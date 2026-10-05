@@ -99,6 +99,24 @@ with both engines.
 scan into Arrow): `test_a_million_row_window_reads_under_200_ms` (`slow`). Measured: DuckDB about
 55 ms, DataFusion about 75 ms (ADR 0013 §6).
 
+## 3. Time and space are indexed per declared clock and per declared frame or CRS
+
+**Statement.** A window on clock C lists only intervals on C: records' world time and series
+files' known ticks. An interval on another clock is compared with it only when the request names
+that clock and the `ClockMapping` records that join it to C, and then it is carried through a
+usable mapping path and keeps its own ticks. A box names its frame (`FrameRef`) or CRS and its
+unit. Extents are compared only within that reference and unit; nothing is converted, reprojected
+or given a default frame. Both indexes are written at registration and reproduced by a rebuild
+([ADR 0015](adr/0015-time-and-spatial-indexes-per-clock-and-per-reference.md)).
+
+**Held by.** `tests/test_ledger_time_space_index.py`:
+`test_naming_the_gps_clock_without_a_mapping_is_refused`,
+`test_each_clock_is_its_own_index_and_gps_time_is_never_compared_with_boot_time`,
+`test_a_named_mapping_carries_gps_intervals_onto_the_boot_clock`,
+`test_a_frame_of_another_graph_is_another_frame`, `test_crs_codes_are_compared_verbatim` and
+`test_a_rebuild_reproduces_both_indexes`. `tests/test_ledger_index_scale.py` holds that building
+them is linear and that four times the index costs a lookup at most about twice the pages.
+
 ## Scale
 
 The catalog's query budget (ADR 0005 §5) re-measured with every record's stored body (ADR 0009 §1)
