@@ -265,6 +265,10 @@
             {
               "items": {
                 "enum": [
+                  "authorised_configuration",
+                  "configuration_active_during",
+                  "configuration_candidate",
+                  "configuration_unknown",
                   "deployed_at",
                   "episode_of",
                   "evidenced_by",
@@ -272,11 +276,13 @@
                   "governed_by",
                   "has_calibration",
                   "has_configuration",
+                  "has_name",
                   "has_summary",
                   "located_at",
                   "maintenance_state",
                   "member_of_fleet",
                   "mounted_on",
+                  "not_covered_by_authorisation",
                   "operated_by",
                   "part_of_programme",
                   "rated_payload",
@@ -285,11 +291,12 @@
                   "runs_software",
                   "same_as",
                   "same_as_candidate",
+                  "succeeds",
                   "zone_of"
                 ],
                 "type": "string"
               },
-              "maxItems": 21,
+              "maxItems": 28,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
