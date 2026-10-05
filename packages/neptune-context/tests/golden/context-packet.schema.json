@@ -1698,6 +1698,7 @@
         "asset",
         "configuration",
         "deployment",
+        "document",
         "episode",
         "fleet",
         "machine",
@@ -1709,6 +1710,7 @@
         "sensor",
         "site",
         "software_version",
+        "stream",
         "task",
         "zone"
       ]
