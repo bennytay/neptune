@@ -1193,7 +1193,7 @@ def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
         assert isinstance(value, dict) and value["cells"] == [
             {"column": 0, "name": name, "type": "string", "value": note}
         ]
-    made = tight.hydrate(anchor(serials, {"kind": "row", "row": 1000}), "row").read()
+    made = tight.hydrate(anchor(serials, {"kind": "row", "row": 400}), "row").read()
     assert isinstance(made.value, Artefact), made.findings
     value = canonical_json.loads(made.value.read())
     assert isinstance(value, dict) and value["cells"] == [
@@ -1204,6 +1204,10 @@ def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
             "value": {"hex": serial.hex()},
         }
     ]
+    # Reaching row 1 000 decodes 8 MiB of serials, whatever the batches: refused.
+    made = tight.hydrate(anchor(serials, {"kind": "row", "row": 1000}), "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
+    assert "up to row 1000" in made.findings[0].detail
     made = tight.hydrate(anchor(ticks, {"kind": "row", "row": 0}), "row").read()
     assert [f.code for f in made.findings] == ["unsafe_entry"]
     assert "a batch" in made.findings[0].detail and "footer states" in made.findings[0].detail
@@ -1256,14 +1260,17 @@ def test_parquet_delta_pages_decode_and_their_shared_prefixes_stay_bounded(lake:
             {"column": 0, "name": "id", "type": "string", "value": "episode-00000005"}
         ], name
     tight = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=1 << 20))
-    made = tight.hydrate(anchor(shared, {"kind": "row", "row": 1000}), "row").read()
-    # A batch of 1 024 rows would be refused after decoding 16 MiB; batches of fewer rows
-    # decode within the limit.
+    made = tight.hydrate(anchor(shared, {"kind": "row", "row": 50}), "row").read()
+    # A batch of 1 024 rows would be refused after decoding 16 MiB; a batch of 51 rows
+    # decodes within the limit.
     assert isinstance(made.value, Artefact), made.findings
     value = canonical_json.loads(made.value.read())
     assert isinstance(value, dict) and value["cells"] == [
         {"column": 0, "name": "note", "type": "binary", "value": {"hex": note.hex()}}
     ]
+    # Row 1 000 is 16 MiB of notes in: refused once its batches pass the limit.
+    made = tight.hydrate(anchor(shared, {"kind": "row", "row": 1000}), "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
     value = canonical_json.loads(
         lake.artefact(anchor(declared, {"kind": "row", "row": 1}), "row").read()
     )
@@ -1272,3 +1279,66 @@ def test_parquet_delta_pages_decode_and_their_shared_prefixes_stay_bounded(lake:
         {"column": 0, "name": "frame", "type": "large_string", "value": "odom"},
         {"column": 1, "decoded": False, "name": "tags.list.element", "type": tags},
     ]
+
+
+def test_parquet_rows_before_the_cited_one_decode_within_the_limit_in_all(lake: Lake) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    def written(table: Any, **options: Any) -> bytes:
+        out = io.BytesIO()
+        pq.write_table(table, out, compression="zstd", **options)
+        return out.getvalue()
+
+    # A humanoid's 1 MiB joint-calibration blob repeated over 512 rows: DELTA_BYTE_ARRAY
+    # stores it once, so the file is a few KiB, while each row decodes it whole. Each batch
+    # fits the limit; what all the batches before row 511 decode (512 MiB) does not.
+    blob = pa.array([b"c" * (1 << 20)], pa.large_binary())
+    repeated = written(
+        pa.table({"calibration": pa.chunked_array([blob] * 512)}),
+        use_dictionary=False,
+        column_encoding={"calibration": "DELTA_BYTE_ARRAY"},
+        data_page_size=1 << 30,
+        row_group_size=512,
+    )
+    # Honest: 5 000 AV drive-segment ids in DELTA pages. As the footer states it, a value may
+    # repeat the whole chunk, so batches are a few rows; in all they decode ~100 KB.
+    ids = pa.table({"segment": [f"segment-{i:08d}" for i in range(5000)]})
+    segments = written(ids, use_dictionary=False, column_encoding={"segment": "DELTA_BYTE_ARRAY"})
+    # Honest: a warehouse fleet's 200k pick events citing 2 048 bin labels (a 136 KiB
+    # dictionary, which pyarrow copies into every batch): 196 batches of 1 024 rows would
+    # decode 30 MiB; batches grow so that row 199 999 is reached in 16.
+    bins = [f"aisle-{i:04d}-".ljust(64, "b") for i in range(2048)]
+    picks = written(pa.table({"bin": [bins[i % 2048] for i in range(200_000)]}))
+    files = {"blob.parquet": repeated, "segments.parquet": segments, "picks.parquet": picks}
+    lake.package("fleet", files, materialise=frozenset(files))
+    assert len(repeated) < 4096
+    tight = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=4 << 20))
+    started = time.perf_counter()
+    made = tight.hydrate(anchor(repeated, {"kind": "row", "row": 511}), "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
+    assert "up to row 511" in made.findings[0].detail
+    assert time.perf_counter() - started < 5
+    made = tight.hydrate(anchor(repeated, {"kind": "row", "row": 2}), "row").read()
+    assert isinstance(made.value, Artefact), made.findings
+
+    width = pq.ParquetFile(io.BytesIO(segments)).metadata.row_group(0).column(0)
+    small = 256 * 1024
+    assert 5000 * width.total_uncompressed_size > small  # one batch would be refused
+    segment = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=small))
+    made = segment.hydrate(anchor(segments, {"kind": "row", "row": 4999}), "row").read()
+    assert isinstance(made.value, Artefact), made.findings
+    value = canonical_json.loads(made.value.read())
+    assert isinstance(value, dict) and value["cells"] == [
+        {"column": 0, "name": "segment", "type": "string", "value": "segment-00004999"}
+    ]
+
+    made = tight.hydrate(anchor(picks, {"kind": "row", "row": 199_999}), "row").read()
+    assert isinstance(made.value, Artefact), made.findings
+    first = made.value.read()
+    value = canonical_json.loads(first)
+    assert isinstance(value, dict) and value["cells"] == [
+        {"column": 0, "name": "bin", "type": "string", "value": bins[199_999 % 2048]}
+    ]
+    again = tight.hydrate(anchor(picks, {"kind": "row", "row": 199_999}), "row").read()
+    assert isinstance(again.value, Artefact) and again.value.read() == first

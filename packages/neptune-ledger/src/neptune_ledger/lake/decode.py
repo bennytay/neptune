@@ -1072,9 +1072,12 @@ _PARQUET_MAGIC: Final = b"PAR1"
 _PARQUET_ENCRYPTED: Final = b"PARE"
 _MAX_FOOTER_BYTES: Final = 16 * 1024 * 1024
 _MAX_LEAF_COLUMNS: Final = 16384
-# Rows are decoded in batches of this many, only the cited row group's cited columns, so a row
-# costs at most one batch of those columns, never the whole group.
+# Only the cited row group's cited columns are decoded, a batch at a time, ending at or just past
+# the cited row. A batch holds up to this many rows, or more so that the row is reached in at most
+# ``_PARQUET_MAX_BATCHES`` batches (pyarrow copies a column's dictionary into every batch), as
+# ``max_decoded_bytes`` allows.
 _PARQUET_BATCH_ROWS: Final = 1024
+_PARQUET_MAX_BATCHES: Final = 16
 
 
 def _parquet_row(
@@ -1134,11 +1137,13 @@ def _parquet_row(
             return problem
         # Byte arrays stay dictionary-encoded, so a value repeated over many rows is held once,
         # never once per row of a batch; only the cited row is decoded. pyarrow reads no DELTA
-        # page that way, so such a chunk is read as it is and bounded by the batch size.
+        # page that way, so such a chunk is read as it is, bounded by the batch size and by what
+        # all batches up to the cited row decode.
         plain = {
             i for i in read if _PARQUET_DELTA & set(meta.row_group(group).column(i).encodings or ())
         }
-        batch = _batch_rows(meta, group, read, rows, plain, subject, limits)
+        at = _At(group, rows, step.row - first, 0)
+        batch = _batch_rows(meta, at, read, plain, subject, limits)
         if isinstance(batch, MediaFinding):
             return batch
         dictionary = [
@@ -1156,7 +1161,7 @@ def _parquet_row(
             thrift_string_size_limit=_MAX_FOOTER_BYTES,
             arrow_extensions_enabled=False,
         )
-        at = _At(group, rows, step.row - first, batch)
+        at = _At(group, rows, at.index, batch)
         record = _parquet_record(parquet, declared, at, columns, leaves, subject, limits)
         if isinstance(record, MediaFinding):
             return record
@@ -1211,22 +1216,18 @@ _PARQUET_WIDTH: Final = {
 
 
 def _batch_rows(
-    meta: Any,
-    group: int,
-    columns: list[int],
-    rows: int,
-    plain: set[int],
-    subject: str,
-    limits: Limits,
+    meta: Any, at: "_At", columns: list[int], plain: set[int], subject: str, limits: Limits
 ) -> int | MediaFinding:
     """How many rows a batch of the cited columns holds, so that it decodes, as the footer
-    states it and before a page is read, to at most ``max_decoded_bytes``.
+    states it and before a page is read, to at most ``max_decoded_bytes``, and the batches
+    end at or just past the cited row (``at.index``).
 
     A dictionary or run-length page states many values in few bytes. A flat leaf holds one
     value a row; a repeated leaf at most all of its chunk's values. A byte array read as it is
     (DELTA pages) whose values may repeat earlier bytes holds, a value, at most its chunk's
     decoded size, so its batches shrink, down to one row.
     """
+    group, rows = at.group, at.rows
     fixed = per_row = 0
     for column in columns:
         leaf, chunk = meta.schema.column(column), meta.row_group(group).column(column)
@@ -1249,7 +1250,11 @@ def _batch_rows(
             f" {limits.max_decoded_bytes}-byte limit"
         )
         return MediaFinding("unsafe_entry", subject, detail)
-    return max(1, min(_PARQUET_BATCH_ROWS, rows, room // per_row if per_row else rows))
+    wanted = at.index + 1
+    fit = room // per_row if per_row else rows
+    cap = max(1, min(max(_PARQUET_BATCH_ROWS, -(-wanted // _PARQUET_MAX_BATCHES)), rows, fit))
+    # As few batches as ``cap`` allows, of even size, so the last ends at or just past the row.
+    return -(-wanted // -(-wanted // cap))
 
 
 @dataclass(frozen=True)
@@ -1273,16 +1278,22 @@ def _parquet_record(
 ) -> list[dict[str, Any]] | MediaFinding:
     """The cited cells of row ``at.index`` of a row group, decoded a batch at a time (each
     cited leaf's top-level column, whose every leaf ``_check_group`` has bounded); each cell's
-    type is the one the file declares (``declared``), not the one it was read as."""
+    type is the one the file declares (``declared``), not the one it was read as.
+
+    What the batches decode is summed, so that all of them up to the cited row decode to at
+    most ``max_decoded_bytes``: a footer can understate it (a DELTA value sharing an earlier
+    one's bytes, a dictionary that every batch holds), and rows can be many."""
     group, rows, index = at.group, at.rows, at.index
     tops = sorted({str(leaves[c]).split(".")[0] for c in columns})
-    seen = 0
+    seen = decoded = 0
     for batch in parquet.iter_batches(
         batch_size=at.batch, row_groups=[group], columns=tops, use_threads=False
     ):
-        if batch.nbytes > limits.max_decoded_bytes:
+        decoded += batch.nbytes
+        if decoded > limits.max_decoded_bytes:
             detail = (
-                f"a batch of row group {group} decodes to {batch.nbytes} bytes, over the"
+                f"rows {seen} to {seen + batch.num_rows - 1} of row group {group} bring what"
+                f" its batches up to row {index} decode to {decoded} bytes, over the"
                 f" {limits.max_decoded_bytes}-byte limit"
             )
             return MediaFinding("unsafe_entry", subject, detail)

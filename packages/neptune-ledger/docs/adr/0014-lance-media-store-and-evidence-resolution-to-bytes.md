@@ -153,8 +153,9 @@ that no package records (root ADR 0010).
      16 MiB that fits the file (an encrypted one is `no_decoder`), at most 16 384 leaf columns,
      row-group counts that are not negative and add up, and every column chunk read lying
      before the footer and decoding, as stated, to at most `max_decoded_bytes` in all. Only
-     the cited leaves' top-level columns of the cited row group are read, 1 024 rows at a
-     time, so a run-length column decodes one batch, not its group. Byte arrays are read as
+     the cited leaves' top-level columns of the cited row group are read (earlier groups are
+     skipped undecoded), in even batches of up to 1 024 rows (more where that reaches the
+     cited row in at most 16), ending at or just past it. Byte arrays are read as
      dictionaries, so a value a dictionary repeats over a batch is held once and only the
      cited row is decoded. pyarrow reads no DELTA page that way, so a chunk with
      `DELTA_LENGTH_BYTE_ARRAY` or `DELTA_BYTE_ARRAY` pages is read as it is. What a batch
@@ -162,10 +163,15 @@ that no package records (root ADR 0010).
      flat leaf (a fixed-length byte array at its declared width; a byte array read as it is
      whose values may repeat earlier bytes, through shared DELTA prefixes or a dictionary, at
      its chunk's whole decoded size) and every stated value of a repeated leaf. Batches
-     shrink, down to one row (about 1.4 s per million rows), to stay within
-     `max_decoded_bytes`; past it at one row is `unsafe_entry`. A cell's `type` is the one
+     shrink, down to one row, to stay within `max_decoded_bytes`; past it at one row is
+     `unsafe_entry`. What all the batches up to the cited row decode (each batch's Arrow
+     size, a dictionary counted in every batch since pyarrow copies it) is summed as they are
+     read, and is `unsafe_entry` once past `max_decoded_bytes`: the limit holds per hydration,
+     not per batch, so a few-KiB file whose DELTA value repeats over many rows is refused after
+     the limit's worth of decoding. No footer-based refusal precedes it, so honest DELTA
+     files (1M Spark-style ids decode in 0.04 s) still read. A cell's `type` is the one
      the file declares, not the one it is read as. A footer and page headers that both
-     understate are bounded only by the batch: the decoding subprocess (§ Consequences)
+     understate are bounded in memory only by the batch: the decoding subprocess (§ Consequences)
      bounds the rest.
    - PDFium is not thread-safe, so every call into it holds one process-wide lock.
 6. **Findings.** `MediaFinding(code, subject, detail)`, never an exception. The codes shared
