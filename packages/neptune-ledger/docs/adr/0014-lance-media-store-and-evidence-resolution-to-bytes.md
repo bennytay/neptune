@@ -156,11 +156,17 @@ that no package records (root ADR 0010).
      the cited leaves' top-level columns of the cited row group are read, 1 024 rows at a
      time, so a run-length column decodes one batch, not its group. Byte arrays are read as
      dictionaries, so a value a dictionary repeats over a batch is held once and only the
-     cited row is decoded. What a batch decodes is bounded as the footer states it, before a
-     page is read: a value per row of a flat leaf (a fixed-length byte array at its declared
-     width) and every stated value of a repeated leaf; over `max_decoded_bytes` is
-     `unsafe_entry`. A footer and page headers that both understate are bounded only by the
-     batch: the decoding subprocess (§ Consequences) bounds the rest.
+     cited row is decoded. pyarrow reads no DELTA page that way, so a chunk with
+     `DELTA_LENGTH_BYTE_ARRAY` or `DELTA_BYTE_ARRAY` pages is read as it is. What a batch
+     decodes is bounded as the footer states it, before a page is read: a value per row of a
+     flat leaf (a fixed-length byte array at its declared width; a byte array read as it is
+     whose values may repeat earlier bytes, through shared DELTA prefixes or a dictionary, at
+     its chunk's whole decoded size) and every stated value of a repeated leaf. Batches
+     shrink, down to one row (about 1.4 s per million rows), to stay within
+     `max_decoded_bytes`; past it at one row is `unsafe_entry`. A cell's `type` is the one
+     the file declares, not the one it is read as. A footer and page headers that both
+     understate are bounded only by the batch: the decoding subprocess (§ Consequences)
+     bounds the rest.
    - PDFium is not thread-safe, so every call into it holds one process-wide lock.
 6. **Findings.** `MediaFinding(code, subject, detail)`, never an exception. The codes shared
    with the catalog API (`as_of_out_of_range`, `file_digest_mismatch`, `file_missing`,

@@ -1175,8 +1175,10 @@ def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
         pa.table({"leg": pa.StructArray.from_arrays([repeated(note, 200_000)], ["calibration"])})
     )
     # A fixed-width value repeated by a dictionary, and one row holding a run-length list of
-    # 1M values: what a batch decodes is bounded as the footer states it, before any page.
-    serials = written(pa.table({"serial": repeated(b"s" * 8192, 1024, pa.binary(8192))}))
+    # 1M values: what a batch decodes is bounded as the footer states it, before any page, by
+    # reading fewer rows a batch, or, past one row, by refusing.
+    serial = b"s" * 8192
+    serials = written(pa.table({"serial": repeated(serial, 1024, pa.binary(8192))}))
     ticks = written(pa.table({"ticks": pa.array([[7] * 1_000_000], pa.list_(pa.int64()))}))
     files = {"notes.parquet": notes, "nested.parquet": nested}
     files |= {"serials.parquet": serials, "ticks.parquet": ticks}
@@ -1191,7 +1193,80 @@ def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
         assert isinstance(value, dict) and value["cells"] == [
             {"column": 0, "name": name, "type": "string", "value": note}
         ]
-    for data in (serials, ticks):
-        made = tight.hydrate(anchor(data, {"kind": "row", "row": 0}), "row").read()
-        assert [f.code for f in made.findings] == ["unsafe_entry"]
-        assert "a batch" in made.findings[0].detail and "footer states" in made.findings[0].detail
+    made = tight.hydrate(anchor(serials, {"kind": "row", "row": 1000}), "row").read()
+    assert isinstance(made.value, Artefact), made.findings
+    assert canonical_json.loads(made.value.read())["cells"] == [  # type: ignore[index]
+        {
+            "column": 0,
+            "name": "serial",
+            "type": "fixed_size_binary[8192]",
+            "value": {"hex": serial.hex()},
+        }
+    ]
+    made = tight.hydrate(anchor(ticks, {"kind": "row", "row": 0}), "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
+    assert "a batch" in made.findings[0].detail and "footer states" in made.findings[0].detail
+
+
+def test_parquet_delta_pages_decode_and_their_shared_prefixes_stay_bounded(lake: Lake) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    def written(table: Any, **options: Any) -> bytes:
+        out = io.BytesIO()
+        pq.write_table(table, out, compression="zstd", **options)
+        return out.getvalue()
+
+    # Episode ids as Spark and parquet-mr v2 writers store them: DELTA pages, which pyarrow
+    # cannot read as a dictionary, and a dictionary that falls back to plain pages.
+    ids = pa.table({"id": [f"episode-{i:08d}" for i in range(1000)]})
+    delta = {
+        f"{encoding}.parquet": written(ids, use_dictionary=False, column_encoding={"id": encoding})
+        for encoding in ("DELTA_LENGTH_BYTE_ARRAY", "DELTA_BYTE_ARRAY")
+    }
+    delta["fallback.parquet"] = written(ids, dictionary_pagesize_limit=64, data_page_version="2.0")
+    # One 16 KiB scan note repeated over 1 024 rows: DELTA_BYTE_ARRAY shares each row's whole
+    # value as a prefix, so the file is a few hundred bytes and a full batch 16 MiB.
+    note = b"n" * (16 * 1024)
+    shared = written(
+        pa.table({"note": pa.array([note] * 1024, pa.binary())}),
+        use_dictionary=False,
+        column_encoding={"note": "DELTA_BYTE_ARRAY"},
+        store_schema=False,
+        data_page_size=1 << 30,
+    )
+    # Types are what the file declares, not how a column was read.
+    declared = written(
+        pa.table(
+            {
+                "frame": pa.array(["base_link", "odom"], pa.large_string()),
+                "tags": pa.array([["arm"], ["leg"]], pa.list_(pa.string())),
+            }
+        )
+    )
+    files = delta | {"shared.parquet": shared, "declared.parquet": declared}
+    lake.package("fleet", files, materialise=frozenset(files))
+    assert len(shared) < 1024
+    for name, data in delta.items():
+        value = canonical_json.loads(
+            lake.artefact(anchor(data, {"kind": "row", "row": 5}), "row").read()
+        )
+        assert isinstance(value, dict) and value["cells"] == [
+            {"column": 0, "name": "id", "type": "string", "value": "episode-00000005"}
+        ], name
+    tight = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=1 << 20))
+    made = tight.hydrate(anchor(shared, {"kind": "row", "row": 1000}), "row").read()
+    # A batch of 1 024 rows would be refused after decoding 16 MiB; batches of fewer rows
+    # decode within the limit.
+    assert isinstance(made.value, Artefact), made.findings
+    assert canonical_json.loads(made.value.read())["cells"] == [  # type: ignore[index]
+        {"column": 0, "name": "note", "type": "binary", "value": {"hex": note.hex()}}
+    ]
+    value = canonical_json.loads(
+        lake.artefact(anchor(declared, {"kind": "row", "row": 1}), "row").read()
+    )
+    tags = str(pq.read_schema(io.BytesIO(declared)).field("tags").type)
+    assert isinstance(value, dict) and value["cells"] == [
+        {"column": 0, "name": "frame", "type": "large_string", "value": "odom"},
+        {"column": 1, "decoded": False, "name": "tags.list.element", "type": tags},
+    ]

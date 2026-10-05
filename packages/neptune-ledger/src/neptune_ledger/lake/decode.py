@@ -1130,15 +1130,23 @@ def _parquet_row(
         tops = {str(leaves[c]).split(".")[0] for c in columns}
         read = [i for i, leaf in enumerate(leaves) if str(leaf).split(".")[0] in tops]
         problem = _check_group(meta.row_group(group), group, read, footer_start, subject, limits)
-        if problem is None:
-            problem = _check_batch(meta, group, read, rows, subject, limits)
         if problem is not None:
             return problem
         # Byte arrays stay dictionary-encoded, so a value repeated over many rows is held once,
-        # never once per row of a batch; only the cited row is decoded.
+        # never once per row of a batch; only the cited row is decoded. pyarrow reads no DELTA
+        # page that way, so such a chunk is read as it is and bounded by the batch size.
+        plain = {
+            i for i in read if _PARQUET_DELTA & set(meta.row_group(group).column(i).encodings or ())
+        }
+        batch = _batch_rows(meta, group, read, rows, plain, subject, limits)
+        if isinstance(batch, MediaFinding):
+            return batch
         dictionary = [
-            str(leaves[i]) for i in read if meta.schema.column(i).physical_type == "BYTE_ARRAY"
+            str(leaves[i])
+            for i in read
+            if meta.schema.column(i).physical_type == "BYTE_ARRAY" and i not in plain
         ]
+        declared = parquet.schema_arrow
         parquet = pq.ParquetFile(
             f,
             metadata=meta,
@@ -1148,9 +1156,8 @@ def _parquet_row(
             thrift_string_size_limit=_MAX_FOOTER_BYTES,
             arrow_extensions_enabled=False,
         )
-        record = _parquet_record(
-            parquet, group, rows, step.row - first, columns, leaves, subject, limits
-        )
+        at = _At(group, rows, step.row - first, batch)
+        record = _parquet_record(parquet, declared, at, columns, leaves, subject, limits)
         if isinstance(record, MediaFinding):
             return record
     return {"cells": record, "format": "parquet", "row": step.row}
@@ -1186,6 +1193,10 @@ def _check_group(
     return None
 
 
+_PARQUET_DELTA: Final = frozenset({"DELTA_BYTE_ARRAY", "DELTA_LENGTH_BYTE_ARRAY"})
+# Encodings in which one value may repeat earlier bytes: a DELTA_BYTE_ARRAY value is a prefix of
+# the one before it plus its own suffix, and a dictionary page's value is cited by any row.
+_PARQUET_REPEATING: Final = frozenset({"DELTA_BYTE_ARRAY", "PLAIN_DICTIONARY", "RLE_DICTIONARY"})
 # What one value of a physical type decodes to; a byte array is read as a dictionary, so each
 # value is one 4-byte index into it.
 _PARQUET_WIDTH: Final = {
@@ -1199,50 +1210,75 @@ _PARQUET_WIDTH: Final = {
 }
 
 
-def _check_batch(
-    meta: Any, group: int, columns: list[int], rows: int, subject: str, limits: Limits
-) -> MediaFinding | None:
-    """A dictionary or run-length page states many values in few bytes, so what one batch of
-    the cited columns decodes to is bounded as the footer states it, before a page is read: a
-    flat leaf holds one value a row, a repeated leaf at most all of its chunk's values."""
-    total = 0
+def _batch_rows(
+    meta: Any,
+    group: int,
+    columns: list[int],
+    rows: int,
+    plain: set[int],
+    subject: str,
+    limits: Limits,
+) -> int | MediaFinding:
+    """How many rows a batch of the cited columns holds, so that it decodes, as the footer
+    states it and before a page is read, to at most ``max_decoded_bytes``.
+
+    A dictionary or run-length page states many values in few bytes. A flat leaf holds one
+    value a row; a repeated leaf at most all of its chunk's values. A byte array read as it is
+    (DELTA pages) whose values may repeat earlier bytes holds, a value, at most its chunk's
+    decoded size, so its batches shrink, down to one row.
+    """
+    fixed = per_row = 0
     for column in columns:
-        leaf = meta.schema.column(column)
+        leaf, chunk = meta.schema.column(column), meta.row_group(group).column(column)
         kind = leaf.physical_type
-        width = max(0, leaf.length or 0) if kind == "FIXED_LEN_BYTE_ARRAY" else None
-        width = _PARQUET_WIDTH.get(kind, 8) if width is None else width
-        flat = leaf.max_repetition_level == 0
-        values = (
-            min(_PARQUET_BATCH_ROWS, rows)
-            if flat
-            else meta.row_group(group).column(column).num_values
-        )
-        total += max(0, values) * width
-    if total > limits.max_decoded_bytes:
+        if kind == "FIXED_LEN_BYTE_ARRAY":
+            width = max(0, leaf.length or 0)
+        elif column in plain and _PARQUET_REPEATING & set(chunk.encodings or ()):
+            width = max(0, chunk.total_uncompressed_size)
+        else:
+            width = _PARQUET_WIDTH.get(kind, 8)
+        if leaf.max_repetition_level == 0:
+            per_row += width
+        else:
+            fixed += max(0, chunk.num_values) * width
+    room = limits.max_decoded_bytes - fixed
+    if room < per_row:
         detail = (
-            f"a batch of row group {group}'s cited columns decodes to {total} bytes as the"
-            f" footer states, over the {limits.max_decoded_bytes}-byte limit"
+            f"a batch of one row of row group {group}'s cited columns decodes to"
+            f" {fixed + per_row} bytes as the footer states, over the"
+            f" {limits.max_decoded_bytes}-byte limit"
         )
         return MediaFinding("unsafe_entry", subject, detail)
-    return None
+    return max(1, min(_PARQUET_BATCH_ROWS, rows, room // per_row if per_row else rows))
+
+
+@dataclass(frozen=True)
+class _At:
+    """Where a row is in its row group, and how many rows a batch of it holds."""
+
+    group: int
+    rows: int
+    index: int
+    batch: int
 
 
 def _parquet_record(
     parquet: Any,
-    group: int,
-    rows: int,
-    index: int,
+    declared: Any,
+    at: _At,
     columns: list[int],
     leaves: list[str | None],
     subject: str,
     limits: Limits,
 ) -> list[dict[str, Any]] | MediaFinding:
-    """The cited cells of row ``index`` of a row group, decoded a batch at a time (each cited
-    leaf's top-level column, whose every leaf ``_check_group`` has bounded)."""
+    """The cited cells of row ``at.index`` of a row group, decoded a batch at a time (each
+    cited leaf's top-level column, whose every leaf ``_check_group`` has bounded); each cell's
+    type is the one the file declares (``declared``), not the one it was read as."""
+    group, rows, index = at.group, at.rows, at.index
     tops = sorted({str(leaves[c]).split(".")[0] for c in columns})
     seen = 0
     for batch in parquet.iter_batches(
-        batch_size=_PARQUET_BATCH_ROWS, row_groups=[group], columns=tops, use_threads=False
+        batch_size=at.batch, row_groups=[group], columns=tops, use_threads=False
     ):
         if batch.nbytes > limits.max_decoded_bytes:
             detail = (
@@ -1252,7 +1288,7 @@ def _parquet_record(
             return MediaFinding("unsafe_entry", subject, detail)
         if seen + batch.num_rows > index:
             row = batch.slice(index - seen, 1)
-            return [_parquet_cell(row, c, str(leaves[c])) for c in columns]
+            return [_parquet_cell(row, declared, c, str(leaves[c])) for c in columns]
         seen += batch.num_rows
         if seen > rows:
             break
@@ -1260,29 +1296,34 @@ def _parquet_record(
     return MediaFinding("undecodable", subject, detail)
 
 
-def _parquet_cell(row: Any, column: int, path: str) -> dict[str, Any]:
+def _parquet_cell(row: Any, declared: Any, column: int, path: str) -> dict[str, Any]:
     """One leaf's value in a one-row batch: a struct path is followed to the leaf; the stored
     integer of a date, time, timestamp or duration (its unit and zone are in ``type``); a
-    decimal's exact text. A leaf inside a list or map is not decoded, as in the compiler."""
+    decimal's exact text. A leaf inside a list or map is not decoded, as in the compiler.
+    ``type`` is the file's own (``declared``): a dictionary's value type."""
     import pyarrow as pa
     import pyarrow.types as pt
 
     parts = path.split(".")
     array = row.column(row.schema.get_field_index(parts[0]))
+    stated = declared.field(parts[0]).type
     for part in parts[1:]:
         if not pt.is_struct(array.type) or array.type.get_field_index(part) < 0:
-            return {"column": column, "decoded": False, "name": path, "type": str(array.type)}
+            return {"column": column, "decoded": False, "name": path, "type": str(stated)}
         array = array.field(part)
+        stated = stated.field(part).type
     kind = array.type
     if pt.is_dictionary(kind):
         array = array.dictionary_decode()
         kind = array.type
+    if pt.is_dictionary(stated):
+        stated = stated.value_type
     if pt.is_timestamp(kind) or pt.is_date(kind) or pt.is_time(kind) or pt.is_duration(kind):
         array = array.view(pa.int64() if kind.bit_width == 64 else pa.int32())
     if pt.is_list(kind) or pt.is_large_list(kind) or pt.is_map(kind):
-        return {"column": column, "decoded": False, "name": path, "type": str(kind)}
+        return {"column": column, "decoded": False, "name": path, "type": str(stated)}
     value = array.to_pylist()[0]
-    cell: dict[str, Any] = {"column": column, "name": path, "type": str(kind)}
+    cell: dict[str, Any] = {"column": column, "name": path, "type": str(stated)}
     return cell | ({"null": True} if value is None else {"value": _json_value(value)})
 
 

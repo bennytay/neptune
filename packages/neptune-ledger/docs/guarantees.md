@@ -140,6 +140,7 @@ worked examples to its exact bytes and hydrates their pointers and rows;
 `test_deep_documents_and_long_yaml_walks_are_refused`,
 `test_parquet_guards_hold_before_any_page_is_decoded`,
 `test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch`,
+`test_parquet_delta_pages_decode_and_their_shared_prefixes_stay_bounded`,
 `test_two_hydrations_are_byte_identical`, `test_a_snapshot_pins_what_a_hydration_returns`,
 `test_hydration_is_lazy_and_video_bytes_slice_by_range`,
 `test_a_moved_source_resolves_to_a_finding_not_a_crash`, `test_a_changed_source_is_never_served`
