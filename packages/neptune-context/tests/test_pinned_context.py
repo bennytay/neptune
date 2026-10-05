@@ -2,7 +2,7 @@
 
 The snapshot matches the registry at the pins, and an upstream addition that Context has not
 pinned (a Memory predicate or node type, a Ledger thread kind) changes nothing Context publishes:
-not the query schema, not the query-packet export, not a query id.
+not the query schema, not the query-packet export, not a query id, not the planner's prompt.
 """
 
 from __future__ import annotations
@@ -93,6 +93,7 @@ if sys.argv[1] == "patched":
 
 from neptune_context.contract import contract_schema, query_id
 from neptune_context.query import Query, from_json
+from neptune_context.query.plan.prompt import output_schema, system_prompt, template_sha256
 from neptune_context.query.schema import schema_bytes
 from neptune_context.query.validate import PREDICATES, SUBJECT_KINDS
 
@@ -108,6 +109,11 @@ print(json.dumps({
     "contract": sha(json.dumps(contract_schema(), sort_keys=True).encode()),
     "ids": ids,
     "kinds": sorted(SUBJECT_KINDS),
+    "planner": [
+        sha(system_prompt().encode()),
+        sha(json.dumps(output_schema(), sort_keys=True).encode()),
+        template_sha256(),
+    ],
     "predicates": sorted(PREDICATES),
     "query_schema": sha(schema_bytes()),
 }))
