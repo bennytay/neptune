@@ -99,7 +99,25 @@ with both engines.
 scan into Arrow): `test_a_million_row_window_reads_under_200_ms` (`slow`). Measured: DuckDB about
 55 ms, DataFusion about 75 ms (ADR 0013 §6).
 
-## 3. Cited bytes are served verified, and media are derivatives that replace nothing
+## 3. Time and space are indexed per declared clock and per declared frame or CRS
+
+**Statement.** A window on clock C lists only intervals on C: records' world time and series
+files' known ticks. An interval on another clock is compared with it only when the request names
+that clock and the `ClockMapping` records that join it to C, and then it is carried through a
+usable mapping path and keeps its own ticks. A box names its frame (`FrameRef`) or CRS and its
+unit. Extents are compared only within that reference and unit; nothing is converted, reprojected
+or given a default frame. Both indexes are written at registration and reproduced by a rebuild
+([ADR 0015](adr/0015-time-and-spatial-indexes-per-clock-and-per-reference.md)).
+
+**Held by.** `tests/test_ledger_time_space_index.py`:
+`test_naming_the_gps_clock_without_a_mapping_is_refused`,
+`test_each_clock_is_its_own_index_and_gps_time_is_never_compared_with_boot_time`,
+`test_a_named_mapping_carries_gps_intervals_onto_the_boot_clock`,
+`test_a_frame_of_another_graph_is_another_frame`, `test_crs_codes_are_compared_verbatim` and
+`test_a_rebuild_reproduces_both_indexes`. `tests/test_ledger_index_scale.py` holds that building
+them is linear and that four times the index costs a lookup at most about twice the pages.
+
+## 4. Cited bytes are served verified, and media are derivatives that replace nothing
 
 **Statement.** An evidence reference resolves to the source's bytes through a registered
 package: its blob, or a stated location under an ingest root the deployment names. Every byte
@@ -119,7 +137,9 @@ worked examples to its exact bytes and hydrates their pointers and rows;
 `test_a_frame_from_a_referenced_mcap_and_from_a_materialised_one`,
 `test_frames_hydrate_from_the_compilers_own_message_citations` (a package `neptune ingest` wrote),
 `test_documents_past_the_limit_are_refused_and_parsing_costs_no_tree`,
+`test_deep_documents_and_long_yaml_walks_are_refused`,
 `test_parquet_guards_hold_before_any_page_is_decoded`,
+`test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch`,
 `test_two_hydrations_are_byte_identical`, `test_a_snapshot_pins_what_a_hydration_returns`,
 `test_hydration_is_lazy_and_video_bytes_slice_by_range`,
 `test_a_moved_source_resolves_to_a_finding_not_a_crash`, `test_a_changed_source_is_never_served`
