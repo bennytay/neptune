@@ -85,7 +85,8 @@ placement, uncounted and uncited.
 
 `render_claims(pack)` writes the pack's claim set as a graph-schema `ClaimsResult` in canonical JSON:
 `as_of` (the snapshot head), `claims` (cited claims on the pack clock), `other_clocks` (the rest) and `findings`
-(the resolver findings the pack lists), each exactly as the snapshot holds it. The CLI writes it as `claims.json`
+(the resolver findings the pack lists), each exactly as the snapshot holds it. It is a result as of the head,
+so it holds current versions only; a superseded version a finding cites stays in `pack.json`. The CLI writes it as `claims.json`
 beside `pack.json` and `pack.pdf`, with the same never-overwrite rule.
 
 ### 6. Compiler 2
@@ -93,10 +94,14 @@ beside `pack.json` and `pack.pdf`, with the same never-overwrite rule.
 - **Overlap conflicts by sweep.** A states section finds overlapping spans of a `one` predicate with different
   objects per (node, predicate, clock) in start order. An interval stays active until a later start reaches its
   end, and each entry is marked at most once, so the work is O(n log n). It gives the same answer as compiler 1's
-  pairwise rule (tested on random spans); 50,000 spans compile in about half a second.
-- **Literals.** `clock_map` and `delta` join the literal datatypes the snapshot reader accepts, and the PDF shows
-  them as stated (a clock map's anchor, rate and bound; a delta's components and unit). Any other datatype is
-  still refused.
+  pairwise rule (tested on random spans); 50,000 spans take about 1–2 s, including the case where every
+  span states a different object and all overlap.
+- **Literals.** `clock_map` and `delta` join the literal datatypes the snapshot reader accepts, each checked
+  against graph-schema's `ClockMap` (1.4.0) and `Delta` (1.7.0) shapes or refused (`snapshot_malformed`). A
+  clock map is stated about a clock node: every anchor's source instant is on that clock, its target instant and
+  residual bound on the map's target. The PDF shows them as stated (a clock map's anchor with both clocks named,
+  rate and bound; a delta's components and unit). Any other datatype is still refused.
+- **PDF metadata.** `/Producer` names the compiler version.
 - **Supersession** is bounded: `recorded_at <= superseded_at <= head` (one transaction may record and supersede a
   version: the resolver folds a transaction's assertions in order).
 - **WinAnsi.** The `<` of a literal `<U+` in source text is escaped too (`<U+003C>U+`), so an escape in the PDF is

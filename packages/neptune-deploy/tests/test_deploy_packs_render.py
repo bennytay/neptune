@@ -24,9 +24,9 @@ TESTS = Path(__file__).resolve().parent
 # says: explain it in the PR, and raise COMPILER_VERSION when a pack's content changes.
 GOLDEN = {
     "configuration.json": "sha256:31b62af1828e986eb4d6ac577d487dbd8580b798333f57893dcd4c649a7b9461",
-    "configuration.pdf": "sha256:80caf0df9652ab7e35377ee36c724a27c82b7a229df576eead5922a448375cd5",
+    "configuration.pdf": "sha256:159f72ea3d0bcef965342fd5ba9f258ab5df8f9336b6eac7b88db9388e0def3a",
     "events.json": "sha256:32a6e162df8954b56831385f8cbc8eb5cda6f4a84a3c75cdf6e7fb3da78f1fec",
-    "events.pdf": "sha256:757e65c639464598f48eb29d12fd7cbd0db3c1fd5a201cb056be7ef94ce56708",
+    "events.pdf": "sha256:1cd6d05222a5f5b3f2037892642c155729da5f4923fa97bd1403f6b543e574d7",
 }
 
 

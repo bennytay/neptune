@@ -16,7 +16,14 @@ from typing import Final
 from neptune.identity import canonical_json
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune_deploy.packs import text as t
-from neptune_deploy.packs.compile import PACK_PREFIX, Entry, EvidencePack, Section, Statement
+from neptune_deploy.packs.compile import (
+    COMPILER_VERSION,
+    PACK_PREFIX,
+    Entry,
+    EvidencePack,
+    Section,
+    Statement,
+)
 from neptune_deploy.packs.pdf import PAGE_HEIGHT, PAGE_WIDTH, PlacedLine, write_pdf
 from neptune_deploy.packs.snapshot import Claim
 
@@ -49,16 +56,19 @@ def render_json(pack: EvidencePack) -> bytes:
 
 def render_claims(pack: EvidencePack) -> bytes:
     """The pack's claim set for external tools: a graph-schema ``ClaimsResult`` (canonical JSON)
-    as of the snapshot's head. ``claims`` are those on the pack clock, ``other_clocks`` those on
-    any other (never compared with it, as Memory's own ``claims`` query returns them), and
-    ``findings`` the resolver findings the pack lists, each exactly as the snapshot holds it."""
+    as of the snapshot's head, so current versions only (a superseded version the pack cites, from
+    a resolver finding, stays in ``pack.json``). ``claims`` are those on the pack clock,
+    ``other_clocks`` those on any other (never compared with it, as Memory's own ``claims`` query
+    returns them), and ``findings`` the resolver findings the pack lists, each exactly as the
+    snapshot holds it."""
     clock = pack.spec.clock
+    current = [c for c in pack.claims if c.current]
     noted = {note.id for section in pack.sections for note in section.findings}
     document: JsonObject = {
         "as_of": pack.snapshot.head,
-        "claims": [c.raw for c in pack.claims if c.valid.clock == clock],
+        "claims": [c.raw for c in current if c.valid.clock == clock],
         "findings": [f.raw for f in pack.snapshot.current_findings if f.id in noted],
-        "other_clocks": [c.raw for c in pack.claims if c.valid.clock != clock],
+        "other_clocks": [c.raw for c in current if c.valid.clock != clock],
     }
     return canonical_json.dumps(document)
 
@@ -214,7 +224,7 @@ def _section(out: _Layout, number: int, section: Section, mark: Callable[[str], 
         _entry(out, entry, 0)
     if section.other_clocks and section.template.kind == "timeline":
         out.line(
-            "NOT PLACED on the pack clock - no stated mapping places these on it; each is listed"
+            "NOT PLACED - Memory states no placement of these on the pack clock; each is listed"
             " on its own clock and never compared:",
             font="F3",
         )
@@ -363,7 +373,7 @@ def render_pdf(pack: EvidencePack) -> bytes:
         "Subject": pack.id,
         "Keywords": f"{pack.snapshot.id} {pack.template.id}@{pack.template.version}",
         "Creator": "neptune-deploy packs",
-        "Producer": "neptune-deploy packs 1",
+        "Producer": f"neptune-deploy packs {COMPILER_VERSION}",
         "CreationDate": FIXED_DATE,
         "ModDate": FIXED_DATE,
     }

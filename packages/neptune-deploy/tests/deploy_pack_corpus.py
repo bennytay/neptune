@@ -135,7 +135,7 @@ def record(name: str) -> dict[str, Any]:
 
 
 def clock_map(
-    target: str, method: str, anchor: tuple[int, int] | None, bound: int | None
+    source: str, target: str, method: str, anchor: tuple[int, int] | None, bound: int | None
 ) -> dict[str, Any]:
     """A ``clock_map`` literal (graph-schema 1.4.0): rate 1, the anchor and bound as stated."""
     return {
@@ -147,7 +147,7 @@ def clock_map(
             if anchor is None
             else {
                 "knowledge": "known",
-                "value": {"source": at(target, anchor[0]), "target": at(target, anchor[1])},
+                "value": {"source": at(source, anchor[0]), "target": at(target, anchor[1])},
             },
             "chain": [],
             "method": method,
@@ -660,7 +660,7 @@ def plant2_clocks() -> Claims:
         RUN14,
         CTRL14,
         span(RUN14, BAG14_START, BAG14_START + BAG_LENGTH),
-        clock_map(CTRL14, "co_sampled", (BAG14_START, BAG14_START - 96_700_000_000), None),
+        clock_map(RUN14, CTRL14, "co_sampled", (BAG14_START, BAG14_START - 96_700_000_000), None),
         ("run cell3-2026-09-14", "derived clock mapping pallet_2026-09-14"),
         pointer(
             "sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml",
@@ -1019,7 +1019,7 @@ def s007_incident() -> Claims:
         S7_SYSLOG,
         S7_LIFE,
         span(S7_SYSLOG, wall(2026, 1, 1), None),
-        clock_map(S7_LIFE, "stated", (wall(2026, 1, 1), wall(2026, 1, 1)), 0),
+        clock_map(S7_SYSLOG, S7_LIFE, "stated", (wall(2026, 1, 1), wall(2026, 1, 1)), 0),
         (SYSLOG_MAP,),
         synthetic("S-007 time-sync statement", 1),
         estimated=False,

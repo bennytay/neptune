@@ -113,7 +113,10 @@ def _anchor(value: object) -> str:
     source, target = value.get("source"), value.get("target")
     if not isinstance(source, Mapping) or not isinstance(target, Mapping):
         return "?"
-    return f"{source.get('ticks')} -> {target.get('ticks')}"
+    return (
+        f"{source.get('domain_id')} {source.get('ticks')} ->"
+        f" {target.get('domain_id')} {target.get('ticks')}"
+    )
 
 
 def _bound(value: object) -> str:

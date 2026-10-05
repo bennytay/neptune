@@ -55,17 +55,17 @@ THIRTY_TWO_SECONDS = 32 * corpus.SECOND  # ticks of the S-007 CMMS clock (nanose
 # explain it in the PR, and raise COMPILER_VERSION when a pack's content changes.
 GOLDEN = {
     "amr-07.claims": "sha256:65a6bb91fc9908b8947e3785e8311d48c05ae3ceb78e25c6adaafe2b1f176157",
-    "amr-07.json": "sha256:d25028bb586091101477f4d2a111b9d9c3ead2f6764aaa9f1dce977f49e595d6",
-    "amr-07.pdf": "sha256:0977734ab3c0551b61798263676aaff23b3718313c306a91f09009212a62d2b6",
+    "amr-07.json": "sha256:b45895703384fb860f3e455597417449a0bd047bdcf638622f07a6b856e5d91f",
+    "amr-07.pdf": "sha256:d9f158e34a1990f1bf356ba2e9690985ab41699221ed6128d4dfcfa924494d25",
     "arm-3a.claims": "sha256:32205f5979ad0fb5c806b5f526bc4747e2db412dad0f2378001230f51c7c19d3",
-    "arm-3a.json": "sha256:8626c819113972adfe68d13c881c143cfca7f6381f1fd8e8bed2dff809ecb4c2",
-    "arm-3a.pdf": "sha256:8ec7017bcd266ce9e3a6a598212d2970f3c508b2c1363ab5b361651aa51c9511",
+    "arm-3a.json": "sha256:0cb5d214ede4c65d540c4358ac223313ef66082b867773a7131a2775c282b1f7",
+    "arm-3a.pdf": "sha256:6d06cf07c1ada9b4186495812be91317b91f3a65a75bcec52fc342525d0524e6",
     "inc-0007.claims": "sha256:67614743a92ba167c4df171e51a11dcd5400d4c180f88d837ac55559b8754c06",
-    "inc-0007.json": "sha256:00534351dfbb58452533a14e47c61f3ef9f3841b1fd2ea3430f937457c9a4d24",
-    "inc-0007.pdf": "sha256:6ada908ecf67e2a670bc0841939f578b24be176c70c313838e73657f4792b998",
+    "inc-0007.json": "sha256:d1002a505fff73d97785437dfbe132de6162472af0b72ca925335934e42c89a9",
+    "inc-0007.pdf": "sha256:e55d094bd54dfc2d08bc7daf578b5dd82aff120b824067ef76e7b10844eaea5c",
     "inc-c3-0011.claims": "sha256:b24e459163cec09af8ce619f1e33e6a6ff2f1cf5794edbbe3746d34518e5283a",
-    "inc-c3-0011.json": "sha256:526a40afa5ea28cb819ba16f0fc5a88b4d7593eafb3fb92d2b47ffe068a67fd0",
-    "inc-c3-0011.pdf": "sha256:db7c790bb8086f2fb49a3ae9d853296f125995c66142d3e374103b83be6d52f0",
+    "inc-c3-0011.json": "sha256:0e7815449db07ac509313fa1c4358c2f032992569b8568189ff0dfceb135d6a1",
+    "inc-c3-0011.pdf": "sha256:df2300a270dab18403570df50dfeac6cfc16992cb65d25e60d9279ee67d27972",
 }
 RENDERERS = (("claims", render_claims), ("json", render_json), ("pdf", render_pdf))
 
@@ -144,7 +144,8 @@ def test_an_inferred_clock_mapping_is_left_out_unless_included_and_then_marked()
     shown = _text(render_pdf(included))
     assert "[INFERRED by neptune.clocks 1, confidence unknown]" in shown
     assert (
-        "(co_sampled): anchor 1789410576700000000 -> 1789410480000000000, rate 1/1, residual"
+        f"(co_sampled): anchor {corpus.RUN14} 1789410576700000000 -> {corpus.CTRL14}"
+        " 1789410480000000000, rate 1/1, residual"
         " bound unknown"
     ) in shown
 
@@ -222,7 +223,7 @@ def test_an_unmapped_clock_is_not_placed_and_its_mapping_is_absent() -> None:
     assert fault.valid.start.domain == corpus.AMR07_CTRL
     assert fault.knowledge == "known"
     pdf = render_pdf(incident(INC_0007, INC_0007_HOUR))
-    assert b"NOT PLACED on the pack clock" in pdf
+    assert b"NOT PLACED - Memory states no placement of these on the pack clock" in pdf
 
 
 def test_restated_own_clock_claims_are_counted_not_dropped() -> None:

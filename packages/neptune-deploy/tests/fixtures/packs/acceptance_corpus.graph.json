@@ -1837,92 +1837,6 @@
       }
     },
     {
-      "assertion_kind": "inferred",
-      "confidence": {
-        "knowledge": "unknown"
-      },
-      "id": "claim:sha256:79be8655091d100619685f4aec9528a91128383932d581b3f298a3bfab58e638",
-      "object": {
-        "datatype": "clock_map",
-        "kind": "literal",
-        "unit": {
-          "knowledge": "not_applicable"
-        },
-        "value": {
-          "anchor": {
-            "knowledge": "known",
-            "value": {
-              "source": {
-                "domain_id": "rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f",
-                "ticks": 1789410576700000000
-              },
-              "target": {
-                "domain_id": "rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f",
-                "ticks": 1789410480000000000
-              }
-            }
-          },
-          "chain": [],
-          "method": "co_sampled",
-          "rate": {
-            "knowledge": "known",
-            "value": {
-              "denominator": 1,
-              "numerator": 1
-            }
-          },
-          "residual_bound": {
-            "knowledge": "unknown"
-          },
-          "target": "rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f",
-          "via": []
-        }
-      },
-      "predicate": "clock_map",
-      "provenance": {
-        "config_hash": "sha256:e43c9ceac1f04774609bc078d03b899ba080ec2f7aa6ee37bf10bff4e0547b7e",
-        "consolidator_id": "memory.time_estimates",
-        "consolidator_version": "1",
-        "evidence": [
-          {
-            "locator": [
-              {
-                "kind": "json_pointer",
-                "pointer": "/rosbag2_bagfile_information"
-              }
-            ],
-            "source": "sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12"
-          }
-        ],
-        "model": {
-          "model_id": "neptune.clocks",
-          "model_version": "1"
-        },
-        "records": [
-          "rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb",
-          "rec:sha256:e7f18b5125886b9250145aad021f27e185611f99cd61f57d2696f3f0e1057e0f"
-        ]
-      },
-      "recorded_at": 3,
-      "subject": {
-        "kind": "node",
-        "node_id": "rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e",
-        "node_type": "clock"
-      },
-      "superseded_at": "open",
-      "supersedes": [],
-      "valid": {
-        "end": {
-          "domain_id": "rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e",
-          "ticks": 1789410885700000000
-        },
-        "start": {
-          "domain_id": "rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e",
-          "ticks": 1789410576700000000
-        }
-      }
-    },
-    {
       "assertion_kind": "stated",
       "confidence": {
         "knowledge": "not_applicable"
@@ -2101,6 +2015,92 @@
       }
     },
     {
+      "assertion_kind": "inferred",
+      "confidence": {
+        "knowledge": "unknown"
+      },
+      "id": "claim:sha256:92097bd19642af4b66ac1ba94c480396611a750b182b0f6b80bf7642dd1ff017",
+      "object": {
+        "datatype": "clock_map",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": {
+          "anchor": {
+            "knowledge": "known",
+            "value": {
+              "source": {
+                "domain_id": "rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e",
+                "ticks": 1789410576700000000
+              },
+              "target": {
+                "domain_id": "rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f",
+                "ticks": 1789410480000000000
+              }
+            }
+          },
+          "chain": [],
+          "method": "co_sampled",
+          "rate": {
+            "knowledge": "known",
+            "value": {
+              "denominator": 1,
+              "numerator": 1
+            }
+          },
+          "residual_bound": {
+            "knowledge": "unknown"
+          },
+          "target": "rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f",
+          "via": []
+        }
+      },
+      "predicate": "clock_map",
+      "provenance": {
+        "config_hash": "sha256:e43c9ceac1f04774609bc078d03b899ba080ec2f7aa6ee37bf10bff4e0547b7e",
+        "consolidator_id": "memory.time_estimates",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/rosbag2_bagfile_information"
+              }
+            ],
+            "source": "sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12"
+          }
+        ],
+        "model": {
+          "model_id": "neptune.clocks",
+          "model_version": "1"
+        },
+        "records": [
+          "rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb",
+          "rec:sha256:e7f18b5125886b9250145aad021f27e185611f99cd61f57d2696f3f0e1057e0f"
+        ]
+      },
+      "recorded_at": 3,
+      "subject": {
+        "kind": "node",
+        "node_id": "rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e",
+        "node_type": "clock"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e",
+          "ticks": 1789410885700000000
+        },
+        "start": {
+          "domain_id": "rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e",
+          "ticks": 1789410576700000000
+        }
+      }
+    },
+    {
       "assertion_kind": "observed",
       "confidence": {
         "knowledge": "not_applicable"
@@ -2275,6 +2275,88 @@
         "start": {
           "domain_id": "rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e",
           "ticks": 1788976895600000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:c473d8895c551bcbdf921d992fc3db4e0fc52b0905e3894aee2f93a856c74c5a",
+      "object": {
+        "datatype": "clock_map",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": {
+          "anchor": {
+            "knowledge": "known",
+            "value": {
+              "source": {
+                "domain_id": "rec:sha256:667cdd93a8c5d0e893e8f1b25f74a8a7e98c7e366d9c2c33e3c907a5a184d813",
+                "ticks": 1767225600000000000
+              },
+              "target": {
+                "domain_id": "rec:sha256:cd5fd9767e620c65ff1a79290c170ab716de7f4044ccd58d1fa8f7ffec7d52ba",
+                "ticks": 1767225600000000000
+              }
+            }
+          },
+          "chain": [],
+          "method": "stated",
+          "rate": {
+            "knowledge": "known",
+            "value": {
+              "denominator": 1,
+              "numerator": 1
+            }
+          },
+          "residual_bound": {
+            "knowledge": "known",
+            "value": {
+              "domain_id": "rec:sha256:cd5fd9767e620c65ff1a79290c170ab716de7f4044ccd58d1fa8f7ffec7d52ba",
+              "ticks": 0
+            }
+          },
+          "target": "rec:sha256:cd5fd9767e620c65ff1a79290c170ab716de7f4044ccd58d1fa8f7ffec7d52ba",
+          "via": []
+        }
+      },
+      "predicate": "clock_map",
+      "provenance": {
+        "config_hash": "sha256:4365c7394887a0d0b7ddcf734134417e312e8ec7dcc457bc3c01559add118bf4",
+        "consolidator_id": "memory.time",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 1
+              }
+            ],
+            "source": "sha256:b1ae2d29dfbcc56fa5bc557f2bd1643b3d7eda3ff1bd76e9110b0e0c11ee0a9d"
+          }
+        ],
+        "records": [
+          "rec:sha256:6c652986f8515df50b12adee0781bc8e7e4c38d1e4cea6e8023c5326f18cd8fc"
+        ]
+      },
+      "recorded_at": 3,
+      "subject": {
+        "kind": "node",
+        "node_id": "rec:sha256:667cdd93a8c5d0e893e8f1b25f74a8a7e98c7e366d9c2c33e3c907a5a184d813",
+        "node_type": "clock"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": "open",
+        "start": {
+          "domain_id": "rec:sha256:667cdd93a8c5d0e893e8f1b25f74a8a7e98c7e366d9c2c33e3c907a5a184d813",
+          "ticks": 1767225600000000000
         }
       }
     },
@@ -2484,88 +2566,6 @@
         "start": {
           "domain_id": "rec:sha256:bff3ea908f34ad024ebb58b422a07818c035362968ed7ceded4d302220307202",
           "ticks": 1776259800000000000
-        }
-      }
-    },
-    {
-      "assertion_kind": "stated",
-      "confidence": {
-        "knowledge": "not_applicable"
-      },
-      "id": "claim:sha256:fce982a8830bfef693efc9cc943323b150156dafd75b9c31ba2dc381edaca6b8",
-      "object": {
-        "datatype": "clock_map",
-        "kind": "literal",
-        "unit": {
-          "knowledge": "not_applicable"
-        },
-        "value": {
-          "anchor": {
-            "knowledge": "known",
-            "value": {
-              "source": {
-                "domain_id": "rec:sha256:cd5fd9767e620c65ff1a79290c170ab716de7f4044ccd58d1fa8f7ffec7d52ba",
-                "ticks": 1767225600000000000
-              },
-              "target": {
-                "domain_id": "rec:sha256:cd5fd9767e620c65ff1a79290c170ab716de7f4044ccd58d1fa8f7ffec7d52ba",
-                "ticks": 1767225600000000000
-              }
-            }
-          },
-          "chain": [],
-          "method": "stated",
-          "rate": {
-            "knowledge": "known",
-            "value": {
-              "denominator": 1,
-              "numerator": 1
-            }
-          },
-          "residual_bound": {
-            "knowledge": "known",
-            "value": {
-              "domain_id": "rec:sha256:cd5fd9767e620c65ff1a79290c170ab716de7f4044ccd58d1fa8f7ffec7d52ba",
-              "ticks": 0
-            }
-          },
-          "target": "rec:sha256:cd5fd9767e620c65ff1a79290c170ab716de7f4044ccd58d1fa8f7ffec7d52ba",
-          "via": []
-        }
-      },
-      "predicate": "clock_map",
-      "provenance": {
-        "config_hash": "sha256:4365c7394887a0d0b7ddcf734134417e312e8ec7dcc457bc3c01559add118bf4",
-        "consolidator_id": "memory.time",
-        "consolidator_version": "1",
-        "evidence": [
-          {
-            "locator": [
-              {
-                "kind": "row",
-                "row": 1
-              }
-            ],
-            "source": "sha256:b1ae2d29dfbcc56fa5bc557f2bd1643b3d7eda3ff1bd76e9110b0e0c11ee0a9d"
-          }
-        ],
-        "records": [
-          "rec:sha256:6c652986f8515df50b12adee0781bc8e7e4c38d1e4cea6e8023c5326f18cd8fc"
-        ]
-      },
-      "recorded_at": 3,
-      "subject": {
-        "kind": "node",
-        "node_id": "rec:sha256:667cdd93a8c5d0e893e8f1b25f74a8a7e98c7e366d9c2c33e3c907a5a184d813",
-        "node_type": "clock"
-      },
-      "superseded_at": "open",
-      "supersedes": [],
-      "valid": {
-        "end": "open",
-        "start": {
-          "domain_id": "rec:sha256:667cdd93a8c5d0e893e8f1b25f74a8a7e98c7e366d9c2c33e3c907a5a184d813",
-          "ticks": 1767225600000000000
         }
       }
     },

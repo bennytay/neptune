@@ -8,14 +8,26 @@ from typing import Any
 
 import pytest
 
+from deploy_pack_corpus import fixture_path as corpus_fixture
 from deploy_pack_graphs import HMI, TEACH, fixture_path, rec
-from deploy_pack_support import CONTRACTS, FIRST_DAY, events, events_pack, spec
+from deploy_pack_support import (
+    CONTRACTS,
+    FIRST_DAY,
+    SITE,
+    configuration_pack,
+    events,
+    events_pack,
+    spec,
+)
 from neptune_deploy.packs import (
+    COMPILER_VERSION,
     PackError,
     compile_pack,
     load_snapshot,
     read_snapshot,
     read_template,
+    render_claims,
+    render_pdf,
 )
 from neptune_deploy.packs.compile import (
     Entry,
@@ -245,3 +257,179 @@ def test_an_event_subject_reads_and_a_record_subject_does_not() -> None:
     with pytest.raises(PackError) as caught:
         spec(snap, "event-timeline", subject=Node("record", "rec:x"))
     assert caught.value.code == "spec_malformed"
+
+
+# --- clock_map and delta literals are shape-checked (review blocker) ---------------------------
+
+
+def _corpus_claim(predicate: str) -> tuple[dict[str, Any], int]:
+    document: dict[str, Any] = json.loads(corpus_fixture().read_bytes())
+    index = next(i for i, c in enumerate(document["claims"]) if c["predicate"] == predicate)
+    return document, index
+
+
+def _refused(document: dict[str, Any], pointer: str, message: str) -> None:
+    with pytest.raises(PackError, match=message) as caught:
+        read_snapshot(document)
+    assert caught.value.code == "snapshot_malformed"
+    assert caught.value.pointer == pointer
+
+
+def test_the_corpus_clock_maps_and_deltas_read() -> None:
+    for predicate in ("clock_map", "drift"):
+        document, _index = _corpus_claim(predicate)
+        read_snapshot(document)
+
+
+CLOCK_MAP_CASES: list[tuple[str, Any, str, str]] = [
+    ("value", 42, "", "expected an object"),
+    ("value", {"bogus": 1}, "", "missing"),
+    ("unit", {"knowledge": "known", "value": "s"}, "/unit", "unexpected value"),
+    ("value/method", "guessed", "/value/method", "not one of"),
+    ("value/target", "not-a-record", "/value/target", "does not match"),
+    ("value/chain", ["x"], "/value/chain/0", "does not match"),
+    ("value/rate", {"knowledge": "known"}, "/value/rate", "missing value"),
+    (
+        "value/rate",
+        {"knowledge": "known", "value": {"denominator": 0, "numerator": 1}},
+        "/value/rate/value/denominator",
+        "below 1",
+    ),
+    ("value/rate", {"knowledge": "maybe"}, "/value/rate/knowledge", "not one of"),
+    (
+        "value/rate",
+        {"candidates": [{"value": {"denominator": 1, "numerator": 1}}], "knowledge": "ambiguous"},
+        "/value/rate/candidates",
+        "at least two candidates",
+    ),
+    (
+        "value/anchor",
+        {"knowledge": "known", "value": {"source": 1}},
+        "/value/anchor/value",
+        "missing",
+    ),
+    (
+        "value/residual_bound",
+        {"knowledge": "known", "value": {"domain_id": "rec:sha256:" + "f" * 64, "ticks": 0}},
+        "/value/residual_bound/value",
+        "ticks of the target clock",
+    ),
+]
+
+
+@pytest.mark.parametrize(("path", "value", "pointer", "message"), CLOCK_MAP_CASES)
+def test_a_malformed_clock_map_is_refused(
+    path: str, value: Any, pointer: str, message: str
+) -> None:
+    document, index = _corpus_claim("clock_map")
+    target: Any = document["claims"][index]["object"]
+    *parents, last = path.split("/")
+    for key in parents:
+        target = target[key]
+    target[last] = value
+    _refused(document, f"/claims/{index}/object{pointer if path != 'value' else '/value'}", message)
+
+
+def _anchor_case(side: str) -> tuple[dict[str, Any], int]:
+    document, index = _corpus_claim("clock_map")
+    anchor = document["claims"][index]["object"]["value"]["anchor"]["value"]
+    other = anchor["target" if side == "source" else "source"]["domain_id"]
+    anchor[side]["domain_id"] = other
+    return document, index
+
+
+def test_an_anchor_source_on_the_target_clock_is_refused() -> None:
+    """Review blocker: the fixture once wrote the source instant on the target clock."""
+    document, index = _anchor_case("source")
+    _refused(
+        document,
+        f"/claims/{index}/object/value/anchor/value/source",
+        "source instant is on the mapped clock",
+    )
+
+
+def test_an_anchor_target_on_the_source_clock_is_refused() -> None:
+    document, index = _anchor_case("target")
+    _refused(
+        document,
+        f"/claims/{index}/object/value/anchor/value/target",
+        "target instant is on the target clock",
+    )
+
+
+def test_a_clock_map_about_a_machine_is_refused() -> None:
+    document, index = _corpus_claim("clock_map")
+    document["claims"][index]["subject"] = {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-3A",
+        "node_type": "machine",
+    }
+    _refused(document, f"/claims/{index}/object/value", "about a clock node")
+
+
+DELTA_CASES: list[tuple[str, Any, str, str]] = [
+    ("value", "not a delta", "/value", "expected an object"),
+    ("value", {"bogus": 1}, "/value", "missing quantity"),
+    ("value/quantity", "angle", "/value/quantity", "not one of"),
+    ("value/representation", "quaternion", "/value/representation", "not one of"),
+    ("value/values", [], "/value/values", "1 to 100000 values"),
+    ("value/values", [1, "2"], "/value/values/1", "expected a number"),
+    ("value/values", [True], "/value/values/0", "expected a number"),
+    ("value/earlier", "CAL-1", "/value/earlier", "does not match"),
+    ("value/extra", 1, "/value", "unexpected extra"),
+    ("unit", {"knowledge": "unknown"}, "/unit/knowledge", "not one of"),
+    ("unit", {"knowledge": "known"}, "/unit", "missing value"),
+]
+
+
+@pytest.mark.parametrize(("path", "value", "pointer", "message"), DELTA_CASES)
+def test_a_malformed_delta_is_refused(path: str, value: Any, pointer: str, message: str) -> None:
+    document, index = _corpus_claim("drift")
+    target: Any = document["claims"][index]["object"]
+    *parents, last = path.split("/")
+    for key in parents:
+        target = target[key]
+    target[last] = value
+    _refused(document, f"/claims/{index}/object{pointer}", message)
+
+
+def test_a_rotation_delta_needs_its_frames_adjustment_and_component_count() -> None:
+    document, index = _corpus_claim("drift")
+    frame = {"frame_graph_id": "rec:sha256:" + "a" * 64, "frame_id": "wrist_camera"}
+    rotation = {
+        "adjustment": "none",
+        "child": frame,
+        "earlier": "rec:sha256:" + "1" * 64,
+        "later": "rec:sha256:" + "2" * 64,
+        "parent": {**frame, "frame_id": "tool0"},
+        "quantity": "rotation",
+        "representation": "quaternion",
+        "transform": {"child": "wrist_camera", "direction": "child_to_parent", "parent": "tool0"},
+        "values": [0.0, 0.0, 0.0, 0.0],
+    }
+    document["claims"][index]["object"]["value"] = rotation
+    read_snapshot(document)
+    rotation["values"] = [0.0, 0.0, 0.0]
+    _refused(document, f"/claims/{index}/object/value/values", "exactly 4 values")
+    rotation["values"] = [0.0] * 4
+    rotation["adjustment"] = "wrapped"
+    _refused(document, f"/claims/{index}/object/value/adjustment", "not one of")
+    del rotation["adjustment"]
+    _refused(document, f"/claims/{index}/object/value", "missing adjustment")
+
+
+def test_the_exported_claim_set_holds_current_versions_only() -> None:
+    """Review nit: a ClaimsResult is as of the head; a superseded version stays in pack.json."""
+    pack = configuration_pack(subject=SITE)
+    superseded = [c.id for c in pack.claims if not c.current]
+    assert superseded  # cited through the overridden_on_arrival finding
+    exported = json.loads(render_claims(pack))
+    ids = {c["id"] for c in (*exported["claims"], *exported["other_clocks"])}
+    assert ids == {c.id for c in pack.claims if c.current}
+    assert not ids.intersection(superseded)
+
+
+def test_the_pdf_producer_names_the_compiler_version() -> None:
+    assert f"/Producer (neptune-deploy packs {COMPILER_VERSION})".encode() in render_pdf(
+        events_pack()
+    )
