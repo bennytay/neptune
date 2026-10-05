@@ -32,10 +32,21 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from neptune_context.query.model import TextField
-from neptune_context.retrieve.analysis import ENGLISH, Analyzer, Clause, Mode, analyzer_for
+from neptune_context.retrieve.analysis import (
+    ENGLISH,
+    JOINERS,
+    MAX_QUERY_CLAUSES,
+    MAX_WORD_CHARS,
+    Analyzer,
+    Clause,
+    Mode,
+    analyzer_for,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
+
+    from neptune.model.jsonvalue import JsonObject
 
 K1: Final = 1.2
 B: Final = 0.75
@@ -149,6 +160,11 @@ class TextIndex(Protocol):
         """Matches for ``request`` in one tenant's partition; an unknown tenant has none."""
         ...
 
+    def settings(self, tenant: str) -> JsonObject:
+        """Every setting that decides this backend's answers for ``tenant`` (analyser,
+        scoring parameters, bounds); the lexical channel reports it as part of its config."""
+        ...
+
 
 def check_tenant(tenant: str) -> str:
     if (
@@ -198,6 +214,22 @@ class Bm25Index:
 
     def analyzer(self, tenant: str) -> Analyzer:
         return self._analyzers.get(check_tenant(tenant), self._default)
+
+    def settings(self, tenant: str) -> JsonObject:
+        return {
+            "analyzer": self.analyzer(tenant).name,
+            "backend": "bm25-inprocess/1",
+            "b": B,
+            "idf": "lucene",
+            "joiners": "".join(sorted(JOINERS)),
+            "k1": K1,
+            "max_document_tokens": MAX_DOCUMENT_TOKENS,
+            "max_query_clauses": MAX_QUERY_CLAUSES,
+            "max_word_chars": MAX_WORD_CHARS,
+            "score_decimals": SCORE_DECIMALS,
+            "stemmer": "english-light/1" if self.analyzer(tenant).name == "english" else "none",
+            "verbatim_fields": sorted(str(f) for f in VERBATIM_FIELDS),
+        }
 
     def size(self, tenant: str) -> int:
         part = self._partitions.get(check_tenant(tenant))

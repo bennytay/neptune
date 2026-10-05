@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from neptune_memory.schema.reader import MemoryReader
     from neptune_memory.schema.supersede import ResolutionFinding
 
+    from neptune.model.jsonvalue import JsonObject
     from neptune.model.knowledge import Knowledge
 
 PASSAGE_FIELDS: Final = frozenset({TextField.RECORD, TextField.DOCUMENT, TextField.FINDING})
@@ -314,11 +315,32 @@ class LexicalCorpus:
         self._claims: dict[str, _ClaimRef] = {}
         self._passages: dict[str, Passage] = {}
         self._superseders: dict[ClaimId, list[tuple[int, ClaimId]]] = {}
+        self._digest: str | None = None
+
+    def digest(self) -> str:
+        """A content id of what is indexed (every unit key names its claim or passage content),
+        the coverage points and the skipped records: what the engine's config hash needs."""
+        if self._digest is None:
+            self._digest = content_id(
+                dumps(
+                    {
+                        "claims": sorted(self._claims),
+                        "claims_through": self.claims_through or 0,
+                        "passages": sorted(self._passages),
+                        "passages_through": self.passages_through or 0,
+                        "skipped": sorted(
+                            [s.record_id, str(s.field), s.reason] for s in self.skipped
+                        ),
+                    }
+                )
+            )
+        return self._digest
 
     def add_claims(self, claims: Iterable[Claim], *, through: LedgerTx) -> tuple[IndexFinding, ...]:
         """Index every version of every claim recorded up to ``through`` (a graph document's
         ``head``): the text of text-valued objects and the declared ids a claim names. Versions
         keep their ``recorded_at`` and ``superseded_at``, so any earlier ``as_of`` is searchable."""
+        self._digest = None
         units: list[IndexedText] = []
         for claim in claims:
             for claimed in claim.supersedes:
@@ -349,6 +371,7 @@ class LexicalCorpus:
         self, passages: Iterable[Passage], *, through: int
     ) -> tuple[IndexFinding, ...]:
         """Index passages read from the catalog at transaction ``through``."""
+        self._digest = None
         units: list[IndexedText] = []
         for passage in passages:
             self._passages.setdefault(passage.key, passage)  # first wins, as in the index
@@ -369,6 +392,7 @@ class LexicalCorpus:
     def add_batch(self, batch: PassageBatch) -> tuple[IndexFinding, ...]:
         """Passages from ``passages_from_catalog``; its skipped records are remembered so the
         channel can say they were not searched."""
+        self._digest = None
         self.skipped.extend(batch.skipped)
         return self.add_passages(batch.passages, through=batch.through or 0)
 
@@ -414,6 +438,21 @@ class LexicalChannel:
     @property
     def channel(self) -> Channel:
         return Channel.LEXICAL
+
+    @property
+    def config(self) -> JsonObject:
+        """The backend's settings, the tenant, the read bounds and a digest of the corpus."""
+        corpus = self._corpus
+        return {
+            "channel": str(Channel.LEXICAL),
+            "corpus": corpus.digest(),
+            "index": corpus.index.settings(corpus.tenant),
+            "max_gap_refs": MAX_GAP_REFS,
+            "max_read": MAX_READ,
+            "min_read": MIN_READ,
+            "overfetch": OVERFETCH,
+            "tenant": corpus.tenant,
+        }
 
     def retrieve(self, request: Retrieval) -> ChannelAnswer:
         clause = request.query.text

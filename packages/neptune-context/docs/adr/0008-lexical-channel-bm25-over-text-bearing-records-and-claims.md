@@ -35,9 +35,12 @@ facts decide it differently:
    depend on insertion order or on the last bit of a platform's `log`.
 2. **Identifier-preserving analysis, two modes** (`retrieve.analysis`). Text is NFKC-normalised and
    case-folded and cut into words; words joined by one of `- _ . / :` between alphanumerics form a
-   compound whose parts keep consecutive positions, so `SN-A4471-9`, `/uav21/imu/data` and
-   `asset_tag:hx-02` are found as exact phrases of their parts and `SN-A4471-9` never matches
-   `SN-A4471-7`. `prose` mode also stems a standalone all-letter word (`english-light`: regular
+   compound whose parts keep consecutive positions, with the compound's first and last part marked.
+   An unquoted compound in a query (`SN-A4471-9`, `/uav21/imu/data`, `asset_tag:hx-02`, `2.4.1`) is
+   found only as one whole compound of the document: never `SN-A4471-7`, `SN-A4471-9-B` or
+   `2.4.1-rc3`. A quoted phrase is found as adjacent terms anywhere, so `"SN-A4471"` finds the whole
+   serial family. A word longer than 128 characters keeps its head and a digest of the whole, so long
+   words never collide. `prose` mode also stems a standalone all-letter word (`english-light`: regular
    plurals, `-ing`, `-ed`, trailing `e`; ASCII only, a rule list that cannot drift between library
    versions); `verbatim` mode (the `declared_id` field) and every compound part are never stemmed. No
    stop words. No script segmentation (CJK stays one word per run). The analyser is named per tenant
@@ -45,11 +48,12 @@ facts decide it differently:
 3. **Query text.** Outside quotes, each compound is an optional phrase of its parts (BM25 over the
    disjunction); a quoted segment is one required, adjacent, ordered phrase. Unbalanced quotes are
    punctuation. At most 64 clauses are used; the rest are ignored and a `not_covered` gap says so.
-4. **Statistics follow what the query may see.** Corpus size, average length and document frequency
-   are computed over the visible units of the requested fields, per analysis mode, and a phrase is
-   scored as one pseudo-term with its own document frequency. Scoping a query to `document` therefore
-   scores against documents only, and withheld inferred text never changes the score of anything
-   returned.
+4. **Statistics follow what the query may see.** Corpus size and average length are computed over the
+   visible units of the requested fields (identifier and prose fields share one scale); document
+   frequency is per analysis mode, because a stemmed term and a verbatim one are different terms. A
+   phrase is scored as one pseudo-term with its own document frequency. Scoping a query to `document`
+   therefore scores against documents only, and withheld inferred text never changes the score of
+   anything returned.
 5. **What is indexed** (`retrieve.lexical`). `claim_text`: the text of text-valued claim objects
    (`has_summary`, `maintenance_state`, `has_description`, ...). `declared_id`: the node ids a claim
    names; a hit is the claims that name the id. `record`, `document`, `finding`: `Passage`s, spans of
@@ -78,14 +82,22 @@ facts decide it differently:
    so no snippet reaches a packet without provenance. A claim beyond the pinned graph-schema is named
    in a `not_covered` gap and never carried (ADR 0007 §3, §6). Scores are BM25 raw scores; the
    interface's `answer()` ranks them and rewrites each item's relevance to this channel's hit.
-8. **Explicit coverage.** A requested field with nothing indexed, claim text indexed through an
-   earlier transaction than the snapshot reads, records skipped for want of provenance, text with no
-   searchable term and clauses beyond the bound are gaps (`not_covered` or `unknown`) at `/text/...`;
-   an empty result is never a bare empty list that reads as "nothing exists".
+8. **Explicit coverage.** These are gaps, never a bare empty list that reads as "nothing exists":
+   a requested field with nothing indexed; claim or record text indexed through an earlier
+   transaction than the snapshot reads (`unknown`); records skipped for want of provenance; text with
+   no searchable term; clauses beyond 64; matches below the read cap (10 per requested item, 100 to
+   2000); hit claims superseded after the snapshot by versions the index does not hold (`unknown`);
+   and query members this channel does not apply. The channel answers the text clause on its own: it
+   does not restrict matches to the query's `subjects`, `during`, `regions` or `site` (ADR 0002 §1
+   conjunction), and says so in one `not_covered` gap at `/text` whenever the query sets one.
 9. **Tenancy.** Every operation takes a tenant (1-128 printable characters); partitions share nothing,
    including statistics. `LexicalCorpus(index, tenant=...)` binds a corpus to one; a Context engine is
    single-tenant like the catalog API, and several corpora may share one index object.
-10. **A corpus is rebuilt, not edited.** Adding an existing key with different content is refused
+10. **The engine seam.** `LexicalChannel.config` reports the backend's settings (`TextIndex.settings`:
+   analyser, stemmer, k1, b, bounds), the tenant, the read caps and a digest of the indexed content
+   and coverage points, so it enters `LocalEngine`'s `produced_by` hash and two engines that may
+   answer differently never share one. It is passed as `LocalEngine(memory, channels=[...])`.
+11. **A corpus is rebuilt, not edited.** Adding an existing key with different content is refused
    (`conflicting_key`, first wins); new Memory transactions or a new parser lineage mean a new corpus.
 
 ## Alternatives considered
@@ -111,9 +123,8 @@ facts decide it differently:
 
 - MVL-143 (vector) implements the same `RetrievalChannel`; fusion treats both as peers. The engine
   takes `LexicalChannel(corpus, memory)` through `channels=`.
-- **Open for the engine and Platform.** The text clause is answered on its own: this channel does not
-  restrict hits to the query's subjects, site or `during` (ADR 0002 §1 conjunction); that is a plan
-  step over fused items. Platform wires `text_of` (reading the packages' record text) and builds the
+- **Open for the engine and Platform.** Restricting text hits to the query's subjects, site, regions
+  and `during` is a plan step over fused items, not done yet (the gap above). Platform wires `text_of` (reading the packages' record text) and builds the
   corpus from the graph document and the catalog; Memory has no claim enumeration and the catalog no
   text, so both are asks if the index must be built from live services.
 - The index lives in memory: fine for a local Ledger, a budget test (`eval/`) decides when a
