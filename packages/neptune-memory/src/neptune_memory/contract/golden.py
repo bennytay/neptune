@@ -27,8 +27,8 @@ Plan, in order of priority (later arrives later within a transaction): ``golden.
 (deterministic), ``golden.operator`` (stated), ``memory.identity`` (the real identity policy),
 ``golden.fixture_model`` (inferred; ``_fixture_model``, golden only) and ``memory.time`` (the real
 time-domain registry: the drone's clocks, and the quadruped's stated ``starting_time`` to
-``log_time`` mapping). Same inputs give byte-identical canonical JSON. Every consolidation finding is a hard error: golden inputs are
-clean by construction, so a finding means the inputs drifted.
+``log_time`` mapping). Same inputs give byte-identical canonical JSON. Every consolidation finding
+is a hard error: golden inputs are clean by construction, so a finding means the inputs drifted.
 """
 
 from __future__ import annotations

@@ -15,3 +15,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0006](0006-graph-schema-v1-contract-surface-and-memory-reader.md) | Graph-schema v1: contract surface, version policy and the MemoryReader | Accepted |
 | [0007](0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) | G1 gate: withdrawal, names, evidence status, and the final store decision | Accepted |
 | [0008](0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) | The identity consolidator on compiler identity links and assertions | Accepted |
+| [0011](0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md) | The time-domain registry: clocks, mappings and chains, never estimated | Accepted |
