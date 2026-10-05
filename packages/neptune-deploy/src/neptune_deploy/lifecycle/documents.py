@@ -21,7 +21,7 @@ from neptune.identity.provenance import evidence_record_id, transform_record
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import ContentId, LogicalId, RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.knowledge import AssertionKind, Knowledge, Known, Unknown
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered, Unknown
 from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.provenance import EvidenceRef, Page, Provenance, Span, TransformRecord
 from neptune.model.world import (
@@ -37,6 +37,7 @@ from neptune_deploy.lifecycle.mapper import (
     _Cell,
     _Clocks,
     _Findings,
+    _Read,
     _Row,
     _Table,
     _table,
@@ -55,7 +56,7 @@ from neptune_deploy.lifecycle.mapping import (
 from neptune_deploy.lifecycle.templates import DocumentTemplate, config_of, rows_read
 
 DOCUMENT_MAPPER_ID: Final = "deploy_document_map"
-DOCUMENT_MAPPER_VERSION: Final = "0.1.0"
+DOCUMENT_MAPPER_VERSION: Final = "0.2.0"
 STATED: Final = AssertionKind.STATED
 OBSERVED: Final = AssertionKind.OBSERVED
 # Page furniture: a running header or footer is neither a label nor part of a section.
@@ -184,7 +185,9 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = _catalog(
         "list_cell_blank",
         Severity.WARNING,
         FindingCategory.MISSING,
-        "blank values read into a list field; a list holds no unknown, so the list lacks them",
+        "a blank value among several read into one list field, where the others state items: the"
+        " list holds those items and lacks what the blank value would have stated (a list whose"
+        " every value is blank is Unknown, and needs no finding)",
     ),
     (
         "list_part_empty",
@@ -673,19 +676,25 @@ class _DocRow(_Values):
         text = "\n".join(t for t in texts if t is not None)
         return text, EvidenceRef(first.source, (*prefix, Span(head.start, tail.end)))
 
-    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef, EvidenceRef]]:
+    def pieces(self, spec: ListCell, path: str) -> _Read:
         if spec.via != "section":
             return super().pieces(spec, path)
         status, heading, blocks = self._locate(spec.column)
-        if status != "ok" or heading is None:
-            return []
+        if status == "absent":
+            return _Read([], NotCovered())
+        assert heading is not None
+        place = heading.provenance.evidence
+        if status == "repeated":
+            return _Read([], Unknown(self.provenance(self.evidence)), self.evidence)
         self.read_blocks.add(heading.id)
+        if not blocks:
+            return _Read([], Unknown(self.provenance(place)), place)
         out = []
         for block in blocks:
             if _role(block) is BlockRole.LIST_ITEM and (text := _text(block.text)):
                 self.read_blocks.add(block.id)
                 out.append((text, block.provenance.evidence, block.provenance.evidence))
-        return out
+        return _Read(out)
 
     def blank(self, spec: Part) -> bool:
         for via, name in sorted(spec_refs(spec)):
@@ -696,12 +705,17 @@ class _DocRow(_Values):
                 return False
         return True
 
-    def items(self, specs: Any, path: str) -> tuple[Any, ...]:
+    def absent(self, spec: Part) -> bool:
+        refs = [(via, name) for via, name in sorted(spec_refs(spec)) if via != "column"]
+        return bool(refs) and all(self.cell(name, via).absent_from_table for via, name in refs)
+
+    def items(self, specs: Any, path: str) -> Knowledge[tuple[Any, ...]]:
         if not isinstance(specs, Rows):
             return super().items(specs, path)
         out: list[Any] = []
         kind = self.template.kind.kind
-        for table in self.view.tables_named(self.template.tables[specs.table]):
+        tables = self.view.tables_named(self.template.tables[specs.table])
+        for table in tables:
             for index in range(len(table.rows)):
                 row = _TableRow(self.mapper, table, index, kind, self.record_id, self.table)
                 if row.blank(specs.part):
@@ -709,7 +723,9 @@ class _DocRow(_Values):
                     row.finding("item_blank", column, row.evidence)
                     continue
                 out.append(row.part(specs.part, f"{path}/{len(out)}"))
-        return tuple(out)
+        if out:
+            return Known(tuple(out))
+        return Unknown(self.provenance(self.evidence)) if tables else NotCovered()
 
 
 class _TableRow(_Row):
@@ -848,6 +864,7 @@ class _TemplateMapper(_Clocks):
         )
         self.findings = _Findings(FINDINGS, DOCUMENT_MAPPER_ID, "document", "reference")
         self.domains = {}
+        self.zones = {}
         self.direct: list[IngestFinding] = []
 
     def run(self, verdicts: dict[RecordId, _Verdict]) -> list[Any]:
@@ -864,6 +881,7 @@ class _TemplateMapper(_Clocks):
             self.transform,
             *records,
             *domains.values(),
+            *self.zones.values(),
             *self.findings.build(self.transform),
             *self.direct,
         ]

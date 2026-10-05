@@ -9,7 +9,7 @@ row's and whose every value cites its cell. What does not map is a finding (ADR 
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
@@ -39,7 +39,7 @@ from neptune.model.provenance import (
     TransformRecord,
     adapter_locator,
 )
-from neptune.model.reference import TimestampDomain
+from neptune.model.reference import CivilTimeZone, TimestampDomain
 from neptune.model.scalars import NonFinite
 from neptune.model.time import ClockRole, Epoch, Timescale, Timestamp
 from neptune.model.units import UncataloguedUnitError, unit_from_text
@@ -47,6 +47,7 @@ from neptune.model.versions import BuildId, DeclaredVersion, FirmwareVersion
 from neptune.model.world import StructuredRecord, StructuredTable
 from neptune.store.package import IngestPackage
 from neptune_deploy.lifecycle.mapping import (
+    UNSTATED,
     LifecycleMapping,
     ListCell,
     MappingError,
@@ -62,7 +63,7 @@ from neptune_deploy.lifecycle.shapes import Shape, fields_of
 from neptune_deploy.lifecycle.times import read_time
 
 MAPPER_ID: Final = "deploy_lifecycle_map"
-MAPPER_VERSION: Final = "0.1.0"
+MAPPER_VERSION: Final = "0.2.0"
 STATED: Final = AssertionKind.STATED
 LEDGER_KINDS: Final = frozenset({"source_artifact", "source_revision", "source_absence"})
 # How many rows and records one grouped finding names (as root ADR 0042 §10 does).
@@ -120,8 +121,9 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
     "list_cell_blank": (
         Severity.WARNING,
         FindingCategory.MISSING,
-        "a blank cell read into a list field: a list holds no unknown, so this record's list lacks"
-        " what the cell would have stated; the list is not a statement of none",
+        "a blank cell among several read into one list field, where the others state items: the"
+        " list holds those items and lacks what the blank cell would have stated (a list whose"
+        " every cell is blank is Unknown, and needs no finding)",
     ),
     "list_part_empty": (
         Severity.INFO,
@@ -160,7 +162,7 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
         Severity.INFO,
         FindingCategory.MISSING,
         "fields of a rule's lifecycle kind that the rule does not read, in every record it made:"
-        " an unread value is not covered, and an unread list is empty without stating none",
+        " an unread value or list is not covered, never read as none",
     ),
     "table_unmapped": (
         Severity.INFO,
@@ -358,6 +360,16 @@ class _Findings:
 
 
 @dataclass(frozen=True)
+class _Read:
+    """What one list cell states: its parts, each with its citation and the cell's; with no part,
+    ``gap`` is why (the list's state if no other cell states items) and ``place`` the blank cell."""
+
+    parts: list[tuple[str, EvidenceRef, EvidenceRef]]
+    gap: Knowledge[tuple[Any, ...]] | None = None
+    place: EvidenceRef | None = None
+
+
+@dataclass(frozen=True)
 class _Cell:
     """What one column holds in one row: a state and where it is; ``None`` state = absent."""
 
@@ -396,6 +408,10 @@ class _Values:
         raise NotImplementedError
 
     def blank(self, spec: Part) -> bool:
+        raise NotImplementedError
+
+    def absent(self, spec: Part) -> bool:
+        """Every cell the part reads is absent from the table or document: no place for it."""
         raise NotImplementedError
 
     def provenance(self, evidence: EvidenceRef) -> Provenance:
@@ -485,21 +501,27 @@ class _Values:
 
     # Cells into lists ----------------------------------------------------------------------
 
-    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef, EvidenceRef]]:
+    def pieces(self, spec: ListCell, path: str) -> "_Read":
         """The texts a list cell states, each with its citation (a span inside a split cell) and
-        the cell's. At most ``MAX_LIST_PARTS``; more is ``list_truncated``, citing the cell."""
+        the cell's. At most ``MAX_LIST_PARTS``; more is ``list_truncated``, citing the cell. A cell
+        that states no text says why in ``gap``: the list's state if no other cell states items."""
         cell = self.cell(spec.column, spec.via)
-        if cell.absent_from_table or isinstance(cell.state, KnownAbsent):
-            return []
-        if cell.state is None or isinstance(cell.state, Unknown | NotCovered):
-            self.cell_finding("list_cell_blank", spec.column, path, cell.place)
-            return []
-        text = _text(cell.state.value) if isinstance(cell.state, Known) else None
+        if cell.absent_from_table:
+            return _Read([], NotCovered())
+        state, place = cell.state, cell.place
+        if isinstance(state, KnownAbsent):
+            grounds = _grounds(state)
+            return _Read([], Known((), self.provenance(grounds.evidence if grounds else place)))
+        if isinstance(state, NotCovered):
+            return _Read([], NotCovered(self.provenance(place)))
+        if state is None or isinstance(state, Unknown):
+            return _Read([], Unknown(self.provenance(place)), place)
+        text = _text(state.value) if isinstance(state, Known) else None
         if text is None:
-            self.cell_finding("value_unreadable", spec.column, path, cell.place)
-            return []
+            self.cell_finding("value_unreadable", spec.column, path, place)
+            return _Read([], Unknown(self.provenance(place)), place)
         if spec.split is None:
-            return [(text, cell.place, cell.place)]
+            return _Read([(text, place, place)])
         out: list[tuple[str, EvidenceRef, EvidenceRef]] = []
         empty, start, separator = 0, 0, spec.split
         while start <= len(text):
@@ -511,32 +533,62 @@ class _Values:
                 empty += 1
             elif len(out) == MAX_LIST_PARTS:
                 # What is not read is cited: the cell's text from this part on (ADR 0005 §3).
-                rest = EvidenceRef(cell.place.source, (*cell.place.locator, Span(start, len(text))))
+                rest = EvidenceRef(place.source, (*place.locator, Span(start, len(text))))
                 details: dict[str, JsonValue] = {"limit": MAX_LIST_PARTS}
-                self.cell_finding(
-                    "list_truncated", spec.column, path, cell.place, (rest,), details=details
-                )
+                self.cell_finding("list_truncated", spec.column, path, place, (rest,), details)
                 break
             else:
                 begin = start + (len(part) - len(part.lstrip()))
                 end = begin + len(stripped)
-                place = cell.place
+                at = place
                 if (begin, end) != (0, len(text)):
-                    place = EvidenceRef(place.source, (*place.locator, Span(begin, end)))
-                out.append((stripped, place, cell.place))
+                    at = EvidenceRef(at.source, (*at.locator, Span(begin, end)))
+                out.append((stripped, at, place))
             start = stop + len(separator)
         if empty:
-            self.cell_finding("list_part_empty", spec.column, path, cell.place, times=empty)
-        return out
+            self.cell_finding("list_part_empty", spec.column, path, place, times=empty)
+        return _Read(out)
 
-    def ids(self, specs: tuple[ListCell, ...], path: str) -> tuple[Knowledge[LogicalId], ...]:
+    def listed(
+        self,
+        specs: tuple[ListCell, ...],
+        reads: list["_Read"],
+        items: tuple[Any, ...],
+        path: str,
+    ) -> Knowledge[tuple[Any, ...]]:
+        """The list's state (ADR 0012 §1): the items, inheriting the record's provenance, when any
+        cell states one (a blank cell beside them is a finding); ``Unknown`` when a cell is blank
+        and none states an item; ``NotCovered`` when the format has no place for the list;
+        ``Known(())`` when the cells were read and list nothing, or state none."""
+        gaps = [
+            (spec, read) for spec, read in zip(specs, reads, strict=True) if read.gap is not None
+        ]
+        if items:
+            for spec, read in gaps:
+                if isinstance(read.gap, Unknown) and read.place is not None:
+                    self.cell_finding("list_cell_blank", spec.column, path, read.place)
+            return Known(items)
+        for _, read in gaps:
+            if isinstance(read.gap, Unknown):
+                return read.gap
+        if len(gaps) == len(specs):
+            for _, read in gaps:
+                if isinstance(read.gap, Known):
+                    return read.gap  # a cell that states none, citing itself
+            return NotCovered()
+        return Known(())
+
+    def ids(self, specs: tuple[ListCell, ...], path: str) -> Knowledge[tuple[Any, ...]]:
         """Declared ids, sorted, each once: a cell's repeats are kept once and are one finding
         about the cell, citing the statement kept and the first repeats (``NAMED`` in all)."""
         found: dict[LogicalId, Knowledge[LogicalId]] = {}
         first: dict[LogicalId, EvidenceRef] = {}
+        reads = []
         for spec in specs:
             assert spec.namespace is not None
-            for text, place, cell in self.pieces(spec, path):
+            read = self.pieces(spec, path)
+            reads.append(read)
+            for text, place, cell in read.parts:
                 identifier = LogicalId(spec.namespace, text)
                 if identifier in found:
                     # The statement kept, then the repeat (the cell itself when it is unsplit).
@@ -545,14 +597,15 @@ class _Values:
                     continue
                 found[identifier] = Known(identifier, self.provenance(place))
                 first[identifier] = place
-        return tuple(found[key] for key in sorted(found, key=lambda i: (i.namespace, i.value)))
+        items = tuple(found[key] for key in sorted(found, key=lambda i: (i.namespace, i.value)))
+        return self.listed(specs, reads, items, path)
 
-    def statements(self, specs: tuple[ListCell, ...], path: str) -> tuple[Knowledge[str], ...]:
-        return tuple(
-            Known(text, self.provenance(place))
-            for spec in specs
-            for text, place, _ in self.pieces(spec, path)
+    def statements(self, specs: tuple[ListCell, ...], path: str) -> Knowledge[tuple[Any, ...]]:
+        reads = [self.pieces(spec, path) for spec in specs]
+        items = tuple(
+            Known(text, self.provenance(place)) for read in reads for text, place, _ in read.parts
         )
+        return self.listed(specs, reads, items, path)
 
     # Parts and records ---------------------------------------------------------------------
 
@@ -564,8 +617,9 @@ class _Values:
             )
         return spec.cls(**self.values(spec.cls, spec.fields, path))
 
-    def items(self, specs: Any, path: str) -> tuple[Any, ...]:
-        """Parts spelled out field by field; one whose every cell is blank is not listed."""
+    def items(self, specs: Any, path: str) -> Knowledge[tuple[Any, ...]]:
+        """Parts spelled out field by field; one whose every cell is blank is not listed. No part
+        listed: the list is ``NotCovered`` when every cell it reads is absent, else ``Unknown``."""
         items: list[Any] = []
         for item in specs:
             assert isinstance(item, Part)
@@ -574,7 +628,11 @@ class _Values:
                 self.finding("item_blank", column, self.evidence)
                 continue
             items.append(self.part(item, f"{path}/{len(items)}"))
-        return tuple(items)
+        if items:
+            return Known(tuple(items))
+        if all(self.absent(item) for item in specs):
+            return NotCovered()
+        return Unknown(self.provenance(self.evidence))
 
     def values(self, cls: type[Any], specs: Any, path: str = "") -> dict[str, Any]:
         """Every field of ``cls``; ``path`` is where ``cls`` sits in the record (JSON pointer)."""
@@ -583,14 +641,15 @@ class _Values:
             spec: Any = specs.get(shape.name)
             at = f"{path}/{shape.name}"
             match shape.shape:
-                # Lists are Known states inheriting the record's provenance (root ADR 0061 §4),
-                # so they stay the version 4 bare arrays.
+                # A list that states items is a Known state inheriting the record's provenance
+                # (root ADR 0061 §4), so it stays the version 4 bare array; every other state of
+                # a list is Unknown, NotCovered or a cited Known(()) (ADR 0012 §1).
                 case Shape.IDS:
-                    out[shape.name] = Known(self.ids(spec, at) if spec else ())
+                    out[shape.name] = self.ids(spec, at) if spec else NotCovered()
                 case Shape.STATEMENTS:
-                    out[shape.name] = Known(self.statements(spec, at) if spec else ())
+                    out[shape.name] = self.statements(spec, at) if spec else NotCovered()
                 case Shape.ITEMS:
-                    out[shape.name] = Known(self.items(spec or (), at))
+                    out[shape.name] = self.items(spec, at) if spec else NotCovered()
                 case Shape.PART:
                     assert shape.part is not None
                     out[shape.name] = self.part(
@@ -671,6 +730,10 @@ class _Row(_Values):
         """A table's clock cites its column's first cell, not the first one read (ADR 0005 §7)."""
         return self.table.first_cell(column) or place
 
+    def absent(self, spec: Part) -> bool:
+        columns = sorted(spec_columns(spec))
+        return bool(columns) and all(self.cell(column).absent_from_table for column in columns)
+
     def blank(self, spec: Part) -> bool:
         """Every cell the part reads is blank or absent in this row."""
         for column in sorted(spec_columns(spec)):
@@ -728,10 +791,12 @@ def _text(value: Any) -> str | None:
 
 
 class _Clocks:
-    """The ``TimestampDomain`` of each time field read, one per scope and field (ADR 0002 §5)."""
+    """The ``TimestampDomain`` of each time field read, one per scope and field (ADR 0002 §5), and
+    the ``CivilTimeZone`` a mapping declares for each civil one (ADR 0012 §2)."""
 
     transform: TransformRecord
     domains: dict[tuple[Any, ...], TimestampDomain]
+    zones: dict[RecordId, CivilTimeZone]
 
     def domain(
         self,
@@ -753,17 +818,27 @@ class _Clocks:
             step = adapter_locator(f"{self.transform.adapter_id}:clock", reading)
             place = EvidenceRef(place.source, (*place.locator, step))
             provenance = Provenance(place, self.transform.id, STATED)
-            self.domains[key] = TimestampDomain(
+            domain = TimestampDomain(
                 id=evidence_record_id(TimestampDomain.kind, place, self.transform),
                 provenance=provenance,
                 field=column,
-                scope=(),  # the declared zone is the mapping's, in the transform config
+                scope=(),
                 role=Known(ClockRole.DOCUMENT),
                 resolution=Known(resolution),
                 epoch=Known(Epoch.UNIX),
                 timescale=Known(Timescale.POSIX) if instant else Unknown(),
                 declared_monotonic=NotCovered(),
             )
+            self.domains[key] = domain
+            if not instant:
+                # What the mapping declares, as declared; the domain's ticks still count the civil
+                # clock (root ADR 0061 §2). "unstated" is the mapping saying the export does not.
+                self.zones[domain.id] = CivilTimeZone(
+                    id=evidence_record_id(CivilTimeZone.kind, place, self.transform),
+                    provenance=provenance,
+                    domain=domain.id,
+                    zone=Unknown() if zone == UNSTATED else Known(zone),
+                )
         return self.domains[key].id
 
 
@@ -795,10 +870,19 @@ class _Mapper(_Clocks):
         )
         self.findings = _Findings()
         self.domains: dict[tuple[Any, ...], TimestampDomain] = {}
+        self.zones: dict[RecordId, CivilTimeZone] = {}
         self.not_covered = {rule.id: uncovered(rule.kind, rule.fields) for rule in mapping.rules}
 
     def run(self) -> list[Any]:
-        records: list[Any] = []
+        return list(self.stream())
+
+    def stream(self) -> Iterator[Any]:
+        """This mapping's transform, then its lifecycle records one row at a time, then its clocks
+        and findings. Nothing holds the records: what a later row needs of an earlier one is its
+        identifiers (``_repeated``) and the findings' groups, which a package of findings bounds
+        by their count, not by the rows."""
+        yield self.transform
+        holders: dict[LogicalId, EvidenceRef] = {}
         for table in self.tables:
             rules = self.applicable[table.record.id]
             self._unmapped(table, rules)
@@ -818,15 +902,11 @@ class _Mapper(_Clocks):
                 else:
                     record = self._record(matched[0], table, index)
                     if record is not None:
-                        records.append(record)
-        self._repeated(records)
-        domains = unique_domains(self.domains.values())
-        return [
-            self.transform,
-            *records,
-            *domains.values(),
-            *self.findings.build(self.transform),
-        ]
+                        self._repeated(record, table, row, holders)
+                        yield record
+        yield from unique_domains(self.domains.values()).values()
+        yield from self.zones.values()
+        yield from self.findings.build(self.transform)
 
     def _selects(self, rule: Rule, table: _Table, index: int) -> bool:
         if rule.where is None:
@@ -890,35 +970,33 @@ class _Mapper(_Clocks):
             )
         return record
 
-    def _repeated(self, records: list[Any]) -> None:
-        """Two records of this mapping stating one identifier: both kept, one finding."""
-        holders: dict[LogicalId, list[Any]] = defaultdict(list)
-        for record in records:
-            ids = record.identifiers  # a Known list from this mapper (root ADR 0061 §4)
-            for identifier in ids.value if isinstance(ids, Known) else ():
-                if isinstance(identifier, Known):
-                    holders[identifier.value].append(record)
-        rows = {
-            row.provenance.evidence: (table, row) for table in self.tables for row in table.rows
-        }
-        for identifier, members in sorted(
-            holders.items(), key=lambda i: (i[0].namespace, i[0].value)
-        ):
-            if len(members) < 2:
+    def _repeated(
+        self,
+        record: Any,
+        table: _Table,
+        row: StructuredRecord,
+        holders: dict[LogicalId, EvidenceRef],
+    ) -> None:
+        """A record of this mapping stating an identifier an earlier one did: both kept, one
+        finding per repeat, citing the first holder."""
+        ids = record.identifiers  # a Known list from this mapper (root ADR 0061 §4), or a gap
+        for identifier in ids.value if isinstance(ids, Known) else ():
+            if not isinstance(identifier, Known):
                 continue
-            first = members[0].provenance.evidence
-            for member in members[1:]:
-                table, row = rows[member.provenance.evidence]
-                self.findings.add(
-                    "identifier_repeated",
-                    table,
-                    member.provenance.evidence,
-                    key=f"{identifier.namespace}:{identifier.value}",
-                    details={"identifier": identifier.to_json()},
-                    row=row.row,
-                    record=member.id,
-                    related=(first,),
-                )
+            first = holders.setdefault(identifier.value, record.provenance.evidence)
+            if first == record.provenance.evidence:
+                continue
+            value = identifier.value
+            self.findings.add(
+                "identifier_repeated",
+                table,
+                record.provenance.evidence,
+                key=f"{value.namespace}:{value.value}",
+                details={"identifier": value.to_json()},
+                row=row.row,
+                record=record.id,
+                related=(first,),
+            )
 
 
 @dataclass(frozen=True)
@@ -995,12 +1073,48 @@ def tables_of(records: Iterable[Any]) -> tuple[list[_Table], list[StructuredTabl
     return usable, unnamed
 
 
-def map_tables(
+@dataclass
+class TablePlan:
+    """Each mapping applied to a package's tables, planned before any row is read: every
+    transform the mapped records will cite is known up front (so the lineage to carry from the
+    base is too), and ``records`` then maps one row at a time."""
+
+    mappers: list[_Mapper]
+    unclaimed: list[_Table]
+    unnamed: list[StructuredTable]
+    run: TransformRecord | None
+
+    @property
+    def transforms(self) -> list[TransformRecord]:
+        found = [mapper.transform for mapper in self.mappers]
+        return found + ([self.run] if self.run else [])
+
+    def records(self) -> Iterator[Any]:
+        """Each mapping's transform, lifecycle records, clocks and findings, then findings about
+        the tables no mapping applies to."""
+        for mapper in self.mappers:
+            yield from mapper.stream()
+        if self.run is not None:
+            transform = self.run
+            findings = _Findings()
+            for table in self.unclaimed:
+                findings.add("table_unmapped", table, table.evidence)
+            for record in self.unnamed:
+                # Only a header the compiler was not told about is undeclared; a table declared to
+                # have none (csv_header none, a Parquet footer's tables) simply has no names.
+                name = (
+                    "header_undeclared" if isinstance(record.header, Unknown) else "table_unmapped"
+                )
+                findings.add(name, _Table(record, [], ()), record.provenance.evidence)
+            yield transform
+            yield from findings.build(transform)
+
+
+def plan_tables(
     base: IngestPackage, mappings: Sequence[LifecycleMapping], claimed: Iterable[RecordId] = ()
-) -> list[Any]:
-    """Each mapping's transform, lifecycle records, clocks and findings, then findings about the
-    tables no mapping applies to. ``claimed`` are tables something else (a document template)
-    already accounts for."""
+) -> TablePlan:
+    """The plan of each mapping over the package's tables, in mapping order of file hash.
+    ``claimed`` are tables something else (a document template) already accounts for."""
     hashes = [mapping.sha256 for mapping in mappings]
     if len(set(hashes)) != len(hashes):
         raise MappingError("the same mapping file is given twice")
@@ -1012,50 +1126,43 @@ def map_tables(
     named, nameless = tables_of(base.records)
     usable = [t for t in named if t.record.id not in taken]
     unnamed = [t for t in nameless if t.id not in taken]
-    out: list[Any] = []
+    mappers: list[_Mapper] = []
     for mapping in sorted(mappings, key=lambda m: m.sha256):
         mapper = _Mapper(mapping, base.id, usable)
         taken.update(table.record.id for table in mapper.tables)
-        out.extend(mapper.run())
-    out.extend(
-        _run_findings(
-            base.id,
-            hashes,
-            [t for t in usable if t.record.id not in taken],
-            [t for t in unnamed if t.id not in taken],
-        )
-    )
-    return out
+        mappers.append(mapper)
+    unclaimed = [t for t in usable if t.record.id not in taken]
+    left = [t for t in unnamed if t.id not in taken]
+    return TablePlan(mappers, unclaimed, left, _run_transform(base.id, hashes, unclaimed, left))
 
 
-def _run_findings(
+def map_tables(
+    base: IngestPackage, mappings: Sequence[LifecycleMapping], claimed: Iterable[RecordId] = ()
+) -> list[Any]:
+    """``TablePlan.records`` as a list: each mapping's transform, lifecycle records, clocks and
+    findings, then findings about the tables no mapping applies to."""
+    return list(plan_tables(base, mappings, claimed).records())
+
+
+def _run_transform(
     base: ContentId,
     hashes: list[ContentId],
     unclaimed: list[_Table],
     unnamed: list[StructuredTable],
-) -> list[Any]:
-    """Findings about tables no mapping applies to, under a transform of the whole run."""
+) -> TransformRecord | None:
+    """The transform of the whole run, for findings about tables no mapping applies to."""
     if not unclaimed and not unnamed:
-        return []
+        return None
     upstream = sorted(
         {t.record.provenance.transform for t in unclaimed}
         | {t.provenance.transform for t in unnamed}
     )
-    transform = transform_record(
+    return transform_record(
         adapter_id=MAPPER_ID,
         adapter_version=MAPPER_VERSION,
         config={"base_package": base, "mappings": sorted(hashes)},
         upstream=upstream,
     )
-    findings = _Findings()
-    for table in unclaimed:
-        findings.add("table_unmapped", table, table.evidence)
-    for record in unnamed:
-        # Only a header the compiler was not told about is undeclared; a table declared to have
-        # none (csv_header none, a Parquet footer's tables) simply has no names to map.
-        name = "header_undeclared" if isinstance(record.header, Unknown) else "table_unmapped"
-        findings.add(name, _Table(record, [], ()), record.provenance.evidence)
-    return [transform, *findings.build(transform)]
 
 
 def carried(base: IngestPackage, records: list[Any]) -> list[Any]:

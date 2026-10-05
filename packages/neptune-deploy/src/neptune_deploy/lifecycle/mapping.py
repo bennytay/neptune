@@ -44,6 +44,7 @@ from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.model.ids import ContentId
 from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.reference import check_iana_zone
 from neptune_deploy.lifecycle.shapes import KINDS, Shape, fields_of, is_score
 from neptune_deploy.lifecycle.times import check_format
 
@@ -160,8 +161,8 @@ def spec_refs(spec: Spec) -> set[tuple[str, str]]:
 def uncovered(cls: type[Any], specs: Mapping[str, Spec], prefix: str = "") -> list[str]:
     """The fields of ``cls`` a declaration does not read, in declaration order, with those of
     the parts it does read as ``field/part_field`` (ADR 0005 §5). An unread scalar is
-    ``NotCovered`` in the record; an unread list is ``()``, which only this list tells apart from
-    a list stated empty."""
+    ``NotCovered`` in the record, and so is an unread list (never ``()``, which is a list stated
+    empty; ADR 0012)."""
     out: list[str] = []
     for shape in fields_of(cls):
         spec = specs.get(shape.name)
@@ -190,6 +191,10 @@ def spec_columns(spec: Spec) -> set[str]:
 
 
 # --- Reading -----------------------------------------------------------------------------------
+
+
+# The civil zone a mapping declares when the export states none: written as an ``Unknown`` zone.
+UNSTATED: Final = "unstated"
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -465,6 +470,11 @@ def _scalar(
         declared = _text(obj["zone"], f"{where}.zone") if "zone" in obj else zone
         if declared is None:
             raise MappingError(f"{where}: a time needs its civil zone declared (or 'unstated')")
+        if declared != UNSTATED:
+            try:
+                check_iana_zone("zone", declared)
+            except ValueError as exc:
+                raise MappingError(f"{where}.zone: {exc}; or declare 'unstated'") from exc
         return Scalar(name, required, formats=checked, zone=declared, via=via)
     return Scalar(name, required, via=via)
 
