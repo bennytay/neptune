@@ -194,6 +194,7 @@ class Link:
     decided: bool
     windows: tuple[Window, ...]
     evidence: tuple[EvidenceRef, ...]
+    also: tuple[RecordId, ...] = ()  # other records its claims cite (an ambiguous retraction)
 
 
 def _readings(knowledge: Knowledge[_T]) -> tuple[tuple[_T | None, tuple[EvidenceRef, ...]], ...]:
@@ -300,14 +301,18 @@ class Statement:
     a ``Known`` scope in declared order, each once (record ids in a scope name evidence, not
     things, so identity does not read them); ``None`` when the scope is not ``Known``.
     ``windows`` holds from ``authored_at``, one per reading: several, and ``timed`` ``False``,
-    when ``authored_at`` is ``Ambiguous`` (empty past ``MAX_WINDOWS``).
+    when ``authored_at`` is ``Ambiguous`` (empty past ``MAX_WINDOWS``). ``identifiers`` and
+    ``retracts`` are every id the field may be: one when ``Known``, each candidate when
+    ``Ambiguous`` (and then its ``*_ambiguous`` flag is set), none otherwise.
     """
 
     record: RecordId
-    identifier: LogicalId | None
+    identifiers: tuple[LogicalId, ...]
+    identifier_ambiguous: bool
     assertion_type: AssertionType | None
     nodes: tuple[LogicalId, ...] | None
-    retracts: LogicalId | None
+    retracts: tuple[LogicalId, ...]
+    retracts_ambiguous: bool
     windows: tuple[Window, ...]
     timed: bool
     evidence: tuple[EvidenceRef, ...]
@@ -323,14 +328,15 @@ def assertion(record: Mapping[str, object]) -> Statement:
             if isinstance(ref, LogicalId) and declared(ref) not in found:
                 found.append(ref)
         nodes = tuple(found)
-    identifier, retracts = _known(parsed.identifier), _known(parsed.retracts)
     starts = _readings(parsed.authored_at)
     return Statement(
         record=parsed.id,
-        identifier=None if identifier is None else declared(identifier),
+        identifiers=tuple(declared(i) for i in _values(parsed.identifier)),
+        identifier_ambiguous=isinstance(parsed.identifier, Ambiguous),
         assertion_type=_known(parsed.assertion_type),
         nodes=nodes,
-        retracts=None if retracts is None else declared(retracts),
+        retracts=tuple(declared(r) for r in _values(parsed.retracts)),
+        retracts_ambiguous=isinstance(parsed.retracts, Ambiguous),
         windows=()
         if len(starts) > MAX_WINDOWS
         else tuple(Window(start, OPEN, cited) for start, cited in starts),

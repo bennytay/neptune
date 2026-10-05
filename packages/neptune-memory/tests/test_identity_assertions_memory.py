@@ -7,6 +7,10 @@
   ``Ambiguous`` is never read as unstated: each reading is a candidate window of its own.
 - A person's ``same_identity`` assertion grounds ``same_as`` while no effective ``retract`` names
   its declared id; a retraction of a retraction restores it; a loop is undecided and reported.
+- A ``retract`` that only possibly names an assertion (an ``Ambiguous`` ``retracts``, or an
+  ``Ambiguous`` ``identifier`` on its target) leaves it doubtful: a ``same_identity`` becomes
+  candidates citing the retract, a ``distinct_identity`` suppresses nothing. An ``Ambiguous``
+  ``identifier`` on a ``same_identity`` alone makes it candidates.
 - ``distinct_identity`` suppresses candidates between its ids and contests a ``same_as``.
 - A stated instant on a clock that declares itself civil lands on the shared ``CivilClock``.
 """
@@ -33,7 +37,7 @@ from neptune.identity.ids import record_id
 from neptune.model.alignment import ValidityWindow
 from neptune.model.assertion import AssertionType
 from neptune.model.ids import LogicalId
-from neptune.model.knowledge import Knowledge, Known, Unknown
+from neptune.model.knowledge import Ambiguous, Knowledge, Known, Unknown
 from neptune.model.time import Epoch, Timescale, Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
 from neptune_memory.consolidate.identity import (
@@ -400,6 +404,70 @@ def test_a_retraction_chain_of_any_length_resolves_without_recursion() -> None:
         ]
         result = _run({**_fleet(CONFIRMED), "pkg-ops-2": chain})
         assert bool(_of(result, SAME_AS)) is stands and not result.findings
+
+
+# --- Ambiguous retraction ------------------------------------------------------------------------
+
+
+def _ids(*names: str) -> Ambiguous[LogicalId]:
+    return ambiguous("assertions ids", *(LogicalId("ops-console", n) for n in names))
+
+
+def test_a_retract_that_may_name_an_assertion_makes_its_same_as_a_candidate() -> None:
+    maybe = assertion("ASR-50", RETRACT, (), retracts=_ids("ASR-20", "ASR-99"))
+    result = _run({**_fleet(CONFIRMED), "pkg-ops-2": [maybe]})
+    assert not _of(result, SAME_AS)
+    candidates = _of(result, SAME_AS_CANDIDATE)
+    assert _pairs(candidates) == {
+        ("controller:slot-b", "serial:H1-0003"),
+        ("serial:H1-0003", "controller:slot-b"),
+    }
+    for claim in candidates:  # the assertion and the retract that may withdraw it
+        assert claim.provenance.records == tuple(sorted((str(CONFIRMED["id"]), str(maybe["id"]))))
+        assert claim.valid_from == at(10)
+    assert _codes(result) == ["identity.retraction_ambiguous"]
+    assert result.findings[0].records == tuple(sorted((CONFIRMED["id"], maybe["id"])))  # type: ignore[type-var]
+
+
+def test_a_retracted_ambiguous_retract_leaves_the_assertion_decided() -> None:
+    maybe = assertion("ASR-51", RETRACT, (), retracts=_ids("ASR-20", "ASR-99"))
+    undo = assertion("ASR-52", RETRACT, (), retracts=LogicalId("ops-console", "ASR-51"))
+    result = _run({**_fleet(CONFIRMED), "pkg-ops-2": [maybe, undo]})
+    (claim,) = _of(result, SAME_AS)
+    assert claim.id == _of(_run(_fleet(CONFIRMED)), SAME_AS)[0].id and not result.findings
+
+
+def test_a_certain_retraction_still_retracts_beside_an_ambiguous_one() -> None:
+    maybe = assertion("ASR-53", RETRACT, (), retracts=_ids("ASR-20", "ASR-99"))
+    result = _run({**_fleet(CONFIRMED), "pkg-ops-2": [RETRACTION, maybe]})
+    assert not result.claims and not result.findings
+
+
+def test_a_retraction_that_may_itself_be_retracted_leaves_its_target_doubtful() -> None:
+    maybe = assertion("ASR-54", RETRACT, (), retracts=_ids("ASR-21", "ASR-99"))
+    result = _run({**_fleet(CONFIRMED), "pkg-ops-2": [RETRACTION, maybe]})
+    assert not _of(result, SAME_AS) and len(_of(result, SAME_AS_CANDIDATE)) == 2
+    assert _codes(result) == ["identity.retraction_ambiguous"]
+
+
+def test_an_ambiguous_identifier_makes_a_same_identity_a_candidate() -> None:
+    said = assertion("ASR-55", SAME, (SLOT, UNIT_1), identifier=_ids("ASR-55", "ASR-56"))
+    result = _run(_fleet(said))
+    assert not _of(result, SAME_AS) and not result.findings
+    assert len(_of(result, SAME_AS_CANDIDATE)) == 2
+    # A certain retract naming one of its possible ids only possibly names it: still candidates.
+    named = assertion("ASR-57", RETRACT, (), retracts=LogicalId("ops-console", "ASR-56"))
+    doubted = _run(_fleet(said, named))
+    assert not _of(doubted, SAME_AS) and len(_of(doubted, SAME_AS_CANDIDATE)) == 2
+    assert _codes(doubted) == ["identity.retraction_ambiguous"]
+
+
+def test_a_distinct_identity_that_may_be_retracted_suppresses_nothing() -> None:
+    apart = assertion("ASR-58", DISTINCT, (SLOT, UNIT_2), authored_at=at(6))
+    maybe = assertion("ASR-59", RETRACT, (), retracts=_ids("ASR-58", "ASR-99"))
+    result = _run(_fleet(AMBIGUOUS, apart, maybe))
+    assert len(_of(result, SAME_AS_CANDIDATE)) == 4  # both readings of the slot, unsuppressed
+    assert _codes(result) == ["identity.retraction_ambiguous"]
 
 
 # --- Clocks ------------------------------------------------------------------------------------

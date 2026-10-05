@@ -52,10 +52,13 @@ Every claim about a run is emitted once per *placement* of each of its records, 
   No `last`, a `last` on another clock (`runs.end_on_other_clock`) or one at the clock's last tick: open end. A
   `last` before `first`: `runs.inverted_interval`, nothing placed.
 - **Span.** A run that states no `first` (a manifest's folder, a rosbag2 metadata) holds over its assembly's
-  recording parts' span when they are all on one clock; otherwise `runs.untimed_run` and no claim.
+  recording parts' span when every part is timed and all are on one clock; otherwise `runs.untimed_run` (naming
+  any untimed part) and no claim: an untimed part may lie anywhere, so the span's bounds would not be stated.
 - **Civil projection.** Only where evidence states it: each `clock_mapping` from the placement's clock to a
   civil-declared clock with a `Known` anchor and rate, whose window (bounds not stated are open, as ADR 0008 §2
-  treats an unstated end) covers the placement. Start rounds down, end up, and both widen by the residual bound
+  treats an unstated end) covers the placement. An `Ambiguous` window, or one with an `Ambiguous` bound, is the
+  intersection of its readings (latest start, earliest end; empty across clocks), with `runs.ambiguous_window`:
+  the projection is made only where every reading covers the run. Start rounds down, end up, and both widen by the residual bound
   where the mapping states one; an unstated bound widens nothing, and the claim cites the mapping, so a reader sees
   that the error is unstated. Direct mappings only, in their stated direction; chains are MVL-130's. Never guessed.
 
@@ -64,15 +67,18 @@ Every claim about a run is emitted once per *placement* of each of its records, 
 - `has_member(run, record:<SourceRevision>)` per member of each assembly naming the run, with the assembly's
   `assertion_kind`, citing the member's evidence, the assembly and its producer transform (the rule's version);
   `evidenced_by(run, record:<assembly>)` beside it. A stated assembly window bounds both, on its own clock
-  (`runs.membership_unplaced` when no placement is on it and it states no start). This is the issue's `member_of(artifact, run)`: an artifact is an
+  (`runs.membership_unplaced` when no placement is on it and it states no start); an `Ambiguous` window bounds them
+  to the intersection of its readings (`runs.ambiguous_window`), and readings that share no instant give none. This is the issue's `member_of(artifact, run)`: an artifact is an
   Episode-tier record, never a node (ADR 0002 §1), so the run is the subject.
 - A recording member's *part* is a `Run` its bytes declare in the assembly's package (revision → content id →
   `Run.provenance.evidence.source`). Parts of one assembled run, from any number of packages, are compared on one
   clock: their own when they share it, where overlap means concurrent; else a civil clock both reach, where a
-  projection is widened, so overlap means only unordered. A part's nearest predecessors are the earlier parts that
-  end by its start and that no other such part follows. One: it `continues` that part (`observed`: nobody stated
-  the order, the records' times show it). Several (concurrent logs that all end before it): a
-  `continues_candidate` to each. Parts declaring different machines are different robots and never relate, so a
+  projection is widened, so overlap means only unordered. A part with an open end that starts first may have ended
+  before the other starts: a possible predecessor, never concurrent. A part's nearest predecessors are the earlier
+  parts, certain or possible, that no other certainly follows. It `continues` the one (`observed`: nobody stated
+  the order, the records' times show it) only when there is exactly one, it certainly ends by the part's start, and
+  both state a machine or neither does. Otherwise (several concurrent logs that all end before it, an open end, a
+  part with no machine beside one with a machine) a `continues_candidate` to each. Parts declaring different machines are different robots and never relate, so a
   part of another robot between two parts hides nothing. Parts with no comparable clock are `continues_candidate`
   both ways: the evidence does not order them.
 
@@ -84,10 +90,10 @@ each `Run.machine`, and each `run_declaration` naming the run. A ground decides 
 candidates: one claim per deciding ground, each with its own `assertion_kind` and evidence. Otherwise every reading
 of every ground is a `*_candidate` claim, and grounds that decide differently are `runs.declarations_disagree`.
 `executes_task` is `many`: every decided task holds, and an ambiguous ground adds candidates only when none of its
-readings is decided. No
-ground: no claim (`Unknown`). A run with no machine ground of its own takes its recording parts' machines; parts
+readings is decided. No ground: no claim (`Unknown`). A run with no machine ground of its own takes its recording parts' machines; parts
 that differ (a folder of two robots' logs) are candidates and `runs.parts_differ` (info): a multi-robot session is
-real, so none is chosen. A site the Ledger's site register does not declare is still claimed as stated and is
+real, so none is chosen. A part that states no machine may be another robot's, so then every part's machine is
+only a candidate (`runs.part_machine_unstated`): never `Known`. A site the Ledger's site register does not declare is still claimed as stated and is
 `runs.site_unregistered`; with no site record at all the register is not covered and nothing is flagged.
 
 `involvement(claims, run, predicate)` reads a role back as `Knowledge` of the objects that hold: `Known` (one

@@ -118,8 +118,9 @@ def test_registration_writes_exactly_the_walkthrough_rows(
         harness_register(pg, "tenant_harness", load_package(name))
     # The harness applies ADR 0002 §5's mapping; ADR 0009's columns are checked against their
     # own oracle in test_ledger_record_index.py, the derived thread index (ADR 0010) against
-    # ADR 0003's rules in test_ledger_threads.py and the contract suite, and ADR 0011's registry
-    # tables in test_ledger_schema_registry.py.
+    # ADR 0003's rules in test_ledger_threads.py and the contract suite, ADR 0011's registry
+    # tables in test_ledger_schema_registry.py, and the time and spatial indexes (ADR 0015) in
+    # test_ledger_time_space_index.py.
     skip = (*TX_COLUMNS, "root_locator", "body", "unknown_pointers", *projection_columns())
     real, harness = dump(pg, "tenant_acme", skip), dump(pg, "tenant_harness", skip)
     for table in ("schema_version", "schema_version_projection"):
@@ -130,8 +131,12 @@ def test_registration_writes_exactly_the_walkthrough_rows(
         "thread_unresolved",
         "thread_clock_mapping",
         "thread_identity_link",
+        "time_interval",
+        "spatial_extent",
     )
-    assert all(real[table] for table in derived[:2]) and not any(harness[t] for t in derived)
+    assert all(real[table] for table in (*derived[:2], *derived[-2:])) and not any(
+        harness[t] for t in derived
+    )
     assert {t: r for t, r in real.items() if t not in derived} == {
         t: r for t, r in harness.items() if t not in derived
     }

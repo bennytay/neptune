@@ -27,13 +27,15 @@ from memory_run_records import (
 from neptune.identity import canonical_json
 from neptune.model.alignment import MemberRole
 from neptune.model.ids import LogicalId
+from neptune.model.knowledge import Ambiguous, Unknown
 from neptune.model.run import run_from_json
 from neptune.model.time import INT64_MAX, Epoch, Timescale, Timestamp
 from neptune_memory.consolidate.base import Consolidation, rebuild, run_consolidator
 from neptune_memory.consolidate.identity import IdentityConsolidator
-from neptune_memory.consolidate.runs import RunConsolidator, run_node
+from neptune_memory.consolidate.runs import RunConsolidator, involvement, run_node
 from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, CivilClock, ledger_tx
+from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
 
 if TYPE_CHECKING:
@@ -42,7 +44,6 @@ if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
     from neptune_memory.consolidate.base import Consolidator
     from neptune_memory.schema.claim import Claim
-    from neptune_memory.schema.nodes import NodeRef
 
 TX = ledger_tx(4)
 AMR = LogicalId("asset-tag", "AMR-04")
@@ -469,3 +470,120 @@ def test_an_assembly_window_bounds_its_membership() -> None:
     # The run itself still holds over its whole interval: only the membership is bounded.
     runs = [c for c in of(result, "evidenced_by") if c.object == LedgerRecordRef(rid)]
     assert {(c.valid_from, c.valid_to) for c in runs} == {(at(0), at(100))}
+
+
+# --- review round 2: an Unknown or Ambiguous value never becomes a definite claim ---------------
+
+
+def readings_of(value: object) -> set[tuple[NodeRef, ...]]:
+    assert isinstance(value, Ambiguous)
+    return {c.value for c in value.candidates}
+
+
+def _known(stamp: Timestamp) -> Record:
+    return {"knowledge": "known", "value": stamp.to_json()}
+
+
+def _ambiguous_windows(clock: str, *spans: tuple[int, int]) -> Record:
+    return {
+        "knowledge": "ambiguous",
+        "candidates": [
+            {
+                "value": {
+                    "clock": clock,
+                    "start": _known(Timestamp(lo, clock)),  # type: ignore[arg-type]
+                    "end": _known(Timestamp(hi, clock)),  # type: ignore[arg-type]
+                }
+            }
+            for lo, hi in spans
+        ],
+    }
+
+
+def test_a_part_with_no_machine_leaves_the_assembled_runs_machine_a_candidate() -> None:
+    meta, meta_id = run("folder/manifest", logical_id=LogicalId("manifest", "shift-3"))
+    a = run("folder/a.mcap", first=at(0), last=at(500), machine=AMR)[0]
+    anonymous = run("folder/b.mcap", first=at(10), last=at(400))[0]
+    files = ["folder/a.mcap", "folder/b.mcap"]
+    held = assembly("folder paths", meta_id, [(f, REC) for f in files], rule="manifest.run")[0]
+    result = consolidate({"p": [meta, a, anonymous, held, *(revision(f)[0] for f in files)]})
+    shift = run_node_of(meta)
+    assert [c for c in of(result, "recorded_by") if c.subject == shift] == []
+    assert {c.object for c in of(result, "recorded_by_candidate")} == {
+        NodeRef(NodeType.MACHINE, "asset-tag:AMR-04")
+    }
+    assert involvement(result.claims, shift, "recorded_by") == Unknown()
+    assert codes(result) == ["runs.part_machine_unstated"]
+
+
+def test_a_part_with_no_machine_between_two_parts_only_possibly_continues() -> None:
+    a1 = run("bag/a.mcap", first=at(0), last=at(9), machine=AMR)[0]
+    unnamed = run("bag/b.mcap", first=at(10), last=at(19))[0]
+    a2 = run("bag/c.mcap", first=at(20), last=at(29), machine=AMR)[0]
+    result = _bag(a1, unnamed, a2)
+    assert of(result, "continues") == []
+    pairs = {(c.subject, c.object) for c in of(result, "continues_candidate")}
+    assert pairs == {
+        (run_node_of(unnamed), run_node_of(a1)),
+        (run_node_of(a2), run_node_of(unnamed)),
+    }
+
+
+def test_an_ambiguous_mapping_window_projects_nothing_it_does_not_cover_in_every_reading() -> None:
+    civil, clock = domain("utc", civil=True)
+    boot_record, boot = domain("boot", civil=False)
+    record = run("x.mcap", first=Timestamp(200, boot), last=Timestamp(299, boot))[0]
+    sync = mapping("sync", boot, clock, anchor=(0, 0))
+    torn = {**sync, "validity": _ambiguous_windows(boot, (0, 100), (500, 600))}
+    result = consolidate({"log": [civil, boot_record, record, torn]})
+    assert {c.valid_from.domain_id for c in result.claims} == {boot}
+    assert codes(result) == ["runs.ambiguous_window"]
+    # Every reading covers the run: the projection holds whichever reading is meant.
+    wide = {**sync, "validity": _ambiguous_windows(boot, (0, 400), (100, 600))}
+    result = consolidate({"log": [civil, boot_record, record, wide]})
+    assert {c.valid_from.domain_id for c in result.claims} == {boot, SECONDS.domain_id}
+
+
+def test_an_ambiguous_assembly_window_bounds_membership_to_what_every_reading_shares() -> None:
+    record, rid = run("x.mcap", first=at(0), last=at(99))
+    held = assembly("x list", rid, [("x.mcap", REC)])[0]
+    overlapping = {**held, "validity": _ambiguous_windows(CLOCK, (10, 60), (40, 90))}
+    result = consolidate({"log": [record, overlapping]})
+    assert {(c.valid_from, c.valid_to) for c in of(result, "has_member")} == {(at(40), at(60))}
+    assert codes(result) == ["runs.ambiguous_window"]
+    apart = {**held, "validity": _ambiguous_windows(CLOCK, (0, 10), (50, 60))}
+    assert of(consolidate({"log": [record, apart]}), "has_member") == []
+
+
+def test_an_untimed_part_leaves_the_assembled_runs_span_unstated() -> None:
+    meta, meta_id = run("s5/manifest", logical_id=LogicalId("manifest", "s5"))
+    p1 = run("s5/p1.mcap", first=at(0), last=at(9))[0]
+    p2 = run("s5/p2.mcap", first=at(10), last=at(19))[0]
+    p3, p3_id = run("s5/p3.bin")
+    files = ["s5/p1.mcap", "s5/p2.mcap", "s5/p3.bin"]
+    held = assembly("s5 paths", meta_id, [(f, REC) for f in files], rule="manifest.run")[0]
+    result = consolidate({"p": [meta, p1, p2, p3, held, *(revision(f)[0] for f in files)]})
+    s5 = run_node_of(meta)
+    assert [c for c in result.claims if c.subject == s5] == []
+    (span,) = [f for f in result.findings if meta_id in f.records]
+    assert span.code == "runs.untimed_run" and p3_id in span.records
+
+
+def test_an_open_ended_part_stays_a_possible_predecessor() -> None:
+    a = run("bag/a.mcap", first=at(0))[0]  # the header states only the start
+    b = run("bag/b.mcap", first=at(20), last=at(29))[0]
+    c = run("bag/c.mcap", first=at(40), last=at(49))[0]
+    result = _bag(a, b, c)
+    assert of(result, "continues") == []
+    pairs = {(x.subject, x.object) for x in of(result, "continues_candidate")}
+    assert pairs == {
+        (run_node_of(b), run_node_of(a)),
+        (run_node_of(c), run_node_of(a)),
+        (run_node_of(c), run_node_of(b)),
+    }
+    # involvement reads candidates alone, so "continues nothing" stays a reading too.
+    assert readings_of(involvement(result.claims, run_node_of(c), "continues")) == {
+        (),
+        (run_node_of(a),),
+        (run_node_of(b),),
+    }
