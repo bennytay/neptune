@@ -85,7 +85,7 @@ async def ingest_with_progress() -> IngestResult:
 | `package`, `receipt` | content id of the package, record id of its receipt; `None` without a package |
 | `findings` | the job's own findings (discovery, probe, runtime): unsupported, ambiguous, quarantined |
 | `read_receipt()` | the package's receipt, every adapter's findings included, checked against `receipt` |
-| `read_package()` | the whole package, read and verified |
+| `read_package()` | the whole package, verified as a stream; records and derived tables are read from disk each time they are iterated, the receipt when first asked for; a file changed or gone since raises `PackageError` then (ADR 0070) |
 | `contents()` | per run, its streams: topic, type, declared field paths and inferred semantic (ADR 0049) |
 | `cache` | per source: adapter, plan and chunks with hit/miss rules; calls per adapter method |
 | `explanation` | a planned dry run's `Explanation` (ADR 0044); `None` otherwise |

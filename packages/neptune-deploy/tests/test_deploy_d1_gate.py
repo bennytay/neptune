@@ -61,8 +61,16 @@ def _generator() -> ModuleType:
     return module
 
 
+def _held(package: IngestPackage) -> IngestPackage:
+    """``package`` with its records and derived tables held, as the attacks below edit them by
+    identity and the mapper is checked to open no file: ``read_package`` reads them from disk on
+    every pass (root ADR 0070)."""
+    derived = {kind: tuple(lines) for kind, lines in package.derived.items()}
+    return replace(package, records=tuple(package.records), derived=derived)
+
+
 A: Final = _generator()
-BASES: Final = {name: read_package(A.PACKAGES / name) for name in (FLEET, CELL)}
+BASES: Final = {name: _held(read_package(A.PACKAGES / name)) for name in (FLEET, CELL)}
 
 
 def _declared(name: str) -> tuple[list[Any], list[Any]]:
