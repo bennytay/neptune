@@ -117,10 +117,11 @@ No golden packet changed. Every fix refuses something the goldens never did, and
 4. **Shape order and plain strings** (#121 review): done, ADR 0006 §5. The rule is to coerce, because
    equal values must get equal verdicts.
 5. **SDK re-export** (MVL-110): `neptune_context.contract` does not re-export the SDK (ADR 0006 §6).
-6. **Harness** (MVL-123): `make harness` is green on this PR's tree (based on `main` 8b54bc0, before
-   commit). Report: `harness green | contracts ok | compiler: real ok | ledger: stub ok | memory: stub ok |
-   context: stub ok`. Context now serves `query-packet 1.0.0`, and the smoke query reads the published
-   golden `packet.q01-fleet-engineer-who-recorded-the-drone-run.json` instead of the canned packet.
+6. **Harness** (MVL-123): **harness green at 82eb40c8** (CI run 37311818177, merged with `main`
+   e3933188, which carries the X1 gate's real Ledger stage). Report: `harness green | contracts ok |
+   compiler: real ok | ledger: real ok | memory: stub ok | context: stub ok`. Context now serves
+   `query-packet 1.0.0`, and the smoke query reads the published golden
+   `packet.q01-fleet-engineer-who-recorded-the-drone-run.json` instead of the canned packet.
 
 ## ADR status after the gate
 
