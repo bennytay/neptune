@@ -72,9 +72,9 @@ Four things break if this is wrong:
      The driving set is a `MATERIALIZED` CTE. Every other filter is applied exactly against the
      `record` row: kinds, `as_of`, packages, the window rule of `QuerySpec`, an `EXISTS` on the
      frame box, and the cursor. Rows come back in `(kind, record_id, package_id)` order under
-     `LIMIT`. The statement runs in a read-only transaction. It reads in batches of at most
-     10 000 rows, by keyset on that order, so a lineage filter or a budget can stop between
-     batches.
+     `LIMIT`. The statement runs once, in a read-only transaction, as a server-side cursor
+     fetched 10 000 rows at a time, so a lineage filter or a budget can stop between batches
+     without re-running the candidate set.
    - **Lineage (PostgreSQL then Arrow-side Python).** Optional; see §3.
    - **Series scan (DuckDB by default, or DataFusion).** Optional; see §4.
    - **Join and budget (Arrow).** The series rows meet their stream rows, the projection is
@@ -140,16 +140,18 @@ Four things break if this is wrong:
      over prefix lengths, since a prefix's bytes grow with its length. Row and byte cuts depend
      only on the catalog and the spec, so the same call gives byte-identical output.
    - **Time.** The deadline is checked between record batches and before each stage. Each
-     PostgreSQL statement runs under `statement_timeout` set to the time left. A DuckDB series
-     scan is interrupted when the time runs out (`connection.interrupt()`). The rows returned
-     are still a prefix: whole batches of the key-ordered record scan, or, for a series join,
-     either the complete series answer or none of it. Which prefix depends on the wall clock, so
+     PostgreSQL fetch runs under `statement_timeout` set to the time left. A DuckDB series
+     scan is interrupted when the time runs out (`connection.interrupt()`), and a scan that
+     ends past the deadline anyway (an interrupt lost before the statement started, or an
+     engine that cannot be interrupted) is discarded the same way. The rows returned are still
+     a prefix: whole batches of the key-ordered record scan, or, for a series join, either the
+     complete series answer or none of it, in the planned schema. Which prefix depends on the wall clock, so
      a time-cut answer has `reproducible: false`. Every other answer has `reproducible: true`.
      The prefix property makes a time-cut answer recoverable. The same spec with
      `max_rows = BudgetReport.rows` and no time limit returns the same rows, and for record rows
      the last row is the cursor to continue from. DataFusion offers no interrupt from Python at
-     the pinned 54.0.0, so a DataFusion scan is checked only before it starts. DuckDB is the
-     default engine.
+     the pinned 54.0.0, so a DataFusion scan runs to its end before an overrun is discarded.
+     DuckDB is the default engine.
 7. **SQL passthrough runs inside a sealed, per-call DuckDB over views of one scoped answer.**
    `QueryEngine.sql(statement, scope)` (and `PostgresCatalog.sql`) is for power users and
    `access/` (MVL-99). It is not a catalog-API call: `query` still never accepts SQL. Its rules:

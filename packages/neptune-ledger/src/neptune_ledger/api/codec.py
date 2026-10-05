@@ -157,6 +157,8 @@ def _number(value: Any, where: str) -> float:
         raise CodecError(f"{where}: {value!r} is not a finite number") from None
     if not math.isfinite(number):
         raise CodecError(f"{where}: {value!r} is not a finite number")
+    if isinstance(value, int) and int(number) != value:
+        raise CodecError(f"{where}: {value!r} has no exact float64 value; it would be rounded")
     return number
 
 

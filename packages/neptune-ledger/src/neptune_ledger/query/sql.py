@@ -87,13 +87,14 @@ def run_sql(
                 rows += batch.num_rows
                 size += batch.nbytes
                 # One row past the row limit, or past the byte limit, shows a cut: stop reading.
-                if rows > budget.max_rows or size > budget.max_bytes:
+                # So does the deadline, which an interrupt lost before the statement started
+                # would otherwise not enforce.
+                if rows > budget.max_rows or size > budget.max_bytes or budget.out_of_time():
                     break
-        except (duckdb.InterruptException, pa.ArrowException, duckdb.Error) as exc:
-            if budget.out_of_time() or isinstance(exc, duckdb.InterruptException):
-                budget.time_ran_out()
-            else:
+        except (pa.ArrowException, duckdb.Error) as exc:
+            if not _interrupted(exc):
                 return _refused(_first_line(exc))
+            budget.time_ran_out()
         if schema is None:
             return _empty(), []
         return pa.Table.from_batches(batches, schema=schema), []
@@ -101,6 +102,14 @@ def run_sql(
         if watchdog is not None:
             watchdog.cancel()
         con.close()
+
+
+def _interrupted(exc: BaseException) -> bool:
+    """The watchdog stopped the statement: DuckDB's interrupt, also when the Arrow reader
+    surfaces it as its own error."""
+    import duckdb
+
+    return isinstance(exc, duckdb.InterruptException) or "interrupt" in str(exc).lower()
 
 
 def _empty() -> Any:

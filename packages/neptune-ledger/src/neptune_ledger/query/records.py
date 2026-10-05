@@ -1,15 +1,14 @@
-"""The record stage: keyset batches of the record statement, the lineage filter, the deadline.
+"""The record stage: the record statement read in batches, the lineage filter, the deadline.
 
 Rows come back in ``(kind, record_id, package_id)`` order. The stage stops between batches when
-it has the rows it needs or the deadline has passed, and each statement runs under a
+it has the rows it needs or the deadline has passed, and each fetch runs under a
 ``statement_timeout`` of the time left, so whatever it returns is a prefix of the full answer
 (ADR 0016 §6). A lineage preference is resolved over each lineage set the rows touch, whole
 (ADR 0016 §3), with the resolver ``thread`` uses.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import Any, Final
 
 import psycopg
@@ -154,77 +153,48 @@ def read_records(
     batch_rows: int,
     lineage: Lineage | None,
 ) -> RecordRead:
-    """Up to ``want`` rows after ``after``, in key order, under the budget's deadline."""
+    """Up to ``want`` rows after ``after``, in key order, under the budget's deadline.
+
+    The statement runs once, as a server-side cursor read ``batch_rows`` at a time: the stage
+    checks the deadline between batches and each fetch runs under the time left, so a cut
+    leaves whole batches, a prefix of the answer. A lineage filter drops rows, so then the
+    statement has no ``LIMIT`` and the stage stops once it has kept ``want`` rows."""
     rows: list[Row] = []
     cursor = after or ("", "", "")
-    # Batches only where the stage may stop early; otherwise one statement asks for everything.
-    stoppable = lineage is not None or budget.remaining() is not None
-    while len(rows) < want:
-        if budget.out_of_time():
-            break
-        # A lineage filter drops rows, so it reads whole batches; otherwise no more than needed.
-        if lineage is not None:
-            size = batch_rows
-        else:
-            size = min(batch_rows, want - len(rows)) if stoppable else want - len(rows)
-        fetched = _fetch(conn, plan, cursor, size, budget)
-        if fetched is None:
-            break
-        if lineage is not None:
-            if not _run_or_stop(conn, budget, partial(lineage.resolve, fetched)):
-                break
-            for row in fetched:
-                if lineage.keeps(row):
-                    rows.append(row)
-                    if len(rows) == want:
-                        break
-        else:
-            rows += fetched
-        if len(fetched) < size:
-            break
-        last = fetched[-1]
-        cursor = (str(last[KIND]), str(last[RECORD]), str(last[PACKAGE]))
-    return RecordRead(rows, list(lineage.findings) if lineage is not None else [])
-
-
-def _timeout(conn: Conn, budget: Budget) -> None:
-    left = budget.remaining()
-    if left is not None:
-        # At least 1 ms: 0 would mean no timeout at all.
-        millis = max(1, int(left * 1000))
-        conn.execute("SELECT set_config('statement_timeout', %s, true)", (f"{millis}ms",))
-
-
-def _fetch(
-    conn: Conn, plan: RecordPlan, cursor: tuple[str, str, str], size: int, budget: Budget
-) -> list[Row] | None:
     params = {
         **plan.params,
         "after_kind": cursor[0],
         "after_record": cursor[1],
         "after_package": cursor[2],
-        "batch": size,
+        "limit": None if lineage is not None else want,
     }
-    out: list[Row] = []
-
-    def run() -> None:
-        out.extend(tuple(row) for row in conn.execute(plan.statement, params).fetchall())
-
-    return out if _run_or_stop(conn, budget, run) else None
-
-
-def _run_or_stop(conn: Conn, budget: Budget, body: Any) -> bool:
-    """Run ``body`` in a savepoint under the time left; False when the deadline cancelled it."""
     try:
-        with conn.transaction():
+        with conn.transaction(), conn.cursor(name="query_records") as scan:
             _timeout(conn, budget)
-            body()
+            scan.execute(plan.statement, params)
+            while len(rows) < want and not budget.out_of_time():
+                size = batch_rows if lineage is not None else min(batch_rows, want - len(rows))
+                _timeout(conn, budget)
+                fetched = [tuple(row) for row in scan.fetchmany(size)]
+                if lineage is None:
+                    rows += fetched
+                else:
+                    lineage.resolve(fetched)
+                    for row in fetched:
+                        if lineage.keeps(row):
+                            rows.append(row)
+                            if len(rows) == want:
+                                break
+                if len(fetched) < size:
+                    break
     except psycopg.errors.QueryCanceled:
         budget.time_ran_out()
-        return False
-    return True
+    return RecordRead(rows, list(lineage.findings) if lineage is not None else [])
 
 
-def keys(rows: Iterable[Row]) -> list[tuple[str, str]]:
-    """The ``(package_id, record_id)`` pairs of stream rows, in row order."""
-    return [(str(row[PACKAGE]), str(row[RECORD])) for row in rows]
+def _timeout(conn: Conn, budget: Budget) -> None:
+    """The next statement runs under the time left; at least 1 ms, since 0 means no limit."""
+    left = budget.remaining()
+    if left is not None:
+        millis = max(1, int(left * 1000))
+        conn.execute("SELECT set_config('statement_timeout', %s, true)", (f"{millis}ms",))

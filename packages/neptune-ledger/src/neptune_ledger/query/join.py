@@ -31,8 +31,9 @@ from neptune_ledger.query.budget import Budget
 
 @dataclass
 class SeriesAnswer:
-    """The joined rows (None when the scan was stopped at the deadline), why any selected
-    stream is not in them, the steps run and whether the request was outside the lake's rules."""
+    """The joined rows (none, in the plan's schema, when the deadline stopped the scan), why
+    any selected stream is not in them, the steps run, and whether the request was outside the
+    lake's rules (then ``table`` is None)."""
 
     table: Any
     findings: list[CatalogFinding]
@@ -86,17 +87,23 @@ def read_series(
             series_sql(plan, tables) if plan.scans else "no file to scan",
         ),
     ]
+    # A scan stopped at the deadline, or one that ran past it (an engine that cannot be
+    # interrupted, or an interrupt that came before the statement started), gives no row: the
+    # empty prefix, in the plan's own schema (ADR 0016 §6).
+    empty = _join(plan.schema.empty_table(), streams)
     if budget.out_of_time():
-        return SeriesAnswer(None, findings, steps)
+        return SeriesAnswer(empty, findings, steps)
     try:
         read = reader.read(plan, timeout=budget.remaining())
     except ScanInterrupted:
         budget.time_ran_out()
-        return SeriesAnswer(None, findings, steps)
+        return SeriesAnswer(empty, findings, steps)
     except LakeRequestError as exc:  # an engine's own limits, e.g. DuckDB's case-folded names
         refusal = CatalogFinding("invalid_request", "series", str(exc).splitlines()[0][:300])
         return SeriesAnswer(None, [refusal], [], refused=True)
     findings += read.findings[len(plan.findings) :]
+    if budget.out_of_time():
+        return SeriesAnswer(empty, findings, steps)
     steps.append(
         PlanStep(
             "arrow",

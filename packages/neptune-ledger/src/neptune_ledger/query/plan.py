@@ -5,7 +5,7 @@ alone. The narrowest filter the spec names drives a ``MATERIALIZED`` candidate s
 members, then the window clock's interval R-tree, then the frame's extent R-tree, then the named
 packages. Without any of them the record primary key is scanned in key order. Every filter is
 then applied exactly to the ``record`` row, and rows come back in ``(kind, record_id,
-package_id)`` order, a keyset batch at a time.
+package_id)`` order, one batch at a time from a server-side cursor.
 """
 
 from dataclasses import dataclass
@@ -55,7 +55,7 @@ class RecordPlan:
     """The record stage: its driver, its statement and the parameters it binds.
 
     ``statement`` takes ``%(after_kind)s``, ``%(after_record)s`` and ``%(after_package)s`` (the
-    keyset cursor; empty strings sort before every key) and ``%(batch)s``."""
+    keyset cursor; empty strings sort before every key) and ``%(limit)s`` (NULL for none)."""
 
     driver: Driver
     statement: str
@@ -126,7 +126,7 @@ def plan_records(spec: QuerySpec, tenant: str, as_of: int) -> RecordPlan:
         " %(after_package)s::text)"
     )
     tail = (
-        f" WHERE {' AND '.join(where)} ORDER BY r.kind, r.record_id, r.package_id LIMIT %(batch)s"
+        f" WHERE {' AND '.join(where)} ORDER BY r.kind, r.record_id, r.package_id LIMIT %(limit)s"
     )
     if chosen == "kinds":
         return RecordPlan(chosen, f"SELECT {ROW} FROM record r{tail}", params)

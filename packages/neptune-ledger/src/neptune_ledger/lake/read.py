@@ -453,9 +453,13 @@ class DuckDBReader:
     def _run(self, plan: SeriesPlan, timeout: float | None = None) -> Any:
         import duckdb
 
+        if timeout is not None and timeout <= 0:
+            raise ScanInterrupted("the read's time ran out before it started")
         con, tables = self._connect(plan)
         # The watchdog interrupts the statement at the deadline (ADR 0016 §6); an interrupted
-        # read returns nothing, never the rows that happened to be sorted by then.
+        # read returns nothing, never the rows that happened to be sorted by then. An interrupt
+        # that comes before the statement starts is lost, so callers check their deadline after
+        # the read too.
         watchdog = None if timeout is None else threading.Timer(max(timeout, 0.0), con.interrupt)
         try:
             if watchdog is not None:

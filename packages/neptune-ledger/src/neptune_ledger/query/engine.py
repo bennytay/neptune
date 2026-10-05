@@ -138,7 +138,8 @@ class QueryEngine:
                     f"more than {self.limits.max_streams} streams match; a series join reads at"
                     " most that many: narrow the spec (ADR 0016 §4)"
                 )
-                return _rejected(point, (CatalogFinding("invalid_request", "series", detail),))
+                refusal = CatalogFinding("invalid_request", "series", detail)
+                return _rejected(point, (*findings, refusal))
             assert spec.window is not None  # checked by specs.problems
             answer = read_series(
                 records,
@@ -149,13 +150,13 @@ class QueryEngine:
                 budget,
             )
             if answer.refused:
-                return _rejected(point, tuple(answer.findings))
+                return _rejected(point, (*findings, *answer.findings))
             findings += answer.findings
             steps += answer.steps
-            if answer.table is None or "time" in budget.exceeded:
-                # A stream selection or a scan stopped by the deadline gives no series row:
-                # the empty prefix of the answer, never a subset of its streams.
-                table = _project(_empty_join(records), spec)
+            if "time" in budget.exceeded:
+                # A stream selection cut by the deadline gives no series row: the empty prefix
+                # of the answer, never the rows of a subset of its streams.
+                table = _project(answer.table.slice(0, 0), spec)
             else:
                 table = _project(answer.table, spec)
         else:
@@ -185,14 +186,18 @@ class QueryEngine:
         if problems:
             return json.dumps([codec.to_json(p) for p in problems])
         with self._read() as conn:
-            _, as_of, _ = catalog_point(conn, self._tenant, spec.as_of)
+            _, as_of, beyond = catalog_point(conn, self._tenant, spec.as_of)
+            if beyond:
+                detail = "as_of is beyond the latest committed catalog point"
+                finding = CatalogFinding("as_of_out_of_range", str(spec.as_of), detail)
+                return json.dumps([codec.to_json(finding)])
             plan = plan_records(spec, self._tenant, as_of)
             params = {
                 **plan.params,
                 "after_kind": "",
                 "after_record": "",
                 "after_package": "",
-                "batch": self.limits.batch_rows,
+                "limit": self.limits.batch_rows,
             }
             verb = "EXPLAIN (ANALYZE, FORMAT JSON) " if analyze else "EXPLAIN (FORMAT JSON) "
             row = conn.execute(verb + plan.statement, params).fetchone()
@@ -219,8 +224,13 @@ class QueryEngine:
             return _rejected(meta.as_of, (*meta.findings, *findings))
         table = budget.cut(table)
         report = budget.report(table)
-        # A statement over a scope the deadline cut is no more reproducible than the scope.
-        report = replace(report, reproducible=report.reproducible and meta.budget.reproducible)
+        # A statement over a cut scope answers over a prefix: the report says which limits cut
+        # either, and it is no more reproducible than the scope.
+        report = replace(
+            report,
+            exceeded=tuple(sorted({*report.exceeded, *meta.budget.exceeded})),
+            reproducible=report.reproducible and meta.budget.reproducible,
+        )
         out = QueryMeta(
             as_of=meta.as_of,
             findings=(*meta.findings, *findings, *budget.findings(table)),
@@ -287,23 +297,6 @@ def _project(table: Any, spec: QuerySpec) -> Any:
     keep = {"kind", "record_id", "package_id", *spec.columns}
     record = set(QUERY_RESULT_SCHEMA.names)
     return table.select([n for n in table.schema.names if n in keep or n not in record])
-
-
-def _empty_join(records: Any) -> Any:
-    """A join with no rows: the record columns, as dictionaries for strings, then the lake's
-    fixed series columns (no value column: no file was read to name one)."""
-    ids = pa.dictionary(pa.int32(), pa.string())
-    fields = [
-        pa.field(f.name, ids if pa.types.is_string(f.type) else f.type, nullable=f.nullable)
-        for f in records.schema
-    ]
-    fields += [
-        pa.field("clock", ids, nullable=False),
-        pa.field("ticks", pa.int64()),
-        pa.field("ticks_state", ids, nullable=False),
-        pa.field("seq", pa.int64(), nullable=False),
-    ]
-    return pa.schema(fields).empty_table()
 
 
 def _budget_step(budget: Budget) -> PlanStep:
