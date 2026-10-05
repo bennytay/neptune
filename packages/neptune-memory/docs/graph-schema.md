@@ -1,8 +1,10 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.0.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
-records the decisions behind it. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
+`contracts/graph-schema/v1.1.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
+([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.0.0's goldens still
+validate and its graph still passes the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
 ## Nodes
@@ -24,6 +26,8 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 | entity | `configuration` | a calibration, parameter set or description revision |
 | entity | `policy` | an operating rule or control policy |
 | entity | `run` | one recorded run |
+| entity | `stream` | one recorded stream of a run: a topic, a channel, a log message type |
+| entity | `document` | a declared document: a manual, an SOP, a datasheet, a register |
 | entity | `episode` | a bounded segment of a run (an entity, not the Episode tier) |
 | context | `deployment` | a deployment, with a summary |
 | context | `fleet` | a fleet, with a summary |
@@ -32,7 +36,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 2`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 3`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -47,6 +51,7 @@ major version (ADR 0002 §5).
 | `governed_by` | deployment, fleet, machine, site | policy | many | an operating rule or control policy that applies |
 | `has_calibration` | sensor | configuration | one | the calibration in force |
 | `has_configuration` | deployment, machine, sensor | configuration | many | a parameter set, description file or other configuration in force |
+| `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
 | `located_at` | asset, machine | site, zone | one | where it is |
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
@@ -59,7 +64,7 @@ major version (ADR 0002 §5).
 | `runs_model` | machine | model_version | many | a learned model it runs |
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
-| `same_as_candidate` | any node | same type | many | ambiguous: both cite the same source; one claim each way |
+| `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
@@ -92,6 +97,11 @@ Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit 
 | `neighbours(node, hops, as_of, *, include_inferred=True)` | `NeighboursResult`: each node within `hops` edges in either direction, at its shortest depth, with a `via` path of claims; findings naming any edge between two result nodes |
 | `episodes(filter)` | **provisional (G3)**: `NotCovered` in v1 |
 | `spatial(site, frame, as_of)` | **provisional (G3)**: `NotCovered` in v1 |
+
+Identity is followed, never merged, with `schema.traverse.same_as_closure(reader, node, as_of, *, depth=8,
+include_candidates=False, include_inferred=True)`: every node `same_as` reaches in either direction within `depth`
+hops, each once at its shortest depth with the claims of one shortest path. It follows `same_as_candidate` only
+when asked, works over any `MemoryReader`, and compares no clocks.
 
 Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, `ClaimsResult`,
 `NeighboursResult`, `EpisodesResult`, `SpatialResult`). A `Knowledge`-wrapped result is
@@ -131,8 +141,11 @@ def test_graph_schema_contract(check):
 9. **One answer per `as_of`.** An `as_of` later than `head` raises `AsOfBeyondHeadError`.
 10. **Missingness is explicit.** A node the graph never names is `NotCovered`. Provisional queries answer
     `NotCovered`, never an empty result.
-11. **Identity is never merged.** `same_as` is an edge that queries traverse. It is grounded only by
-    `memory.identity`, never by inference. `same_as_candidate` is pairwise. People are named only by declared
+11. **Identity is never merged.** `same_as` is an edge that queries traverse (`schema.traverse.same_as_closure`).
+    It is grounded only by `memory.identity`, never by inference: a compiler `IdentityLink` with a `Known` right
+    side, configuration lineage, or a person's `same_identity` assertion that no effective `retract` withdraws
+    ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md)).
+    `same_as_candidate` is pairwise: every candidate of an `Ambiguous` link, and threads citing one source. People are named only by declared
     identifiers: never blank, never padded with whitespace.
 
 ## Caveat: a resolver configuration is a store generation
@@ -149,14 +162,14 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
 ## Not in v1
 
 - `episodes` and `spatial` structure (G3).
-- Cross-clock comparison, which waits for `ClockAlignment` (compiler MVL-36).
+- Cross-clock comparison, which waits for the compiler's `ClockMapping` records (root ADR 0050 §5; Memory MVL-130).
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,
   masks `superseded_at`, joins findings and runs this suite.
 - Withdrawal ([ADR 0007](adr/0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) §5, MVL-132).
   Until it lands, a claim a consolidator stops emitting stays current: an operator cannot retract a `many`
   fact such as `same_as`, and an upgrade that emits nothing retires nothing. A `one` fact is corrected by a new
-  stated claim, which supersedes it.
-- Names (`has_name`, ADR 0007 §2, MVL-126).
+  stated claim, which supersedes it. The identity consolidator already stops emitting a retracted `same_as`
+  (ADR 0008 §3); withdrawal makes that end it.
 - Evidence status beside claims (ADR 0007 §6, MVL-132): a `Knowledge[EvidenceStatus]` for every cited source,
   `NotCovered` until the Ledger catalog emits a retention signal. v1 results carry no status map, which never
   means "available".
