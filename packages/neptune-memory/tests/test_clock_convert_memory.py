@@ -89,10 +89,6 @@ def test_history_before_the_revision_converts_through_the_old_mapping() -> None:
     assert known(convert(graph, 1_500, spot, dock, ledger_tx(1))).ticks == 51_500
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GAP MVL-132: the version emitted open at tx 1 stays current until withdrawal",
-)
 def test_after_the_revision_the_history_converts_through_the_new_mapping_only() -> None:
     graph = reader(revised(1), revised(2))
     spot, dock = clock("spot boot"), clock("dock")

@@ -26,6 +26,14 @@ lineage per consolidator per transaction, and a replaced lineage never returns, 
 ``LineageError``. A consolidator's first claim in a new lineage retires, at that transaction, every
 current version of its other lineages, split closures included (``superseded_at`` set, valid time
 untouched).
+
+Withdrawal (ADR 0007 §5, ADR 0016): ``resolve`` may also be given the ``Build`` records of the
+consolidator runs that produced the claims. A build is a complete statement of its lineage over
+one Ledger snapshot: at a build of lineage ``L`` at transaction ``t``, every current version whose
+original assertion belongs to ``L`` and that the build did not emit gets ``superseded_at = t``,
+before the claims first recorded at ``t`` arrive. A build of a new lineage retires the
+consolidator's other lineages at ``t`` even when it emits nothing. Without builds, ``resolve``
+behaves exactly as before.
 """
 
 from __future__ import annotations
@@ -206,6 +214,54 @@ class Resolution:
     findings: tuple[ResolutionFinding, ...]
 
 
+@dataclass(frozen=True)
+class Build:
+    """One run of one consolidator lineage over one Ledger snapshot (ADR 0007 §5.1).
+
+    ``claims`` is every claim id the run emitted, possibly none: the build is a complete statement
+    of its lineage at ``recorded_at``, so whatever the lineage held before and did not emit again
+    is withdrawn there. Ids are unique and sorted.
+    """
+
+    consolidator_id: str
+    version: str
+    config_hash: ConfigHash
+    recorded_at: LedgerTx
+    claims: tuple[ClaimId, ...] = ()
+
+    def __post_init__(self) -> None:
+        check_token("consolidator_id", self.consolidator_id)
+        if self.consolidator_id == RESOLVER_ID:
+            raise ValueError(f"{RESOLVER_ID!r} is the resolver, never a build")
+        check_text("version", self.version)
+        parse_config_hash(self.config_hash)
+        ledger_tx(self.recorded_at)
+        if not isinstance(self.claims, tuple):
+            raise TypeError("claims must be a tuple of claim ids")
+        for claim_id in self.claims:
+            parse_claim_id(claim_id)
+        if list(self.claims) != sorted(set(self.claims)):
+            raise ValueError("a build's claims must be unique and sorted")
+
+    @property
+    def lineage(self) -> Lineage:
+        return (self.consolidator_id, self.version, self.config_hash)
+
+    def to_json(self) -> JsonObject:
+        return {
+            "claims": list(self.claims),
+            "config_hash": self.config_hash,
+            "consolidator_id": self.consolidator_id,
+            "recorded_at": self.recorded_at,
+            "version": self.version,
+        }
+
+
+def build_order(builds: Iterable[Build]) -> tuple[Build, ...]:
+    """Builds in their published order: ``(recorded_at, consolidator_id)``."""
+    return tuple(sorted(builds, key=lambda b: (b.recorded_at, b.consolidator_id)))
+
+
 def assertion_rank(kind: ClaimAssertionKind) -> int:
     """Observed and stated evidence outrank inference; neither outranks the other."""
     return 0 if is_inferred(kind) else 1
@@ -250,7 +306,10 @@ def assertions(history: Iterable[Claim]) -> tuple[Claim, ...]:
 
 
 def resolve(
-    claims: Iterable[Claim], registry: PredicateRegistry, priorities: Mapping[str, int]
+    claims: Iterable[Claim],
+    registry: PredicateRegistry,
+    priorities: Mapping[str, int],
+    builds: Iterable[Build] = (),
 ) -> Resolution:
     """The bi-temporal history of ``claims``: pure, deterministic, order-free and idempotent.
 
@@ -261,8 +320,14 @@ def resolve(
     data findings: ``consolidate/`` turns non-conforming claims into findings before they get here.
     Every claim must conform to ``registry`` (else ``ClaimSchemaError``) and every consolidator
     must have an integer priority (else ``ValueError``).
+
+    ``builds`` (ADR 0007 §5) must agree with ``claims`` (else ``ValueError``): at most one per
+    consolidator and transaction; each names only claims of its own lineage recorded by then; and
+    a consolidator that has builds has every recording of its claims in the build at that
+    transaction.
     """
     claims = tuple(claims)
+    builds = build_order(builds)
     inputs = assertions(claims)
     missing = sorted({c.provenance.consolidator_id for c in inputs} - priorities.keys())
     if missing:
@@ -274,82 +339,26 @@ def resolve(
         raise ValueError(f"priorities must be integers: {bad}")
     for claim in inputs:
         check_claim(claim, registry)
-    _check_lineages(claims)
-    resolver_hash = resolver_config_hash(registry, priorities)
-    by_resolver = FindingProvenance(RESOLVER_ID, RESOLVER_VERSION, resolver_hash)
-    versions: dict[ClaimId, Claim] = {}
-    origin: dict[ClaimId, Claim] = {}  # version id -> the assertion it is a version of
-    current: dict[tuple[NodeRef, str], list[ClaimId]] = {}
-    findings: list[ResolutionFinding] = []
-
-    latest: dict[str, Lineage] = {}  # consolidator id -> lineage of its latest build so far
-
-    for arriving in sorted(inputs, key=lambda c: arrival_key(c, priorities)):
-        arriving_lineage = lineage_of(arriving)
-        cid = arriving.provenance.consolidator_id
-        if latest.get(cid, arriving_lineage) != arriving_lineage:
-            _retire(versions, origin, current, arriving_lineage, arriving.recorded_at)
-        latest[cid] = arriving_lineage
-        origin[arriving.id] = arriving
-        if registry.spec(arriving.predicate).cardinality is Cardinality.MANY:
-            versions[arriving.id] = arriving
-            continue
-        tx = arriving.recorded_at
-        live = current.setdefault((arriving.subject, arriving.predicate), [])
-        claimed = _object_key(arriving)
-        domain = arriving.valid_from.domain_id
-        overlapping = [
-            versions[i]
-            for i in live
-            if _object_key(versions[i]) != claimed
-            and versions[i].valid_from.domain_id == domain
-            and versions[i].valid.overlaps(arriving.valid)
-        ]
-        winners = [r for r in overlapping if not _beats(arriving, origin[r.id])]
-        effective: list[Claim] = [arriving]
-        stored = arriving
-        if winners:
-            stored = replace(arriving, superseded_at=tx)
-            cutters = _distinct(origin[w.id] for w in winners)
-            effective = [
-                _closure(arriving, arriving, piece, cutters, tx, resolver_hash)
-                for piece in arriving.valid.minus(w.valid for w in winners)
-            ]
-            if not effective:
-                findings.append(
-                    ResolutionFinding(
-                        FindingCode.OVERRIDDEN_ON_ARRIVAL,
-                        arriving.id,
-                        tuple(sorted({w.id for w in winners})),
-                        by_resolver,
-                        tx,
-                    )
-                )
-        losers = [
-            r
-            for r in overlapping
-            if _beats(arriving, origin[r.id]) and any(r.valid.overlaps(e.valid) for e in effective)
-        ]
-        for loser in losers:
-            versions[loser.id] = replace(loser, superseded_at=tx)
-            live.remove(loser.id)
-            root = origin[loser.id]
-            for piece in loser.valid.minus(e.valid for e in effective):
-                narrowed = _closure(loser, root, piece, (arriving,), tx, resolver_hash)
-                origin[narrowed.id] = root
-                versions[narrowed.id] = narrowed
-                live.append(narrowed.id)
-        versions[arriving.id] = replace(stored, supersedes=tuple(sorted(r.id for r in losers)))
-        for version in effective:
-            if version is not arriving:
-                origin[version.id] = arriving
-                versions[version.id] = version
-            live.append(version.id)
-
+    _check_lineages(claims, builds)
+    _check_builds(claims, inputs, builds)
+    state = _Resolver(registry, priorities)
+    arrivals = sorted(inputs, key=lambda c: arrival_key(c, priorities))
+    pending = list(builds)
+    for tx in sorted({c.recorded_at for c in arrivals} | {b.recorded_at for b in builds}):
+        at_tx = [b for b in pending if b.recorded_at == tx]
+        pending = pending[len(at_tx) :]
+        if at_tx:
+            state.apply_builds(at_tx, tx)
+        while arrivals and arrivals[0].recorded_at == tx:
+            state.arrive(arrivals.pop(0))
+    versions = state.versions
     forged = sorted({c.id for c in claims if is_closure(c)} - versions.keys())
     if forged:
         raise ValueError(f"closure versions this resolution does not produce: {forged}")
-    findings.extend(_clock_mismatches(versions.values(), origin, registry, priorities, by_resolver))
+    findings = state.findings
+    findings.extend(
+        _clock_mismatches(versions.values(), state.origin, registry, priorities, state.by_resolver)
+    )
     history = tuple(sorted(versions.values(), key=lambda c: (c.recorded_at, c.id)))
     ordered = tuple(sorted(findings, key=lambda f: (f.recorded_at, f.claim, f.code, f.others)))
     return Resolution(history, ordered)
@@ -381,39 +390,273 @@ def as_of(resolution: Resolution, tx: LedgerTx) -> Resolution:
 # --- Internals --------------------------------------------------------------------------------
 
 
-def _retire(
-    versions: dict[ClaimId, Claim],
-    origin: Mapping[ClaimId, Claim],
-    current: Mapping[tuple[NodeRef, str], list[ClaimId]],
-    upgrade: Lineage,
-    tx: LedgerTx,
+Fact: TypeAlias = "tuple[NodeRef, str]"
+
+
+class _Resolver:
+    """The fold behind ``resolve``: claim versions, the assertion each is a version of, and the
+    current versions of each ``one`` fact, as assertions arrive and builds land."""
+
+    def __init__(self, registry: PredicateRegistry, priorities: Mapping[str, int]) -> None:
+        self.registry = registry
+        self.priorities = priorities
+        self.resolver_hash = resolver_config_hash(registry, priorities)
+        self.by_resolver = FindingProvenance(RESOLVER_ID, RESOLVER_VERSION, self.resolver_hash)
+        self.versions: dict[ClaimId, Claim] = {}
+        self.origin: dict[ClaimId, Claim] = {}  # version id -> the assertion it is a version of
+        self.current: dict[Fact, list[ClaimId]] = {}  # current versions of each ``one`` fact
+        self.roots: dict[Fact, list[Claim]] = {}  # every assertion of each ``one`` fact, arrived
+        self.findings: list[ResolutionFinding] = []
+        self.latest: dict[str, Lineage] = {}  # consolidator id -> its latest lineage so far
+        self.withdrawn: set[ClaimId] = set()  # assertions a build withdrew and none re-emitted
+        self.by_lineage: dict[Lineage, list[Claim]] = {}  # every assertion arrived, by lineage
+
+    def _one(self, claim: Claim) -> bool:
+        return self.registry.spec(claim.predicate).cardinality is Cardinality.ONE
+
+    def arrive(self, arriving: Claim) -> None:
+        """An assertion's first recording (ADR 0005), retiring its consolidator's other lineages."""
+        arriving_lineage = lineage_of(arriving)
+        cid = arriving.provenance.consolidator_id
+        if self.latest.get(cid, arriving_lineage) != arriving_lineage:
+            self._retire(arriving_lineage, arriving.recorded_at)
+        self.latest[cid] = arriving_lineage
+        self.origin[arriving.id] = arriving
+        self.by_lineage.setdefault(arriving_lineage, []).append(arriving)
+        if not self._one(arriving):
+            self.versions[arriving.id] = arriving
+            return
+        self.roots.setdefault((arriving.subject, arriving.predicate), []).append(arriving)
+        self._place(arriving, arriving.recorded_at)
+
+    def _place(self, arriving: Claim, tx: LedgerTx) -> None:
+        """Contest ``arriving`` against the current versions of its ``one`` fact (ADR 0005)."""
+        versions, origin, resolver_hash = self.versions, self.origin, self.resolver_hash
+        live = self.current.setdefault((arriving.subject, arriving.predicate), [])
+        claimed = _object_key(arriving)
+        domain = arriving.valid_from.domain_id
+        overlapping = [
+            versions[i]
+            for i in live
+            if _object_key(versions[i]) != claimed
+            and versions[i].valid_from.domain_id == domain
+            and versions[i].valid.overlaps(arriving.valid)
+        ]
+        winners = [r for r in overlapping if not _beats(arriving, origin[r.id])]
+        effective: list[Claim] = [arriving]
+        stored = arriving
+        if winners:
+            stored = replace(arriving, superseded_at=tx)
+            cutters = _distinct(origin[w.id] for w in winners)
+            effective = [
+                _closure(arriving, arriving, piece, cutters, tx, resolver_hash)
+                for piece in arriving.valid.minus(w.valid for w in winners)
+            ]
+            if not effective:
+                self.findings.append(
+                    ResolutionFinding(
+                        FindingCode.OVERRIDDEN_ON_ARRIVAL,
+                        arriving.id,
+                        tuple(sorted({w.id for w in winners})),
+                        self.by_resolver,
+                        tx,
+                    )
+                )
+        losers = [
+            r
+            for r in overlapping
+            if _beats(arriving, origin[r.id]) and any(r.valid.overlaps(e.valid) for e in effective)
+        ]
+        for loser in losers:
+            versions[loser.id] = replace(loser, superseded_at=tx)
+            live.remove(loser.id)
+            root = origin[loser.id]
+            for piece in loser.valid.minus(e.valid for e in effective):
+                narrowed = _closure(loser, root, piece, (arriving,), tx, resolver_hash)
+                origin[narrowed.id] = root
+                versions[narrowed.id] = narrowed
+                live.append(narrowed.id)
+        versions[arriving.id] = replace(stored, supersedes=tuple(sorted(r.id for r in losers)))
+        for version in effective:
+            if version is not arriving:
+                origin[version.id] = arriving
+                versions[version.id] = version
+            live.append(version.id)
+
+    def apply_builds(self, builds: Sequence[Build], tx: LedgerTx) -> None:
+        """ADR 0007 §5 and ADR 0016 §2: the builds landing at ``tx``, before its arrivals.
+
+        A build of a new lineage retires the consolidator's other lineages; every build withdraws
+        what its lineage held and it did not emit, and restates what it emitted that an earlier
+        build had withdrawn. Then each ``one`` fact that lost or regained an assertion is placed
+        again, so what a withdrawn claim had cut is held again by the claims still standing.
+        """
+        touched: set[Fact] = set()
+        for build in builds:
+            if self.latest.get(build.consolidator_id, build.lineage) != build.lineage:
+                touched |= self._retire(build.lineage, tx)
+            self.latest[build.consolidator_id] = build.lineage
+            touched |= self._withdraw(build)
+            for claim_id in build.claims:
+                if claim_id not in self.withdrawn:
+                    continue
+                self.withdrawn.discard(claim_id)
+                root = self.origin[claim_id]
+                if self._one(root):
+                    touched.add((root.subject, root.predicate))
+                else:
+                    restated = _restatement(root, root.valid, (), tx, self.resolver_hash)
+                    self.origin[restated.id] = root
+                    self.versions[restated.id] = restated
+        for fact in sorted(touched, key=lambda f: (f[0].node_type, f[0].node_id, f[1])):
+            self._replace(fact, tx)
+
+    def _live(self, root: Claim) -> bool:
+        cid = root.provenance.consolidator_id
+        return root.id not in self.withdrawn and self.latest.get(cid) == lineage_of(root)
+
+    def _replace(self, fact: Fact, tx: LedgerTx) -> None:
+        """Place a ``one`` fact again from its standing assertions, in arrival order.
+
+        The standing assertions (not withdrawn, of their consolidator's latest lineage) contest
+        each other as ``_place`` would have had they been the only ones to arrive. One whose
+        current pieces already are what it holds keeps its versions; any other has them superseded
+        at ``tx`` and is restated over the pieces it now holds.
+        """
+        standing = sorted(
+            (r for r in self.roots.get(fact, ()) if self._live(r)),
+            key=lambda c: arrival_key(c, self.priorities),
+        )
+        holds = _contest(standing)
+        live = self.current.setdefault(fact, [])
+        for root in standing:
+            pieces = holds.get(root.id, [])
+            held = [vid for vid in live if self.origin[vid].id == root.id]
+            if sorted(_valid_key(self.versions[v].valid) for v in held) == sorted(
+                _valid_key(p) for p in pieces
+            ):
+                continue
+            for vid in held:
+                self._end(vid, tx)
+            cutters = _distinct(
+                other
+                for other in standing
+                if other.id != root.id
+                and _conflict(other, root)
+                and holds.get(other.id)
+                and _beats(other, root)
+            )
+            for piece in pieces:
+                restated = _restatement(root, piece, cutters, tx, self.resolver_hash)
+                self.origin[restated.id] = root
+                self.versions[restated.id] = restated
+                live.append(restated.id)
+
+    def _retire(self, upgrade: Lineage, tx: LedgerTx) -> set[Fact]:
+        """ADR 0003 §3: a new lineage retires every current claim of the consolidator's others.
+
+        Each such version gets ``superseded_at = tx``, closure versions included, even one
+        narrowed at ``tx`` itself. Nothing is deleted and valid time is not cut, so ``as_of``
+        before ``tx`` still answers from the old lineage. Returns the ``one`` facts that lost a
+        version.
+        """
+        touched: set[Fact] = set()
+        for vid, version in list(self.versions.items()):
+            root = lineage_of(self.origin[vid])
+            if (
+                root[0] == upgrade[0]
+                and root != upgrade
+                and isinstance(version.superseded_at, Open)
+            ):
+                touched |= self._end(vid, tx)
+        return touched
+
+    def _withdraw(self, build: Build) -> set[Fact]:
+        """ADR 0007 §5.2: a build ends every current version of its lineage that it did not emit.
+
+        A version is its original assertion's: a split closure stays current while the build
+        emits the assertion it narrows, and is withdrawn with it otherwise. An assertion with no
+        current version is withdrawn too, so it stands in no later contest until a build emits it
+        again. Returns the ``one`` facts that lost an assertion.
+        """
+        emitted = set(build.claims)
+        gone = {
+            root.id: root
+            for root in self.by_lineage.get(build.lineage, ())
+            if root.id not in emitted and root.id not in self.withdrawn
+        }
+        if not gone:
+            return set()
+        self.withdrawn.update(gone)
+        touched = {(r.subject, r.predicate) for r in gone.values() if self._one(r)}
+        for vid, version in list(self.versions.items()):
+            if isinstance(version.superseded_at, Open) and self.origin[vid].id in gone:
+                self._end(vid, build.recorded_at)
+        return touched
+
+    def _end(self, vid: ClaimId, tx: LedgerTx) -> set[Fact]:
+        version = self.versions[vid] = replace(self.versions[vid], superseded_at=tx)
+        fact = (version.subject, version.predicate)
+        live = self.current.get(fact)
+        if live is not None and vid in live:
+            live.remove(vid)
+            return {fact}
+        return set()
+
+
+def _check_builds(
+    claims: Sequence[Claim], inputs: Sequence[Claim], builds: Sequence[Build]
 ) -> None:
-    """ADR 0003 §3: a consolidator's new lineage retires every current claim of its other lineages.
+    """Builds agree with the claims: one per consolidator and transaction, naming only claims of
+    their lineage recorded by then, and holding every recording of a consolidator that has any."""
+    by_key: dict[tuple[str, LedgerTx], Build] = {}
+    for build in builds:
+        key = (build.consolidator_id, build.recorded_at)
+        if key in by_key:
+            raise ValueError(f"two builds of {key[0]} at transaction {key[1]}")
+        by_key[key] = build
+    first = {c.id: c for c in inputs}
+    for build in builds:
+        foreign = [
+            i
+            for i in build.claims
+            if i not in first
+            or lineage_of(first[i]) != build.lineage
+            or first[i].recorded_at > build.recorded_at
+        ]
+        if foreign:
+            raise ValueError(
+                f"the build of {build.consolidator_id} at transaction {build.recorded_at} names"
+                f" claims of another lineage, or not recorded by then: {foreign[:3]}"
+            )
+    built = {cid for cid, _ in by_key}
+    emitted = {key: frozenset(build.claims) for key, build in by_key.items()}
+    for claim in claims:
+        cid = claim.provenance.consolidator_id
+        if is_closure(claim) or cid not in built:
+            continue
+        if claim.id not in emitted.get((cid, claim.recorded_at), frozenset()):
+            raise ValueError(
+                f"claim {claim.id} of {cid} is recorded at transaction {claim.recorded_at}"
+                " outside a build that emitted it"
+            )
 
-    Each such version gets ``superseded_at = tx``, closure versions included, even one narrowed at
-    ``tx`` itself. Nothing is deleted and valid time is not cut, so ``as_of`` before ``tx`` still
-    answers from the old lineage.
-    """
-    for vid, version in list(versions.items()):
-        root = lineage_of(origin[vid])
-        if root[0] == upgrade[0] and root != upgrade and isinstance(version.superseded_at, Open):
-            versions[vid] = replace(version, superseded_at=tx)
-            for live in current.values():
-                if vid in live:
-                    live.remove(vid)
 
-
-def _check_lineages(claims: Iterable[Claim]) -> None:
+def _check_lineages(claims: Iterable[Claim], built: Iterable[Build] = ()) -> None:
     """One lineage per consolidator per transaction, and no lineage back after another replaced it.
 
-    Checked over every recording (before ``assertions`` keeps only the earliest), so a re-run of
-    a retired lineage is caught even when it reproduces the old claim ids.
+    Checked over every recording (before ``assertions`` keeps only the earliest) and every build,
+    so a re-run of a retired lineage is caught even when it reproduces the old claim ids or emits
+    nothing.
     """
     builds: dict[str, dict[int, set[Lineage]]] = {}
     for claim in claims:
         if not is_closure(claim):
             by_tx = builds.setdefault(claim.provenance.consolidator_id, {})
             by_tx.setdefault(claim.recorded_at, set()).add(lineage_of(claim))
+    for build in built:
+        by_tx = builds.setdefault(build.consolidator_id, {})
+        by_tx.setdefault(build.recorded_at, set()).add(build.lineage)
     for cid, by_tx in sorted(builds.items()):
         clashes = sorted(tx for tx, lineages in by_tx.items() if len(lineages) > 1)
         if clashes:
@@ -496,6 +739,77 @@ def _closure(
         superseded_at=OPEN,
         supersedes=(version.id,),
     )
+
+
+def _conflict(one: Claim, other: Claim) -> bool:
+    """Different objects over overlapping valid time on one clock: a contest (ADR 0005)."""
+    return (
+        _object_key(one) != _object_key(other)
+        and one.valid_from.domain_id == other.valid_from.domain_id
+        and one.valid.overlaps(other.valid)
+    )
+
+
+def _contest(standing: Sequence[Claim]) -> dict[ClaimId, list[Interval]]:
+    """What each assertion of one ``one`` fact holds when they arrive in this order alone.
+
+    The same contest as ``_Resolver._place``, over intervals rather than versions: an arriving
+    assertion keeps what no held winner covers, and cuts what it beats out of the losers it
+    overlaps.
+    """
+    held: list[tuple[Claim, Interval]] = []
+    for root in standing:
+        claimed = _object_key(root)
+        domain = root.valid_from.domain_id
+        overlapping = [
+            (other, piece)
+            for other, piece in held
+            if _object_key(other) != claimed
+            and piece.start.domain_id == domain
+            and piece.overlaps(root.valid)
+        ]
+        effective = list(root.valid.minus(p for o, p in overlapping if not _beats(root, o)))
+        losers = [
+            (other, piece)
+            for other, piece in overlapping
+            if _beats(root, other) and any(piece.overlaps(e) for e in effective)
+        ]
+        kept = [h for h in held if h not in losers]
+        for other, piece in losers:
+            kept.extend((other, p) for p in piece.minus(effective))
+        kept.extend((root, e) for e in effective)
+        held = kept
+    holds: dict[ClaimId, list[Interval]] = {}
+    for root, piece in held:
+        holds.setdefault(root.id, []).append(piece)
+    return holds
+
+
+def _valid_key(interval: Interval) -> bytes:
+    return dumps(interval.to_json())
+
+
+def _restatement(
+    root: Claim,
+    valid: Interval,
+    cutters: Sequence[Claim],
+    recorded_at: LedgerTx,
+    resolver_hash: ConfigHash,
+) -> Claim:
+    """``root`` held again over ``valid`` from ``recorded_at`` (ADR 0016 §2): a resolver version.
+
+    Like a split closure, its evidence is ``root``'s then the ``cutters``', and its ``config_hash``
+    covers the resolver configuration, the assertion it restates and the transaction, so a claim
+    withdrawn and restated more than once never repeats an id. It ``supersedes`` ``root``.
+    """
+    closure = _closure(root, root, valid, cutters, recorded_at, resolver_hash)
+    provenance = replace(
+        closure.provenance,
+        config_hash=config_hash(
+            {"at": recorded_at, "resolver": resolver_hash, "restates": root.id}
+        ),
+    )
+    return replace(closure, provenance=provenance)
 
 
 def _clock_mismatches(

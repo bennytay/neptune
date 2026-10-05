@@ -35,7 +35,7 @@ from neptune_memory.schema.predicates import (
     violations,
 )
 from neptune_memory.schema.predicates import SAME_AS as SAME_AS
-from neptune_memory.schema.supersede import RESOLVER_ID
+from neptune_memory.schema.supersede import RESOLVER_ID, Build
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -191,11 +191,26 @@ class Consolidator(Protocol):
 
 @dataclass(frozen=True)
 class Consolidation:
-    """One consolidator's output in one build: claims and findings, each sorted by id."""
+    """One consolidator's output in one build: claims and findings, each sorted by id.
+
+    ``recorded_at`` is the Ledger snapshot's transaction the build ran at; ``build`` is the
+    record of the run that withdrawal reads (ADR 0007 §5), empty or not.
+    """
 
     transform: ConsolidatorTransform
     claims: tuple[Claim, ...]
     findings: tuple[ConsolidationFinding, ...]
+    recorded_at: LedgerTx
+
+    @property
+    def build(self) -> Build:
+        return Build(
+            self.transform.consolidator_id,
+            self.transform.version,
+            self.transform.config_hash,
+            self.recorded_at,
+            tuple(claim.id for claim in self.claims),
+        )
 
     def to_json(self) -> JsonObject:
         return {
@@ -310,10 +325,12 @@ def run_consolidator(
         message = f"{type(exc).__name__}: {exc}"
         if _safe_text(message) != message:
             message = type(exc).__name__
-        return Consolidation(transform, (), (_finding("failed", transform, message),))
+        failed = (_finding("failed", transform, message),)
+        return Consolidation(transform, (), failed, recorded_at)
     if not isinstance(output, ConsolidatorOutput):  # its own fields are checked on construction
         message = "consolidate() must return a ConsolidatorOutput"
-        return Consolidation(transform, (), (_finding("bad_output", transform, message),))
+        bad = (_finding("bad_output", transform, message),)
+        return Consolidation(transform, (), bad, recorded_at)
     claims: dict[ClaimId, Claim] = {}
     findings: dict[RecordId, ConsolidationFinding] = {f.id: f for f in output.findings}
     for draft in output.drafts:
@@ -326,6 +343,7 @@ def run_consolidator(
         transform,
         tuple(claims[key] for key in sorted(claims)),
         tuple(findings[key] for key in sorted(findings)),
+        recorded_at,
     )
 
 
