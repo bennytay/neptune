@@ -1,0 +1,2344 @@
+{
+  "claims": [
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:14ae0236df769478ce72c70a459172681852d256012c97ae0736a3b9c2a4344e",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "protective_stop"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 12
+              }
+            ],
+            "source": "sha256:b1fd3ae362a515dc676b2c1bc379a5a85e5e2072e9848079783a30aa3303fc93"
+          }
+        ],
+        "records": [
+          "rec:sha256:a23c541da599ae61f86a9a425c3dd9b0451b545042dd9e46e1e7d411c8f75553"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:0a9d474326b242f55a83e9522f9024717156f6e067502673d3899fe09939ad4a",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:9b53fda7492572e6b3c6a27256db4b0a12d598bd18610b28e0adfa34c06cdbf0",
+          "ticks": 13
+        },
+        "start": {
+          "domain_id": "rec:sha256:9b53fda7492572e6b3c6a27256db4b0a12d598bd18610b28e0adfa34c06cdbf0",
+          "ticks": 12
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:18fe4e1a941db64b5f55088c0fe1b795423c7e4fdc69e11c0867d40b1b6f9734",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "fault"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 812
+              }
+            ],
+            "source": "sha256:4111cb9fe58653c8cef035c36d6fee980fbf05874a52da738b71f184df0e5e1e"
+          }
+        ],
+        "records": [
+          "rec:sha256:9e260f9f922e2b6cc0fd2c8aeab15e90e090592bb5b51bb93a39400e7f9cbc47"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:5c0208173e017d6750427f990c28f649d6bdb9b18cb208ba0179b8c2b669e8b6",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:1a0412f08fa6d0f9091d35a3f283f3424f5b0abf980b892dec5c1896a3c68631",
+      "object": {
+        "kind": "record",
+        "record_id": "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea"
+      },
+      "predicate": "evidenced_by",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:a3115758eb3fcf60d31d96c5161cc07f499d74d5bfb436cc15a191c7110ed953",
+          "ticks": 77030
+        },
+        "start": {
+          "domain_id": "rec:sha256:a3115758eb3fcf60d31d96c5161cc07f499d74d5bfb436cc15a191c7110ed953",
+          "ticks": 77000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:1ab2f84392d5fb430ec70ecdfa6fd6c6812e6eb71c4cd0ab7eb73acda77d4019",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves_candidate",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 55
+              }
+            ],
+            "source": "sha256:df907349a0c8e3bdac9c48815ea70e3f9da3e88254afe9a9b269c22645589149"
+          }
+        ],
+        "records": [
+          "rec:sha256:972d131414149d0a6d7b65e8f8bc1107af9c313f1ed44c084d3e75f13a15f9ce"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:f871defa0f75e10d156260d90f653c4e9bc1b470187c70545f478c9641387b2f",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:1d578dd95bf11c2e29e0b5930038f2818473e913124b2b1619f73b0895e052be",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "high"
+      },
+      "predicate": "stated_severity",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003600000000006
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:28efd8d5a0ffe5a1b817aba880bbaadec863d526e4de358790bf9796d3d35d89",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "emergency_stop"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003600000000006
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:34b8618aa83931ae8e57ab033bfca53f83e93c6a052e41025e04ffa22ff82201",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea",
+          "rec:sha256:c7846c70f9ae4b971107cfec72b8a348f589424737fae5e19954e6515793db0f",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003787000000000
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003757000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:3775a56f45a35a0980d5cf9068c48b505eb6eba211f1c68000d941e489e88693",
+      "object": {
+        "kind": "record",
+        "record_id": "rec:sha256:9e260f9f922e2b6cc0fd2c8aeab15e90e090592bb5b51bb93a39400e7f9cbc47"
+      },
+      "predicate": "evidenced_by",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 812
+              }
+            ],
+            "source": "sha256:4111cb9fe58653c8cef035c36d6fee980fbf05874a52da738b71f184df0e5e1e"
+          }
+        ],
+        "records": [
+          "rec:sha256:9e260f9f922e2b6cc0fd2c8aeab15e90e090592bb5b51bb93a39400e7f9cbc47"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:5c0208173e017d6750427f990c28f649d6bdb9b18cb208ba0179b8c2b669e8b6",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:426da28e695891b0b4c8adfd844ebbc19b28919a2830a2e6eb2c8fb034a35101",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:47b5f1d1c2651b37717609034f84d723f0650693270d9159a0e43b3a321ffd2a",
+      "object": {
+        "kind": "record",
+        "record_id": "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea"
+      },
+      "predicate": "evidenced_by",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea",
+          "rec:sha256:bbdc3e52a5ac1f31c7f36d792998427171354273c1e7e65699c12ac52a6b745a",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003690000000000
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003660000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:4b4cc9e4aa90c3b3f4fafad64550ff9253dcfdbdcefa3b4758571a73873b5076",
+      "object": {
+        "kind": "node",
+        "node_id": "site-code:CELL-3",
+        "node_type": "site"
+      },
+      "predicate": "at_site",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003600000000006
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:4b86dfe76b8c1423ce7e352ba2bb7ffc657dae3fefb949848225e35d3566b9de",
+      "object": {
+        "kind": "record",
+        "record_id": "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+      },
+      "predicate": "evidenced_by",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003600000000006
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:4ba61a2ded728596df408131ee22ec2a34aceda50ccaf6e444898f99378fe26e",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "high"
+      },
+      "predicate": "stated_severity",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:516d7315b09e9701f30a3dd40a0f81768de21bea45b63a78e3a7229aa869aedb",
+      "object": {
+        "kind": "record",
+        "record_id": "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea"
+      },
+      "predicate": "evidenced_by",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea",
+          "rec:sha256:c7846c70f9ae4b971107cfec72b8a348f589424737fae5e19954e6515793db0f",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003787000000000
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003757000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:64009cebfa0e2a5636e73a300269472eeeee8663c2f6d899ba34b18d3cc72707",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "intervention"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea",
+          "rec:sha256:c7846c70f9ae4b971107cfec72b8a348f589424737fae5e19954e6515793db0f",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003787000000000
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003757000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:75a4b5018c0a4b1affefa68bef65f7ee7a757d45e8327524400f8e7d925be35a",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "DRIVE_OVERCURRENT"
+      },
+      "predicate": "declared_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 812
+              }
+            ],
+            "source": "sha256:4111cb9fe58653c8cef035c36d6fee980fbf05874a52da738b71f184df0e5e1e"
+          }
+        ],
+        "records": [
+          "rec:sha256:9e260f9f922e2b6cc0fd2c8aeab15e90e090592bb5b51bb93a39400e7f9cbc47"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:5c0208173e017d6750427f990c28f649d6bdb9b18cb208ba0179b8c2b669e8b6",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:76a27a7a40b130b85a786fdf4acc0dafb7c69312d511ad94d6c03e2c040bd351",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003600000000006
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:78cedee393cdf1422d4cab5eaab9f8d434fe17a30f23ee989089c93f6df5584e",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "near_miss"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 55
+              }
+            ],
+            "source": "sha256:df907349a0c8e3bdac9c48815ea70e3f9da3e88254afe9a9b269c22645589149"
+          }
+        ],
+        "records": [
+          "rec:sha256:972d131414149d0a6d7b65e8f8bc1107af9c313f1ed44c084d3e75f13a15f9ce"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:f871defa0f75e10d156260d90f653c4e9bc1b470187c70545f478c9641387b2f",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:7fd9ad05f477776ffc0a59687fb2e67e97466c1e2fdb9bccb4dcc773e587aa25",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "intervention"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:a3115758eb3fcf60d31d96c5161cc07f499d74d5bfb436cc15a191c7110ed953",
+          "ticks": 77030
+        },
+        "start": {
+          "domain_id": "rec:sha256:a3115758eb3fcf60d31d96c5161cc07f499d74d5bfb436cc15a191c7110ed953",
+          "ticks": 77000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:8083aef525484ed0a62d8129a7737272f6266be5523e42452c02f1cdae82ce06",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "Operator pressed the E-stop → arm halted mid-pick"
+      },
+      "predicate": "has_description",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003600000000006
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:95d05ed6f59e712a0850c01cd340f7d95c17286edc31d0ae071e84d318037580",
+      "object": {
+        "kind": "record",
+        "record_id": "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+      },
+      "predicate": "evidenced_by",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:96985b3a4b312ae3d0eddc9dac949151037a25f0b0eeb09e0e4923f6d435f29e",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea",
+          "rec:sha256:bbdc3e52a5ac1f31c7f36d792998427171354273c1e7e65699c12ac52a6b745a",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003690000000000
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003660000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:9a64512cdb7899a355cf69d7e5cc6b0ddc1fe1173c8dd412819e02ab8c63953b",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "intervention"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea",
+          "rec:sha256:bbdc3e52a5ac1f31c7f36d792998427171354273c1e7e65699c12ac52a6b745a",
+          "rec:sha256:ea8c663930fb51e21de025a21dd6f600cc98dc5b33625eea0d0e664a3765f077"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003690000000000
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003660000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:a5040dcee051d0de6632476c25e10899e83a641bb8c49c5d55c4acab919e6507",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 12
+              }
+            ],
+            "source": "sha256:b1fd3ae362a515dc676b2c1bc379a5a85e5e2072e9848079783a30aa3303fc93"
+          }
+        ],
+        "records": [
+          "rec:sha256:a23c541da599ae61f86a9a425c3dd9b0451b545042dd9e46e1e7d411c8f75553"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:0a9d474326b242f55a83e9522f9024717156f6e067502673d3899fe09939ad4a",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:9b53fda7492572e6b3c6a27256db4b0a12d598bd18610b28e0adfa34c06cdbf0",
+          "ticks": 13
+        },
+        "start": {
+          "domain_id": "rec:sha256:9b53fda7492572e6b3c6a27256db4b0a12d598bd18610b28e0adfa34c06cdbf0",
+          "ticks": 12
+        }
+      }
+    },
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:b0311fc62ce8954c7725f82f3f19e8a430b65e470d9d3f7feab52e9fc9828eb3",
+      "object": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "predicate": "co_occurs_within",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          },
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 812
+              }
+            ],
+            "source": "sha256:4111cb9fe58653c8cef035c36d6fee980fbf05874a52da738b71f184df0e5e1e"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:9e260f9f922e2b6cc0fd2c8aeab15e90e090592bb5b51bb93a39400e7f9cbc47",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:5c0208173e017d6750427f990c28f649d6bdb9b18cb208ba0179b8c2b669e8b6",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003604999999995
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:b7f4a31baa7fdf293e4520608b5e0352f340cf0eb5e6c461c4d20d4d67273226",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "Operator pressed the E-stop → arm halted mid-pick"
+      },
+      "predicate": "has_description",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:ba0adb955129690cb2e7404b7f20ced4d9023cbc5ff26c6ce1b677aa31a0a956",
+      "object": {
+        "kind": "node",
+        "node_id": "site-code:CELL-3",
+        "node_type": "site"
+      },
+      "predicate": "at_site",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 55
+              }
+            ],
+            "source": "sha256:df907349a0c8e3bdac9c48815ea70e3f9da3e88254afe9a9b269c22645589149"
+          }
+        ],
+        "records": [
+          "rec:sha256:972d131414149d0a6d7b65e8f8bc1107af9c313f1ed44c084d3e75f13a15f9ce"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:f871defa0f75e10d156260d90f653c4e9bc1b470187c70545f478c9641387b2f",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:bc582a7e70820e2753147b984c6fa767a17721b25bec933979dc254fa96b1767",
+      "object": {
+        "kind": "node",
+        "node_id": "site-code:CELL-3",
+        "node_type": "site"
+      },
+      "predicate": "at_site",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:c01b902820fb24696795455a2c738e9a14ed13d6b561fc96cd42485206d52425",
+      "object": {
+        "datatype": "text",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": "emergency_stop"
+      },
+      "predicate": "event_kind",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:09bf7e7bd482de98b072f35647f5c9735bf1b4416962fa1a7a4bf268f81c5c0b",
+          "ticks": 5000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:c22a9b7eb126a7a54df75e77d639aaf2ef1d5e573bc95909b8701764dd45a81b",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 812
+              }
+            ],
+            "source": "sha256:4111cb9fe58653c8cef035c36d6fee980fbf05874a52da738b71f184df0e5e1e"
+          }
+        ],
+        "records": [
+          "rec:sha256:9e260f9f922e2b6cc0fd2c8aeab15e90e090592bb5b51bb93a39400e7f9cbc47"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:5c0208173e017d6750427f990c28f649d6bdb9b18cb208ba0179b8c2b669e8b6",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003602000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:e451ff66f85a40394183df38cf8000deaee3d2c4ed43d83cd14c5f6e651ac26c",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:AMR-12",
+        "node_type": "machine"
+      },
+      "predicate": "involves_candidate",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 55
+              }
+            ],
+            "source": "sha256:df907349a0c8e3bdac9c48815ea70e3f9da3e88254afe9a9b269c22645589149"
+          }
+        ],
+        "records": [
+          "rec:sha256:972d131414149d0a6d7b65e8f8bc1107af9c313f1ed44c084d3e75f13a15f9ce"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:f871defa0f75e10d156260d90f653c4e9bc1b470187c70545f478c9641387b2f",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000001
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003603000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:e9d709bc6cfc598687122f2c501693f1de61d465db0147edb09367e8f6a6117d",
+      "object": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:5c0208173e017d6750427f990c28f649d6bdb9b18cb208ba0179b8c2b669e8b6",
+        "node_type": "event"
+      },
+      "predicate": "co_occurs_within",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 40
+              }
+            ],
+            "source": "sha256:8ece3f853e6b5bb8cfd941d89f4e9ae6da63b8e8b7c1fa1e0ff0bfd9f4cc5b60"
+          },
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 812
+              }
+            ],
+            "source": "sha256:4111cb9fe58653c8cef035c36d6fee980fbf05874a52da738b71f184df0e5e1e"
+          }
+        ],
+        "records": [
+          "rec:sha256:80a1e5ee3707c0214e9a88d57b9dfb540a4b149dd625dbe6fc50ec6c8342a605",
+          "rec:sha256:9e260f9f922e2b6cc0fd2c8aeab15e90e090592bb5b51bb93a39400e7f9cbc47",
+          "rec:sha256:77c25951f5d811d3568bd246fc964803db3a7eefa70f293b49d784a0a8e67920"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:9dd3aabe62a174062bcd3895bee6b529b6c4bbebe3ebc25c9fea8b5529c184a9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003604999999995
+        },
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790003599999999995
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:ee8d4407850672feb4f3e7181b1e2d3fe61bb2d15cadf94647652bfabb00bad8",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "involves",
+      "provenance": {
+        "config_hash": "sha256:17277ba8ce760a574dd405e0e5c4ecd94e6bf5b8f671b822c8f3eb5dbd0c6260",
+        "consolidator_id": "memory.events",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:e881ba820e7a276bd4426d86630d32fd39c57e58a15d4b73e89708965efea1a7"
+          }
+        ],
+        "records": [
+          "rec:sha256:1d99ca7d1d658106e6722882d7e624f032620af1d9f9e56538bdbaaf5dd170ea"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:d724bf4307c7a529a0651220179e0a8b2a84e9fa31b4f379924f0213aad733d9",
+        "node_type": "event"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": {
+          "domain_id": "rec:sha256:a3115758eb3fcf60d31d96c5161cc07f499d74d5bfb436cc15a191c7110ed953",
+          "ticks": 77030
+        },
+        "start": {
+          "domain_id": "rec:sha256:a3115758eb3fcf60d31d96c5161cc07f499d74d5bfb436cc15a191c7110ed953",
+          "ticks": 77000
+        }
+      }
+    }
+  ],
+  "findings": [],
+  "generation": "sha256:dfad36ca921242b5fc28ad965a50287910e36a712ac0146d2b47f0d4947d4a67",
+  "graph_schema_version": 1,
+  "head": 4,
+  "kind": "memory.graph",
+  "resolver_config": {
+    "priorities": {
+      "memory.configuration": 3,
+      "memory.events": 4,
+      "memory.identity": 2
+    },
+    "vocabulary": {
+      "predicates": [
+        {
+          "cardinality": "one",
+          "description": "at_site (Memory ADR 0013)",
+          "domain": [
+            "event",
+            "run"
+          ],
+          "name": "at_site",
+          "range": [
+            "site"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "at_site_candidate (Memory ADR 0013)",
+          "domain": [
+            "event",
+            "run"
+          ],
+          "name": "at_site_candidate",
+          "range": [
+            "site"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "an authorisation envelope approves this configuration at the site over the interval",
+          "domain": [
+            "site"
+          ],
+          "name": "authorised_configuration",
+          "range": [
+            "configuration"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "co_occurs_within (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "co_occurs_within",
+          "range": [
+            "event"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
+          "domain": [
+            "run"
+          ],
+          "name": "configuration_active_during",
+          "range": [
+            "configuration"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: the configuration in force could be this one; one claim per reading",
+          "domain": [
+            "machine",
+            "run"
+          ],
+          "name": "configuration_candidate",
+          "range": [
+            "configuration"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "no configuration is stated over the interval; the record leaves it open, never filled",
+          "domain": [
+            "machine",
+            "run"
+          ],
+          "name": "configuration_unknown",
+          "range": [
+            "record"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "declared_kind (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "declared_kind",
+          "range": [
+            "integer",
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "where a deployment takes place",
+          "domain": [
+            "deployment"
+          ],
+          "name": "deployed_at",
+          "range": [
+            "site"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the run an episode segments",
+          "domain": [
+            "episode"
+          ],
+          "name": "episode_of",
+          "range": [
+            "run"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "event_kind (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "event_kind",
+          "range": [
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "a Ledger record about the node (Episode tier, by id)",
+          "domain": [
+            "asset",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "event",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "name": "evidenced_by",
+          "range": [
+            "record"
+          ],
+          "version": 2
+        },
+        {
+          "cardinality": "many",
+          "description": "a task attempted",
+          "domain": [
+            "episode",
+            "run"
+          ],
+          "name": "executes_task",
+          "range": [
+            "task"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "an operating rule or control policy that applies",
+          "domain": [
+            "deployment",
+            "fleet",
+            "machine",
+            "site"
+          ],
+          "name": "governed_by",
+          "range": [
+            "policy"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the calibration in force",
+          "domain": [
+            "sensor"
+          ],
+          "name": "has_calibration",
+          "range": [
+            "configuration"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "a parameter set, description file or other configuration in force",
+          "domain": [
+            "deployment",
+            "machine",
+            "sensor"
+          ],
+          "name": "has_configuration",
+          "range": [
+            "configuration"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "has_description (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "has_description",
+          "range": [
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "a declared display name, verbatim; never an identifier",
+          "domain": [
+            "asset",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "name": "has_name",
+          "range": [
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "a context node's summary",
+          "domain": [
+            "deployment",
+            "fleet",
+            "programme"
+          ],
+          "name": "has_summary",
+          "range": [
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "in_zone (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "in_zone",
+          "range": [
+            "zone"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "in_zone_candidate (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "in_zone_candidate",
+          "range": [
+            "zone"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "involves (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "involves",
+          "range": [
+            "asset",
+            "machine"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "involves_candidate (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "involves_candidate",
+          "range": [
+            "asset",
+            "machine"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "where it is",
+          "domain": [
+            "asset",
+            "machine"
+          ],
+          "name": "located_at",
+          "range": [
+            "site",
+            "zone"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "serviceability as a record states it, verbatim",
+          "domain": [
+            "asset",
+            "machine",
+            "sensor"
+          ],
+          "name": "maintenance_state",
+          "range": [
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the fleet a machine belongs to",
+          "domain": [
+            "machine"
+          ],
+          "name": "member_of_fleet",
+          "range": [
+            "fleet"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "what a sensor is attached to",
+          "domain": [
+            "sensor"
+          ],
+          "name": "mounted_on",
+          "range": [
+            "asset",
+            "machine"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "observed: no authorisation envelope in the Ledger names the configuration then",
+          "domain": [
+            "run"
+          ],
+          "name": "not_covered_by_authorisation",
+          "range": [
+            "configuration"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "a declared operator or supervisor",
+          "domain": [
+            "run"
+          ],
+          "name": "operated_by",
+          "range": [
+            "person"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the owning programme",
+          "domain": [
+            "deployment",
+            "fleet"
+          ],
+          "name": "part_of_programme",
+          "range": [
+            "programme"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "rated payload, unit as declared",
+          "domain": [
+            "machine"
+          ],
+          "name": "rated_payload",
+          "range": [
+            "quantity"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the machine whose log a run is",
+          "domain": [
+            "run"
+          ],
+          "name": "recorded_by",
+          "range": [
+            "machine"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "a learned model it runs",
+          "domain": [
+            "machine"
+          ],
+          "name": "runs_model",
+          "range": [
+            "model_version"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "installed software",
+          "domain": [
+            "machine",
+            "sensor"
+          ],
+          "name": "runs_software",
+          "range": [
+            "software_version"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "the same real-world thing: declared identifier, configuration lineage or operator",
+          "domain": [
+            "asset",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "name": "same_as",
+          "range": [
+            "asset",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "version": 2
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: the evidence could mean either; whether they are one thing is undecided",
+          "domain": [
+            "asset",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "name": "same_as_candidate",
+          "range": [
+            "asset",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "version": 2
+        },
+        {
+          "cardinality": "one",
+          "description": "stated_severity (Memory ADR 0013)",
+          "domain": [
+            "event"
+          ],
+          "name": "stated_severity",
+          "range": [
+            "integer",
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "took over from the object on a machine's chain; valid while the subject is in force",
+          "domain": [
+            "configuration"
+          ],
+          "name": "succeeds",
+          "range": [
+            "configuration"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the site a zone belongs to",
+          "domain": [
+            "zone"
+          ],
+          "name": "zone_of",
+          "range": [
+            "site"
+          ],
+          "version": 1
+        }
+      ]
+    },
+    "vocabulary_version": 8
+  }
+}
