@@ -1195,7 +1195,8 @@ def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
         ]
     made = tight.hydrate(anchor(serials, {"kind": "row", "row": 1000}), "row").read()
     assert isinstance(made.value, Artefact), made.findings
-    assert canonical_json.loads(made.value.read())["cells"] == [  # type: ignore[index]
+    value = canonical_json.loads(made.value.read())
+    assert isinstance(value, dict) and value["cells"] == [
         {
             "column": 0,
             "name": "serial",
@@ -1259,7 +1260,8 @@ def test_parquet_delta_pages_decode_and_their_shared_prefixes_stay_bounded(lake:
     # A batch of 1 024 rows would be refused after decoding 16 MiB; batches of fewer rows
     # decode within the limit.
     assert isinstance(made.value, Artefact), made.findings
-    assert canonical_json.loads(made.value.read())["cells"] == [  # type: ignore[index]
+    value = canonical_json.loads(made.value.read())
+    assert isinstance(value, dict) and value["cells"] == [
         {"column": 0, "name": "note", "type": "binary", "value": {"hex": note.hex()}}
     ]
     value = canonical_json.loads(
