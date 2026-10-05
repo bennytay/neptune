@@ -194,7 +194,9 @@ def compiler_real(ctx: Context) -> Outcome:
             gold = resolve_gold(destination, case.gold)
             row["gold"] = gold
             problems.extend(
-                f"{case.id}: gold evidence {key} resolves to nothing" for key in gold["missing"]
+                f"{case.id}: gold evidence {key} resolves to nothing"
+                + (f" ({gold['reasons'][key]})" if key in gold["reasons"] else "")
+                for key in gold["missing"]
             )
             problems.extend(f"{case.id}: {problem}" for problem in gold["problems"])
     return Outcome({"cases": cases}, tuple(problems))

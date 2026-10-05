@@ -237,3 +237,56 @@ def test_the_harness_workflow_runs_when_an_imported_generator_changes() -> None:
     )
     for path in writers:
         assert f'- "{path.relative_to(corpus.REPO).as_posix()}"' in workflow, path
+
+
+def test_the_resolver_escapes_pointers_scales_ticks_and_says_why_a_source_is_missing(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "package"
+    (root / "records").mkdir(parents=True)
+    (root / "derived").mkdir()
+    source = "sha256:" + "0" * 64
+    ref = {"locator": [], "source": source}
+
+    def lines(*records: dict[str, Any]) -> str:
+        return "".join(json.dumps(r) + "\n" for r in records)
+
+    known = {"knowledge": "known"}
+    (root / "records" / "source_revision.jsonl").write_text(
+        lines({"id": "rev", "content_id": source, "location": {"kind": "local", "path": "a.yaml"}})
+    )
+    (root / "records" / "configuration_value.jsonl").write_text(
+        lines(
+            {
+                "id": "value",
+                "path": ["topics", "/cmd_vel", "~x"],
+                "provenance": {"evidence": ref},
+                "text": {**known, "value": "1"},
+            }
+        )
+    )
+    (root / "records" / "timestamp_domain.jsonl").write_text(
+        lines(
+            {"id": "us", "resolution": {**known, "value": {"numerator": 1, "denominator": 10**6}}},
+            {"id": "ns", "resolution": {**known, "value": {"numerator": 1, "denominator": 10**9}}},
+            {"id": "unknown", "resolution": {"knowledge": "unknown"}},
+        )
+    )
+
+    def mapping(ident: str, source_domain: str, source_ticks: int, target_ticks: int) -> str:
+        anchor = {
+            "source": {"domain_id": source_domain, "ticks": source_ticks},
+            "target": {"domain_id": "ns", "ticks": target_ticks},
+        }
+        return json.dumps({"id": ident, "anchor": {**known, "value": anchor}, "evidence": [ref]})
+
+    (root / "derived" / "clock_mapping.jsonl").write_text(
+        mapping("us-to-ns", "us", 1_000_000, 3 * 10**9) + "\n" + mapping("unknown", "unknown", 1, 3)
+    )
+    package = resolve.Package(root)
+    escaped = {"kind": "config_value", "path": "a.yaml", "pointer": "/topics/~1cmd_vel/~0x"}
+    assert resolve.resolve_one(package, escaped)["records"] == ["value"]
+    clocks = {"kind": "clock_mapping", "path": "a.yaml", "offset_s": [1.5, 2.5]}
+    assert resolve.resolve_one(package, clocks)["records"] == ["us-to-ns"]  # 3 s - 1 s
+    resolved = {"gone": resolve.resolve_one(package, {"kind": "source", "path": "b.csv"})}
+    assert resolve.summary(resolved)["reasons"] == {"gone": "the package holds no source at b.csv"}

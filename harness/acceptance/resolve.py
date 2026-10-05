@@ -22,7 +22,8 @@ Selectors (``select.kind``):
   ``contains``; the stream's record and each row's ``seq`` and first clock reading.
 - ``finding`` ``{path, code}``: ``ingest_finding`` records with the code whose subject is the path.
 - ``clock_mapping`` ``{path, offset_s}``: derived ``clock_mapping`` lines evidenced by the path
-  whose anchor offset, target minus source, lies in ``[low, high]`` seconds.
+  whose anchor offset, target minus source in seconds by each clock's stated resolution, lies in
+  ``[low, high]``; a clock without a known resolution is never compared.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
@@ -69,6 +71,16 @@ class Package:
             self._kinds[key] = [json.loads(line) for line in lines if line]
         return self._kinds[key]
 
+    def tick_seconds(self) -> dict[str, Fraction]:
+        """Each clock's tick length in seconds, where its ``resolution`` is known."""
+        out: dict[str, Fraction] = {}
+        for derived in (False, True):
+            for domain in self.kind("timestamp_domain", derived=derived):
+                value = _known(domain.get("resolution"))
+                if isinstance(value, dict) and value.get("denominator"):
+                    out[str(domain["id"])] = Fraction(value["numerator"], value["denominator"])
+        return out
+
     def content(self, relative: str) -> str | None:
         """The content id of the source at ``relative`` (a corpus path), if the package has it."""
         for revision in self.kind("source_revision"):
@@ -99,6 +111,11 @@ def _need(select: Json, *names: str) -> list[Any]:
     if missing:
         raise GoldError(f"selector {select.get('kind')!r} needs {', '.join(missing)}")
     return [select[name] for name in names]
+
+
+def _pointer(path: list[Any]) -> str:
+    """A configuration value's path as an RFC 6901 JSON pointer (``~`` and ``/`` escaped)."""
+    return "".join("/" + str(part).replace("~", "~0").replace("/", "~1") for part in path)
 
 
 def _ids(records: list[Json]) -> list[str]:
@@ -165,7 +182,7 @@ def resolve_one(package: Package, select: Json) -> Json:
     elif kind == "config_value":
         (pointer,) = _need(select, "pointer")
         for value in package.kind("configuration_value"):
-            if _source(value) != content or "/" + "/".join(map(str, value["path"])) != pointer:
+            if _source(value) != content or _pointer(value["path"]) != pointer:
                 continue
             if "equals" not in select or _known(value.get("text")) == str(select["equals"]):
                 found.append(value)
@@ -207,14 +224,20 @@ def resolve_one(package: Package, select: Json) -> Json:
         ]
     elif kind == "clock_mapping":
         (bounds,) = _need(select, "offset_s")
-        low, high = float(bounds[0]), float(bounds[1])
+        low, high = Fraction(str(bounds[0])), Fraction(str(bounds[1]))
+        seconds = package.tick_seconds()
         for mapping in package.kind("clock_mapping", derived=True):
             if all(e.get("source") != content for e in mapping.get("evidence", [])):
                 continue
             anchor = _known(mapping.get("anchor"))
             if anchor is None:
                 continue
-            offset = (anchor["target"]["ticks"] - anchor["source"]["ticks"]) / 1e9
+            source, target = anchor["source"], anchor["target"]
+            source_tick = seconds.get(source["domain_id"])
+            target_tick = seconds.get(target["domain_id"])
+            if source_tick is None or target_tick is None:
+                continue  # a clock whose tick length is not known is not compared
+            offset = target["ticks"] * target_tick - source["ticks"] * source_tick
             if low <= offset <= high:
                 found.append(mapping)
     out["records"] = _ids(found)
@@ -282,5 +305,7 @@ def summary(resolved: Json) -> Json:
         "evidence": len(resolved),
         "resolved": len(resolved) - len(missing),
         "missing": missing,
+        # why an item resolved to nothing, when the reason is not the selector (a source absent)
+        "reasons": {key: resolved[key]["problem"] for key in missing if "problem" in resolved[key]},
         "selectors": dict(sorted(by_kind.items())),
     }
