@@ -1,4 +1,8 @@
-"""The harness end to end: today's stages, determinism, partial success and the failure exits."""
+"""The harness end to end: today's stages, determinism, partial success and the failure exits.
+
+These run the worked examples (four small cases); the acceptance corpus, the default, has its own
+tests (``test_acceptance_ingest.py``).
+"""
 
 import json
 import shutil
@@ -11,10 +15,11 @@ from harness.run import main, run
 
 REPO: Final = Path(__file__).resolve().parents[3]
 FIXTURES: Final = REPO / "tests" / "fixtures" / "model"
+WORKED: Final = "worked-examples"
 
 
 def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> None:
-    report, code = run(tmp_path / "run", owner_tests=False)
+    report, code = run(tmp_path / "run", owner_tests=False, corpus_name=WORKED)
     assert code == 0 and report["ok"] is True
     modes = {stage["stage"]: (stage["mode"], stage["status"]) for stage in report["stages"]}
     assert modes == {
@@ -42,7 +47,7 @@ def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> No
 
 
 def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: Path) -> None:
-    report, _ = run(tmp_path / "run", owner_tests=False)
+    report, _ = run(tmp_path / "run", owner_tests=False, corpus_name=WORKED)
     cases = report["stages"][0]["output"]["cases"]
     assert [case["case"] for case in cases] == list(corpus.EXAMPLE_NAMES)
     for case in cases:
@@ -72,8 +77,8 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
 
 
 def test_two_runs_give_byte_identical_reports_with_no_path_in_them(tmp_path: Path) -> None:
-    run(tmp_path / "a", owner_tests=False)
-    run(tmp_path / "elsewhere" / "b", owner_tests=False)
+    run(tmp_path / "a", owner_tests=False, corpus_name=WORKED)
+    run(tmp_path / "elsewhere" / "b", owner_tests=False, corpus_name=WORKED)
     first = (tmp_path / "a" / "report.json").read_bytes()
     assert first == (tmp_path / "elsewhere" / "b" / "report.json").read_bytes()
     assert (tmp_path / "a" / "report.md").read_bytes() == (
@@ -86,9 +91,10 @@ def test_two_runs_give_byte_identical_reports_with_no_path_in_them(tmp_path: Pat
 
 def test_a_rerun_clears_its_own_scratch_directory_only(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
-    run(run_dir, owner_tests=False)
+    run(run_dir, owner_tests=False, corpus_name=WORKED)
     (run_dir / "keep.txt").write_text("not scratch", encoding="utf-8")
-    run(run_dir, owner_tests=False)  # ingesting into work/packages again would fail if not cleared
+    # Ingesting into work/packages again would fail if it were not cleared.
+    run(run_dir, owner_tests=False, corpus_name=WORKED)
     assert (run_dir / "keep.txt").exists()
 
 
@@ -116,7 +122,9 @@ def test_a_registry_that_breaks_its_own_rule_fails_the_run(tmp_path: Path) -> No
     shutil.copytree(REPO / "contracts", broken)
     golden = broken / "catalog-api" / "v0.0.0" / "golden" / "manipulator.lineage.json"
     golden.write_text("{}\n", encoding="utf-8")
-    report, code = run(tmp_path / "run", contracts_root=broken, owner_tests=False)
+    report, code = run(
+        tmp_path / "run", contracts_root=broken, owner_tests=False, corpus_name=WORKED
+    )
     assert code == 1 and report["ok"] is False
     assert report["contracts"]["ok"] is False and report["contracts"]["problems"]
     # Contract failure is reported, and the stages still ran (the report says all of it).
@@ -127,7 +135,8 @@ def test_a_registry_that_breaks_its_own_rule_fails_the_run(tmp_path: Path) -> No
 def test_the_cli_writes_the_report_and_exits_zero_when_green(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["--run-dir", str(tmp_path / "run"), "--no-owner-tests"]) == 0
+    args = ["--run-dir", str(tmp_path / "run"), "--no-owner-tests", "--corpus-name", WORKED]
+    assert main(args) == 0
     out = capsys.readouterr().out
     assert "harness green" in out and "compiler: real ok" in out
     assert (tmp_path / "run" / "report.json").is_file()
@@ -141,7 +150,7 @@ def test_the_real_contracts_check_all_passes_with_owner_tests_skipped() -> None:
 
 
 def test_report_json_is_canonical(tmp_path: Path) -> None:
-    run(tmp_path / "run", owner_tests=False)
+    run(tmp_path / "run", owner_tests=False, corpus_name=WORKED)
     text = (tmp_path / "run" / "report.json").read_text(encoding="utf-8")
     parsed: Any = json.loads(text)
     assert text == json.dumps(parsed, sort_keys=True, indent=2, ensure_ascii=False) + "\n"

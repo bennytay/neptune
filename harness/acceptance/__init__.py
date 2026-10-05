@@ -47,7 +47,9 @@ def tree_digest(files: dict[str, bytes]) -> str:
 def lock_document(files: dict[str, bytes]) -> dict[str, Any]:
     return {
         "corpus": NAME,
-        "files": {path: {"sha256": digest(data), "size": len(data)} for path, data in files.items()},
+        "files": {
+            path: {"sha256": digest(data), "size": len(data)} for path, data in files.items()
+        },
         "lock_format": LOCK_FORMAT,
         "tree": tree_digest(files),
         "version": VERSION,
@@ -78,3 +80,39 @@ def materialise(root: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     return root
+
+
+def lock_problems(files: dict[str, bytes]) -> list[str]:
+    """Why ``files`` (a fresh build) break the committed lock or the size rule; empty when sound."""
+    lock = read_lock()
+    out = [
+        f"{path} is {len(data)} bytes, over {MAX_FILE_BYTES}"
+        for path, data in files.items()
+        if len(data) > MAX_FILE_BYTES
+    ]
+    if lock.get("version") != VERSION:
+        out.append(f"the lock is for {lock.get('version')}, VERSION is {VERSION}")
+    if lock != lock_document(files):
+        locked = lock.get("files", {})
+        changed = sorted(
+            set(locked).symmetric_difference(files)
+            | {p for p, d in files.items() if locked.get(p, {}).get("sha256") != digest(d)}
+        )
+        out.append(
+            "the corpus no longer matches corpus.lock.json"
+            + (f" ({', '.join(changed)})" if changed else "")
+            + ": bump VERSION (ADR 0006 section 3) and run `python -m harness.acceptance lock`"
+        )
+    return out
+
+
+def lock_status() -> dict[str, Any]:
+    """What the harness report says about the corpus it ran: version, tree, and lock agreement."""
+    files = build()
+    problems = lock_problems(files)
+    return {
+        "locked": not problems,
+        "problems": problems,
+        "tree": tree_digest(files),
+        "version": VERSION,
+    }

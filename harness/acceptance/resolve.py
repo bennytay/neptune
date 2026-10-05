@@ -30,8 +30,10 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 Json = dict[str, Any]
 SELECTORS: Final = (
@@ -81,7 +83,11 @@ def _source(record: Json) -> str | None:
 
 
 def _known(state: Any) -> Any:
-    return state.get("value") if isinstance(state, dict) and state.get("knowledge") == "known" else None
+    return (
+        state.get("value")
+        if isinstance(state, dict) and state.get("knowledge") == "known"
+        else None
+    )
 
 
 def _cells(record: Json) -> list[str]:
@@ -100,7 +106,8 @@ def _ids(records: list[Json]) -> list[str]:
 
 
 def _series_rows(package: Package, stream_id: str, contains: str) -> list[Json]:
-    import pyarrow.parquet as pq  # the compiler's own dependency; only ``message`` needs it
+    # The compiler's own dependency (untyped); only ``message`` needs it.
+    import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
     path = package.root / "series" / f"{stream_id.removeprefix('rec:sha256:')}.parquet"
     if not path.is_file():
@@ -171,9 +178,7 @@ def resolve_one(package: Package, select: Json) -> Json:
                 value = _known(item.get("value"))
                 where = item["value"].get("provenance", {}).get("evidence", {}).get("source")
                 expected = select.get("equals")
-                if where == content and (
-                    "equals" not in select or value in (expected, [expected])
-                ):
+                if where == content and ("equals" not in select or value in (expected, [expected])):
                     found.append(record)
     elif kind in ("stream", "message"):
         (topic,) = _need(select, "topic")
@@ -186,13 +191,13 @@ def resolve_one(package: Package, select: Json) -> Json:
             found = streams
         else:
             (contains,) = _need(select, "contains")
-            rows: list[Json] = []
+            hits: list[Json] = []
             for stream in streams:
                 matched = _series_rows(package, str(stream["id"]), contains)
                 if matched:
                     found.append(stream)
-                    rows += [{"stream": stream["id"], **row} for row in matched]
-            out["rows"] = sorted(rows, key=lambda r: (r["stream"], r["seq"]))
+                    hits += [{"stream": stream["id"], **row} for row in matched]
+            out["rows"] = sorted(hits, key=lambda r: (r["stream"], r["seq"]))
     elif kind == "finding":
         (code,) = _need(select, "code")
         found = [
@@ -262,7 +267,9 @@ def check_gold(gold: Json) -> list[str]:
 def resolve(package_root: Path, gold: Json) -> Json:
     """Every evidence item of ``gold`` resolved against the package: ``{evidence id: result}``."""
     package = Package(package_root)
-    return {key: resolve_one(package, item["select"]) for key, item in sorted(gold["evidence"].items())}
+    return {
+        key: resolve_one(package, item["select"]) for key, item in sorted(gold["evidence"].items())
+    }
 
 
 def summary(resolved: Json) -> Json:

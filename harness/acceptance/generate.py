@@ -36,15 +36,23 @@ import importlib.util
 import io
 import struct
 import sys
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from types import ModuleType
 
 REPO: Final = Path(__file__).resolve().parents[2]
 ARCHETYPES_SCRIPT: Final = (
-    REPO / "packages" / "neptune-deploy" / "tests" / "fixtures" / "archetypes" / "make_archetypes.py"
+    REPO
+    / "packages"
+    / "neptune-deploy"
+    / "tests"
+    / "fixtures"
+    / "archetypes"
+    / "make_archetypes.py"
 )
 
 
@@ -251,9 +259,7 @@ def cell_run(
         status(stop + 3.1, "E-STOP: OP-2")
     return {
         f"{CELL}/bags/{name}/{path}": data
-        for path, data in A.ros2_bag(
-            name, (A.JOINT_STATE, DIAGNOSTICS, A.STRING), messages
-        ).items()
+        for path, data in A.ros2_bag(name, (A.JOINT_STATE, DIAGNOSTICS, A.STRING), messages).items()
     }
 
 
@@ -500,8 +506,14 @@ def incident_report() -> bytes:
             "Property damage, no injury",
             "WO-26-0915",
             (
-                ("2026-09-14 14:28:00", "Cell restarted after the break; PALLET_C3 started from the HMI"),
-                ("2026-09-14 14:32:38", "Collision detection on joint 5 at pick P1; protective stop"),
+                (
+                    "2026-09-14 14:28:00",
+                    "Cell restarted after the break; PALLET_C3 started from the HMI",
+                ),
+                (
+                    "2026-09-14 14:32:38",
+                    "Collision detection on joint 5 at pick P1; protective stop",
+                ),
                 ("2026-09-14 14:32:41", "Operator presses the E-stop at OP-2"),
                 ("2026-09-14 14:33:30", "Cell supervisor notified; cell locked out"),
                 ("2026-09-14 14:52:00", "PF-3 locating edge found bent; part 7731-B dropped"),
@@ -667,13 +679,19 @@ def patrol_mcap(start: int) -> bytes:
     for i in range(0, 600, 5):
         add(1, i, bytes(M._cdr_imu(t0 + i * SECOND - 3 * MS, "base_imu", 0.02, -0.01, 9.80)))
         if i % 60 == 0:
-            add(2, i + 0.002, A._json_bytes({"percentage": round(0.95 - i / 6000, 3), "voltage": 51.8}))
+            add(
+                2,
+                i + 0.002,
+                A._json_bytes({"percentage": round(0.95 - i / 6000, 3), "voltage": 51.8}),
+            )
         if i in readings:
             asset, point, temp, waypoint = readings[i]
             add(
                 3,
                 i + 0.004,
-                A._json_bytes({"asset": asset, "point": point, "temp_c": temp, "waypoint": waypoint}),
+                A._json_bytes(
+                    {"asset": asset, "point": point, "temp_c": temp, "waypoint": waypoint}
+                ),
             )
     channels = (
         M.Channel(1, 1, "/imu", "cdr", {"offered_qos_profiles": A.QOS}),
@@ -787,10 +805,34 @@ def site_survey() -> bytes:
             D.Table(
                 [
                     ("Device", "Role", "Time source", "Offset to reference", "State"),
-                    ("PLC-C3", "Cell 3 safety PLC and HMI", "PTP grandmaster GM-1", "+0.02 s", "Synchronised"),
-                    ("ARM-3A controller", "Robot controller", "NTP from PLC-C3", "+0.03 s", "Synchronised"),
-                    ("CELL3-IPC", "Cell PC: vision, ROS 2 recorder", "NTP 10.20.0.5 (unreachable)", "+94.1 s", "Free-running"),
-                    ("LEG-01", "Legged inspection robot", "NTP over plant Wi-Fi", "+0.4 s", "Synchronised"),
+                    (
+                        "PLC-C3",
+                        "Cell 3 safety PLC and HMI",
+                        "PTP grandmaster GM-1",
+                        "+0.02 s",
+                        "Synchronised",
+                    ),
+                    (
+                        "ARM-3A controller",
+                        "Robot controller",
+                        "NTP from PLC-C3",
+                        "+0.03 s",
+                        "Synchronised",
+                    ),
+                    (
+                        "CELL3-IPC",
+                        "Cell PC: vision, ROS 2 recorder",
+                        "NTP 10.20.0.5 (unreachable)",
+                        "+94.1 s",
+                        "Free-running",
+                    ),
+                    (
+                        "LEG-01",
+                        "Legged inspection robot",
+                        "NTP over plant Wi-Fi",
+                        "+0.4 s",
+                        "Synchronised",
+                    ),
                 ],
                 (110, 170, 170, 120, 120),
             ),
@@ -804,7 +846,9 @@ def site_survey() -> bytes:
         [
             D.Heading("Recommendations"),
             D.Item("Restore the NTP route from VLAN 20 to 10.20.0.5, or point CELL3-IPC at PLC-C3"),
-            D.Item("Until then, do not compare CELL3-IPC timestamps with HMI alarm times uncorrected"),
+            D.Item(
+                "Until then, do not compare CELL3-IPC timestamps with HMI alarm times uncorrected"
+            ),
             D.Item("Add a Wi-Fi access point in the CELL-3 aisle"),
             D.Para(["Work orders raised: none"]),
         ]
@@ -870,17 +914,160 @@ def plant() -> dict[str, bytes]:
 # --- Enterprise records and the folder's manifest -----------------------------------------------
 
 ASSET_REGISTER: Final = (
-    ("Asset ID", "Asset Type", "Embodiment", "Model", "Serial", "Site", "Location", "Firmware", "Software", "Commissioned", "Status", "Notes"),
-    ("AMR-05", "AMR", "mobile base", "tug-200", "SN-T200-0105", "S-007", "Fleet", "4.3.1", "", "2025-11-03", "In service", ""),
-    ("AMR-06", "AMR", "mobile base", "tug-200", "SN-T200-0106", "S-007", "Fleet", "4.3.1", "", "2025-11-03", "In service", ""),
-    ("AMR-07", "AMR", "mobile base", "lift-150", "SN-L150-0107", "S-007", "Fleet", "4.3.1", "", "2025-11-03", "In service", "Fork carriage chain replaced 2026-03-19"),
-    ("ARM-3A", "Industrial robot", "manipulator", "IRB-6700", "SN-6700-118", "PLANT-2", "CELL-3", "7.8.1", "5.6.0", "2026-02-26", "In service", ""),
-    ("GRP-3A", "Gripper", "", "PG-80", "PG80-0931", "PLANT-2", "CELL-3 ARM-3A", "2.3", "", "2026-02-26", "In service", "Finger set FS-0291"),
-    ("WCAM-3A", "Wrist camera", "", "VC-1280", "SN-VC-4471", "PLANT-2", "CELL-3 ARM-3A", "1.9.2", "", "2026-02-26", "In service", ""),
-    ("CELL3-IPC", "Industrial PC", "", "IPC-427", "SN-IPC-2290", "PLANT-2", "CELL-3", "", "ROS 2 Humble; vision 3.4", "2026-02-26", "In service", "Records the cell bags"),
-    ("PLC-C3", "Safety PLC", "", "S7-1516F", "SN-PLC-7730", "PLANT-2", "CELL-3", "2.9", "", "2026-02-26", "In service", "HMI alarm log"),
-    ("PF-3", "Fixture", "", "Infeed fixture", "PF3-0007", "PLANT-2", "CELL-3 P1", "", "", "2026-02-26", "In service", ""),
-    ("LEG-01", "Inspection robot", "legged", "QD-2", "SN-QD2-0031", "PLANT-2", "Patrol A", "3.1.4", "", "2026-05-12", "In service", "Thermal and acoustic inspection"),
+    (
+        "Asset ID",
+        "Asset Type",
+        "Embodiment",
+        "Model",
+        "Serial",
+        "Site",
+        "Location",
+        "Firmware",
+        "Software",
+        "Commissioned",
+        "Status",
+        "Notes",
+    ),
+    (
+        "AMR-05",
+        "AMR",
+        "mobile base",
+        "tug-200",
+        "SN-T200-0105",
+        "S-007",
+        "Fleet",
+        "4.3.1",
+        "",
+        "2025-11-03",
+        "In service",
+        "",
+    ),
+    (
+        "AMR-06",
+        "AMR",
+        "mobile base",
+        "tug-200",
+        "SN-T200-0106",
+        "S-007",
+        "Fleet",
+        "4.3.1",
+        "",
+        "2025-11-03",
+        "In service",
+        "",
+    ),
+    (
+        "AMR-07",
+        "AMR",
+        "mobile base",
+        "lift-150",
+        "SN-L150-0107",
+        "S-007",
+        "Fleet",
+        "4.3.1",
+        "",
+        "2025-11-03",
+        "In service",
+        "Fork carriage chain replaced 2026-03-19",
+    ),
+    (
+        "ARM-3A",
+        "Industrial robot",
+        "manipulator",
+        "IRB-6700",
+        "SN-6700-118",
+        "PLANT-2",
+        "CELL-3",
+        "7.8.1",
+        "5.6.0",
+        "2026-02-26",
+        "In service",
+        "",
+    ),
+    (
+        "GRP-3A",
+        "Gripper",
+        "",
+        "PG-80",
+        "PG80-0931",
+        "PLANT-2",
+        "CELL-3 ARM-3A",
+        "2.3",
+        "",
+        "2026-02-26",
+        "In service",
+        "Finger set FS-0291",
+    ),
+    (
+        "WCAM-3A",
+        "Wrist camera",
+        "",
+        "VC-1280",
+        "SN-VC-4471",
+        "PLANT-2",
+        "CELL-3 ARM-3A",
+        "1.9.2",
+        "",
+        "2026-02-26",
+        "In service",
+        "",
+    ),
+    (
+        "CELL3-IPC",
+        "Industrial PC",
+        "",
+        "IPC-427",
+        "SN-IPC-2290",
+        "PLANT-2",
+        "CELL-3",
+        "",
+        "ROS 2 Humble; vision 3.4",
+        "2026-02-26",
+        "In service",
+        "Records the cell bags",
+    ),
+    (
+        "PLC-C3",
+        "Safety PLC",
+        "",
+        "S7-1516F",
+        "SN-PLC-7730",
+        "PLANT-2",
+        "CELL-3",
+        "2.9",
+        "",
+        "2026-02-26",
+        "In service",
+        "HMI alarm log",
+    ),
+    (
+        "PF-3",
+        "Fixture",
+        "",
+        "Infeed fixture",
+        "PF3-0007",
+        "PLANT-2",
+        "CELL-3 P1",
+        "",
+        "",
+        "2026-02-26",
+        "In service",
+        "",
+    ),
+    (
+        "LEG-01",
+        "Inspection robot",
+        "legged",
+        "QD-2",
+        "SN-QD2-0031",
+        "PLANT-2",
+        "Patrol A",
+        "3.1.4",
+        "",
+        "2026-05-12",
+        "In service",
+        "Thermal and acoustic inspection",
+    ),
 )
 
 
