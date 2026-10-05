@@ -268,6 +268,7 @@ class _Retrieve:
         query, node_types = self.query, pinned.node_types()
         subjects = ordered(query.subjects, _subject_json)
         declared: dict[NodeRef, int] = {}
+        groups: dict[NodeRef, list[NodeRef]] = {}  # a declared node and its same_as identities
         asked = False  # whether any subject names one node: then only those may seed the walk
         kinds: set[NodeType] = set()
         kind_wide: list[str] = []
@@ -298,13 +299,14 @@ class _Retrieve:
                 )
                 continue
             declared[node] = 0
-            for other in self.same_as(node, subject.same_as_depth):
+            groups[node] = [node, *self.same_as(node, subject.same_as_depth)]
+            for other in groups[node]:
                 declared.setdefault(other, 0)
         anchors = self.site_anchors()
         if not asked:
             seeds = anchors  # the site and zones are the anchors (ADR 0002 §5)
         elif declared and anchors:
-            seeds = self.at_site(declared, anchors)
+            seeds = self.at_site(groups, anchors)
         else:
             # Subjects that name nodes were asked; none found is no seed, never the whole site.
             seeds = declared
@@ -367,24 +369,27 @@ class _Retrieve:
         return anchors
 
     def at_site(
-        self, declared: dict[NodeRef, int], anchors: dict[NodeRef, int]
+        self, groups: dict[NodeRef, list[NodeRef]], anchors: dict[NodeRef, int]
     ) -> dict[NodeRef, int]:
-        """The declared seeds the graph connects to the scoped site (or, given zones, to one of
-        them) within ``SITE_CHECK_HOPS`` admitted claims; the rest are a gap at ``/site``."""
+        """The declared subjects (each with its ``same_as`` identities, kept or dropped together)
+        the graph connects to the scoped site (or, given zones, to one of them) within
+        ``SITE_CHECK_HOPS`` admitted claims; the rest are a gap at ``/site``."""
         zones = {n for n in anchors if n.node_type is NodeType.ZONE}
         targets = zones or set(anchors)
         kept: dict[NodeRef, int] = {}
-        for node in sorted(declared, key=_node_key):
+        dropped: list[NodeRef] = []
+        for root in sorted(groups, key=_node_key):
             reached = self.walk(
-                {node: 0},
+                dict.fromkeys(groups[root], 0),
                 SITE_CHECK_HOPS,
                 lambda p: p != SAME_AS_CANDIDATE,
                 Direction.BOTH,
                 record=False,
             )
             if targets & reached:
-                kept[node] = 0
-        dropped = sorted(set(declared) - set(kept), key=_node_key)
+                kept.update(dict.fromkeys(groups[root], 0))
+            else:
+                dropped.append(root)
         if dropped:
             self.state.gap(
                 GapCode.NOT_COVERED,
