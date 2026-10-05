@@ -252,6 +252,34 @@ def test_a_scene_rests_on_something_and_its_claims_are_carried() -> None:
     refuses(Code.DANGLING_REFERENCE, lambda: with_items(packet, [*others, with_claim]))
 
 
+def test_an_item_resting_on_an_inferred_claim_is_inferred_itself() -> None:
+    # C1 gate (ADR 0006 §3): a "stated" configuration over an inferred claim would render
+    # without INFERRED. q03 includes inference and carries one inferred claim item.
+    packet = golden("q03")
+    (claim_item,) = (i for i in packet.items if isinstance(i, ClaimItem) and i.is_inferred)
+    config = next(i for i in golden("q07").items if isinstance(i, ConfigurationItem))
+    stated = dataclasses.replace(config, claims=(claim_item.claim.id,))
+    refuses(Code.ASSERTION_MISMATCH, lambda: with_items(packet, [*packet.items, stated]))
+    inferred = dataclasses.replace(
+        stated,
+        assertion_kind="inferred",
+        confidence=claim_item.confidence,
+        provenance=dataclasses.replace(stated.provenance, model=claim_item.provenance.model),
+    )
+    assert with_items(packet, [*packet.items, inferred]).items
+    scene = next(i for i in golden("q07").items if isinstance(i, SceneItem))
+    stated_scene = dataclasses.replace(scene, claims=(claim_item.claim.id,))
+    refuses(Code.ASSERTION_MISMATCH, lambda: with_items(packet, [*packet.items, stated_scene]))
+
+
+def test_a_stated_item_may_rest_on_observed_or_stated_claims() -> None:
+    packet = golden("q01")
+    claim_item = next(i for i in packet.items if isinstance(i, ClaimItem))
+    config = next(i for i in golden("q07").items if isinstance(i, ConfigurationItem))
+    resting = dataclasses.replace(config, claims=(claim_item.claim.id,))
+    assert resting in with_items(packet, [*packet.items, resting]).items
+
+
 def test_scene_nodes_and_refs_are_sorted_and_unique() -> None:
     scene = next(i for i in golden("q07").items if isinstance(i, SceneItem))
     records = scene.records
@@ -369,6 +397,26 @@ def test_superseded_since_names_carried_claims_inside_the_window() -> None:
         )
     refuses(Code.BAD_VALUE, lambda: Superseded(entry.claim, entry.superseded_at, (entry.claim,)))
     refuses(Code.BAD_VALUE, lambda: Superseded(entry.claim, entry.superseded_at, ()))
+
+
+def test_superseded_since_starts_at_memorys_snapshot_when_memory_trails() -> None:
+    # C1 gate (ADR 0006 §4): claims are as Memory knew them at its own snapshot. When Memory
+    # trails the Ledger, a supersession between the two snapshots must still be listable.
+    packet = golden("q02")  # memory and packet as_of 3, superseded at 4, head 5
+    (entry,) = packet.superseded_since
+    trailing = dataclasses.replace(packet, as_of=LedgerTx(entry.superseded_at))
+    assert trailing.memory.as_of < trailing.as_of == entry.superseded_at
+    assert trailing.superseded_since == (entry,)
+    at_memory = dataclasses.replace(entry, superseded_at=LedgerTx(packet.memory.as_of))
+    refuses(Code.NOT_AS_OF, lambda: dataclasses.replace(trailing, superseded_since=(at_memory,)))
+
+
+def test_an_inferred_withheld_gap_needs_inference_excluded() -> None:
+    packet = golden("q06")  # evidence only, one inferred_withheld gap, no inferred item
+    assert any(g.code is GapCode.INFERRED_WITHHELD for g in packet.gaps)
+    refuses(Code.INFERENCE_EXCLUDED, lambda: dataclasses.replace(packet, inference_included=True))
+    others = tuple(g for g in packet.gaps if g.code is not GapCode.INFERRED_WITHHELD)
+    assert dataclasses.replace(packet, inference_included=True, gaps=others).inference_included
 
 
 def test_findings_must_be_active_at_the_snapshot_and_name_a_carried_claim() -> None:

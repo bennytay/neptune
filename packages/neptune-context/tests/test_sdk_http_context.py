@@ -155,6 +155,27 @@ def test_status_codes_map_to_structured_errors() -> None:
         assert raised.value.code is code, status
 
 
+def test_an_unmapped_status_takes_the_code_its_body_names() -> None:
+    # C1 gate review: a server's deterministic defect is not retried as an outage.
+    for status, named in (
+        (502, ErrorCode.INVALID_RESPONSE),
+        (500, ErrorCode.ENGINE_ERROR),
+        (410, ErrorCode.NOT_FOUND),
+    ):
+        reply = error_body(SdkError(named, "defect"))
+        with (
+            serve(lambda *_, s=status, r=reply: (s, r)) as (url, seen),
+            pytest.raises(SdkError) as raised,
+        ):
+            Client(url).query(golden_query("q01"))
+        assert raised.value.code is named, status
+        assert len(seen.requests) == 1, "a non-retryable code is asked once"
+    mapped = error_body(SdkError(ErrorCode.ENGINE_ERROR, "x"))
+    with serve(lambda *_: (404, mapped)) as (url, _), pytest.raises(SdkError) as raised:
+        Client(url, retry=RetryPolicy(attempts=1)).query(golden_query("q01"))
+    assert raised.value.code is ErrorCode.NOT_FOUND  # a mapped status decides
+
+
 def test_a_refused_query_answer_carries_its_findings_back() -> None:
     reply = error_body(SdkError(ErrorCode.QUERY_REFUSED, "no", findings=_findings()))
     with serve(lambda *_: (422, reply)) as (url, _), pytest.raises(SdkError) as raised:

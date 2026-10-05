@@ -359,7 +359,7 @@ def test_malformed_registry_is_reported(registry: Any, damage: str, expected: st
     elif damage == "extra_golden":
         (version / "golden" / "stray.json").write_text("{}\n")
     elif damage == "planned_with_version":
-        shutil.copytree(version, registry.root / "query-packet" / "v1.0.0")
+        shutil.copytree(version, registry.root / "dataset-manifest" / "v1.0.0")
     elif damage == "unknown_package":
         path = registry.root / "query-packet" / "contract.toml"
         path.write_text(_text(path).replace('"neptune-learn"]', '"neptune-nowhere"]'))
@@ -541,7 +541,7 @@ def test_the_first_stable_version_adds_every_in_repo_consumer(
 
 def test_bump_refuses_planned_contracts(registry: Any) -> None:
     with pytest.raises(tool.ContractError, match="planned"):
-        tool.bump(registry, "query-packet", "0.1.0")
+        tool.bump(registry, "dataset-manifest", "0.1.0")
 
 
 def test_post_needs_a_key_and_never_guesses(

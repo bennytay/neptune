@@ -33,7 +33,12 @@ LOOPBACK: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 DEFAULT_TIMEOUT_S: Final = 30.0
 
 
-_TIMED_OUT: Final = SdkError(ErrorCode.TIMEOUT, "the engine did not answer in time")
+def _timed_out() -> SdkError:
+    """A fresh error per timeout: a shared instance would grow its traceback on every raise and
+    keep each call's frames (request headers, partial bodies) alive across threads."""
+    return SdkError(ErrorCode.TIMEOUT, "the engine did not answer in time")
+
+
 _CHUNK: Final = 64 * 1024
 
 
@@ -54,7 +59,7 @@ def _read(stream: Any, limit: int, deadline: float) -> bytes:
     take = getattr(stream, "read1", stream.read)  # read1 returns after one socket wait
     while size < limit:
         if time.monotonic() > deadline:
-            raise _TIMED_OUT
+            raise _timed_out()
         chunk = take(min(_CHUNK, limit - size))
         if not chunk:
             break
@@ -136,10 +141,10 @@ class HttpEngine:
         except SdkError:
             raise
         except TimeoutError:
-            raise _TIMED_OUT from None
+            raise _timed_out() from None
         except urllib.error.URLError as error:
             if isinstance(error.reason, TimeoutError):
-                raise _TIMED_OUT from None
+                raise _timed_out() from None
             raise _unreachable(error.reason) from None
         except (OSError, http.client.HTTPException) as error:
             raise _unreachable(error) from None

@@ -37,7 +37,7 @@ def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> No
     assert ledger["output"]["served"] == "goldens"
     assert len(ledger["output"]["goldens"]) == len(served.goldens)
     assert report["smoke"]["ok"] is True
-    assert report["smoke"]["packet_source"].startswith("canned: query-packet")
+    assert report["smoke"]["packet_source"].startswith("golden query-packet packet.q01-")
     assert report["corpus"] == {"name": "worked-examples", "cases": list(corpus.EXAMPLE_NAMES)}
 
 

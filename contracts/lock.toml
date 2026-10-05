@@ -11,6 +11,7 @@ graph-schema = "1.0.0"
 catalog-api = "1.4.0"
 graph-schema = "1.0.0"
 package-schema = "6.0.0"
+query-packet = "1.0.0"
 
 [neptune-ledger]
 package-schema = "6.0.0"
