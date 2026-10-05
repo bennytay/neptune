@@ -6,12 +6,12 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 1`, published as `contracts/graph-schema/v1.3.0/` (1.0.0 and 1.1.0 stay)
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 1`, published as `contracts/graph-schema/v1.8.0/` (1.0.0, 1.1.0 and 1.3.0 stay)
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
   - `neptune_memory.schema`: `NodeRef`/`NodeType`/`Tier`, `Claim` and its objects and provenance (with `ModelRef`),
-    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 5`), the
+    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 10`), the
     superseding resolver (`resolve`, `as_of`, `ResolutionFinding`, `resolver_config`), `codec` (strict JSON) and
     `export.graph_schema`. Claim model: [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md);
     superseding: [ADR 0005](adr/0005-split-closures-bi-temporal-findings-and-the-resolver-config.md).

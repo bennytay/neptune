@@ -43,8 +43,8 @@ def test_today_only_the_compiler_resolves_to_real() -> None:
     assert "no real driver for neptune-ledger" in resolved["ledger"].reason
     assert resolved["ledger"].contract_version == "1.6.0"
     assert resolved["context"].mode == "stub"
-    assert resolved["memory"].mode == "stub"  # graph-schema 1.3.0 published; no driver yet
-    assert resolved["memory"].contract_version == "1.3.0"
+    assert resolved["memory"].mode == "stub"  # graph-schema 1.8.0 published; no driver yet
+    assert resolved["memory"].contract_version == "1.8.0"
 
 
 def test_an_importable_package_without_a_driver_is_still_a_stub() -> None:
