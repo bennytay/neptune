@@ -3,6 +3,8 @@
 - An ``IdentityLink`` the compiler marked ``Ambiguous`` (its right side, or a shared identifier)
   yields ``same_as_candidate`` pairs, one claim each way per candidate, each citing that
   candidate's own evidence; never ``same_as`` and never a collapse to one candidate.
+- A validity window, a bound of one, or an assertion's ``authored_at`` the evidence leaves
+  ``Ambiguous`` is never read as unstated: each reading is a candidate window of its own.
 - A person's ``same_identity`` assertion grounds ``same_as`` while no effective ``retract`` names
   its declared id; a retraction of a retraction restores it; a loop is undecided and reported.
 - ``distinct_identity`` suppresses candidates between its ids and contests a ``same_as``.
@@ -12,9 +14,13 @@
 from collections.abc import Mapping, Sequence
 from fractions import Fraction
 
+import pytest
+
 from memory_identity_records import (
+    CLOCK,
     STATED,
     Record,
+    ambiguous,
     assertion,
     at,
     civil_domain,
@@ -24,9 +30,11 @@ from memory_identity_records import (
     window,
 )
 from neptune.identity.ids import record_id
+from neptune.model.alignment import ValidityWindow
 from neptune.model.assertion import AssertionType
 from neptune.model.ids import LogicalId
-from neptune.model.time import Epoch, Timescale
+from neptune.model.knowledge import Knowledge, Known, Unknown
+from neptune.model.time import Epoch, Timescale, Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
 from neptune_memory.consolidate.identity import (
     SAME_AS,
@@ -35,6 +43,7 @@ from neptune_memory.consolidate.identity import (
     node_ref,
     same_as_candidates,
 )
+from neptune_memory.consolidate.identity_records import MAX_WINDOWS
 from neptune_memory.schema.claim import Claim
 from neptune_memory.schema.interval import OPEN, CivilClock, LedgerTx, ledger_tx
 from neptune_memory.schema.nodes import NodeType
@@ -78,6 +87,12 @@ def _codes(result: Consolidation) -> list[str]:
     return sorted(f.code for f in result.findings)
 
 
+def _thread_of(node_id: str) -> str:
+    """The record id of ``node_id``'s one thread in ``_fleet``."""
+    namespace, value = node_id.split(":", 1)
+    return str(thread(LogicalId(namespace, value))["id"])
+
+
 # --- Ambiguous links ---------------------------------------------------------------------------
 
 AMBIGUOUS = link("maintenance.log line 12", SLOT, (UNIT_1, UNIT_2))
@@ -91,7 +106,9 @@ def test_an_ambiguous_link_is_a_candidate_each_way_per_candidate_never_same_as()
     assert _pairs(candidates) == {(slot, one), (one, slot), (slot, two), (two, slot)}
     for claim in candidates:
         assert claim.assertion_kind is STATED
-        assert claim.provenance.records == (AMBIGUOUS["id"],)
+        # No window stated: each direction holds from its subject's first thread, and cites it.
+        subject_thread = _thread_of(claim.subject.node_id)
+        assert claim.provenance.records == tuple(sorted((str(AMBIGUOUS["id"]), subject_thread)))
     # Each candidate cites the line and its own place in it: the evidence for that reading.
     by_pair = {(c.subject.node_id, c.object.node_id): c.provenance.evidence for c in candidates}  # type: ignore[union-attr]
     assert by_pair[(slot, one)] != by_pair[(slot, two)]
@@ -147,6 +164,96 @@ def test_a_window_with_an_end_but_no_start_its_subject_can_place_is_a_finding() 
     result = _run(_fleet(timed))
     assert not result.claims
     assert _codes(result) == ["identity.untimeable_window"]
+
+
+# --- Ambiguous time ----------------------------------------------------------------------------
+
+# A fleet register: asset tag slot-b belonged to unit 1 in one of two periods (tags are reused).
+TWO_PERIODS = ambiguous(
+    "register row 4 validity",
+    ValidityWindow(CLOCK, Known(at(500)), Known(at(900))),
+    ValidityWindow(CLOCK, Known(at(1500)), Known(at(1900))),
+)
+
+
+def _windows(claims: Sequence[Claim]) -> set[tuple[str, object, object]]:
+    return {(c.subject.node_id, c.valid_from, c.valid_to) for c in claims}
+
+
+def test_an_ambiguous_validity_is_a_candidate_per_window_never_a_same_as() -> None:
+    result = _run(_fleet(link("register row 4", SLOT, UNIT_1, validity=TWO_PERIODS)))
+    assert not _of(result, SAME_AS) and not result.findings
+    candidates = _of(result, SAME_AS_CANDIDATE)
+    slot, one = "controller:slot-b", "serial:H1-0001"
+    assert _windows(candidates) == {
+        (subject, at(start), at(end))
+        for subject in (slot, one)
+        for start, end in ((500, 900), (1500, 1900))
+    }
+    # Each window cites its own candidate; nothing falls back to a thread start.
+    by_window = {c.valid_from: c.provenance for c in candidates}
+    assert by_window[at(500)].evidence != by_window[at(1500)].evidence
+    assert all(p.evidence for p in by_window.values())
+    assert all(len(c.provenance.records) == 1 for c in candidates)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [
+        (ambiguous("row 5 start", at(500), at(1500)), Known(at(1900)), [(500, 1900), (1500, 1900)]),
+        (ambiguous("row 5 start", at(500), at(1500)), Unknown(), [(500, None), (1500, None)]),
+        (Known(at(200)), ambiguous("row 5 end", at(900), at(1900)), [(200, 900), (200, 1900)]),
+    ],
+)
+def test_an_ambiguous_bound_is_a_candidate_per_reading_never_a_same_as(
+    start: Knowledge[Timestamp], end: Knowledge[Timestamp], expected: list[tuple[int, int | None]]
+) -> None:
+    validity = Known(ValidityWindow(CLOCK, start, end))
+    result = _run(_fleet(link("register row 5", SLOT, UNIT_1, validity=validity)))
+    assert not _of(result, SAME_AS) and not result.findings
+    assert {(c.valid_from, c.valid_to) for c in _of(result, SAME_AS_CANDIDATE)} == {
+        (at(s), OPEN if e is None else at(e)) for s, e in expected
+    }
+    assert len(_of(result, SAME_AS_CANDIDATE)) == 2 * len(expected)
+
+
+def test_an_ambiguous_end_with_no_start_holds_from_and_cites_the_subject_s_thread() -> None:
+    validity = Known(ValidityWindow(CLOCK, Unknown(), ambiguous("row 6 end", at(900), at(1900))))
+    result = _run(_fleet(link("register row 6", SLOT, UNIT_1, validity=validity)))
+    candidates = _of(result, SAME_AS_CANDIDATE)
+    assert {(c.valid_from, c.valid_to) for c in candidates} == {
+        (at(100), at(900)),
+        (at(100), at(1900)),
+    }
+    for claim in candidates:
+        assert _thread_of(claim.subject.node_id) in claim.provenance.records
+
+
+def test_a_candidate_window_that_ends_before_it_starts_is_a_finding_and_the_others_stay() -> None:
+    start = ambiguous("row 7 start", at(500), at(1500))
+    validity = Known(ValidityWindow(CLOCK, start, Known(at(1000))))
+    result = _run(_fleet(link("register row 7", SLOT, UNIT_1, validity=validity)))
+    assert {(c.valid_from, c.valid_to) for c in result.claims} == {(at(500), at(1000))}
+    assert len(result.claims) == 2 and not _of(result, SAME_AS)
+    assert _codes(result) == ["identity.untimeable_window"]
+
+
+def test_too_many_candidate_windows_are_refused_not_multiplied() -> None:
+    many = ambiguous("row 8 start", *(at(n) for n in range(MAX_WINDOWS + 1)))
+    validity = Known(ValidityWindow(CLOCK, many, Unknown()))
+    result = _run(_fleet(link("register row 8", SLOT, UNIT_1, validity=validity)))
+    assert not result.claims
+    assert _codes(result) == ["identity.untimeable_window"]
+
+
+def test_an_ambiguous_authored_at_makes_a_same_identity_a_candidate_per_reading() -> None:
+    said = assertion("ASR-40", SAME, (SLOT, UNIT_1), authored_at=ambiguous("ASR-40", at(5), at(7)))
+    result = _run(_fleet(said))
+    assert not _of(result, SAME_AS) and not result.findings
+    assert {(c.valid_from, c.valid_to) for c in _of(result, SAME_AS_CANDIDATE)} == {
+        (at(5), OPEN),
+        (at(7), OPEN),
+    }
 
 
 # --- Assertions --------------------------------------------------------------------------------

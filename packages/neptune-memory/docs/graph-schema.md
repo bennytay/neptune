@@ -1,9 +1,9 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.2.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.4.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
-([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds
+([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.4.0 (minor) adds
 the `clock` node type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
 ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
@@ -40,7 +40,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 4`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 6`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -128,7 +128,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.2.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.4.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -164,6 +164,11 @@ def test_graph_schema_contract(check):
     ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md)).
     `same_as_candidate` is pairwise: every candidate of an `Ambiguous` link, and threads citing one source. People are named only by declared
     identifiers: never blank, never padded with whitespace.
+    An `Ambiguous` validity window, window bound or assertion `authored_at` is never read as unstated: the
+    statement becomes `same_as_candidate` pairs, one per reading of its window, each citing that reading (more
+    than 64 readings: `identity.untimeable_window`, no claim). A statement that states no start holds from its
+    subject's first thread record, and the claim lists that thread in `provenance.records`, so a conventional
+    start is told from a stated one.
 12. **No clock mapping is invented.** `maps_to` and `clock_map` rest only on a compiler `ClockMapping` (declared:
     `observed` or `stated`, from `memory.time`) or a compiler estimate (`inferred`, from `memory.time_estimates`),
     or on a chain of them; Memory never estimates an offset, never assumes an unstated validity open, and never

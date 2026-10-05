@@ -6,9 +6,10 @@ compiler's ``IdentityLink`` with a ``Known`` right side (two ids co-declared, or
 both sides declare verbatim), configuration-lineage continuity, and a person's ``same_identity``
 assertion that no effective ``retract`` withdraws. Everything else plausible is a
 ``same_as_candidate`` pair, one claim each way: every candidate of a link the compiler marked
-``Ambiguous``, with that candidate's own evidence, and threads of one type in different namespaces
-that cite one identical evidence ref. Nothing is merged: ``same_as`` is an edge that queries
-traverse (``schema.traverse.same_as_closure``).
+``Ambiguous``, with that candidate's own evidence; every window of a statement whose validity (or
+a bound of it, or an assertion's ``authored_at``) is ``Ambiguous``, with that window's evidence;
+and threads of one type in different namespaces that cite one identical evidence ref. Nothing is
+merged: ``same_as`` is an edge that queries traverse (``schema.traverse.same_as_closure``).
 
 Records are parsed by ``consolidate.identity_records``; this module decides. Malformed or
 contradictory input is a finding and never a claim, and the rest of the build is unaffected.
@@ -118,12 +119,6 @@ def _malformed(kind: str, package_id: str, index: int, reason: str) -> Consolida
 class _Node:
     ref: NodeRef
     threads: tuple[Thread, ...]  # sorted by record id
-
-    @property
-    def start(self) -> Timestamp:
-        """Where a statement that states no time starts: the node's first thread record's start
-        (by record id). A convention, not a lifetime: Memory models none (ADR 0007 §3)."""
-        return self.threads[0].valid_from
 
 
 @dataclass
@@ -357,8 +352,8 @@ def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[
                 assertion_kind=AssertionKind.STATED,
                 left=ordered[0],
                 right=tuple(Side(node) for node in ordered[1:]),
-                decided=True,
-                window=Window(statement.authored_at, OPEN),
+                decided=statement.timed,
+                windows=statement.windows,
                 evidence=statement.evidence,
             )
         )
@@ -414,6 +409,15 @@ class IdentityConsolidator:
             )
         stated, distinct = _from_statements(view)
         links = sorted((*view.links, *stated), key=lambda link: link.record)
+        for link in (link for link in links if not link.windows):
+            view.findings.append(
+                _link_finding(
+                    "untimeable_window",
+                    link,
+                    f"states more than {parse.MAX_WINDOWS} candidate windows; none is read",
+                )
+            )
+        links = [link for link in links if link.windows]
         drafts: list[ClaimDraft] = []
         components = _Components()
         for link in (link for link in links if link.decided):
@@ -492,21 +496,38 @@ def _ends(view: _View, link: Link, side: Side) -> tuple[_Node, _Node] | Consolid
     return a, b
 
 
+@dataclass(frozen=True)
+class _Timed:
+    """Where a statement holds for one subject, and the records and evidence that time cites:
+    its window's own candidate, and the subject's first thread when it supplies the start."""
+
+    start: Timestamp
+    end: Timestamp | Open
+    records: tuple[RecordId, ...]
+    evidence: tuple[EvidenceRef, ...]
+
+
 def _interval(
-    view: _View, link: Link, subject: _Node
-) -> tuple[Timestamp, Timestamp | Open] | ConsolidationFinding:
-    """The statement's window on a shared clock where it declares one; a window that states no
-    start holds from the subject's first thread (ADR 0008 §2)."""
-    end = OPEN if isinstance(link.window.end, Open) else view.place(link.window.end)
-    start = subject.start if link.window.start is None else link.window.start
-    start = view.place(start)
+    view: _View, link: Link, window: Window, subject: _Node
+) -> _Timed | ConsolidationFinding:
+    """The window on a shared clock where it declares one. A window that states no start holds
+    from the subject's first thread record (by record id; ADR 0008 §2), which the claim then
+    cites, so a conventional start is told from a stated one. A convention, not a lifetime:
+    Memory models none (ADR 0007 §3)."""
+    end = OPEN if isinstance(window.end, Open) else view.place(window.end)
+    records: tuple[RecordId, ...] = ()
+    if window.start is None:
+        first = subject.threads[0]
+        start, records = view.place(first.valid_from), (first.record,)
+    else:
+        start = view.place(window.start)
     if isinstance(end, Timestamp) and (end.domain_id != start.domain_id or not start < end):
         return _link_finding(
             "untimeable_window",
             link,
             "states an end but no start its subject's clock can place before it",
         )
-    return start, end
+    return _Timed(start, end, records, window.evidence)
 
 
 def _same_as(view: _View, link: Link, side: Side) -> ClaimDraft | None:
@@ -515,26 +536,28 @@ def _same_as(view: _View, link: Link, side: Side) -> ClaimDraft | None:
         view.findings.append(ends)
         return None
     a, b = ends
-    interval = _interval(view, link, a)
-    if isinstance(interval, ConsolidationFinding):
-        view.findings.append(interval)
+    (window,) = link.windows  # a decided statement states one window
+    timed = _interval(view, link, window, a)
+    if isinstance(timed, ConsolidationFinding):
+        view.findings.append(timed)
         return None
     return ClaimDraft(
         subject=a.ref,
         predicate=SAME_AS,
         object=b.ref,
-        valid_from=interval[0],
-        valid_to=interval[1],
+        valid_from=timed.start,
+        valid_to=timed.end,
         assertion_kind=link.assertion_kind,
-        evidence=(*link.evidence, *side.evidence),
-        records=(link.record,),
+        evidence=(*link.evidence, *side.evidence, *timed.evidence),
+        records=(link.record, *timed.records),
     )
 
 
 def _link_candidates(
     view: _View, link: Link, apart: Callable[[Key, Key], bool]
 ) -> list[ClaimDraft]:
-    """Every candidate of an ambiguous link, one claim each way, each with its own evidence."""
+    """Every candidate of an ambiguous link over every window it may hold in, one claim each way,
+    each citing that candidate and that window's own evidence."""
     drafts: list[ClaimDraft] = []
     for side in link.right:
         ends = _ends(view, link, side)
@@ -543,26 +566,30 @@ def _link_candidates(
             continue
         if not apart(_key(link.left), _key(side.node)):
             continue
-        directions = [
-            (subject, obj, _interval(view, link, subject)) for subject, obj in (ends, ends[::-1])
-        ]
-        refused = [i for _, _, i in directions if isinstance(i, ConsolidationFinding)]
-        if refused:  # both ways or neither: a candidate pair is never one-sided
-            view.findings.append(refused[0])
-            continue
-        drafts.extend(
-            ClaimDraft(
-                subject=subject.ref,
-                predicate=SAME_AS_CANDIDATE,
-                object=obj.ref,
-                valid_from=interval[0],  # type: ignore[index]
-                valid_to=interval[1],  # type: ignore[index]
-                assertion_kind=link.assertion_kind,
-                evidence=(*link.evidence, *side.evidence),
-                records=(link.record,),
+        for window in link.windows:
+            directions = [
+                (subject, obj, _interval(view, link, window, subject))
+                for subject, obj in (ends, ends[::-1])
+            ]
+            timed = [t for _, _, t in directions if isinstance(t, _Timed)]
+            if len(timed) < len(directions):  # both ways or neither: never one-sided
+                view.findings.append(
+                    next(t for _, _, t in directions if isinstance(t, ConsolidationFinding))
+                )
+                continue
+            drafts.extend(
+                ClaimDraft(
+                    subject=subject.ref,
+                    predicate=SAME_AS_CANDIDATE,
+                    object=obj.ref,
+                    valid_from=t.start,
+                    valid_to=t.end,
+                    assertion_kind=link.assertion_kind,
+                    evidence=(*link.evidence, *side.evidence, *t.evidence),
+                    records=(link.record, *t.records),
+                )
+                for (subject, obj, _), t in zip(directions, timed, strict=True)
             )
-            for subject, obj, interval in directions
-        )
     return drafts
 
 

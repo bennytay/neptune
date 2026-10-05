@@ -67,7 +67,7 @@ def test_schema_export_is_published_and_validates_every_golden() -> None:
 
 
 def test_the_first_published_golden_still_loads_and_passes_the_suite() -> None:
-    """1.1.0 and 1.2.0 are minor releases: a consumer pinned to 1.0.0 keeps its golden and its
+    """1.1.0 and 1.4.0 are minor releases: a consumer pinned to 1.0.0 keeps its golden and its
     answers."""
     first = load_golden(FIRST / "golden" / "graph.json")
     for check in CHECKS:

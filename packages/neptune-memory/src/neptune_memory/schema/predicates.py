@@ -29,11 +29,11 @@ if TYPE_CHECKING:
 
 # Bumped whenever CORE_PREDICATES changes. 2: ``same_as`` and ``same_as_candidate`` joined the
 # core (ADR 0006 §4). 3: ``has_name`` joined (ADR 0007 §2), and the predicates that hold for every
-# node type widened to ``stream`` and ``document`` (ADR 0008 §6). 4: the time-domain registry's
+# node type widened to ``stream`` and ``document`` (ADR 0008 §6). 6: the time-domain registry's
 # ``has_clock``, ``maps_to`` and ``clock_map`` joined, and the predicates that hold for every node
-# type widened to ``clock`` (ADR 0011 §1). The vocabulary is part of graph-schema
-# (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 4
+# type widened to ``clock`` (ADR 0011 §1); 4 and 5 are MVL-127's and MVL-131's, numbered in merge
+# order. The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 6
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.

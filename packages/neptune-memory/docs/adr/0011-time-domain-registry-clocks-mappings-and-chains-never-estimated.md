@@ -113,9 +113,10 @@ reached, and the mappings that exist but do not apply (outside validity, or no a
 
 ### 6. Contract
 
-Vocabulary 4 (`has_clock`, `maps_to`, `clock_map`; the every-node-type predicates widen to `clock` and bump their
-versions), the `clock` node type and the `clock_map` value type are graph-schema **1.2.0**, a minor release:
-every 1.0.0 and 1.1.0 golden validates. The golden graph adds `memory.time` (priority 4): the drone's three clocks
+Vocabulary 6 (`has_clock`, `maps_to`, `clock_map`; the every-node-type predicates widen to `clock` and bump their
+versions), the `clock` node type and the `clock_map` value type are graph-schema **1.4.0**, a minor release:
+every 1.0.0 and 1.1.0 golden validates (1.4.0 and vocabulary 6 are provisional: 1.2.0/4 and 1.3.0/5 are
+MVL-127's and MVL-131's, and the numbers follow merge order). The golden graph adds `memory.time` (priority 4): the drone's three clocks
 and the quadruped's stated `starting_time` → `log_time` mapping. A new generation (ADR 0006 §7).
 
 ### 7. Withdrawal stays MVL-132's
