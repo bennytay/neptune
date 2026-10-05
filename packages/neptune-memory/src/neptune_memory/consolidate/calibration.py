@@ -25,10 +25,11 @@ Four things, each from declared records only, each cited:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from functools import partial
 from itertools import pairwise
-from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Final, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.model.finding import Severity
@@ -79,7 +80,9 @@ from neptune_memory.consolidate.identity_records import (
 )
 from neptune_memory.schema.claim import (
     MAX_DELTA_VALUES,
+    DeclaredTransform,
     Delta,
+    DeltaAdjustment,
     DeltaQuantity,
     LedgerRecordRef,
     TypedLiteral,
@@ -398,6 +401,8 @@ def _configurations(
     The configuration chain at the calibration's instant states which configuration the machine
     was in then; only where it places none that a hardware configuration is anchored on are the
     configurations that declare the machine (which state no time) read instead (ADR 0014 §2).
+    Those are definite only for a machine with no chain at all: where it has one that cannot say
+    (another clock, an untimed calibration, an instant it does not cover), each is one reading.
     """
 
     def add(
@@ -426,11 +431,24 @@ def _configurations(
                     add(chained, configuration, not placed.decided, placed.evidence, placed.records)
     if chained:
         return chained
+    chain = view.chains.get(machine, ())
     declared: _Found = {}
     for configuration in view.configurations:  # the identity chain: it declares the machine
         for candidate in configuration.machines:
             if node_ref(NodeType.MACHINE, candidate) == machine:
-                add(declared, configuration, configuration.machine == "ambiguous")
+                add(declared, configuration, bool(chain) or configuration.machine == "ambiguous")
+    if chain and declared:
+        view.findings.append(
+            _finding(
+                "chain_undecided",
+                "the machine's configuration chain does not place a hardware configuration at the"
+                " calibration's instant (another clock, untimed, or not covered); the"
+                " configurations that declare the machine are each only one reading",
+                (calibration.record,),
+                machine=machine.node_id,
+                clocks=sorted({p.interval.domain_id for p in chain}),
+            )
+        )
     return declared
 
 
@@ -623,10 +641,6 @@ def _frame_check(
 
 # --- History ------------------------------------------------------------------------------------
 
-# What follows a calibration in its series: the next definite calibration's stated valid_from,
-# "unstated" when that one states none, or None when no definite calibration follows.
-_Next: TypeAlias = "Timestamp | Literal['unstated'] | None"
-
 
 @dataclass(frozen=True)
 class _Entry:
@@ -647,42 +661,121 @@ class _Entry:
         return not self.placement.definite or not self.frames_agree
 
     @property
-    def shape(self) -> tuple[str, ...]:
-        """Its kind: the parameter names it declares (ADR 0014 §3). Edges are not part of it: a
-        contradicted binding names another edge, and is still a calibration of the same kind."""
-        return tuple(p.name for p in self.calibration.parameters)
+    def shape(self) -> tuple[tuple[str, ...], tuple[bytes, ...]]:
+        """Its kind: the parameter names it declares and the description edges it binds (ADR
+        0014 §3), so a lidar-to-camera extrinsic never ends a lidar-to-base one."""
+        names = tuple(p.name for p in self.calibration.parameters)
+        return names, tuple(sorted({_edge_key((b.parent, b.child)) for b in self.bindings}))
+
+    @property
+    def firm(self) -> bool:
+        """Definitely this sensor's, with a stated ``valid_from``: it orders its series."""
+        return not self.candidate and isinstance(self.calibration.valid_from, Known)
 
 
-def _windows(
-    view: _View, entry: _Entry, after: _Next
-) -> tuple[list[tuple[Timestamp, Timestamp | Open, tuple[EvidenceRef, ...]]], bool]:
-    """The intervals a calibration is stated over, and whether they are readings of an
-    ``Ambiguous`` end. ``after`` is the next definite calibration of its series: its stated
-    ``valid_from``, ``"unstated"`` when it states none, or ``None`` when none follows.
+def _starts(view: _View, entry: _Entry) -> tuple[Timestamp, ...] | None:
+    """Where its validity may start: its stated ``valid_from``, every reading of an
+    ``Ambiguous`` one, or ``None`` when it states none (it may start anywhere)."""
+    start = entry.calibration.valid_from
+    if isinstance(start, Known):
+        return (view.place(start.value),)
+    if isinstance(start, Ambiguous):
+        return tuple(sorted({view.place(c.value) for c in start.candidates}, key=_key))
+    return None
 
-    From a stated ``valid_from`` only; to its stated ``valid_until``, open where it states none
-    (``KnownAbsent``), or else until the next calibration's ``valid_from`` (open when none
-    follows). A successor that states no ``valid_from`` leaves the end unstated: no interval.
+
+@dataclass(frozen=True)
+class _Ends:
+    """How a calibration's unstated end reads in its series: ``readings`` (one is decided, several
+    are ``Ambiguous``), or ``doubt`` naming the calibrations that may start anywhere in it."""
+
+    readings: tuple[Timestamp | Open, ...] = ()
+    doubt: tuple[RecordId, ...] = ()
+
+
+def _firm_start(view: _View, entry: _Entry) -> Timestamp | None:
+    """A firm calibration's stated ``valid_from``; ``None`` for any other."""
+    return _starts(view, entry)[0] if entry.firm else None  # type: ignore[index]
+
+
+def _ends(view: _View, entry: _Entry, start: Timestamp, members: list[_Entry]) -> _Ends:
+    """Where a calibration that states no end ended: at the next calibration of its series to
+    start, as a configuration span ends at the next placement (ADR 0010 §2).
+
+    The next firm calibration (definitely this sensor's, stated ``valid_from``, same clock) ends
+    it, or nothing does (``open``). A calibration whose start or placement is in doubt and that
+    may start before that adds its readings: a candidate placement may or may not end it; one
+    definitely of the sensor whose ``Ambiguous`` start lies wholly before the next firm one does
+    end it, at one of its readings. One that may start anywhere (stated no ``valid_from``, or on
+    another clock) leaves the end undecided.
+    """
+    domain = start.domain_id
+    later = [
+        t
+        for e in members
+        if e is not entry and (t := _firm_start(view, e)) is not None
+        if t.domain_id == domain and t.ticks > start.ticks
+    ]
+    bound: Timestamp | Open = min(later, key=lambda t: t.ticks, default=OPEN)
+
+    def within(t: Timestamp) -> bool:
+        return start < t and (isinstance(bound, Open) or t < bound)
+
+    doubt: list[RecordId] = []
+    maybe: list[Timestamp] = []
+    surely: list[tuple[Timestamp, ...]] = []
+    for other in members:
+        firm = _firm_start(view, other)
+        if other is entry or (firm is not None and firm.domain_id == domain):
+            continue
+        starts = _starts(view, other)
+        if starts is None or any(t.domain_id != domain for t in starts):
+            doubt.append(other.calibration.record)
+            continue
+        inside = [t for t in starts if within(t)]
+        maybe.extend(inside)
+        if inside and len(inside) == len(starts) and not other.candidate:
+            surely.append(tuple(inside))
+    if doubt:
+        return _Ends(doubt=tuple(sorted(set(doubt))))
+    if surely:  # one of these surely ends it: no later than the earliest of their latest readings
+        upper = min((max(group, key=lambda t: t.ticks) for group in surely), key=lambda t: t.ticks)
+        readings: list[Timestamp | Open] = [t for t in maybe if t.ticks <= upper.ticks]
+    else:
+        readings = [*maybe, bound]
+    unique = {(-1 if isinstance(r, Open) else 0, getattr(r, "ticks", 0)): r for r in readings}
+    ordered = [unique[k] for k in sorted(unique, key=lambda k: (k[0] == -1, k[1]))]
+    return _Ends(readings=tuple(ordered))
+
+
+def _claims(view: _View, entry: _Entry, members: list[_Entry], tie: bool) -> list[ClaimDraft]:
+    """``calibrated_with`` (or ``calibration_candidate``) claims on its sensor's nodes.
+
+    From a stated ``valid_from`` only; to its stated ``valid_until``, open where it states it has
+    none (``KnownAbsent``), else where its series says (``_ends``). Any reading of an ``Ambiguous``
+    bound, an end in doubt, a tie or a doubtful placement makes it a candidate per reading.
     """
     calibration = entry.calibration
     record = (calibration.record,)
-    start_knowledge = calibration.valid_from
-    if not isinstance(start_knowledge, Known):
-        ambiguous = isinstance(start_knowledge, Ambiguous)
+    starts = _starts(view, entry)
+    if starts is None or len(starts) > 1:
+        ambiguous = starts is not None
         view.findings.append(
             _finding(
                 "ambiguous_validity" if ambiguous else "validity_unstated",
                 "a calibration's valid_from is "
                 + ("Ambiguous" if ambiguous else "not stated")
-                + "; it is ordered by its instant, but no interval is claimed for it",
+                + "; no interval is claimed for it, and it leaves undecided where the"
+                " calibrations of its series around it end",
                 record,
                 Severity.WARNING if ambiguous else Severity.INFO,
             )
         )
-        return [], False
-    start = view.place(start_knowledge.value)
+        return []
+    (start,) = starts
     until = calibration.valid_until
     readings: list[tuple[Timestamp | Open, tuple[EvidenceRef, ...]]]
+    doubtful = False
     if isinstance(until, Known):
         readings = [(view.place(until.value), ())]
     elif isinstance(until, Ambiguous):
@@ -695,21 +788,37 @@ def _windows(
             )
         )
         readings = [(view.place(c.value), parse.cited(c)) for c in until.candidates]
+        doubtful = True
     elif isinstance(until, KnownAbsent):
         readings = [(OPEN, ())]
-    elif after == "unstated":
-        view.findings.append(
-            _finding(
-                "end_unstated",
-                "a calibration states no valid_until and the next calibration of its series"
-                " states no valid_from; where it ended is not stated, so no interval is claimed",
-                record,
-            )
-        )
-        return [], False
     else:
-        readings = [(OPEN if after is None else after, ())]
-    windows: list[tuple[Timestamp, Timestamp | Open, tuple[EvidenceRef, ...]]] = []
+        ends = _ends(view, entry, start, members)
+        if ends.doubt:
+            view.findings.append(
+                _finding(
+                    "end_unstated",
+                    "a calibration states no valid_until, and a calibration of its series that"
+                    " may start anywhere (no stated valid_from, another clock) leaves where it"
+                    " ended undecided; no interval is claimed",
+                    (*record, *ends.doubt),
+                )
+            )
+            return []
+        if len(ends.readings) > 1:
+            view.findings.append(
+                _finding(
+                    "ambiguous_end",
+                    "a calibration states no valid_until, and calibrations whose start or"
+                    " placement is in doubt may end it; each reading is a candidate",
+                    record,
+                    readings=len(ends.readings),
+                )
+            )
+            doubtful = True
+        readings = [(end, ()) for end in ends.readings]
+    if entry.configuration is None:
+        return []
+    windows: list[tuple[Timestamp | Open, tuple[EvidenceRef, ...]]] = []
     for end, cited in readings:
         if isinstance(end, Timestamp) and (end.domain_id != start.domain_id or not start < end):
             view.findings.append(
@@ -721,29 +830,21 @@ def _windows(
                 )
             )
             continue
-        windows.append((start, end, cited))
-    return windows, isinstance(until, Ambiguous)
-
-
-def _claims(view: _View, entry: _Entry, after: _Next, candidate: bool) -> list[ClaimDraft]:
-    """``calibrated_with`` (or ``calibration_candidate``) claims on each of its sensor's nodes."""
-    if entry.configuration is None:
-        return []
-    windows, ambiguous_end = _windows(view, entry, after)
-    predicate = CALIBRATION_CANDIDATE if candidate or ambiguous_end else CALIBRATED_WITH
+        windows.append((end, cited))
+    candidate = entry.candidate or tie or doubtful
     return [
         ClaimDraft(
             subject=node,
-            predicate=predicate,
+            predicate=CALIBRATION_CANDIDATE if candidate else CALIBRATED_WITH,
             object=entry.configuration,
             valid_from=start,
             valid_to=end,
-            assertion_kind=entry.calibration.assertion_kind,
+            assertion_kind=calibration.assertion_kind,
             evidence=(*entry.evidence, *cited),
             records=entry.records,
         )
         for node in entry.placement.nodes
-        for start, end, cited in windows
+        for end, cited in windows
     ]
 
 
@@ -789,47 +890,41 @@ def _entry(view: _View, calibration: CalibrationRecord) -> _Entry | None:
 
 
 def _history(view: _View, entries: list[_Entry]) -> list[ClaimDraft]:
-    """Series per sensor node and kind; each ordered on one clock, ties never broken."""
-    series: dict[tuple[NodeRef, tuple[str, ...]], list[_Entry]] = {}
+    """Series per sensor node and kind. Firm calibrations order a series on one clock; every
+    other member (a doubtful placement, an unstated or Ambiguous start, another clock) is placed
+    as far as it states, and wherever it may lie no end and no drift is decided (ADR 0014 §3)."""
+    series: dict[tuple[NodeRef, tuple[tuple[str, ...], tuple[bytes, ...]]], list[_Entry]] = {}
     for entry in entries:
-        if entry.at is None:
+        if not isinstance(entry.calibration.valid_from, Known) and not isinstance(
+            entry.calibration.performed, Known
+        ):
             view.findings.append(
                 _finding(
                     "untimed",
                     "a calibration states neither valid_from nor performed; it is in no ordered"
-                    " history and no drift is computed for it",
+                    " history, and its series' ends and drift around it are undecided",
                     (entry.calibration.record,),
                 )
             )
-            # It states no valid_from: the finding says whether that is unstated or Ambiguous.
-            _windows(view, entry, None)
-            continue
-        for node in entry.placement.nodes:
-            series.setdefault((node, entry.shape), []).append(entry)
+    for entry in entries:
+        if entry.frames_agree:
+            for node in entry.placement.nodes:
+                series.setdefault((node, entry.shape), []).append(entry)
+    # A contradicted binding names an edge the description does not have, so which edge (and so
+    # which kind) it measures is in doubt: it is a doubtful member of every series of its sensor
+    # whose parameters it shares, or of its own kind where there is none.
+    for entry in entries:
+        if not entry.frames_agree:
+            for node in entry.placement.nodes:
+                names = entry.shape[0]
+                keys = [k for k in series if k[0] == node and k[1][0] == names]
+                for key in keys or [(node, entry.shape)]:
+                    series.setdefault(key, []).append(entry)
     drafts: list[ClaimDraft] = []
     deltas: dict[tuple[RecordId, RecordId], list[_Delta]] = {}
     for (node, _), members in sorted(series.items(), key=lambda item: item[0][0].node_id):
-        clocks: dict[RecordId, list[_Entry]] = {}
-        for entry in members:
-            clocks.setdefault(entry.at.domain_id, []).append(entry)  # type: ignore[union-attr]
-        if len(clocks) > 1:
-            view.findings.append(
-                _finding(
-                    "clock_split",
-                    "a sensor's calibrations state instants on clocks Memory cannot compare; each"
-                    " clock is a history of its own, and no drift is computed across them",
-                    (e.calibration.record for e in members),
-                    sensor=node.node_id,
-                    clocks=sorted(clocks),
-                )
-            )
-        for domain in sorted(clocks):
-            drafts.extend(_series(view, node, clocks[domain], deltas))
+        drafts.extend(_series(view, node, members, deltas))
     return drafts
-
-
-def _ticks(entry: _Entry) -> int:
-    return entry.at.ticks  # type: ignore[union-attr]
 
 
 def _series(
@@ -838,62 +933,86 @@ def _series(
     members: list[_Entry],
     deltas: dict[tuple[RecordId, RecordId], list[_Delta]],
 ) -> list[ClaimDraft]:
-    """One series on one clock. Definite calibrations are ordered by instant; a candidate is
-    placed in time but orders nothing: it ends no calibration and is never a drift end."""
-    instants: list[list[_Entry]] = []
-    for entry in sorted((e for e in members if not e.candidate), key=_ticks):
-        if instants and instants[-1][0].at == entry.at:
-            instants[-1].append(entry)
+    starts = {e.calibration.record: t for e in members if (t := _firm_start(view, e)) is not None}
+    firm = sorted(
+        (e for e in members if e.firm),
+        key=lambda e: (
+            starts[e.calibration.record].domain_id,
+            starts[e.calibration.record].ticks,
+            e.calibration.record,
+        ),
+    )
+    clocks = sorted({t.domain_id for t in starts.values()})
+    if len(clocks) > 1:
+        view.findings.append(
+            _finding(
+                "clock_split",
+                "a sensor's calibrations state instants on clocks Memory cannot compare; none is"
+                " ordered against another clock's, so no end or drift is decided across them",
+                (e.calibration.record for e in members),
+                sensor=node.node_id,
+                clocks=clocks,
+            )
+        )
+    groups: list[list[_Entry]] = []
+    for entry in firm:
+        if groups and starts[groups[-1][0].calibration.record] == starts[entry.calibration.record]:
+            groups[-1].append(entry)
         else:
-            instants.append([entry])
-    candidates = [e for e in members if e.candidate]
-    drafts: list[ClaimDraft] = []
-    for entry in sorted(members, key=lambda e: (_ticks(e), e.calibration.record)):
-        later = [group for group in instants if _ticks(group[0]) > _ticks(entry)]
-        after: _Next = None
-        if later:
-            stated = any(isinstance(e.calibration.valid_from, Known) for e in later[0])
-            after = later[0][0].at if stated else "unstated"
-        tie = any(entry in group and len(group) > 1 for group in instants)
-        claims = _claims(view, entry, after, candidate=entry.candidate or tie)
-        drafts.extend(d for d in claims if d.subject == node)
-    for group in instants:
+            groups.append([entry])
+    ties = {e.calibration.record for g in groups if len(g) > 1 for e in g}
+    for group in groups:
         if len(group) > 1:
             view.findings.append(
                 _finding(
                     "same_instant",
-                    "calibrations of one sensor and kind state the same instant; neither is"
+                    "calibrations of one sensor and kind state the same valid_from; neither is"
                     " ordered before the other, so each is a candidate and no drift is computed"
                     " to or from them",
                     (e.calibration.record for e in group),
                     sensor=node.node_id,
-                    at=group[0].at.to_json(),  # type: ignore[union-attr]
+                    at=starts[group[0].calibration.record].to_json(),
                 )
             )
-    for first, second in pairwise(instants):
+    drafts: list[ClaimDraft] = []
+    for entry in sorted(members, key=lambda e: e.calibration.record):
+        claims = _claims(view, entry, members, entry.calibration.record in ties)
+        drafts.extend(d for d in claims if d.subject == node)
+    for first, second in pairwise(groups):
         if len(first) > 1 or len(second) > 1:
             continue
-        earlier, later_entry = first[0], second[0]
-        between = [
-            c.calibration.record
-            for c in candidates
-            if _ticks(earlier) <= _ticks(c) <= _ticks(later_entry)
-        ]
+        earlier, later = first[0], second[0]
+        a, b = starts[earlier.calibration.record], starts[later.calibration.record]
+        if a.domain_id != b.domain_id:
+            continue
+        between = []
+        for other in members:
+            firm_start = starts.get(other.calibration.record)
+            if firm_start is not None and firm_start.domain_id == a.domain_id:
+                continue  # ordered on this clock: consecutive groups have none between them
+            readings = _starts(view, other)
+            if (
+                readings is None
+                or any(t.domain_id != a.domain_id for t in readings)
+                or any(a.ticks <= t.ticks <= b.ticks for t in readings)
+            ):
+                between.append(other.calibration.record)
         if between:
             view.findings.append(
                 _finding(
                     "drift_undecided",
-                    "a calibration that may be this sensor's lies between two of its calibrations;"
-                    " whether they are consecutive is not decided, so no drift is claimed",
-                    (earlier.calibration.record, later_entry.calibration.record, *between),
+                    "a calibration that may be this sensor's and kind's may lie between two of its"
+                    " calibrations; whether they are consecutive is not decided, so no drift is"
+                    " claimed",
+                    (earlier.calibration.record, later.calibration.record, *sorted(set(between))),
                     sensor=node.node_id,
                 )
             )
             continue
-        key = (earlier.calibration.record, later_entry.calibration.record)
+        key = (earlier.calibration.record, later.calibration.record)
         if key not in deltas:
-            deltas[key] = _deltas(view, earlier, later_entry)
-        drafts.extend(_drift(node, earlier, later_entry, deltas[key]))
+            deltas[key] = _deltas(view, earlier, later)
+        drafts.extend(_drift(node, a, b, deltas[key]))
     return drafts
 
 
@@ -1107,7 +1226,12 @@ def _transform_deltas(
             a.record,
             b.record,
         )
-        for quantity, form, values, unit in _parts(a.value, b.value, refusals, what):
+        declared = DeclaredTransform(
+            a.parent.frame_id,
+            a.child.frame_id,
+            a.direction.value,  # type: ignore[union-attr]
+        )
+        for quantity, form, values, unit, adjustment in _parts(a.value, b.value, refusals, what):
             delta = Delta(
                 earlier.calibration.record,
                 later.calibration.record,
@@ -1115,21 +1239,78 @@ def _transform_deltas(
                 form,
                 values,
                 edge=edge,
+                transform=declared,
+                adjustment=adjustment,
             )
             out.append(_Delta(delta, unit, cited, records))
     return out
 
 
+_Part: TypeAlias = (
+    "tuple[DeltaQuantity, str, tuple[float, ...], Knowledge[Unit], DeltaAdjustment | None]"
+)
+
+
+def _half_turn(unit: Unit) -> float | None:
+    """Half a turn in ``unit``, an angle unit: ``180.0`` for degrees, ``math.pi`` for radians.
+
+    Exact where the unit's scale is a rational multiple of pi (degrees, revolutions); one
+    rounding of ``pi`` otherwise. ``None`` for a scale with another power of pi."""
+    scale = unit.scale
+    if scale.pi_power == 1:
+        return float(1 / scale.rational)
+    if scale.pi_power == 0:
+        return float(1 / scale.rational) * math.pi
+    return None
+
+
+def _wrap(difference: float, half: float) -> float:
+    """``difference`` into ``(-half, half]``: ``fmod`` is exact, so this is deterministic."""
+    turn = 2 * half
+    wrapped = math.fmod(difference, turn)
+    if wrapped > half:
+        wrapped -= turn
+    elif wrapped <= -half:
+        wrapped += turn
+    return wrapped
+
+
+def _rotation_delta(
+    form: str, a: tuple[float, ...], b: tuple[float, ...], unit: Knowledge[Unit]
+) -> tuple[tuple[float, ...], DeltaAdjustment] | None:
+    """A rotation's differences in its declared form (ADR 0014 §4).
+
+    ``q`` and ``-q`` are one rotation, so a quaternion whose dot product with the earlier one is
+    negative is negated first. Euler angles are wrapped into a half turn either side of zero in
+    their declared unit. Other forms are differenced as declared."""
+    if form == "quaternion":
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        if dot < 0:
+            values = _difference(a, tuple(-y for y in b))
+            return None if values is None else (values, DeltaAdjustment.LATER_NEGATED)
+        values = _difference(a, b)
+        return None if values is None else (values, DeltaAdjustment.NONE)
+    values = _difference(a, b)
+    if values is None:
+        return None
+    if form == "euler_angles":
+        half = _half_turn(unit.value) if isinstance(unit, Known) else None
+        if half is None:
+            return None
+        return tuple(_wrap(v, half) for v in values), DeltaAdjustment.WRAPPED
+    return values, DeltaAdjustment.NONE
+
+
 def _parts(
     a: TransformValue, b: TransformValue, refusals: _Refusals, what: JsonValue
-) -> list[tuple[DeltaQuantity, str, tuple[float, ...], Knowledge[Unit]]]:
+) -> list[_Part]:
     """The translation and rotation deltas of two transform values declared alike."""
-    parts: list[tuple[DeltaQuantity, str, tuple[float, ...], Knowledge[Unit]]] = []
+    parts: list[_Part] = []
     if isinstance(a, Pose) and isinstance(b, Pose):
         unit = _unit(a.translation.unit, b.translation.unit, refusals, what)
         values = _finite(_difference(a.translation.values, b.translation.values), refusals, what)
         if unit is not None and values is not None:
-            parts.append((DeltaQuantity.TRANSLATION, "translation", values, unit))
+            parts.append((DeltaQuantity.TRANSLATION, "translation", values, unit, None))
         form = _rotation_form(a.rotation, b.rotation)
         if form is None:
             refusals.add("incomparable_transform", what)
@@ -1138,24 +1319,37 @@ def _parts(
         rotation_unit: Knowledge[Unit] | None = NotApplicable()
         if declared is not None:
             rotation_unit = _unit(declared, b.rotation.unit, refusals, what)  # type: ignore[union-attr]
-        values = _finite(_difference(a.rotation.values, b.rotation.values), refusals, what)
-        if rotation_unit is not None and values is not None:
-            parts.append((DeltaQuantity.ROTATION, name, values, rotation_unit))
+        if rotation_unit is None:
+            return parts
+        rotation = _rotation_delta(name, a.rotation.values, b.rotation.values, rotation_unit)
+        if rotation is None:
+            refusals.add("non_finite", what)
+            return parts
+        values, adjustment = rotation
+        parts.append((DeltaQuantity.ROTATION, name, values, rotation_unit, adjustment))
         return parts
     if isinstance(a, HomogeneousMatrix) and isinstance(b, HomogeneousMatrix):
         if not _same(a.layout, b.layout):
             refusals.add("incomparable_transform", what)
             return parts
         layout: MatrixLayout = a.layout.value  # type: ignore[union-attr]
-        rotation = _finite(
+        block = _finite(
             _difference(
                 [a.values[i] for i in _MATRIX_ROTATION], [b.values[i] for i in _MATRIX_ROTATION]
             ),
             refusals,
             what,
         )
-        if rotation is not None:
-            parts.append((DeltaQuantity.ROTATION, "homogeneous_matrix", rotation, NotApplicable()))
+        if block is not None:
+            parts.append(
+                (
+                    DeltaQuantity.ROTATION,
+                    "homogeneous_matrix",
+                    block,
+                    NotApplicable(),
+                    DeltaAdjustment.NONE,
+                )
+            )
         indices = _MATRIX_TRANSLATION[layout]
         unit = _unit(a.translation_unit, b.translation_unit, refusals, what)
         translation = _finite(
@@ -1164,7 +1358,7 @@ def _parts(
             what,
         )
         if unit is not None and translation is not None:
-            parts.append((DeltaQuantity.TRANSLATION, "homogeneous_matrix", translation, unit))
+            parts.append((DeltaQuantity.TRANSLATION, "homogeneous_matrix", translation, unit, None))
         return parts
     refusals.add("incomparable_transform", what)
     return parts
@@ -1187,7 +1381,9 @@ def _deltas(view: _View, earlier: _Entry, later: _Entry) -> list[_Delta]:
     return found
 
 
-def _drift(node: NodeRef, earlier: _Entry, later: _Entry, deltas: list[_Delta]) -> list[ClaimDraft]:
+def _drift(
+    node: NodeRef, earlier: Timestamp, later: Timestamp, deltas: list[_Delta]
+) -> list[ClaimDraft]:
     """``drift`` over ``[earlier's instant, later's instant)``: observed, a fact about the two
     records (as ``not_covered_by_authorisation`` is, ADR 0010 §5), never a judgement."""
     return [
@@ -1195,8 +1391,8 @@ def _drift(node: NodeRef, earlier: _Entry, later: _Entry, deltas: list[_Delta]) 
             subject=node,
             predicate=DRIFT,
             object=TypedLiteral(ValueType.DELTA, item.delta, item.unit),
-            valid_from=earlier.at,  # type: ignore[arg-type]
-            valid_to=later.at,  # type: ignore[arg-type]
+            valid_from=earlier,
+            valid_to=later,
             assertion_kind=_OBSERVED,
             evidence=item.evidence,
             records=item.records,
@@ -1291,4 +1487,6 @@ class CalibrationHistoryConsolidator:
         entries = [e for c in view.calibrations if (e := _entry(view, c)) is not None]
         drafts = _history(view, entries)
         drafts.extend(_calibrated_by(view))
-        return ConsolidatorOutput(tuple(drafts), tuple(view.findings))
+        # A calibration in several series (one per sensor node) reports its validity once.
+        findings = {finding.id: finding for finding in view.findings}
+        return ConsolidatorOutput(tuple(drafts), tuple(findings.values()))

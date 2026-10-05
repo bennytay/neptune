@@ -162,6 +162,7 @@ def component(
     serial: str | None = None,
     at: FrameRef | None = None,
     category: ComponentCategory = ComponentCategory.SENSOR,
+    also: Sequence[LogicalId] = (),
 ) -> Record:
     """A component of ``configuration``; ``serial`` is its declared ``("serial", …)`` id."""
     label = name if isinstance(name, str) else "ambiguous"
@@ -173,7 +174,13 @@ def component(
         category=category,
         name=Known(name) if isinstance(name, str) else name,
         model=Unknown(),
-        identifiers=(Known(LogicalId("serial", serial)),) if serial else (),
+        identifiers=tuple(
+            Known(i)
+            for i in sorted(
+                [*([LogicalId("serial", serial)] if serial else []), *also],
+                key=lambda i: (i.namespace, i.value),
+            )
+        ),
         frame=Known(at) if at is not None else Unknown(),
     ).to_json()  # type: ignore[return-value]
 

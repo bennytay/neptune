@@ -27,7 +27,9 @@ from memory_calibration_records import (
 )
 from memory_configuration_records import commissioning, maintenance, requalification
 from memory_identity_records import at, ledger, thread
+from neptune.identity.ids import record_id
 from neptune.model.ids import LogicalId
+from neptune.model.time import Timestamp
 from neptune.model.units import unit_from_text
 from neptune_memory.consolidate.base import Consolidation, rebuild
 from neptune_memory.consolidate.calibration import CalibrationHistoryConsolidator
@@ -335,3 +337,41 @@ def test_after_a_sensor_swap_the_chain_not_the_old_manifest_says_which_sensor() 
     assert placed == [("serial:LDR-0090", "cal:before-swap"), ("serial:LDR-0200", "cal:after-swap")]
     assert not of(result, "calibration_candidate")
     assert not of(result, "drift")  # two sensors: nothing is consecutive across a swap
+
+
+def test_a_chain_on_another_clock_leaves_the_machine_declaring_configurations_as_readings() -> None:
+    """The chain places the URDF (sensor LDR-0090) on the forms' clock; the calibration is on
+    its tool's clock, so which configuration was in force then is not known: the retrofit that
+    declares the AMR (sensor LDR-0200) is only one reading, never a definite placement."""
+    urdf = hardware("amr-11-urdf")
+    retrofit = hardware("amr-11-retrofit", machine=AMR)
+    old, new = LogicalId("cfg", "AMR-11-u1"), LogicalId("cfg", "AMR-11-u2")
+    records = [
+        thread(AMR, "threads/amr"),
+        urdf,
+        component(urdf, "front_lidar", serial="LDR-0090", at=LIDAR),
+        retrofit,
+        component(retrofit, "front_lidar", serial="LDR-0200", at=LIDAR),
+        sensor_thread("LDR-0090"),
+        sensor_thread("LDR-0200"),
+        thread(old, "hw/amr-11-urdf", node_type=NodeType.CONFIGURATION),
+        thread(new, "hw/amr-11-retrofit", node_type=NodeType.CONFIGURATION),
+        commissioning("commissioning", [AMR], old, at(100)),
+        maintenance("swap", [AMR], new, at(500)),
+    ]
+    tool_clock = record_id("test.clock", {"name": "calibration tool clock"})
+    same = calibration("same", machine=AMR, subject="front_lidar", valid_from=at(300))
+    other = calibration(
+        "other",
+        machine=AMR,
+        subject="front_lidar",
+        valid_from=Timestamp(300, tool_clock),
+    )
+    on_chain = build(records, [same, calibration_thread("same")])
+    assert [c.subject.node_id for c in of(on_chain, "calibrated_with")] == ["serial:LDR-0090"]
+    off_chain = build(records, [other, calibration_thread("other")])
+    assert not of(off_chain, "calibrated_with")
+    assert [c.subject.node_id for c in of(off_chain, "calibration_candidate")] == [
+        "serial:LDR-0200"
+    ]
+    assert "calibration.chain_undecided" in codes(off_chain)

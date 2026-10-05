@@ -10,12 +10,19 @@ from jsonschema import Draft202012Validator, ValidationError
 from memory_identity_records import STATED, TRANSFORM, cite
 from memory_schema_builders import OBSERVED, claim, node
 from neptune.identity import canonical_json
-from neptune.model.frames import FrameRef
+from neptune.model.frames import FrameRef, TransformDirection
 from neptune.model.ids import RecordId
 from neptune.model.knowledge import Known, NotApplicable, Unknown
 from neptune.model.provenance import Provenance
 from neptune.model.units import unit_from_text
-from neptune_memory.schema.claim import Delta, DeltaQuantity, TypedLiteral, ValueType
+from neptune_memory.schema.claim import (
+    DeclaredTransform,
+    Delta,
+    DeltaAdjustment,
+    DeltaQuantity,
+    TypedLiteral,
+    ValueType,
+)
 from neptune_memory.schema.codec import claim_from_json, delta_from_json
 from neptune_memory.schema.export import graph_schema
 from neptune_memory.schema.nodes import NodeType
@@ -34,8 +41,23 @@ def parameter(values: tuple[float, ...] = (0.02,)) -> Delta:
     return Delta(EARLIER, LATER, DeltaQuantity.PARAMETER, "values", values, name="focal_length")
 
 
-def rotation(values: tuple[float, ...] = (0.0, 0.0, 0.01, -5e-05)) -> Delta:
-    return Delta(EARLIER, LATER, DeltaQuantity.ROTATION, "quaternion", values, edge=EDGE)
+SIDE = DeclaredTransform("tool0", "wrist_camera", TransformDirection.CHILD_TO_PARENT)
+
+
+def rotation(
+    values: tuple[float, ...] = (0.0, 0.0, 0.01, -5e-05),
+    adjustment: DeltaAdjustment = DeltaAdjustment.LATER_NEGATED,
+) -> Delta:
+    return Delta(
+        EARLIER,
+        LATER,
+        DeltaQuantity.ROTATION,
+        "quaternion",
+        values,
+        edge=EDGE,
+        transform=SIDE,
+        adjustment=adjustment,
+    )
 
 
 def _validate(name: str, value: Any) -> None:
@@ -79,7 +101,12 @@ def _validate(name: str, value: Any) -> None:
         ),
         (
             lambda: Delta(
-                EARLIER, LATER, DeltaQuantity.TRANSLATION, "translation", (1.0, 0.0, 0.0)
+                EARLIER,
+                LATER,
+                DeltaQuantity.TRANSLATION,
+                "translation",
+                (1.0, 0.0, 0.0),
+                transform=SIDE,
             ),
             ValueError,
         ),
@@ -91,8 +118,41 @@ def _validate(name: str, value: Any) -> None:
                 "translation",
                 (1.0, 0.0, 0.0),
                 edge=(EDGE[0], FrameRef("cam", "rec:sha256:" + "4" * 64)),  # type: ignore[arg-type]
+                transform=SIDE,
             ),
             ValueError,
+        ),
+        (lambda: rotation(adjustment=DeltaAdjustment.WRAPPED), ValueError),
+        (
+            lambda: Delta(
+                EARLIER,
+                LATER,
+                DeltaQuantity.ROTATION,
+                "quaternion",
+                (0.0,) * 4,
+                edge=EDGE,
+                transform=SIDE,
+            ),
+            ValueError,
+        ),
+        (
+            lambda: Delta(
+                EARLIER,
+                LATER,
+                DeltaQuantity.TRANSLATION,
+                "translation",
+                (1.0, 0.0, 0.0),
+                edge=EDGE,
+                transform=SIDE,
+                adjustment=DeltaAdjustment.NONE,
+            ),
+            ValueError,
+        ),
+        (
+            lambda: Delta(
+                EARLIER, LATER, DeltaQuantity.TRANSLATION, "translation", (1.0, 0.0, 0.0), edge=EDGE
+            ),
+            TypeError,
         ),
         (
             lambda: Delta(

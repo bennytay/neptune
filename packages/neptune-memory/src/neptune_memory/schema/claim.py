@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Final, Literal, NewType, TypeAlias
 from neptune.derived.provenance import INFERRED
 from neptune.identity.canonical_json import dumps
 from neptune.identity.hashing import content_id
-from neptune.model.frames import FrameRef
+from neptune.model.frames import FrameRef, TransformDirection
 from neptune.model.ids import (
     ConfigHash,
     RecordId,
@@ -107,6 +107,41 @@ class DeltaQuantity(StrEnum):
     ROTATION = "rotation"
 
 
+class DeltaAdjustment(StrEnum):
+    """How a rotation delta's ``later`` numbers were read before differencing (ADR 0014 §4).
+
+    ``later_negated``: two quaternions with a negative dot product, ``later`` negated (``q`` and
+    ``-q`` are one rotation); ``wrapped``: Euler-angle differences wrapped into a half-open half
+    turn either side of zero, ``(-180, 180]`` in degrees, in the declared unit.
+    """
+
+    NONE = "none"
+    LATER_NEGATED = "later_negated"
+    WRAPPED = "wrapped"
+
+
+@dataclass(frozen=True)
+class DeclaredTransform:
+    """The compared transforms' own frames (in each calibration file's graph) and direction,
+    equal in both, so the delta's signs can be read without following its records."""
+
+    parent: str
+    child: str
+    direction: TransformDirection
+
+    def __post_init__(self) -> None:
+        for name in ("parent", "child"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a frame id, got {value!r}")
+            check_text(name, value)
+        if not isinstance(self.direction, TransformDirection):
+            raise TypeError(f"direction must be a TransformDirection, got {self.direction!r}")
+
+    def to_json(self) -> JsonObject:
+        return {"child": self.child, "direction": str(self.direction), "parent": self.parent}
+
+
 # The declared form a delta compares, by quantity, with its component count and whether its
 # numbers carry a declared unit (ADR 0014 §4). ``values`` is a parameter's own numbers (any count);
 # a homogeneous matrix's rotation is its nine non-translation entries in declared order.
@@ -138,6 +173,9 @@ class Delta:
     - ``name``: a parameter's declared name, verbatim; ``None`` for a transform.
     - ``edge``: ``(parent, child)``, the frame-graph edge both calibrations bind the compared
       transform to; ``None`` for a parameter.
+    - ``transform``: the compared transforms' own frames and direction; ``None`` for a parameter.
+    - ``adjustment``: for a rotation, how ``later`` was read (``DeltaAdjustment``); ``None``
+      otherwise.
     - ``values``: the finite differences.
     """
 
@@ -148,6 +186,8 @@ class Delta:
     values: tuple[float, ...]
     name: str | None = None
     edge: tuple[FrameRef, FrameRef] | None = None
+    transform: DeclaredTransform | None = None
+    adjustment: DeltaAdjustment | None = None
 
     def __post_init__(self) -> None:
         parse_record_id(self.earlier)
@@ -169,11 +209,22 @@ class Delta:
         for value in self.values:
             if not isinstance(value, float) or not math.isfinite(value):
                 raise TypeError(f"a difference is a finite float, got {value!r}")
+        rotation = self.quantity is DeltaQuantity.ROTATION
+        if rotation != isinstance(self.adjustment, DeltaAdjustment):
+            raise ValueError("a rotation delta, and only a rotation delta, states its adjustment")
+        allowed = {
+            "quaternion": {DeltaAdjustment.NONE, DeltaAdjustment.LATER_NEGATED},
+            "euler_angles": {DeltaAdjustment.WRAPPED},
+        }.get(self.representation, {DeltaAdjustment.NONE})
+        if rotation and self.adjustment not in allowed:
+            raise ValueError(f"a {self.representation} delta's adjustment is one of {allowed}")
         if self.quantity is DeltaQuantity.PARAMETER:
-            if not isinstance(self.name, str) or self.edge is not None:
+            if not isinstance(self.name, str) or self.edge is not None or self.transform:
                 raise ValueError("a parameter delta names its parameter and no edge")
             check_text("name", self.name)
             return
+        if not isinstance(self.transform, DeclaredTransform):
+            raise TypeError("a transform delta states the compared transforms' frames")
         if self.name is not None or not isinstance(self.edge, tuple) or len(self.edge) != 2:
             raise ValueError("a transform delta names its edge (parent, child) and no parameter")
         parent, child = self.edge
@@ -197,7 +248,11 @@ class Delta:
         }
         if self.edge is not None:
             out["parent"], out["child"] = self.edge[0].to_json(), self.edge[1].to_json()
-        elif self.name is not None:
+        if self.transform is not None:
+            out["transform"] = self.transform.to_json()
+        if self.adjustment is not None:
+            out["adjustment"] = str(self.adjustment)
+        if self.name is not None:
             out["name"] = self.name
         return out
 

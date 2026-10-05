@@ -33,15 +33,18 @@ configuration thread (ADR 0010 §1), and `unthreaded_id` or `ambiguous_anchor` w
 
 ### 2. Placement: the sensor, through identity and configuration chains
 
-A calibration's **instant** is its `valid_from`, else its `performed`, when `Known` (the Ledger's thread order,
-Ledger ADR 0003 §3). The sensor is found in three steps, each through stated values only:
+A calibration's **instant** for placement is its `valid_from`, else its `performed`, when `Known` (the Ledger's
+thread order, Ledger ADR 0003 §3); it is never an order or a validity bound (§3). The sensor is found in three steps, each through stated values only:
 
 1. **Machine** (identity chain): each machine its `machine` names that a Ledger thread declares.
 2. **Configurations** (configuration chain): the `HardwareConfiguration`s whose anchor is cited by a configuration
    node that `memory.configuration` places on the machine (`has_configuration`, or one reading of
    `configuration_candidate`) over an interval containing the calibration's instant on its clock. Only where the
    chain places none of them are the `HardwareConfiguration`s that declare the machine read instead: they state no
-   time, so a swapped sensor's old configuration would otherwise make every later calibration ambiguous. A configuration whose declared revision shares no reading with the calibration's
+   time, so a swapped sensor's old configuration would otherwise make every later calibration ambiguous. They are
+   definite only for a machine with no chain at all: where it has one that cannot say (another clock, an untimed
+   calibration, an instant it does not cover), each is one reading and `calibration.chain_undecided`; no clock is
+   compared without a mapping. A configuration whose declared revision shares no reading with the calibration's
    `hardware_revision` is excluded (root ADR 0019 §3, §6); one where only some readings match is one reading.
 3. **Sensor**: the sensor components of those configurations whose declared name is the calibration's subject,
    verbatim. A name selects only among one machine's configurations; it never keys a node. The sensor's nodes are
@@ -63,26 +66,34 @@ about this one (root ADR 0007). A contradicted calibration is a `calibration_can
 description's own edges, with `calibration.frame_disagreement`. A binding that names the calibration only as one
 `Ambiguous` candidate is `ambiguous_binding` and is not read.
 
-Placed calibrations form a **series** per sensor node and **kind**: the parameter names they declare.
-Recalibrating the same quantities is the same kind; a hand-eye result and a camera-intrinsics file for one camera
-are two series. Each series is ordered by instant on one clock (`clock_split` across clocks). Definite calibrations
-order it; calibrations at one instant are `same_instant` candidates and never ordered by record id. A candidate is
-placed in time but orders nothing: it ends no calibration, and two definite calibrations with a candidate between
-them are not known to be consecutive (`drift_undecided`). An untimed calibration is `calibration.untimed` and in no
-order.
+Placed calibrations form a **series** per sensor node and **kind**: the parameter names they declare and the
+description edges they bind. Recalibrating the same quantities is the same kind; a hand-eye result, a lidar-to-base
+and a lidar-to-camera extrinsic of one sensor are three. A contradicted calibration's edge is in doubt, so it is a
+doubtful member of every series of its sensor with its parameter names (its own kind where there is none).
+
+A **firm** member is definitely the sensor's, uncontradicted, with a stated `valid_from`: firm members order the
+series on one clock (`clock_split` where firm members use several); two at one `valid_from` are `same_instant`
+candidates, never ordered by record id. Every other member is **doubtful**: an ambiguous placement or contradicted
+binding, an `Ambiguous` `valid_from` (it may start at any reading), or one that may start anywhere: no stated
+`valid_from` (`performed` orders nothing: a calibration measured on Monday may be put into service on Friday),
+untimed (`calibration.untimed`), or on another clock.
 
 `calibrated_with(sensor → calibration)` holds from a stated `valid_from` only (`validity_unstated`, or
-`ambiguous_validity`, and no interval otherwise; `performed` never becomes a validity bound). It ends at a stated
-`valid_until`, is `open` where the calibration states it has none (`KnownAbsent`), and otherwise ends at the stated
-`valid_from` of the next definite calibration of its series, as a machine's configuration span ends at the next
-placement (ADR 0010 §2); the last is `open`. A next calibration that states no `valid_from` leaves the end unstated:
-`end_unstated`, and no interval. An `Ambiguous` `valid_until` gives one `calibration_candidate` per reading. An end not after its start is
-`untimeable_window`. `assertion_kind` is the calibration's.
+`ambiguous_validity`, and no interval otherwise). It ends at a stated `valid_until` (each reading of an `Ambiguous`
+one a `calibration_candidate`), is `open` where the calibration states it has none (`KnownAbsent`), and otherwise
+ends where the next calibration of its series starts, as a machine's configuration span ends at the next placement
+(ADR 0010 §2). That is the next firm member's `valid_from` (`open` when none follows), unless a doubtful member may
+start before it: then each possible start is a reading (`ambiguous_end`, one `calibration_candidate` each; a member
+definitely of the sensor whose `Ambiguous` start lies wholly before the next firm one surely ends it, so the open or
+next-firm reading drops), and a member that may start anywhere leaves it undecided (`end_unstated`, no interval).
+An end not after its start is `untimeable_window`. Ties, doubtful placements and readings are candidates.
+`assertion_kind` is the calibration's.
 
 ### 4. Drift
 
-Between consecutive calibrations of a series (single at both instants), every value both declare alike gives one
-`drift(sensor → delta)` claim over `[earlier instant, later instant)`, `observed` (a fact about two records, as
+Between consecutive firm calibrations of a series (single at both `valid_from`s, one clock), when no doubtful member
+may start between them (else `drift_undecided`), every value both declare alike gives one
+`drift(sensor → delta)` claim over `[earlier valid_from, later valid_from)`, `observed` (a fact about two records, as
 `not_covered_by_authorisation` is, ADR 0010 §5), citing both calibrations (and, for an extrinsic, both bindings and
 transforms). The **`delta`** value type (`Delta`) holds `earlier` and `later` (the two record ids), what was compared
 and `values`: `later - earlier` component by component, by IEEE-754 subtraction (correctly rounded, so
@@ -94,7 +105,14 @@ deterministic), in declared order.
   direction and the same form: a `Pose`'s translation (equal `Known` units) and rotation (same kind and `Known` equal
   order and convention, layout, or sequence and mode; equal units for Euler angles and rotation vectors); a
   `HomogeneousMatrix`'s nine rotation entries and three translation entries by its `Known` layout (equal
-  `translation_unit`). Quaternion and matrix entries have no unit: the literal's unit is `not_applicable`.
+  `translation_unit`). Quaternion and matrix entries have no unit: the literal's unit is `not_applicable`. A transform
+  delta also names the compared transforms' own `parent`, `child` and `direction` (equal in both), so its signs read
+  without following its records.
+- **Rotations are read as one rotation.** `q` and `-q` are the same rotation, so when two quaternions' dot product is
+  negative the later one is negated before differencing (`adjustment: later_negated`; else `none`). Euler-angle
+  differences are wrapped into a half turn either side of zero in their declared unit, `(-180, 180]` for degrees and
+  `(-pi, pi]` for radians (`adjustment: wrapped`, exact `fmod`); Euler angles with no `Known` angular unit give no
+  delta (`unit_unstated`). Rotation matrices and vectors are differenced as declared (`none`).
 - **Never converted.** Different units are `calibration.unit_mismatch` and no delta: the compiler records no
   declared conversion between units (ADR 0013 §6 leaves SI normalisation records undefined), so there is nothing to
   apply. Unstated units, values, shapes, non-finite numbers, different interpretations and changed text settings
@@ -102,8 +120,8 @@ deterministic), in declared order.
 - **No judgement.** A zero delta is stated like any other; "exceeds tolerance" is a Deploy evidence-pack rule or a
   G4 inference.
 
-A component-wise rotation difference is not a rotation angle: a quaternion and its negation are one rotation with a
-large difference. The angle needs composition and inversion, which root ADR 0015 leaves to derived transforms.
+A component-wise rotation difference is still not a rotation angle; the angle needs composition and inversion,
+which root ADR 0015 leaves to derived transforms.
 
 ### 5. `calibrated_by`
 

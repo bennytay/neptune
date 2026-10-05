@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NoReturn
 
 from neptune.identity.ids import config_hash
-from neptune.model.frames import frame_ref_from_json
+from neptune.model.frames import TransformDirection, frame_ref_from_json
 from neptune.model.ids import ConfigHash, parse_config_hash, parse_record_id
 from neptune.model.knowledge import AssertionKind, Knowledge
 from neptune.model.knowledge import from_json as knowledge_from_json
@@ -29,7 +29,9 @@ from neptune_memory.schema.claim import (
     ClaimAssertionKind,
     ClaimObject,
     ClaimProvenance,
+    DeclaredTransform,
     Delta,
+    DeltaAdjustment,
     DeltaQuantity,
     LedgerRecordRef,
     LiteralValue,
@@ -115,7 +117,10 @@ def delta_from_json(data: JsonValue) -> Delta:
     keys = {"earlier", "later", "quantity", "representation", "values"}
     quantity = DeltaQuantity(_str(_object(data, "delta").get("quantity", ""), "quantity"))
     edge = quantity is not DeltaQuantity.PARAMETER
-    obj = _exact(data, "delta", keys | ({"child", "parent"} if edge else {"name"}))
+    extra = {"child", "parent", "transform"} if edge else {"name"}
+    if quantity is DeltaQuantity.ROTATION:
+        extra.add("adjustment")
+    obj = _exact(data, "delta", keys | extra)
     values = []
     for item in _list(obj["values"], "values"):
         value = real_from_json(item)
@@ -132,6 +137,19 @@ def delta_from_json(data: JsonValue) -> Delta:
         edge=(frame_ref_from_json(obj["parent"]), frame_ref_from_json(obj["child"]))
         if edge
         else None,
+        transform=_declared_transform(obj["transform"]) if edge else None,
+        adjustment=DeltaAdjustment(_str(obj["adjustment"], "adjustment"))
+        if "adjustment" in obj
+        else None,
+    )
+
+
+def _declared_transform(data: JsonValue) -> DeclaredTransform:
+    obj = _exact(data, "transform", {"child", "direction", "parent"})
+    return DeclaredTransform(
+        _str(obj["parent"], "parent"),
+        _str(obj["child"], "child"),
+        TransformDirection(_str(obj["direction"], "direction")),
     )
 
 

@@ -599,6 +599,29 @@
             "representation": {
               "const": "homogeneous_matrix"
             },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
             "values": {
               "items": {
                 "type": "number"
@@ -615,6 +638,7 @@
             "parent",
             "quantity",
             "representation",
+            "transform",
             "values"
           ],
           "type": "object"
@@ -640,6 +664,29 @@
             "representation": {
               "const": "translation"
             },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
             "values": {
               "items": {
                 "type": "number"
@@ -656,6 +703,7 @@
             "parent",
             "quantity",
             "representation",
+            "transform",
             "values"
           ],
           "type": "object"
@@ -663,6 +711,11 @@
         {
           "additionalProperties": false,
           "properties": {
+            "adjustment": {
+              "enum": [
+                "wrapped"
+              ]
+            },
             "child": {
               "$ref": "#/$defs/FrameRef"
             },
@@ -681,6 +734,29 @@
             "representation": {
               "const": "euler_angles"
             },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
             "values": {
               "items": {
                 "type": "number"
@@ -691,12 +767,14 @@
             }
           },
           "required": [
+            "adjustment",
             "child",
             "earlier",
             "later",
             "parent",
             "quantity",
             "representation",
+            "transform",
             "values"
           ],
           "type": "object"
@@ -704,6 +782,11 @@
         {
           "additionalProperties": false,
           "properties": {
+            "adjustment": {
+              "enum": [
+                "none"
+              ]
+            },
             "child": {
               "$ref": "#/$defs/FrameRef"
             },
@@ -722,6 +805,29 @@
             "representation": {
               "const": "homogeneous_matrix"
             },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
             "values": {
               "items": {
                 "type": "number"
@@ -732,12 +838,14 @@
             }
           },
           "required": [
+            "adjustment",
             "child",
             "earlier",
             "later",
             "parent",
             "quantity",
             "representation",
+            "transform",
             "values"
           ],
           "type": "object"
@@ -745,6 +853,12 @@
         {
           "additionalProperties": false,
           "properties": {
+            "adjustment": {
+              "enum": [
+                "later_negated",
+                "none"
+              ]
+            },
             "child": {
               "$ref": "#/$defs/FrameRef"
             },
@@ -763,6 +877,29 @@
             "representation": {
               "const": "quaternion"
             },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
             "values": {
               "items": {
                 "type": "number"
@@ -773,12 +910,14 @@
             }
           },
           "required": [
+            "adjustment",
             "child",
             "earlier",
             "later",
             "parent",
             "quantity",
             "representation",
+            "transform",
             "values"
           ],
           "type": "object"
@@ -786,6 +925,11 @@
         {
           "additionalProperties": false,
           "properties": {
+            "adjustment": {
+              "enum": [
+                "none"
+              ]
+            },
             "child": {
               "$ref": "#/$defs/FrameRef"
             },
@@ -804,6 +948,29 @@
             "representation": {
               "const": "rotation_matrix"
             },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
             "values": {
               "items": {
                 "type": "number"
@@ -814,12 +981,14 @@
             }
           },
           "required": [
+            "adjustment",
             "child",
             "earlier",
             "later",
             "parent",
             "quantity",
             "representation",
+            "transform",
             "values"
           ],
           "type": "object"
@@ -827,6 +996,11 @@
         {
           "additionalProperties": false,
           "properties": {
+            "adjustment": {
+              "enum": [
+                "none"
+              ]
+            },
             "child": {
               "$ref": "#/$defs/FrameRef"
             },
@@ -845,6 +1019,29 @@
             "representation": {
               "const": "rotation_vector"
             },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
             "values": {
               "items": {
                 "type": "number"
@@ -855,18 +1052,20 @@
             }
           },
           "required": [
+            "adjustment",
             "child",
             "earlier",
             "later",
             "parent",
             "quantity",
             "representation",
+            "transform",
             "values"
           ],
           "type": "object"
         }
       ],
-      "description": "later - earlier, component by component, between two calibration records, in their declared form and unit; never converted (neptune-memory ADR 0014)"
+      "description": "later - earlier, component by component, between two calibration records, in their declared form and unit; never converted. A rotation states how later was read: a quaternion negated when the two point opposite ways, Euler angles wrapped into a half turn either side (neptune-memory ADR 0014)"
     },
     "Duration": {
       "additionalProperties": false,

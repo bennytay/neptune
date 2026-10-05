@@ -102,8 +102,10 @@ claim's provenance, with `method` `stated` or `co_sampled`; or a `composed` chai
 `chain` and the clocks between in `via`, with no parameters of its own). A `delta`
 (`#/$defs/Delta`) is `later - earlier`, component by component, between two calibration records (`earlier`,
 `later`): a parameter by its declared `name`, or the `translation` or `rotation` of the transforms both bind to one
-edge (`parent`, `child`), in the `representation` both declare. Its unit is the one both declare (`Known`), or
-`not_applicable` for a form without one (a quaternion, a rotation matrix); it is never converted.
+edge (`parent`, `child`), in the `representation` both declare, with the transforms' own frames and direction
+(`transform`). A rotation states its `adjustment`: a quaternion negated when the two point opposite ways
+(`later_negated`), Euler angles wrapped into a half turn (`wrapped`), else `none`. Its unit is the one both declare
+(`Known`), or `not_applicable` for a form without one (a quaternion, a rotation matrix); it is never converted.
 
 ## The claim and the finding
 
@@ -227,7 +229,9 @@ def test_graph_schema_contract(check):
     places a calibration on a sensor only through its declared machine and subject and the hardware configurations
     the machine declares or its chain places; several readings are `calibration_candidate`s, and so is a calibration
     whose frame binding contradicts its sensor's configuration graph. A `calibrated_with` starts at a stated
-    `valid_from` only. `drift` exists only between equal declared units (or forms without one) and equal declared
+    `valid_from` only, and its unstated end is the next calibration's stated start only where no calibration whose
+    start or placement is in doubt may come first; otherwise it is candidates or no interval, and no drift is
+    claimed across the doubt. `drift` exists only between equal declared units (or forms without one) and equal declared
     interpretations; anything else is a finding, never a converted value, and no threshold is applied.
 
 ## Caveat: a resolver configuration is a store generation
