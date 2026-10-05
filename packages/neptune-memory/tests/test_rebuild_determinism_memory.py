@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
+import memory_contest_ledger as contest
 from memory_archetype_ledger import ARCHETYPE, packages_at
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
@@ -46,6 +47,7 @@ from neptune_memory.ledger import (
 from neptune_memory.schema.codec import graph_from_json
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.supersede import as_of, is_closure
+from neptune_memory.store.graphs import TenantGraphs
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -210,32 +212,13 @@ def test_incremental_consolidation_holds_the_same_graph_as_a_full_rebuild(
     record = canonical_json.loads(written.rstrip(b"\n"))
     assert isinstance(record, dict)
     assert canonical_json.dumps(record["snapshot"]) + b"\n" == full_snapshot.encode()
-    current = {}
+    graphs = TenantGraphs(tmp_path)
+    projections = {}
     for tenant in ("inc", "full"):
-        status, _, _ = cli(
-            "--graphs",
-            tmp_path,
-            "--tenant",
-            tenant,
-            "dump",
-            "--as-of",
-            str(HEAD),
-            "--out",
-            tmp_path / f"{tenant}.jsonl",
-        )
-        assert status == OK
-        current[tenant] = [
-            canonical_json.loads(line)
-            for line in (tmp_path / f"{tenant}.jsonl").read_bytes().splitlines()
-        ]
-    content = {
-        tenant: sorted(
-            canonical_json.dumps({k: v for k, v in claim.items() if k != "recorded_at"})  # type: ignore[union-attr]
-            for claim in claims
-        )
-        for tenant, claims in current.items()
-    }
-    assert content["inc"] == content["full"] and len(content["inc"]) > 300
+        document = graphs.load(tenant)
+        assert document is not None and document.head == HEAD
+        projections[tenant] = contest.head_projection(document.resolution)
+    assert projections["inc"] == projections["full"] and len(projections["inc"]) > 300
 
 
 def test_what_a_later_build_no_longer_emits_is_withdrawn_never_deleted() -> None:
@@ -628,3 +611,46 @@ def test_a_corrupt_snapshot_record_is_refused(ledger_file: Path, tmp_path: Path)
     assert cli(*argv)[0] == OK
     (tmp_path / "t" / "snapshots" / "1.json").write_text("{", encoding="utf-8")
     assert cli(*argv)[0] == REFUSED
+
+
+# --- Contested facts: incremental equals rebuild where it is hardest ------------------------------
+
+
+def contested(snapshot: int) -> StubLedger:
+    return StubLedger({pid: (1, r) for pid, r in contest.packages_at(snapshot).items()})
+
+
+@pytest.mark.parametrize("snapshot", sorted(contest.CONTESTED))
+def test_contested_facts_settle_alike_incrementally_and_on_rebuild(snapshot: int) -> None:
+    """A contest, a withdrawn winner, a re-emitted claim and full ties (``memory_contest_ledger``):
+    at every snapshot the incremental graph holds, as of its head, the same assertions over the
+    same intervals with the same objects as a rebuild of that snapshot."""
+    document = None
+    for tx in range(1, snapshot + 1):
+        document = extend(document, consolidate(contested(tx), contest.registrations(), tx))
+    assert document is not None
+    rebuilt = extend(None, consolidate(contested(snapshot), contest.registrations(), snapshot))
+    assert contest.head_projection(document.resolution) == contest.head_projection(
+        rebuilt.resolution
+    )
+
+
+def test_the_contested_ledger_exercises_withdrawal_restatement_and_ties() -> None:
+    document = None
+    for tx in sorted(contest.CONTESTED):
+        document = extend(document, consolidate(contested(tx), contest.registrations(), tx))
+    assert document is not None
+    history = document.resolution.claims
+    resolver = [c for c in history if is_closure(c)]
+    assert resolver, "closures or restatements are made"
+    current = {
+        (c.subject.node_id, c.object.node_id, c.valid_from.ticks)  # type: ignore[union-attr]
+        for c in as_of(document.resolution, ledger_tx(2)).claims
+    }
+    assert ("asset-tag:amr-7", "site:dock", 0) in current  # the withdrawn pier freed the dock
+    assert not any(n == "asset-tag:amr-7" and o == "site:pier" for n, o, _ in current)
+    at_three = as_of(document.resolution, ledger_tx(3)).claims
+    pier = [c for c in at_three if c.object.node_id == "site:pier"]  # type: ignore[union-attr]
+    assert len(pier) == 1 and is_closure(pier[0])  # re-emitted after withdrawal: restated
+    humanoid = [c for c in at_three if c.subject.node_id == "asset-tag:humanoid-2"]
+    assert len(humanoid) == 1  # a full tie leaves one winner

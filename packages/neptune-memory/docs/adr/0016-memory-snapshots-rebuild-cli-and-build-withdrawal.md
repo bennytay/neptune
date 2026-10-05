@@ -62,12 +62,24 @@ ADR 0007 §5 stands, with these details:
    assertion over its valid interval. Its evidence is the assertion's evidence, then the evidence of
    whatever cuts it. It `supersedes` the assertion, and its `config_hash` covers
    `{at: t, resolver, restates: id}`, so no id repeats.
-4. **A touched `one` fact is placed again.** This supersedes ADR 0005 §1.4 for histories resolved with
-   builds. A withdrawn or retired winner no longer keeps what it took. Each `one` fact that lost or
-   regained an assertion at `t` is contested again among its standing assertions (not withdrawn, of their
-   consolidator's latest lineage), in arrival order, with ADR 0005's rules. An assertion whose current
-   pieces already match keeps its versions. Any other has them superseded at `t` and is restated over
-   the pieces it now holds. Without builds, ADR 0005 §1.4 holds unchanged.
+4. **With builds, a `one` fact is placed order-free.** This supersedes ADR 0005 §1.1 (a full tie goes
+   to the later arrival) and §1.4 (no resurrection) for histories resolved with builds. Without builds,
+   ADR 0005 holds unchanged.
+   - Each transaction places every `one` fact it touched: a fact with a new assertion, a withdrawal, a
+     retirement or a restatement.
+   - The fact is placed from its standing assertions: those not withdrawn and of their consolidator's
+     latest lineage.
+   - Each standing assertion holds its valid interval minus that of every standing assertion that
+     contradicts it and is stronger. Contradicting means another object, an overlapping interval and
+     the same clock. Strength is ordered by `(assertion rank, original valid_from, priority, id)`, a
+     total order whose tail is a rebuild's arrival order.
+   - So the current fact is a function of the standing set alone, whichever transactions brought it.
+     A withdrawn or retired winner no longer keeps what it took, and a full tie goes the same way in
+     every run.
+   - An assertion already placed whose versions hold exactly that, on the same grounds, keeps them. Any
+     other has them superseded at `t` and is restated over what it now holds.
+   - A new assertion is its own version when nothing cuts it. Otherwise it is recorded as superseded on
+     arrival with split closures, or with an `overridden_on_arrival` finding when nothing is left.
 5. **Every build is complete over its whole snapshot.** This supersedes ADR 0007 §5.3. The consolidators
    read across packages (run continuation, identity links, configuration chains), so a build over only
    the new packages would miss claims. "Incremental" means consolidating the new snapshot onto the
@@ -139,14 +151,31 @@ withdraw). Three things are checked:
 - Shuffled registration orders give byte-identical documents and snapshots.
 - Two `memory rebuild` processes under different `PYTHONHASHSEED` and `TZ` dump identical bytes.
 - Incremental consolidation (snapshots 1, 2, 3) holds the rebuild's `MemorySnapshot` and, at the head,
-  its claims.
+  its *head projection*.
 
-Incremental and rebuilt graphs are equal at the claim-set level by construction, because the latest
-builds are pure functions of the snapshot. The resolved split of a contested `one` fact follows arrival
-order (ADR 0005), and a rebuild flattens all arrivals into one transaction. So where standing claims
-contest a fact that no withdrawal touched, the two graphs may split it differently: a full tie goes to
-the later arrival, and a part one claim took stays taken. The archetype has no such contest, and the
-test pins exact equality there.
+The head projection is the sorted multiset, over every current version, of three things:
+
+- the assertion it is a version of, following `supersedes` past resolver versions;
+- its valid interval;
+- its object.
+
+Incremental and rebuilt graphs have equal claim sets by construction, because the latest builds are pure
+functions of the snapshot. Their head projections are equal because §2.4 places each fact from the
+standing set alone. Version ids, resolver provenance and evidence order may differ, since an incremental
+graph restates where a rebuild records the assertion itself.
+
+The archetype contests no fact. `tests/memory_contest_ledger.py` therefore adds a test consolidator over
+a Ledger with these cases:
+
+- a contest;
+- a withdrawn winner that frees a loser;
+- a re-emitted withdrawn claim;
+- full ties within and across transactions;
+- a three-way chain.
+
+Its projection is compared at every snapshot. Seeded random histories in
+`tests/test_supersede_withdrawal_memory.py` (two consolidators, withdrawals, re-emissions, half crowded
+with ties) compare the same projection at the resolver level.
 
 ## Alternatives considered
 
@@ -156,7 +185,11 @@ test pins exact equality there.
   interval and unique version ids. A restatement is the same move a split closure makes.
 - **Keep ADR 0005 "no resurrection" under withdrawal**: a retracted or revised claim would keep shaping the
   graph through what it once cut, and incremental would drift from rebuild on every withdrawn winner.
-  Re-placement is bounded to the facts a build touched.
+  Placement is bounded to the facts a transaction touched.
+- **Re-place only what a withdrawal touched, in arrival order, and break full ties by (priority, id)**:
+  arrival order still decides a three-way chain. If A beats B, B beats C, and A and C share an object,
+  then whether C keeps what B took from it depends on which of them arrived first. Seeded histories
+  diverged at the assertion level even with no ties at all.
 - **Package-scoped builds** (ADR 0007 §5.3): run continuation, identity links and configuration chains span
   packages, so a build over only new packages misses or wrongly withdraws claims.
 - **Plan in registration order, or pass every earlier claim as `previous`**: either lets a shuffle

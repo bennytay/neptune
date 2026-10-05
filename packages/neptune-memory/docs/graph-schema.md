@@ -304,9 +304,13 @@ def test_graph_schema_contract(check):
     cut, and `as_of` before it answers as before. This ends a retracted `same_as`, a clock mapping a revision
     re-states, and every claim of a lineage an upgrade replaces, even by an empty build. A claim emitted again after
     a withdrawal is *restated*: a resolver version recorded at that build, over the assertion's interval, that
-    `supersedes` the assertion (P10: every emitted `many` claim is current). A `one` fact that loses or regains an
-    assertion is placed again from the assertions still standing, so what a withdrawn winner had cut is held again;
-    an assertion whose pieces do not change keeps its versions.
+    `supersedes` the assertion (P10: every emitted `many` claim is current).
+
+    With builds, every `one` fact a transaction touches is placed order-free from the assertions still standing.
+    Each holds its interval minus that of every stronger contradicting assertion, by `(rank, valid_from, priority,
+    id)`. So what a withdrawn winner had cut is held again, a full tie goes the same way in every run, and an
+    incremental graph holds what a rebuild holds. An assertion whose pieces and grounds do not change keeps its
+    versions.
 
 ## Caveat: a resolver configuration is a store generation
 

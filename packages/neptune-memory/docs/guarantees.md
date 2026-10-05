@@ -17,7 +17,14 @@ time zone. Consolidating the packages as they are registered, one snapshot after
 results at the last snapshot as a rebuild from scratch:
 
 - the same `MemorySnapshot`;
-- the same current claims;
+- the same *head projection*, the sorted multiset over every current version of three things:
+  - the assertion it is a version of, following `supersedes` past resolver versions;
+  - its valid interval;
+  - its object.
+
+  So the same claims hold the same intervals with the same objects. Version ids, resolver provenance
+  and evidence order may differ, because an incremental graph restates where a rebuild records the
+  claim itself;
 - every claim the later builds no longer emit is withdrawn, not deleted, so `as_of` an earlier snapshot
   still answers as it did then.
 
@@ -29,6 +36,9 @@ results at the last snapshot as a rebuild from scratch:
   ([ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md) §3).
 - The runner sorts every output. A build is a complete statement of its lineage, so whatever a later build
   does not emit is withdrawn at that build (ADR 0016 §2, [ADR 0007](adr/0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) §5).
+- With builds, each `one` fact is placed from the claims still standing, order-free: a claim holds its
+  interval minus that of every stronger contradicting claim. Strength is `(rank, valid_from, priority,
+  id)`, so a full tie goes the same way whichever claim came first (ADR 0016 §2.4).
 - Every file Memory writes is canonical JSON.
 
 **How it is checked.** `tests/test_rebuild_determinism_memory.py` runs in every `make check` and in CI.
@@ -46,7 +56,15 @@ The tests check these cases:
 - two `memory rebuild` processes, under different `PYTHONHASHSEED` and `TZ`, dump byte-identical claims,
   graphs and snapshot records;
 - incremental `memory consolidate` at snapshots 1, 2 and 3 records the same `MemorySnapshot` as
-  `memory rebuild` at 3, and dumps the same claims as of the head;
+  `memory rebuild` at 3, and the same head projection;
+- the contested Ledger (`tests/memory_contest_ledger.py`) holds the same head projection, incrementally
+  and rebuilt, at each of its four snapshots. It covers:
+  - a contest;
+  - a withdrawn winner that frees a loser;
+  - a re-emitted claim;
+  - full ties within and across packages;
+  - a three-way chain;
+- seeded random histories with withdrawals, re-emissions and ties do the same at the resolver level;
 - consolidating the head again writes nothing;
 - what disappears between snapshots stays in the history, superseded at the build that dropped it.
 
@@ -64,24 +82,20 @@ memory --graphs /tmp/g --tenant a dump --as-of 3 --out a.jsonl
 memory --graphs /tmp/g --tenant b dump --as-of 3 --out b.jsonl
 ```
 
-The two snapshot records at `snapshots/3.json` hold the same `snapshot.id`. Apart from `recorded_at` and
-`supersedes`, the two dumps hold the same claims. A claim the incremental graph learned earlier keeps that
-earlier recording.
+The two snapshot records at `snapshots/3.json` hold the same `snapshot.id`. The two graphs have the same
+head projection: each current version of `b`, followed back to its assertion, matches one of `a` with the
+same interval and object. A claim the incremental graph learned earlier keeps that earlier recording.
 
 **Where it stops.**
 
 - **The input is fixed.** "The same snapshot" means the same packages and records. Changing a
   consolidator's version or config, or adding one, changes the `MemorySnapshot`. Adding a consolidator
   also changes the generation. Removing one takes a rebuild: `consolidate` refuses it.
-- **Contested facts can split differently.** An incremental graph and a rebuild hold the same claim set.
-  How they split a contested `one` fact follows arrival order (ADR 0005), and a rebuild flattens that to a
-  single transaction. Where standing claims contest a fact that no withdrawal touched, the two can split
-  it differently:
-  - a full tie goes to the later arrival;
-  - a part one claim took stays taken.
-
-  The archetype has no such contest, and the test pins exact equality there. The `MemorySnapshot` and
-  the claim set are equal in every case.
+- **Builds are required.** The order-free placement applies to graphs resolved with builds, which every
+  graph `memory` writes is. A history resolved without builds keeps ADR 0005's arrival order.
+- **A consolidator that fails at the head.** If it crashes or returns bad output at the head, or reads one
+  that did, it records no build. Incrementally, its earlier claims stay current. After a rebuild it has
+  none. The `MemorySnapshot`s still match, and both record the failure.
 - **The CLI reads a Ledger export.** It reads a Ledger export (`neptune_memory.ledger.LedgerExport`),
   not the catalog API, until Memory adopts it.
 - **The graph is stored on disk.** It lives in a directory per tenant (`neptune_memory.store.graphs`)

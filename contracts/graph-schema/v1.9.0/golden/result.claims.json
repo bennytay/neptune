@@ -56,7 +56,7 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
-      "id": "claim:sha256:69729bca5d00120e8a368ad8e43ea48c506d0fbf9bcf7a04ef05da02dccc2c70",
+      "id": "claim:sha256:8e16b2732b3f2e0c94125c7dc09bda1c59c656e96e2295c0ae62446d78160f51",
       "object": {
         "kind": "node",
         "node_id": "asset-tag:ARM-05",
@@ -64,7 +64,7 @@
       },
       "predicate": "recorded_by",
       "provenance": {
-        "config_hash": "sha256:1cb42240190637eea20c16163fa88df1b03ca89a5bc7d96404a8c9af6a7bdbc3",
+        "config_hash": "sha256:89c22294eb49e918ec784ce1f416298f53d6345d0a883a343a9bf5ff9da8ee00",
         "consolidator_id": "memory.supersede",
         "consolidator_version": "2",
         "evidence": [

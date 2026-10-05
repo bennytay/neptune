@@ -334,9 +334,9 @@ def run_consolidator(
     try:
         output: object = consolidator.consolidate(ledger, tuple(previous), config)
     except Exception as exc:  # partial success: a crashing consolidator is a finding
-        message = f"{type(exc).__name__}: {exc}"
-        if _safe_text(message) != message:
-            message = type(exc).__name__
+        # The type name only: an exception's text can hold an address or a set's order, which
+        # would make the finding, and so the MemorySnapshot id, differ between processes.
+        message = type(exc).__name__
         failed = (_finding("failed", transform, message),)
         return Consolidation(transform, (), failed, recorded_at)
     if not isinstance(output, ConsolidatorOutput):  # its own fields are checked on construction

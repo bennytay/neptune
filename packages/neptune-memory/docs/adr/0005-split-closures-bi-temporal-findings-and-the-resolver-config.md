@@ -1,6 +1,6 @@
 # 0005 — Split closures, bi-temporal findings and the resolver's config
 
-- Status: Accepted; §1.4 (no resurrection) superseded by 0016 for histories resolved with builds
+- Status: Accepted; §1.1 (later-arrival tie-break) and §1.4 (no resurrection) superseded by 0016 for histories resolved with builds
 - Date: 2026-10-02
 - Issue: MVL-196
 

@@ -13,12 +13,14 @@ new version every two transactions.
 """
 
 from dataclasses import replace
+from itertools import permutations
 from random import Random
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from memory_contest_ledger import head_projection
 from memory_schema_builders import (
     BOOT_CLOCK,
     CONFIG,
@@ -40,10 +42,7 @@ from neptune_memory.schema.supersede import (
     Build,
     LineageError,
     Resolution,
-    _contest,
-    arrival_key,
     as_of,
-    assertions,
     is_closure,
     lineage_of,
     resolve,
@@ -360,26 +359,67 @@ def test_a_build_that_skips_transactions_withdraws_at_its_own() -> None:
     assert resolution.claims[0].superseded_at == 3
 
 
-@settings(derandomize=True, max_examples=300)
-@given(st.lists(pooled(), max_size=8))
-def test_replacement_contests_exactly_as_first_placement(pool: list[Claim]) -> None:
-    """``_contest``, which re-placement runs, gives each assertion the pieces ``resolve`` placed."""
-    items = [replace(c, recorded_at=ledger_tx(i % 3)) for i, c in enumerate(pool)]
-    resolution = resolve(items, CORE_PREDICATES, PRIORITIES)
-    root_of = roots(resolution)
-    distinct = {c.id: c for c in assertions(items)}.values()
-    facts = {(c.subject, c.predicate) for c in distinct if c.predicate == "located_at"}
-    for fact in facts:
-        standing = sorted(
-            (c for c in distinct if (c.subject, c.predicate) == fact),
-            key=lambda c: arrival_key(c, PRIORITIES),
-        )
-        expected = {
-            root.id: sorted(dumps(p.to_json()) for p in pieces)
-            for root, pieces in ((r, _contest(standing).get(r.id, [])) for r in standing)
-        }
-        placed: dict[ClaimId, list[bytes]] = {r.id: [] for r in standing}
-        for version in resolution.claims:
-            if version.is_current and (version.subject, version.predicate) == fact:
-                placed[root_of[version.id].id].append(dumps(version.valid.to_json()))
-        assert {k: sorted(v) for k, v in placed.items()} == expected
+# --- Incremental equals rebuild (ADR 0016 §2.4, §5) ----------------------------------------------
+
+
+def _histories(
+    seed: int, trials: int
+) -> list[tuple[list[Claim], list[Build], dict[str, list[Claim]]]]:
+    """Seeded 3-transaction histories over one ``one`` fact: two consolidators, claims that come,
+    go and come back, and every other history crowded with full ties."""
+    rng = Random(seed)
+    machine, sites = MACHINES[1], [*SITES, node(NodeType.SITE, "quay")]
+    out = []
+    for trial in range(trials):
+        ties = trial % 2 == 1
+        starts = [rng.randint(0, 3) for _ in range(5)] if ties else rng.sample(range(10), 5)
+        pool = [
+            claim(
+                machine,
+                "located_at",
+                rng.choice(sites),
+                start,
+                OPEN if rng.random() < 0.5 else start + rng.randint(1, 5),
+                tx=0,
+                kind=rng.choice([STATED, OBSERVED]),
+                consolidator=rng.choice(sorted(PRIORITIES)),
+                ev=i,
+            )
+            for i, start in enumerate(starts)
+        ]
+        claims: list[Claim] = []
+        builds: list[Build] = []
+        latest: dict[str, list[Claim]] = {}
+        for tx in (1, 2, 3):
+            for cid in sorted(PRIORITIES):
+                mine = [
+                    c for c in pool if c.provenance.consolidator_id == cid and rng.random() < 0.6
+                ]
+                claims.extend(at(c, tx) for c in mine)
+                builds.append(build_of(tx, *mine, cid=cid))
+                latest[cid] = mine
+        out.append((claims, builds, latest))
+    return out
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_incremental_resolution_holds_what_a_rebuild_holds(seed: int) -> None:
+    """At the head, the same assertions hold the same intervals with the same objects whether
+    the claims arrived over three transactions or all at once, ties included."""
+    for claims, builds, latest in _histories(seed, 400):
+        incremental = run(claims, builds)
+        flat = [at(c, MAX_TX) for mine in latest.values() for c in mine]
+        rebuild = run(flat, [build_of(MAX_TX, *mine, cid=cid) for cid, mine in latest.items()])
+        assert head_projection(incremental) == head_projection(rebuild)
+
+
+def test_a_full_tie_goes_the_same_way_whichever_arrives_first() -> None:
+    """Same rank, same ``valid_from``, other objects: (priority, id) decides, never arrival."""
+    for first, second in permutations(SITES, 2):
+        a = claim(AUV, "located_at", first, 0, tx=1, consolidator="memory.a", ev=0)
+        b = claim(AUV, "located_at", second, 0, tx=2, consolidator="memory.a", ev=1)
+        incremental = run([a, b], [build_of(1, a), build_of(2, a, b)])
+        rebuild = run([at(a, 2), b], [build_of(2, a, b)])
+        winner = max((a, b), key=lambda c: c.id)
+        for resolution in (incremental, rebuild):
+            assert [c.object for c in resolution.claims if c.is_current] == [winner.object]
