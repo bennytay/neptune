@@ -19,6 +19,7 @@ from deploy_pack_support import (
     schema_path,
 )
 from neptune_deploy.packs.appendix import CATALOG_API_VERSION, resolution
+from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_PIN as READER_PIN
 
 GRAPH_SCHEMA_PIN = "1.6.0"
 DOCS = Path(__file__).resolve().parents[1] / "docs"
@@ -87,7 +88,7 @@ def test_a_graph_at_head_zero_pins_no_transaction() -> None:
 
 def test_deploy_pins_the_contracts_it_reads() -> None:
     lock = tomllib.loads((CONTRACTS / "lock.toml").read_text(encoding="utf-8"))["neptune-deploy"]
-    assert lock["graph-schema"] == GRAPH_SCHEMA_PIN
+    assert lock["graph-schema"] == GRAPH_SCHEMA_PIN == READER_PIN
     assert lock["catalog-api"] == CATALOG_API_VERSION
     table = (DOCS / "contracts.md").read_text(encoding="utf-8")
     assert re.search(
