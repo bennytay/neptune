@@ -368,7 +368,21 @@ def _raw_server(script: Callable[[Any], None]) -> Iterator[str]:
     def run() -> None:
         connection, _ = listener.accept()
         with connection:
-            connection.recv(65536)
+            # Drain the whole request first: unread bytes would make the close a reset, which
+            # hides how the client treats a clean close (a truncated body must still fail).
+            request = connection.recv(65536)
+            while b"\r\n\r\n" not in request:
+                request += connection.recv(65536)
+            head, _, body = request.partition(b"\r\n\r\n")
+            length = next(
+                int(line.split(b":", 1)[1])
+                for line in head.split(b"\r\n")
+                if line.lower().startswith(b"content-length:")
+            )
+            while len(body) < length:
+                more = connection.recv(65536)
+                assert more, "the client closed before sending its whole request"
+                body += more
             script(connection)
 
     thread = threading.Thread(target=run, daemon=True)

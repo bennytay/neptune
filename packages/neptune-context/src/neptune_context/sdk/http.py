@@ -62,6 +62,11 @@ def _read(stream: Any, limit: int, deadline: float) -> bytes:
             raise _timed_out()
         chunk = take(min(_CHUNK, limit - size))
         if not chunk:
+            # ``read1`` ends quietly at EOF even when the server promised more: a body shorter
+            # than its Content-Length is a broken connection, not a short answer.
+            missing = getattr(stream, "length", None)
+            if missing:
+                raise http.client.IncompleteRead(b"".join(chunks), missing)
             break
         chunks.append(chunk)
         size += len(chunk)
