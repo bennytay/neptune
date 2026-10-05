@@ -1,0 +1,212 @@
+{
+  "corpus": "acceptance",
+  "files": {
+    "neptune.yaml": {
+      "sha256": "sha256:1279658641566e0b752c487a4ff6ca85f6895996d94ed6fb9134572011382dba",
+      "size": 1575
+    },
+    "records/asset_register.csv": {
+      "sha256": "sha256:b24e816567ecca2d15afb5da6c046d7d666538c8327cafd247ed738311869e7d",
+      "size": 1133
+    },
+    "sites/PLANT-2/cell3/bags/pallet_2026-09-09/metadata.yaml": {
+      "sha256": "sha256:13b72327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49",
+      "size": 1972
+    },
+    "sites/PLANT-2/cell3/bags/pallet_2026-09-09/pallet_2026-09-09_0.mcap": {
+      "sha256": "sha256:a868368a4ee5ee0701bb22dc0b4be70ed2f381fdfcf28d03e9f0e4b1de90ed4c",
+      "size": 113317
+    },
+    "sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml": {
+      "sha256": "sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12",
+      "size": 1972
+    },
+    "sites/PLANT-2/cell3/bags/pallet_2026-09-14/pallet_2026-09-14_0.mcap": {
+      "sha256": "sha256:14259c0d0908b0914878f1b2ec72f9f327eb21f1c9440f9a1c592b62bfc2f976",
+      "size": 112982
+    },
+    "sites/PLANT-2/cell3/bags/pick_place_2026-08-20/metadata.yaml": {
+      "sha256": "sha256:6af83e864da12599a5beb10f484a4d428ab4884db811453a2aa314d628878839",
+      "size": 1480
+    },
+    "sites/PLANT-2/cell3/bags/pick_place_2026-08-20/pick_place_2026-08-20_0.mcap": {
+      "sha256": "sha256:a6eff07ae440bfcdcc3c8da5a3bdc016665eefc7b9f207018d2c7e84883a1751",
+      "size": 22273
+    },
+    "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0226.yaml": {
+      "sha256": "sha256:fecc413f15fd281f9a58cdd7f88e51751b6ddc0e5ae2b11eab85184cd112a077",
+      "size": 313
+    },
+    "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0415.yaml": {
+      "sha256": "sha256:7734a681a3f12e6046524b1de00867ea2d66cf0a86d76082dc7f3c74dafcf42d",
+      "size": 326
+    },
+    "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0623.yaml": {
+      "sha256": "sha256:530ef05aaa164117044f3192bcafcb24737c65212fb9771ba8f205894aacdf80",
+      "size": 334
+    },
+    "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml": {
+      "sha256": "sha256:a2d19ecfbcda50ea0d69888d09d5f529e747ed4eb2434641837f09f657b175e9",
+      "size": 334
+    },
+    "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml": {
+      "sha256": "sha256:0ac61f856e5f99b1a8e8231bcfcfe5a7ad4497f50da2c4ad8b3a994f14fdbfa4",
+      "size": 370
+    },
+    "sites/PLANT-2/cell3/config/cell_config.yaml": {
+      "sha256": "sha256:57ea0f32041ae257fcb6bfed1c7c5a6738203f6290e7c0beccf3180a2245fb25",
+      "size": 497
+    },
+    "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_B.pdf": {
+      "sha256": "sha256:dfce92258c17b6f530d0beba2f3ba5d5af700e6b0ca37643e8e292bafa6840bd",
+      "size": 7220
+    },
+    "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_C.pdf": {
+      "sha256": "sha256:1f82a1d7d16ff3773b649151c47c72cc41237fb377cce3cd519c90324f8eaa54",
+      "size": 7609
+    },
+    "sites/PLANT-2/cell3/documents/commissioning_CR-C3-2026-02.pdf": {
+      "sha256": "sha256:5e9fde08afd857fc9696313d71432ff87f2d126a2d5b44a2508806cdf391a9d7",
+      "size": 12618
+    },
+    "sites/PLANT-2/cell3/documents/risk_assessment_CELL3-RA-009.pdf": {
+      "sha256": "sha256:9929112c0ec52f281dfded4f86d401ed43175e36031154a08146cb2773e6cf28",
+      "size": 11475
+    },
+    "sites/PLANT-2/cell3/documents/sop_CELL-014_finger_set.pdf": {
+      "sha256": "sha256:962616825f67fd5f73c4d078fcc412cfbb027ffd69749a7dd61a4ed8b7c70b28",
+      "size": 6551
+    },
+    "sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf": {
+      "sha256": "sha256:bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e19c97908",
+      "size": 7915
+    },
+    "sites/PLANT-2/cell3/requalification/requalification_tests.csv": {
+      "sha256": "sha256:30be864d249a145a23a78fc8b38686e09a3ca1d3c8b4c9f08c08feb847a3f2be",
+      "size": 987
+    },
+    "sites/PLANT-2/cell3/shared/for_vendor/cell3_reference_run.mcap": {
+      "sha256": "sha256:a868368a4ee5ee0701bb22dc0b4be70ed2f381fdfcf28d03e9f0e4b1de90ed4c",
+      "size": 113317
+    },
+    "sites/PLANT-2/cell3/tickets/near_miss_export.json": {
+      "sha256": "sha256:a48873e408ee17b04ca43a68c2b6a1450f7acba3e867e1bfa84e41c44f793b6d",
+      "size": 1046
+    },
+    "sites/PLANT-2/cell3/urdf/arm6.urdf": {
+      "sha256": "sha256:7f79c49b41ef85282e970087ee262c9f4df41721f1641cbc35e4a23eb7dbfa37",
+      "size": 1767
+    },
+    "sites/PLANT-2/cell3/vision/wrist_camera_handeye.yml": {
+      "sha256": "sha256:1850863a15c965649863270e7170ed35528b4ed4225587063c8d0d5e9a10ace8",
+      "size": 709
+    },
+    "sites/PLANT-2/changes/servicenow_changes.csv": {
+      "sha256": "sha256:fdca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f1ef16",
+      "size": 626
+    },
+    "sites/PLANT-2/cmms/work_orders.csv": {
+      "sha256": "sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3",
+      "size": 2044
+    },
+    "sites/PLANT-2/legged/config/2026-09-01/LEG-01_patrol.yaml": {
+      "sha256": "sha256:9813ae367c6be18b197ef4f323c988e1cbaa5bd30279fcfe44b2008b040b6514",
+      "size": 480
+    },
+    "sites/PLANT-2/legged/config/2026-09-13/LEG-01_patrol.yaml": {
+      "sha256": "sha256:7e0c0d49f6d992a862132aeaf2302dd976edc5d8b228bf4a88bac613c1115308",
+      "size": 481
+    },
+    "sites/PLANT-2/legged/runs/patrol_2026-09-12.mcap": {
+      "sha256": "sha256:4bafc373118f24034015c9cd56dee2ea45ec2eb574b1a28402ce3c6dab6d9cfc",
+      "size": 49842
+    },
+    "sites/PLANT-2/legged/runs/patrol_2026-09-14/metadata.yaml": {
+      "sha256": "sha256:4bb95d42f085cd51e8d8d29557dcaed833b24d977938ac9e07a8032b2c62372a",
+      "size": 1947
+    },
+    "sites/PLANT-2/legged/runs/patrol_2026-09-14/patrol_2026-09-14_0.mcap": {
+      "sha256": "sha256:27b2b07617c165dab444807a166ba5e28ae69d869fc00c5b7248e0167286fe9d",
+      "size": 102615
+    },
+    "sites/PLANT-2/legged/urdf/qd2.urdf": {
+      "sha256": "sha256:e0acab8370e9f7bbed326846f93649a9bd065e00971c60059ff5529ac2ede636",
+      "size": 4828
+    },
+    "sites/PLANT-2/maps/PLANT-2_zones.geojson": {
+      "sha256": "sha256:c2c3f8e94d923163d758b062bc5663edb6f81f2927a1bc75c6ebf143b53c2c7d",
+      "size": 2071
+    },
+    "sites/PLANT-2/survey/site_survey_SS-PLANT2-2026-09.pdf": {
+      "sha256": "sha256:d410bcb189212af7b275c8403890b1f6b3b584613347a329087977d5d7f56b2a",
+      "size": 10337
+    },
+    "sites/PLANT-2/vendor/SB-2026-117_PG-80_finger_sets.md": {
+      "sha256": "sha256:127b45a4312653409438ae94fe88f132416e52b42cf88f98de9456a15ab32558",
+      "size": 1004
+    },
+    "sites/S-007/authorisation/zone_register.csv": {
+      "sha256": "sha256:45788eab57528e0fb36a3e2ae9d72a843252edda2ed63596378bd2e3c2a187a1",
+      "size": 494
+    },
+    "sites/S-007/changes/servicenow_changes.csv": {
+      "sha256": "sha256:91d38d927ae0f43c8e0706a41a5da1d39d50fb94be8dac1e87ed9b21e71bff1c",
+      "size": 880
+    },
+    "sites/S-007/cmms/work_orders.csv": {
+      "sha256": "sha256:653d2e3bff6fd54ab9d76e36b7af4bb952d0cdfb70623315309a513c755f232d",
+      "size": 1067
+    },
+    "sites/S-007/config/AMR-05/nav2_params.yaml": {
+      "sha256": "sha256:6495d96ee25fd90b7a5f3416267cdcd25e381b9938748fd838d62f4db133f66f",
+      "size": 405
+    },
+    "sites/S-007/config/AMR-06/nav2_params.yaml": {
+      "sha256": "sha256:7f04720e8e8b1375f6b79189e2c784bc54e3dce791ad084a0ceee1fb660639b5",
+      "size": 405
+    },
+    "sites/S-007/config/AMR-07/nav2_params.yaml": {
+      "sha256": "sha256:9e0b456f5606c529bc765557a52f3589357722234d52b5c3c0cdbe70baa56637",
+      "size": 405
+    },
+    "sites/S-007/incidents/INC-0007.pdf": {
+      "sha256": "sha256:b793183fb43a23f9bb069be4e3f4c360321da5dc1c60d929312bd8942abbcda8",
+      "size": 6897
+    },
+    "sites/S-007/maps/S-007_zones.geojson": {
+      "sha256": "sha256:83d1dc3347fee1a343d6a92f148e4cdfd00a9b5a402dfadf21c98aa3c6abc777",
+      "size": 1393
+    },
+    "sites/S-007/requalification/requalification_tests.csv": {
+      "sha256": "sha256:e1dd2870994f4adbd7d45e8d4df91961afcb4fa5285e37e27ddad645265e2931",
+      "size": 495
+    },
+    "sites/S-007/runs/amr-05_2026-03-03.mcap": {
+      "sha256": "sha256:08528ca2ef6fe860c8744a0950ad7bc1cf6674822a9e27be2c96e6249975541d",
+      "size": 17400
+    },
+    "sites/S-007/runs/amr-06_2026-03-03.mcap": {
+      "sha256": "sha256:b80fb68ef024c5d9b866b998595e0e1b7ba0ba1dda0a4037d3e945de369407ba",
+      "size": 17515
+    },
+    "sites/S-007/runs/amr-07_2026-04-02.mcap": {
+      "sha256": "sha256:34bb6772f2fd57ccededd1a9f6f6e83e5b8c5fefaa389765a28d3c311910bbe8",
+      "size": 17516
+    },
+    "sites/S-007/runs/amr-07_2026-04-15.mcap": {
+      "sha256": "sha256:e1987a0b1303fe67c473a25d87b363be8de1085f07f51e267e90d311e83202da",
+      "size": 17400
+    },
+    "sites/S-007/urdf/lift_150.urdf": {
+      "sha256": "sha256:4ed9c552ac68359f303331356a840df509aa06d1dc0b84c35fcecb2da9e00404",
+      "size": 1757
+    },
+    "sites/S-007/urdf/tug_200.urdf": {
+      "sha256": "sha256:15e99b9d03564d7a323c7df48e94444fb803a69c261c1809dfd37f19132baf46",
+      "size": 1475
+    }
+  },
+  "lock_format": 1,
+  "tree": "sha256:d85cd2e5aa704c07951ea9e1191692ebf3b08e813e21da3fe1834ddf19373a5a",
+  "version": "1.0.0"
+}
