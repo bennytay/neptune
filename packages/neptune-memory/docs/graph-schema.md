@@ -1,14 +1,21 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.0.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
-records the decisions behind it. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
+`contracts/graph-schema/v1.4.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
+([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
+configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
+run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.4.0 (minor) adds the `clock` node
+type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
+([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)). Earlier goldens still
+validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
 ## Nodes
 
 A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and every edge is a claim (ADR 0002 §1).
-`node_id` is opaque: a Ledger thread's declared logical id `<namespace>:<value>` (ADR 0003 §1).
+`node_id` is opaque: a Ledger thread's declared logical id `<namespace>:<value>` (ADR 0003 §1), or for a `clock`
+the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 
 | Tier | Node type | What it is |
 |---|---|---|
@@ -24,7 +31,10 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 | entity | `configuration` | a calibration, parameter set or description revision |
 | entity | `policy` | an operating rule or control policy |
 | entity | `run` | one recorded run |
+| entity | `stream` | one recorded stream of a run: a topic, a channel, a log message type |
+| entity | `document` | a declared document: a manual, an SOP, a datasheet, a register |
 | entity | `episode` | a bounded segment of a run (an entity, not the Episode tier) |
+| entity | `clock` | one declared clock; `node_id` is its compiler `TimestampDomain` record id |
 | context | `deployment` | a deployment, with a summary |
 | context | `fleet` | a fleet, with a summary |
 | context | `programme` | a programme, with a summary |
@@ -32,7 +42,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 2`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 6`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -40,30 +50,50 @@ major version (ADR 0002 §5).
 
 | Predicate | Subject | Object | Cardinality | Meaning |
 |---|---|---|---|---|
+| `at_site` | run | site | one | the site a run took place at, as declared |
+| `at_site_candidate` | run | site | many | ambiguous: the evidence names several sites for the run |
+| `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
+| `clock_map` | clock | clock_map | many | a `maps_to`'s parameters as the evidence states them, or the chain it composes |
+| `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
+| `configuration_candidate` | machine, run | configuration | many | ambiguous: the configuration in force could be this one; one claim per reading |
+| `configuration_unknown` | machine, run | record | many | no configuration is stated over the interval; the record leaves it open, never filled |
+| `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
+| `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
+| `executes_task_candidate` | episode, run | task | many | ambiguous: the evidence names several tasks |
 | `governed_by` | deployment, fleet, machine, site | policy | many | an operating rule or control policy that applies |
 | `has_calibration` | sensor | configuration | one | the calibration in force |
+| `has_clock` | machine | clock | many | a clock the machine's records carry, over the interval they observe it |
 | `has_configuration` | deployment, machine, sensor | configuration | many | a parameter set, description file or other configuration in force |
+| `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
+| `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
 | `located_at` | asset, machine | site, zone | one | where it is |
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
+| `maps_to` | clock | clock | many | a declared or estimated mapping, or a chain of them, takes its ticks to another clock's |
 | `member_of_fleet` | machine | fleet | one | the fleet a machine belongs to |
 | `mounted_on` | sensor | asset, machine | one | what a sensor is attached to |
+| `not_covered_by_authorisation` | run | configuration | many | observed: no authorisation envelope in the Ledger names the configuration then |
 | `operated_by` | run | person | many | a declared operator or supervisor |
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
 | `recorded_by` | run | machine | one | the machine whose log a run is |
+| `recorded_by_candidate` | run | machine | many | ambiguous: the evidence names several machines for the run |
 | `runs_model` | machine | model_version | many | a learned model it runs |
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
-| `same_as_candidate` | any node | same type | many | ambiguous: both cite the same source; one claim each way |
+| `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
+| `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
-`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock) and `record`.
+`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record` and `clock_map` (`#/$defs/ClockMap`:
+a mapping's `anchor`, `rate` and `residual_bound` exactly as stated, each a `Knowledge` state inheriting the
+claim's provenance, with `method` `stated` or `co_sampled`; or a `composed` chain naming its mapping records in
+`chain` and the clocks between in `via`, with no parameters of its own).
 
 ## The claim and the finding
 
@@ -93,6 +123,20 @@ Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit 
 | `episodes(filter)` | **provisional (G3)**: `NotCovered` in v1 |
 | `spatial(site, frame, as_of)` | **provisional (G3)**: `NotCovered` in v1 |
 
+Identity is followed, never merged, with `schema.traverse.same_as_closure(reader, node, as_of, *, depth=8,
+include_candidates=False, include_inferred=True)`: every node `same_as` reaches in either direction within `depth`
+hops, each once at its shortest depth with the claims of one shortest path. It follows `same_as_candidate` only
+when asked, works over any `MemoryReader`, and compares no clocks.
+
+Clocks are related, never coerced, with `schema.clocks.convert(reader, ticks, from_clock, to_clock, as_of, *,
+include_inferred=True, max_hops=8)`: exact ticks of `to_clock` (a `Fraction`) with the error bound the mappings
+state, through `clock_map` claims that hold at that instant, forward or inverted, along every route of every
+length. Declared mappings are tried first, estimated ones only if the declared ones decide nothing. The result is
+`Known` (every route agrees), `Ambiguous` (routes or mappings that hold disagree) or `Unknown` with a
+`MissingHop`: nothing arrives, or some branch is undecided (a mapping in force without parameters, a conflict a
+later hop's validity would settle, too many readings); it names the clocks reached, the mappings that do not
+apply, and the readings that did arrive (ADR 0011 §5).
+
 Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, `ClaimsResult`,
 `NeighboursResult`, `EpisodesResult`, `SpatialResult`). A `Knowledge`-wrapped result is
 `{"knowledge": "known", "value": …}` or `{"knowledge": "not_covered"}`. Goldens `result.*.json` pin the shapes.
@@ -101,7 +145,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.0.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.4.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -131,9 +175,44 @@ def test_graph_schema_contract(check):
 9. **One answer per `as_of`.** An `as_of` later than `head` raises `AsOfBeyondHeadError`.
 10. **Missingness is explicit.** A node the graph never names is `NotCovered`. Provisional queries answer
     `NotCovered`, never an empty result.
-11. **Identity is never merged.** `same_as` is an edge that queries traverse. It is grounded only by
-    `memory.identity`, never by inference. `same_as_candidate` is pairwise. People are named only by declared
+11. **Identity is never merged.** `same_as` is an edge that queries traverse (`schema.traverse.same_as_closure`).
+    It is grounded only by `memory.identity`, never by inference: a compiler `IdentityLink` with a `Known` right
+    side, configuration lineage, or a person's `same_identity` assertion that no effective `retract` withdraws
+    ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md)).
+    `same_as_candidate` is pairwise: every candidate of an `Ambiguous` link, and threads citing one source. People are named only by declared
     identifiers: never blank, never padded with whitespace.
+    An `Ambiguous` validity window, window bound or assertion `authored_at` is never read as unstated: the
+    statement becomes `same_as_candidate` pairs, one per reading of its window, each citing that reading (more
+    than 64 readings: `identity.untimeable_window`, no claim). A statement that states no start holds from its
+    subject's first thread record, and the claim lists that thread in `provenance.records`, so a conventional
+    start is told from a stated one.
+    A `retract` whose `retracts` is `Ambiguous`, or that names one candidate of a target's `Ambiguous` `identifier`,
+    only possibly names that target. Retraction is labelled over certain and possible retractions together: an
+    assertion is retracted only by a certain retract that stands, and effective only when every retract that may
+    name it is retracted. One that certain retractions alone would settle but a possible one leaves open is
+    reported as `identity.retraction_ambiguous`. A `same_identity` of that kind becomes `same_as_candidate` pairs
+    that cite the retracts leaving it in doubt, and a `distinct_identity` of that kind suppresses nothing. A
+    `same_identity` whose own `identifier` is `Ambiguous` is always candidates, never `same_as`.
+12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
+    places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
+    the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
+    nearest configuration in time; where records disagree, every reading is a `configuration_candidate`. No
+    `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
+    made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
+    envelope end is never read as open.
+13. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run
+    node is a compiler `Run`'s declared logical id, else `record:<run record id>`. Every claim about a run holds over
+    its stated `[first, last]` on its own clock, and again on a civil clock only where a `timestamp_domain` or a
+    stated `clock_mapping` puts it there. `continues` links the parts of one run its `RunAssembly` states, in time
+    order on one clock; parts whose clocks cannot be compared are `continues_candidate` both ways. `recorded_by`
+    and `at_site` are `Known` only when every ground names one id, and `executes_task` holds every task stated;
+    otherwise each reading is a `*_candidate` claim. `consolidate.runs.involvement` reads a role back as `Known`,
+    `Ambiguous`, `Unknown` or `NotCovered`.
+14. **No clock mapping is invented.** `maps_to` and `clock_map` rest only on a compiler `ClockMapping` (declared:
+    `observed` or `stated`, from `memory.time`) or a compiler estimate (`inferred`, from `memory.time_estimates`),
+    or on a chain of them; Memory never estimates an offset, never assumes an unstated validity open, and never
+    re-times a claim. A later-starting mapping of one clock pair holds from its start, and the earlier one's
+    claims end there ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)).
 
 ## Caveat: a resolver configuration is a store generation
 
@@ -149,14 +228,17 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
 ## Not in v1
 
 - `episodes` and `spatial` structure (G3).
-- Cross-clock comparison, which waits for `ClockAlignment` (compiler MVL-36).
+- Cross-clock comparison inside the resolver: claims on two clocks are still never compared there
+  (`clock_mismatch`). A consumer relates them with `schema.clocks.convert`; no claim is ever re-timed.
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,
   masks `superseded_at`, joins findings and runs this suite.
 - Withdrawal ([ADR 0007](adr/0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) §5, MVL-132).
   Until it lands, a claim a consolidator stops emitting stays current: an operator cannot retract a `many`
   fact such as `same_as`, and an upgrade that emits nothing retires nothing. A `one` fact is corrected by a new
-  stated claim, which supersedes it.
-- Names (`has_name`, ADR 0007 §2, MVL-126).
+  stated claim, which supersedes it. The identity consolidator already stops emitting a retracted `same_as`
+  (ADR 0008 §3); withdrawal makes that end it. Likewise a revised clock mapping: the build after the revision
+  emits the old mapping's claims closed at the revision, but the version emitted open before stays current
+  beside them until withdrawal ends it (ADR 0011 §5).
 - Evidence status beside claims (ADR 0007 §6, MVL-132): a `Knowledge[EvidenceStatus]` for every cited source,
   `NotCovered` until the Ledger catalog emits a retention signal. v1 results carry no status map, which never
   means "available".

@@ -7,7 +7,7 @@ published golden graph (``contracts/graph-schema/v<version>/golden/graph.json``)
     import pytest
     from neptune_memory.contract.suite import CHECKS, load_golden
 
-    GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.0.0/golden/graph.json")
+    GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.4.0/golden/graph.json")
 
     @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
     def test_graph_schema_contract(check):

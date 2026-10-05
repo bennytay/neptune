@@ -8,7 +8,8 @@ package whose every value cites the exact source cell or span. The base package 
 the same package, files and mapper version give a byte-identical result.
 
 - ``map_files(base, mappings, templates)``: the new package's files, in memory;
-- ``map_package(base_root, mappings, out, templates)``: read, map, write; returns the package id;
+- ``map_package(base_root, mappings, out, templates)``: read, map, write through the compiler's
+  streaming writer (ADR 0012 §3); returns the package id;
 - ``preset(name)`` / ``PRESETS``: the mapping files shipped for common exports;
 - ``TemplateRegistry`` / ``load_template``: the document templates a run may match.
 """
@@ -23,8 +24,8 @@ from neptune.store.package import (
     PackageError,
     package_files,
     read_package,
-    write_package,
 )
+from neptune.store.writer import write_package_stream
 from neptune_deploy.lifecycle.documents import (
     DOCUMENT_MAPPER_ID,
     DOCUMENT_MAPPER_VERSION,
@@ -38,7 +39,7 @@ from neptune_deploy.lifecycle.mapping import (
     load_mapping,
     parse_mapping,
 )
-from neptune_deploy.lifecycle.run import map_records
+from neptune_deploy.lifecycle.run import check_declared, iter_records, map_records
 from neptune_deploy.lifecycle.templates import (
     TEMPLATE_SCHEMA,
     DocumentTemplate,
@@ -97,12 +98,21 @@ def map_package(
     mappings: Sequence[LifecycleMapping],
     out: Path,
     templates: Sequence[DocumentTemplate] = (),
+    scratch: Path | None = None,
 ) -> ContentId:
     """Read and verify the package at ``base_root``, map it, write the new package to ``out``.
 
-    ``out`` may not be the base package or inside it: the base is never changed (ADR 0002 §1).
+    ``out`` may not be the base package or inside it: the base is never changed (ADR 0002 §1). The
+    records are written as they are mapped (ADR 0012 §3); sorted runs spill under ``scratch``, by
+    default the directory ``out`` is made in, and are removed when the write ends.
     """
     base, target = base_root.resolve(), out.resolve()
     if target == base or base in target.parents:
         raise PackageError(f"{out} is inside the base package {base_root}; write it elsewhere")
-    return write_package(out, map_files(read_package(base_root), mappings, templates))
+    if not mappings and not templates:
+        raise MappingError("name at least one mapping file or document template")
+    check_declared(mappings, templates)
+    spill = out.parent if scratch is None else scratch
+    spill.mkdir(parents=True, exist_ok=True)
+    records = iter_records(read_package(base_root), mappings, templates)
+    return write_package_stream(out, records, scratch=spill)
