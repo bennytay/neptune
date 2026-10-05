@@ -28,6 +28,30 @@
     },
     {
       "cardinality": "many",
+      "description": "an authorisation envelope approves this configuration at the site over the interval",
+      "domain": [
+        "site"
+      ],
+      "name": "authorised_configuration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a maps_to's parameters as the evidence states them, or the chain it composes",
+      "domain": [
+        "clock"
+      ],
+      "name": "clock_map",
+      "range": [
+        "clock_map"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "both events began inside the claim's valid interval, which is the configured window on that clock; from different sources; co-occurrence, never a cause",
       "domain": [
         "event"
@@ -35,6 +59,44 @@
       "name": "co_occurs_within",
       "range": [
         "event"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
+      "domain": [
+        "run"
+      ],
+      "name": "configuration_active_during",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the configuration in force could be this one; one claim per reading",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_candidate",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "no configuration is stated over the interval; the record leaves it open, never filled",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_unknown",
+      "range": [
+        "record"
       ],
       "version": 1
     },
@@ -88,6 +150,30 @@
       "version": 1
     },
     {
+      "cardinality": "many",
+      "description": "where an episode ends, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at_candidate",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "one",
       "description": "the run an episode segments",
       "domain": [
@@ -116,6 +202,7 @@
       "description": "a Ledger record about the node (Episode tier, by id)",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -139,7 +226,7 @@
       "range": [
         "record"
       ],
-      "version": 3
+      "version": 4
     },
     {
       "cardinality": "many",
@@ -196,6 +283,18 @@
     },
     {
       "cardinality": "many",
+      "description": "a clock the machine's records carry, over the interval they observe it",
+      "domain": [
+        "machine"
+      ],
+      "name": "has_clock",
+      "range": [
+        "clock"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "a parameter set, description file or other configuration in force",
       "domain": [
         "deployment",
@@ -237,6 +336,7 @@
       "description": "a declared display name, verbatim; never an identifier",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -260,7 +360,7 @@
       "range": [
         "text"
       ],
-      "version": 2
+      "version": 3
     },
     {
       "cardinality": "one",
@@ -297,6 +397,30 @@
       "name": "in_zone_candidate",
       "range": [
         "zone"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a human intervention during the episode (an Intervention record, by id)",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the intervention may have been during the episode; the evidence does not say",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened_candidate",
+      "range": [
+        "record"
       ],
       "version": 1
     },
@@ -355,6 +479,18 @@
       "version": 1
     },
     {
+      "cardinality": "many",
+      "description": "a declared or estimated mapping, or a chain of them, takes its ticks to another clock's",
+      "domain": [
+        "clock"
+      ],
+      "name": "maps_to",
+      "range": [
+        "clock"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "one",
       "description": "the fleet a machine belongs to",
       "domain": [
@@ -381,6 +517,18 @@
     },
     {
       "cardinality": "many",
+      "description": "observed: no authorisation envelope in the Ledger names the configuration then",
+      "domain": [
+        "run"
+      ],
+      "name": "not_covered_by_authorisation",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "a declared operator or supervisor",
       "domain": [
         "run"
@@ -388,6 +536,18 @@
       "name": "operated_by",
       "range": [
         "person"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the outcome a record declares for the episode, verbatim; never inferred",
+      "domain": [
+        "episode"
+      ],
+      "name": "outcome",
+      "range": [
+        "text"
       ],
       "version": 1
     },
@@ -470,6 +630,7 @@
       "description": "the same real-world thing: declared identifier, configuration lineage or operator",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -492,6 +653,7 @@
       "name": "same_as",
       "range": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -511,13 +673,14 @@
         "task",
         "zone"
       ],
-      "version": 3
+      "version": 4
     },
     {
       "cardinality": "many",
       "description": "ambiguous: the evidence could mean either; whether they are one thing is undecided",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -540,6 +703,7 @@
       "name": "same_as_candidate",
       "range": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -559,7 +723,19 @@
         "task",
         "zone"
       ],
-      "version": 3
+      "version": 4
+    },
+    {
+      "cardinality": "many",
+      "description": "where an episode starts, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "starts_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
     },
     {
       "cardinality": "one",
@@ -571,6 +747,18 @@
       "range": [
         "integer",
         "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "took over from the object on a machine's chain; valid while the subject is in force",
+      "domain": [
+        "configuration"
+      ],
+      "name": "succeeds",
+      "range": [
+        "configuration"
       ],
       "version": 1
     },

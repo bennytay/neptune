@@ -22,7 +22,14 @@ REPO: Final = Path(__file__).resolve().parents[3]
 REGISTRY: Final = REPO / "contracts" / "graph-schema"
 PUBLISHED: Final = REGISTRY / "v1.6.0"  # the latest: what this code must reproduce
 FIRST: Final = REGISTRY / "v1.0.0"  # still read by consumers pinned to 1.0.0
-EARLIER: Final = (FIRST, REGISTRY / "v1.1.0", REGISTRY / "v1.3.0")  # every earlier minor of major 1
+EARLIER: Final = (
+    FIRST,
+    REGISTRY / "v1.1.0",
+    REGISTRY / "v1.2.0",
+    REGISTRY / "v1.3.0",
+    REGISTRY / "v1.4.0",
+    REGISTRY / "v1.5.0",
+)  # every earlier stable minor of major 1
 
 
 @cache

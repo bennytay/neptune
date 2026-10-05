@@ -12,6 +12,8 @@ Verdict: HOLDS. ``has_name`` joined the core vocabulary with MVL-126 in ADR 0007
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from memory_g1_harness import (
     JUN_01_2025,
     MAR_02_2026,
@@ -39,7 +41,7 @@ from neptune_memory.schema.supersede import is_closure
 # ADR 0007 §2: the shape MVL-126 added to the core vocabulary (a minor graph-schema release).
 HAS_NAME = PredicateSpec(
     "has_name",
-    2,  # 2: every node type includes event (ADR 0013 §6)
+    1,
     frozenset(NodeType),
     frozenset({ValueType.TEXT}),
     Cardinality.ONE,
@@ -66,8 +68,12 @@ def _name(text: str, when: int, register: str) -> ClaimDraft:
 
 
 def test_has_name_is_core_in_adr_0007_s_shape() -> None:
-    """The GAP pin flipped (MVL-126): the core vocabulary holds ``has_name`` exactly as fixed."""
-    assert CORE_PREDICATES.spec("has_name") == HAS_NAME
+    """The GAP pin flipped (MVL-126): the core vocabulary holds ``has_name`` as fixed, at version
+    3 since every node type grew ``clock`` (ADR 0011 §1) and ``event`` (ADR 0013 §6), which only
+    widens it."""
+    spec = CORE_PREDICATES.spec("has_name")
+    assert spec == replace(HAS_NAME, version=3)
+    assert spec.widens(HAS_NAME)
 
 
 def test_a_rename_that_keeps_the_identifier_keeps_the_node_and_supersedes_only_the_name() -> None:

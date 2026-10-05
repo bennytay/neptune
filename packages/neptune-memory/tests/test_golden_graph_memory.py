@@ -68,10 +68,10 @@ def test_schema_export_is_published_and_validates_every_golden() -> None:
     )
 
 
-@pytest.mark.parametrize("earlier", EARLIER, ids=lambda path: path.name)
-def test_earlier_published_goldens_still_load_and_pass_the_suite(earlier: Path) -> None:
-    """1.1.0, 1.3.0 and 1.6.0 are minor releases: a consumer pinned to an earlier minor keeps its
-    golden and its answers."""
+@pytest.mark.parametrize("earlier", EARLIER, ids=lambda p: p.name)
+def test_every_earlier_published_golden_still_loads_and_passes_the_suite(earlier: Path) -> None:
+    """1.1.0 to 1.6.0 are minor releases: a consumer pinned to an earlier minor keeps
+    its golden and its answers."""
     golden = load_golden(earlier / "golden" / "graph.json")
     for check in CHECKS:
         check(ReferenceReader, golden)

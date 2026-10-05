@@ -1,13 +1,19 @@
-"""Parsing what the event consolidator reads: Ledger records and its config (ADR 0013 §1, §3).
+"""Parsing stated events: what the episode consolidator (ADR 0012 §1) and the event index
+(ADR 0013 §1, §3) read, and the event index's config.
 
-Parsing is kept apart from the event policy: each parser turns one Ledger record into a typed
-value or raises ``Malformed``, and decides nothing about events. ``consolidate.events`` applies
-the policy.
+Parsing is kept apart from policy: each parser turns one Ledger record into a typed value or
+raises ``Malformed``, and decides nothing. ``consolidate.episodes`` and ``consolidate.events``
+apply their policies. One reader per kind serves both: ``incident_record`` and
+``intervention_record`` return the compiler's record, and ``incident`` and ``intervention`` its
+``Event`` summary for episodes.
 
 Every kind is a compiler kind, read with the compiler's own strict reader:
 
 - ``incident_record`` and ``intervention`` (root ADR 0051): lifecycle records, ``stated`` by a form,
-  a CMMS row or a ticket; Deploy maps them from CMMS exports, ticket systems and Formant.
+  a CMMS row or a ticket; Deploy maps them from CMMS exports, ticket systems and Formant. An
+  intervention involves ``machines``, names ``related`` records and has a ``start`` / ``end`` on the
+  clock its timestamps name; an incident states the instant it ``occurred``. No compiler kind states
+  a task attempt yet (root ADR 0047 §9).
 - ``structured_table`` and ``structured_record`` (root ADR 0020 §5): a table and its rows, read as
   events only where the config declares the table an event table (by its declared name). Deploy's
   ROS 2 diagnostics mapper writes such a table (``diagnostic events``, with a ``@clock:stamp``
@@ -36,19 +42,21 @@ from typing import TYPE_CHECKING, Final, TypeVar
 
 from neptune.identity import canonical_json
 from neptune.model.ids import RecordId, check_token, parse_record_id
+from neptune.model.knowledge import Ambiguous, Known
 from neptune.model.lifecycle import (
     IncidentRecord,
     Intervention,
     incident_record_from_json,
     intervention_from_json,
 )
+from neptune.model.provenance import Provenance
 from neptune.model.world import (
     StructuredRecord,
     StructuredTable,
     structured_record_from_json,
     structured_table_from_json,
 )
-from neptune_memory.consolidate.identity_records import Clock, Malformed, clock
+from neptune_memory.consolidate.identity_records import Clock, Malformed, clock, declared
 from neptune_memory.consolidate.run_records import Inferred, mapping
 from neptune_memory.consolidate.run_records import _strict as _strict  # one gate for every kind
 from neptune_memory.schema.predicates import EVENT_KINDS
@@ -56,12 +64,16 @@ from neptune_memory.schema.predicates import EVENT_KINDS
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from neptune.model.ids import LogicalId
     from neptune.model.jsonvalue import JsonValue
+    from neptune.model.knowledge import Knowledge
+    from neptune.model.provenance import EvidenceRef
+    from neptune.model.time import Timestamp
 
 _T = TypeVar("_T")
 
-# Ledger record kinds the event consolidator reads.
-INCIDENT_RECORD: Final = "incident_record"
+# Ledger record kinds the episode and event consolidators read.
+INCIDENT: Final = "incident_record"
 INTERVENTION: Final = "intervention"
 STRUCTURED_TABLE: Final = "structured_table"
 STRUCTURED_RECORD: Final = "structured_record"
@@ -71,7 +83,7 @@ CLOCK_MAPPING: Final = "clock_mapping"
 # The vendor names of the two lifecycle kinds: an incident's mapping is keyed by its stated
 # severity, an intervention's by its stated mode. Unmapped, each is its own registered kind.
 LIFECYCLE_DEFAULT_KIND: Final[Mapping[str, str]] = {
-    INCIDENT_RECORD: "incident",
+    INCIDENT: "incident",
     INTERVENTION: "intervention",
 }
 
@@ -93,7 +105,7 @@ DEFAULT_CONFIG: Final[Mapping[str, JsonValue]] = {
 __all__ = [
     "CLOCK_MAPPING",
     "DEFAULT_CONFIG",
-    "INCIDENT_RECORD",
+    "INCIDENT",
     "INTERVENTION",
     "LIFECYCLE_DEFAULT_KIND",
     "NOT_AN_EVENT",
@@ -102,15 +114,19 @@ __all__ = [
     "TIMESTAMP_DOMAIN",
     "Clock",
     "ClockSpec",
+    "Event",
     "EventConfig",
     "IdColumn",
     "Inferred",
     "Malformed",
+    "Named",
     "TableSpec",
     "TimeSpec",
     "clock",
     "incident",
+    "incident_record",
     "intervention",
+    "intervention_record",
     "mapping",
     "parse_config",
     "resolve_config",
@@ -119,12 +135,103 @@ __all__ = [
 ]
 
 
-def incident(record: Mapping[str, object]) -> IncidentRecord:
+def incident_record(record: Mapping[str, object]) -> IncidentRecord:
     return _strict(incident_record_from_json, record)
 
 
-def intervention(record: Mapping[str, object]) -> Intervention:
+def intervention_record(record: Mapping[str, object]) -> Intervention:
     return _strict(intervention_from_json, record)
+
+
+# --- Event summaries for episodes (ADR 0012 §1) -------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Named:
+    """One id a list states: ``ids`` holds one id when it is ``Known``, every candidate when it is
+    ``Ambiguous``; ``evidence`` is what the item itself cites (nothing when it inherits)."""
+
+    ids: tuple[LogicalId, ...]
+    decided: bool
+    evidence: tuple[EvidenceRef, ...]
+
+
+@dataclass(frozen=True)
+class Event:
+    """A stated event as the episode policy needs it.
+
+    ``start`` and ``end`` are the instants the record states, each on its own clock; ``end`` is
+    inclusive and ``None`` when not stated (an incident states one instant: ``start`` only).
+    ``evidence`` cites the record and every value read from it that cites its own place.
+    """
+
+    record: RecordId
+    kind: str
+    machines: tuple[Named, ...]
+    related: tuple[Named, ...]
+    start: Timestamp | None
+    end: Timestamp | None
+    evidence: tuple[EvidenceRef, ...]
+
+
+def _cited(knowledge: object) -> tuple[EvidenceRef, ...]:
+    """The evidence a value (or a candidate) cites itself; nothing when it inherits."""
+    slot = getattr(knowledge, "provenance", None)
+    return (slot.evidence,) if isinstance(slot, Provenance) else ()
+
+
+def _named(listed: Knowledge[tuple[Knowledge[LogicalId], ...]]) -> tuple[Named, ...]:
+    """The ids a ``Listed`` field states; a list not stated (``Unknown``, ``NotCovered``) names
+    none. Every id is a declared value (ADR 0006 §9): never blank or padded."""
+    if not isinstance(listed, Known):
+        return ()
+    out: list[Named] = []
+    for item in listed.value:
+        if isinstance(item, Known):
+            out.append(Named((declared(item.value),), True, _cited(item)))
+        elif isinstance(item, Ambiguous):
+            ids = tuple(declared(c.value) for c in item.candidates)
+            cited = tuple(ref for c in item.candidates for ref in _cited(c))
+            out.append(Named(ids, False, (*_cited(item), *cited)))
+    return tuple(out)
+
+
+def _instant(knowledge: Knowledge[Timestamp]) -> Timestamp | None:
+    """A stated instant; an ``Ambiguous`` or unstated one is not read as any of its readings."""
+    return knowledge.value if isinstance(knowledge, Known) else None
+
+
+def _event(
+    record: Intervention | IncidentRecord,
+    start: Knowledge[Timestamp],
+    end: Knowledge[Timestamp] | None,
+) -> Event:
+    stated = [start, *([end] if end is not None else [])]
+    return Event(
+        record=record.id,
+        kind=record.kind,
+        machines=_named(record.machines),
+        related=_named(record.related),
+        start=_instant(start),
+        end=_instant(end) if end is not None else None,
+        evidence=(
+            record.provenance.evidence,
+            *(ref for k in stated if isinstance(k, Known) for ref in _cited(k)),
+        ),
+    )
+
+
+def intervention(record: Mapping[str, object]) -> Event:
+    parsed = intervention_record(record)
+    return _event(parsed, parsed.start, parsed.end)
+
+
+def incident(record: Mapping[str, object]) -> Event:
+    parsed = incident_record(record)
+    return _event(parsed, parsed.occurred, None)
+
+
+# --- Event tables -------------------------------------------------------------------------------
 
 
 def table(record: Mapping[str, object]) -> StructuredTable:
@@ -371,21 +478,19 @@ def _vendor(name: str, value: object) -> dict[Key, str | None]:
     for section, entries in sorted(spec.items()):
         if not isinstance(entries, dict):
             raise _Bad(f"{where}.{section} must be an object of declared kind -> event kind")
-        for declared, target in sorted(entries.items()):
-            if not isinstance(declared, str) or not declared:
+        for stated, target in sorted(entries.items()):
+            if not isinstance(stated, str) or not stated:
                 raise _Bad(f"{where}.{section} has an empty declared kind")
-            if section == INTEGER and not _INTEGER.fullmatch(declared):
-                raise _Bad(f"{where}.integer.{declared}: not an integer written canonically")
+            if section == INTEGER and not _INTEGER.fullmatch(stated):
+                raise _Bad(f"{where}.integer.{stated}: not an integer written canonically")
             if target == NOT_AN_EVENT:
                 if name in LIFECYCLE_DEFAULT_KIND:
-                    raise _Bad(f"{where}.{declared}: a {name} is always an event; map it to a kind")
-                out[(section, declared)] = None
+                    raise _Bad(f"{where}.{stated}: a {name} is always an event; map it to a kind")
+                out[(section, stated)] = None
                 continue
             if not isinstance(target, str) or target not in EVENT_KINDS:
-                raise _Bad(
-                    f"{where}.{section}.{declared}: {target!r} is not a registered event kind"
-                )
-            out[(section, declared)] = target
+                raise _Bad(f"{where}.{section}.{stated}: {target!r} is not a registered event kind")
+            out[(section, stated)] = target
     return out
 
 

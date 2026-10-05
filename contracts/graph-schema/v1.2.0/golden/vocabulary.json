@@ -1,0 +1,459 @@
+{
+  "predicates": [
+    {
+      "cardinality": "many",
+      "description": "an authorisation envelope approves this configuration at the site over the interval",
+      "domain": [
+        "site"
+      ],
+      "name": "authorised_configuration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
+      "domain": [
+        "run"
+      ],
+      "name": "configuration_active_during",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the configuration in force could be this one; one claim per reading",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_candidate",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "no configuration is stated over the interval; the record leaves it open, never filled",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_unknown",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "where a deployment takes place",
+      "domain": [
+        "deployment"
+      ],
+      "name": "deployed_at",
+      "range": [
+        "site"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the run an episode segments",
+      "domain": [
+        "episode"
+      ],
+      "name": "episode_of",
+      "range": [
+        "run"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a Ledger record about the node (Episode tier, by id)",
+      "domain": [
+        "asset",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "evidenced_by",
+      "range": [
+        "record"
+      ],
+      "version": 2
+    },
+    {
+      "cardinality": "many",
+      "description": "a task attempted",
+      "domain": [
+        "episode",
+        "run"
+      ],
+      "name": "executes_task",
+      "range": [
+        "task"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "an operating rule or control policy that applies",
+      "domain": [
+        "deployment",
+        "fleet",
+        "machine",
+        "site"
+      ],
+      "name": "governed_by",
+      "range": [
+        "policy"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the calibration in force",
+      "domain": [
+        "sensor"
+      ],
+      "name": "has_calibration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a parameter set, description file or other configuration in force",
+      "domain": [
+        "deployment",
+        "machine",
+        "sensor"
+      ],
+      "name": "has_configuration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "a declared display name, verbatim; never an identifier",
+      "domain": [
+        "asset",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "has_name",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "a context node's summary",
+      "domain": [
+        "deployment",
+        "fleet",
+        "programme"
+      ],
+      "name": "has_summary",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "where it is",
+      "domain": [
+        "asset",
+        "machine"
+      ],
+      "name": "located_at",
+      "range": [
+        "site",
+        "zone"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "serviceability as a record states it, verbatim",
+      "domain": [
+        "asset",
+        "machine",
+        "sensor"
+      ],
+      "name": "maintenance_state",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the fleet a machine belongs to",
+      "domain": [
+        "machine"
+      ],
+      "name": "member_of_fleet",
+      "range": [
+        "fleet"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "what a sensor is attached to",
+      "domain": [
+        "sensor"
+      ],
+      "name": "mounted_on",
+      "range": [
+        "asset",
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "observed: no authorisation envelope in the Ledger names the configuration then",
+      "domain": [
+        "run"
+      ],
+      "name": "not_covered_by_authorisation",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a declared operator or supervisor",
+      "domain": [
+        "run"
+      ],
+      "name": "operated_by",
+      "range": [
+        "person"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the owning programme",
+      "domain": [
+        "deployment",
+        "fleet"
+      ],
+      "name": "part_of_programme",
+      "range": [
+        "programme"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "rated payload, unit as declared",
+      "domain": [
+        "machine"
+      ],
+      "name": "rated_payload",
+      "range": [
+        "quantity"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the machine whose log a run is",
+      "domain": [
+        "run"
+      ],
+      "name": "recorded_by",
+      "range": [
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a learned model it runs",
+      "domain": [
+        "machine"
+      ],
+      "name": "runs_model",
+      "range": [
+        "model_version"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "installed software",
+      "domain": [
+        "machine",
+        "sensor"
+      ],
+      "name": "runs_software",
+      "range": [
+        "software_version"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "the same real-world thing: declared identifier, configuration lineage or operator",
+      "domain": [
+        "asset",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "same_as",
+      "range": [
+        "asset",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "version": 2
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the evidence could mean either; whether they are one thing is undecided",
+      "domain": [
+        "asset",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "same_as_candidate",
+      "range": [
+        "asset",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "version": 2
+    },
+    {
+      "cardinality": "many",
+      "description": "took over from the object on a machine's chain; valid while the subject is in force",
+      "domain": [
+        "configuration"
+      ],
+      "name": "succeeds",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the site a zone belongs to",
+      "domain": [
+        "zone"
+      ],
+      "name": "zone_of",
+      "range": [
+        "site"
+      ],
+      "version": 1
+    }
+  ]
+}

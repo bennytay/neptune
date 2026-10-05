@@ -1,9 +1,9 @@
 name: harness
 
 # The integration harness (MVL-123, packages/neptune-platform ADR 0004): contracts check, the corpus
-# through compiler -> ledger -> memory -> context, a smoke query, one report. It needs no Docker
-# while every stage is the real compiler or a contract stub. It is not a required status yet:
-# `ci.yml`'s `check` is the only one.
+# (the acceptance corpus, ADR 0007) through compiler -> ledger -> memory -> context, a smoke query,
+# one report. It needs no Docker while every real stage runs in process (the ledger on an embedded
+# PostgreSQL, platform ADR 0006). It is not a required status yet: `ci.yml`'s `check` is the only one.
 #
 # - merge_group and the nightly schedule run it unconditionally (a merge group has no path filter);
 # - pull_request runs it for contracts, the harness and any package's exported-schema paths. If
@@ -25,8 +25,16 @@ on:
       - "harness/**"
       - "scripts/contracts.py"
       - ".github/workflows/harness.yml"
-      # package-schema, alignment-records, lifecycle-records: the compiler's model
-      - "src/neptune/model/**"
+      # the acceptance corpus's imported generators (ADR 0007 section 3): a change here changes
+      # the corpus bytes, which its lock test catches
+      - "packages/neptune-deploy/tests/fixtures/archetypes/make_archetypes.py"
+      - "packages/neptune-deploy/tests/fixtures/documents/make_document_fixtures.py"
+      - "tests/fixtures/mcap/make_mcap.py"
+      - "tests/fixtures/rosbag2/make_rosbag2.py"
+      - "tests/fixtures/pdf/make_pdfs.py"
+      # the compiler: package-schema, alignment-records and lifecycle-records live in its model, and
+      # the compiler stage runs the SDK and the store over the corpus
+      - "src/neptune/**"
       # each member's exported schemas: catalog-api (api), graph-schema (schema), query-packet
       # (contract), dataset-manifest (manifest); a module or a package of that name
       - "packages/*/src/*/api.py"
@@ -37,6 +45,19 @@ on:
       - "packages/*/src/*/contract/**"
       - "packages/*/src/*/manifest.py"
       - "packages/*/src/*/manifest/**"
+      # the code a real stage runs beyond its contract module: register drives the Ledger's catalog,
+      # lake, threads and lineage, with pgserver/psycopg from its dependencies (platform ADR 0006)
+      - "packages/neptune-ledger/src/**"
+      - "packages/neptune-ledger/pyproject.toml"
+      # every contract's owner tests (`contract_tests` in contracts/*/contract.toml), which
+      # `check --all` runs; a unit test fails until a new one is listed here
+      - "tests/unit/model/test_schema.py"
+      - "tests/integration/test_worked_examples.py"
+      - "tests/unit/store/test_ingest_package.py"
+      - "packages/neptune-ledger/tests/contract/**"
+      - "packages/neptune-ledger/tests/test_ledger_api_contract.py"
+      - "packages/neptune-memory/tests/test_reader_contract_memory.py"
+      - "packages/neptune-memory/tests/test_golden_graph_memory.py"
 
 permissions:
   contents: read

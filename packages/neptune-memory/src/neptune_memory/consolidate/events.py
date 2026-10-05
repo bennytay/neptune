@@ -154,8 +154,8 @@ class _View:
 _PARSERS: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
     parse.TIMESTAMP_DOMAIN: parse.clock,
     parse.CLOCK_MAPPING: parse.mapping,
-    parse.INCIDENT_RECORD: parse.incident,
-    parse.INTERVENTION: parse.intervention,
+    parse.INCIDENT: parse.incident_record,
+    parse.INTERVENTION: parse.intervention_record,
     parse.STRUCTURED_TABLE: parse.table,
     parse.STRUCTURED_RECORD: parse.row,
 }
@@ -469,7 +469,7 @@ class _Builder:
             event = _Event(event_node(record.id), source, evidence, (record.id,), *occurred)
             event.facts += [
                 _Fact(EVIDENCED_BY, LedgerRecordRef(record.id), STATED),
-                *self.lifecycle_kind(parse.INCIDENT_RECORD, record.severity, record.id),
+                *self.lifecycle_kind(parse.INCIDENT, record.severity, record.id),
                 *_stated_text(record.severity, STATED_SEVERITY),
                 *_stated_text(record.description, HAS_DESCRIPTION),
                 *_listed(record.machines, NodeType.MACHINE),

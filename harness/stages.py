@@ -46,6 +46,10 @@ class Context:
     cases: Sequence[Case]
     upstream: dict[str, Json] = field(default_factory=dict)
 
+    def package_root(self, case_id: str) -> Path:
+        """Where the compiler stage writes, and the ledger stage registers, a case's package."""
+        return self.work / "packages" / case_id
+
     def package_ids(self) -> list[str]:
         """The package id of every case the compiler stage ingested (sorted by case)."""
         compiled = self.upstream.get("compiler", {})
@@ -160,7 +164,7 @@ def compiler_real(ctx: Context) -> Outcome:
     for case in ctx.cases:
         row: Json = {"case": case.id}
         cases.append(row)
-        destination = ctx.work / "packages" / case.id
+        destination = ctx.package_root(case.id)
         try:
             result = Neptune(ctx.work / "workspaces" / case.id).ingest(case.sources, destination)
             if not result.committed:
@@ -190,7 +194,190 @@ def compiler_real(ctx: Context) -> Outcome:
             )
             row[field_name] = not errors
             problems.extend(f"{case.id}: {document} breaks package-schema: {e}" for e in errors[:3])
+        if case.gold is not None:
+            gold = resolve_gold(destination, case.gold)
+            row["gold"] = gold
+            problems.extend(
+                f"{case.id}: gold evidence {key} resolves to nothing"
+                + (f" ({gold['reasons'][key]})" if key in gold["reasons"] else "")
+                for key in gold["missing"]
+            )
+            problems.extend(f"{case.id}: {problem}" for problem in gold["problems"])
     return Outcome({"cases": cases}, tuple(problems))
+
+
+def resolve_gold(package: Path, gold_path: Path) -> Json:
+    """The case's gold answers checked, and their evidence resolved against its package
+    (ADR 0007): counts, the evidence that resolved to nothing, and the gold file's own problems."""
+    from harness.acceptance import resolve
+
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    return {
+        **resolve.summary(resolve.resolve(package, gold)),
+        "corpus_version": gold.get("corpus_version"),
+        "problems": resolve.check_gold(gold),
+        "questions": len(gold.get("questions", [])),
+    }
+
+
+# --- Ledger (real) ---------------------------------------------------------------------------
+
+LEDGER_TENANT: Final = "harness"
+
+
+def _embedded_postgres(ctx: Context) -> Any:
+    """A PostgreSQL 16 server from the ``pgserver`` wheel (the server the Ledger's own catalog
+    tests use; platform ADR 0006), with its data directory in the run's scratch."""
+    from pgserver.postgres_server import get_server
+
+    return get_server(ctx.work / "ledger-pgdata", cleanup_mode="delete")
+
+
+def _catalog_database(server: Any) -> str:
+    """A new C-collated database (Ledger ADR 0005 §4) on the server, migrated for the tenant."""
+    import psycopg
+    from neptune_ledger.catalog.migrate import apply_migrations
+    from psycopg import sql
+
+    name = "harness_catalog"
+    with psycopg.connect(str(server.get_uri()), autocommit=True) as admin:
+        admin.execute(
+            sql.SQL(
+                "CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'"
+            ).format(sql.Identifier(name))
+        )
+    uri = str(server.get_uri(database=name))
+    with psycopg.connect(uri, autocommit=True) as conn:
+        apply_migrations(conn, LEDGER_TENANT)
+    return uri
+
+
+def _known(slot: Any) -> Any:
+    """The value of a ``Known`` slot, else ``None`` (the slot's state is the catalog's answer)."""
+    from neptune.model.knowledge import Known
+
+    return slot.value if isinstance(slot, Known) else None
+
+
+def ledger_real(ctx: Context) -> Outcome:
+    """Register every package the compiler stage committed into the Ledger's real catalog
+    (``PostgresCatalog`` on an embedded PostgreSQL), register it again, verify it, and validate
+    every response against the registry's catalog-api schema. The package-schema version each
+    package needs (its manifest's ``schema_version``, the lowest version whose readers read it;
+    compiler ADR 0037) must be within the major ``neptune-ledger`` locks in ``contracts/lock.toml``.
+    One case's refusal or error is that case's problem; the other cases still run. Platform
+    ADR 0006."""
+    from neptune_ledger.catalog.registry import PostgresCatalog
+
+    tool = load_tool()
+    version = ctx.registry.latest("catalog-api", stable=True)
+    if version is None:
+        return Outcome({"cases": []}, ("catalog-api has no stable version to validate against",))
+    locked = ctx.registry.lock().get("neptune-ledger", {}).get("package-schema")
+    check = _LedgerCheck(
+        tool=tool,
+        schema=json.loads(version.schema_text),
+        pointers={
+            "register": _pointer(version, ".registration.json"),
+            "verify": _pointer(version, ".verify_report.json"),
+        },
+        locked=locked,
+        locked_major=tool.parse_semver(locked)[0] if locked else None,
+    )
+    if locked is None:  # the lock cannot be honoured, so the stage cannot be green
+        check.problems.append("neptune-ledger has no package-schema entry in contracts/lock.toml")
+    compiled = ctx.upstream.get("compiler", {}).get("cases") or []
+    if not compiled:  # e.g. a stub compiler: a real ledger that registered nothing is not green
+        return Outcome(
+            {"cases": [], "locked_package_schema": locked, "tenant": LEDGER_TENANT},
+            ("the compiler stage compiled no case to register",),
+        )
+    cases: list[Json] = []
+    server = _embedded_postgres(ctx)
+    try:
+        uri = _catalog_database(server)
+        roots = (ctx.work / "packages",)
+        with PostgresCatalog(uri, LEDGER_TENANT, package_roots=roots) as catalog:
+            for upstream in compiled:
+                case, package = str(upstream["case"]), upstream.get("package")
+                row: Json = {"case": case}
+                cases.append(row)
+                if not package:
+                    row["registration"] = "not_attempted"
+                    check.problems.append(f"{case}: the compiler stage committed no package")
+                    continue
+                try:
+                    check.case(catalog, row, ctx.package_root(case), str(package))
+                except Exception as error:  # one case's failure is a finding, not the stage's
+                    # The type only: a message can carry the server's socket path.
+                    row["error"] = type(error).__name__
+                    check.problems.append(f"{case}: the catalog raised {type(error).__name__}")
+    finally:
+        server.cleanup()
+    output: Json = {"cases": cases, "locked_package_schema": locked, "tenant": LEDGER_TENANT}
+    return Outcome(output, tuple(check.problems))
+
+
+@dataclass
+class _LedgerCheck:
+    """What the ledger stage checks per case, and the problems it found."""
+
+    tool: Any
+    schema: Json
+    pointers: dict[str, str]
+    locked: str | None
+    locked_major: int | None
+    problems: list[str] = field(default_factory=list)
+
+    def _valid(self, case: str, call: str, response: Any) -> bool:
+        from neptune_ledger.api import codec
+
+        errors = self.tool.validate_golden(
+            self.schema, self.pointers[call], codec.to_json(response)
+        )
+        self.problems.extend(f"{case}: {call} breaks catalog-api: {e}" for e in errors[:3])
+        return not errors
+
+    def case(self, catalog: Any, row: Json, root: Path, package: str) -> None:
+        case = str(row["case"])
+        first = catalog.register(root)
+        row.update(
+            registration=first.outcome,
+            registration_findings=dict(sorted(Counter(f.code for f in first.findings).items())),
+            responses_valid=self._valid(case, "register", first),
+        )
+        if first.outcome != "registered":
+            codes = ", ".join(sorted({f.code for f in first.findings})) or "no finding"
+            self.problems.append(f"{case}: register was {first.outcome} ({codes})")
+            return  # nothing was registered: re-registering, verifying or the lock say nothing
+        if _known(first.package_id) != package:
+            self.problems.append(
+                f"{case}: the catalog registered {_known(first.package_id)}, not {package}"
+            )
+        again = catalog.register(root)
+        report = catalog.verify(package)
+        needs = _known(first.schema_version)
+        key = _known(first.registration_key)
+        again_valid = self._valid(case, "register", again)
+        report_valid = self._valid(case, "verify", report)
+        row.update(
+            tx_seq=key.tx_seq if key is not None else None,  # never tx_time: a clock
+            schema_version=needs,
+            records=sum(count.count for count in first.record_counts),
+            reregistration=again.outcome,
+            verify=report.verdict,
+            files_checked=report.files_checked,
+            responses_valid=row["responses_valid"] and again_valid and report_valid,
+        )
+        if again.outcome != "already_registered":
+            self.problems.append(f"{case}: a second register was {again.outcome}")
+        if report.verdict != "intact":
+            self.problems.append(f"{case}: verify was {report.verdict}")
+        if self.locked_major is not None and (needs is None or needs > self.locked_major):
+            self.problems.append(
+                f"{case}: the package needs package-schema {needs}, "
+                f"neptune-ledger locks {self.locked}"
+            )
 
 
 # --- Contract stubs --------------------------------------------------------------------------
@@ -228,13 +415,24 @@ def _golden_stub(contract_id: str, consumes: str | None) -> Driver:
 
 
 def ledger_stub(ctx: Context) -> Outcome:
-    """Serves the catalog-api goldens (v0.0.0, draft: the registry's only catalog document)."""
+    """Serves the goldens of catalog-api's latest version (used only when the stage is a stub)."""
     return _golden_stub("catalog-api", "compiler")(ctx)
 
 
 def memory_stub(ctx: Context) -> Outcome:
-    """graph-schema has no published version, so this serves a canned empty result."""
+    """Serves the goldens of graph-schema's latest version (a canned marker when none exists)."""
     return _golden_stub("graph-schema", "ledger")(ctx)
+
+
+def _gold_query(ctx: Context) -> str | None:
+    """The first gold question of the first case that has gold answers (the acceptance corpus's
+    "why did the incident happen"), so the smoke query is the demo's question."""
+    for case in ctx.cases:
+        if case.gold is not None and case.gold.is_file():
+            questions = json.loads(case.gold.read_text(encoding="utf-8")).get("questions", [])
+            if questions:
+                return str(questions[0]["question"])
+    return None
 
 
 def context_stub(ctx: Context) -> Outcome:
@@ -242,7 +440,9 @@ def context_stub(ctx: Context) -> Outcome:
     has one, else a minimal canned packet naming the packages that flowed in."""
     base = _golden_stub("query-packet", "memory")(ctx).output
     cases = [case.id for case in ctx.cases]
-    query = f"what hardware and calibration does {cases[0] if cases else 'the robot'} carry?"
+    query = _gold_query(ctx) or (
+        f"what hardware and calibration does {cases[0] if cases else 'the robot'} carry?"
+    )
     packet: Json
     if base["served"] == "goldens":
         version = ctx.registry.latest("query-packet")
@@ -271,7 +471,7 @@ STAGES: Final[tuple[Stage, ...]] = (
         compiler_real,
         _golden_stub("package-schema", None),
     ),
-    Stage("ledger", "neptune-ledger", "catalog-api", True, None, ledger_stub),
+    Stage("ledger", "neptune-ledger", "catalog-api", False, ledger_real, ledger_stub),
     Stage("memory", "neptune-memory", "graph-schema", True, None, memory_stub),
     Stage("context", "neptune-context", "query-packet", True, None, context_stub),
 )

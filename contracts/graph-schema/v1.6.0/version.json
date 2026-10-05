@@ -9,7 +9,7 @@
     "vocabulary.json": "#/$defs/PredicateRegistry"
   },
   "owner_version": 1,
-  "schema_sha256": "sha256:dac69d48d0ef4c3f5d7998224e8cddabe22459f994ecdd3142fb8858a83e72b7",
+  "schema_sha256": "sha256:bf40e0e1d52bbcd6e02cad70f78fa29e46cb77946eb798fc8c5ee407cf74a7a7",
   "status": "stable",
   "version": "1.6.0"
 }

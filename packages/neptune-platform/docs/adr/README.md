@@ -12,3 +12,5 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0003](0003-multi-coordinator-playbook-and-versioning.md) | Multi-coordinator playbook and release/versioning policy | Accepted |
 | [0004](0004-integration-harness.md) | Integration harness: real-or-stub stages, one deterministic report, no Docker until needed | Accepted |
 | [0005](0005-merge-without-a-queue.md) | Merge without a queue: no strict up-to-date rule, a freshness check, stop the line on a red main | Accepted |
+| [0006](0006-real-ledger-stage-on-embedded-postgres.md) | The real Ledger stage runs on an embedded PostgreSQL, not the compose stack | Accepted |
+| [0007](0007-acceptance-corpus-layout-versioning-and-gold-answers.md) | Acceptance corpus: generated in `harness/acceptance`, locked by version, gold answers cited by path and selector | Accepted |
