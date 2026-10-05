@@ -1130,6 +1130,8 @@ def _parquet_row(
         tops = {str(leaves[c]).split(".")[0] for c in columns}
         read = [i for i, leaf in enumerate(leaves) if str(leaf).split(".")[0] in tops]
         problem = _check_group(meta.row_group(group), group, read, footer_start, subject, limits)
+        if problem is None:
+            problem = _check_batch(meta, group, read, rows, subject, limits)
         if problem is not None:
             return problem
         # Byte arrays stay dictionary-encoded, so a value repeated over many rows is held once,
@@ -1179,6 +1181,47 @@ def _check_group(
         detail = (
             f"row group {group}'s cited columns decode to {total} bytes as the footer states,"
             f" over the {limits.max_decoded_bytes}-byte limit"
+        )
+        return MediaFinding("unsafe_entry", subject, detail)
+    return None
+
+
+# What one value of a physical type decodes to; a byte array is read as a dictionary, so each
+# value is one 4-byte index into it.
+_PARQUET_WIDTH: Final = {
+    "BOOLEAN": 1,
+    "INT32": 4,
+    "FLOAT": 4,
+    "BYTE_ARRAY": 4,
+    "INT64": 8,
+    "DOUBLE": 8,
+    "INT96": 12,
+}
+
+
+def _check_batch(
+    meta: Any, group: int, columns: list[int], rows: int, subject: str, limits: Limits
+) -> MediaFinding | None:
+    """A dictionary or run-length page states many values in few bytes, so what one batch of
+    the cited columns decodes to is bounded as the footer states it, before a page is read: a
+    flat leaf holds one value a row, a repeated leaf at most all of its chunk's values."""
+    total = 0
+    for column in columns:
+        leaf = meta.schema.column(column)
+        kind = leaf.physical_type
+        width = max(0, leaf.length or 0) if kind == "FIXED_LEN_BYTE_ARRAY" else None
+        width = _PARQUET_WIDTH.get(kind, 8) if width is None else width
+        flat = leaf.max_repetition_level == 0
+        values = (
+            min(_PARQUET_BATCH_ROWS, rows)
+            if flat
+            else meta.row_group(group).column(column).num_values
+        )
+        total += max(0, values) * width
+    if total > limits.max_decoded_bytes:
+        detail = (
+            f"a batch of row group {group}'s cited columns decodes to {total} bytes as the"
+            f" footer states, over the {limits.max_decoded_bytes}-byte limit"
         )
         return MediaFinding("unsafe_entry", subject, detail)
     return None

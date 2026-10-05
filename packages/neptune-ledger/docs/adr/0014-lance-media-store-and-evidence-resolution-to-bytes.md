@@ -119,7 +119,10 @@ that no package records (root ADR 0010).
      document is walked as a stream (JSON tokens; PyYAML's pure-Python parser events, as the
      compiler reads YAML), so nothing is built from it. Keys are matched by their text, as
      the compiler cites them. A key held twice on the path is `invalid_request`: no silent
-     choice of one.
+     choice of one. Being a slice of the document, a block collection's text keeps the
+     indentation of every line but its first (`/cam0` of `cam0:\n  intrinsics: [1, 2]\n  model:
+     pinhole` is `intrinsics: [1, 2]\n  model: pinhole`), so it need not parse as YAML on its
+     own; a reader dedents it by the node's column.
    - **No silent choices.** A frame is exactly one message: a range holding none, or several
      sharing a tick, is `invalid_request` (cite `[t, t + 1)`). Multi-frame images are not
      decoded. A `row_cell` whose stated `column_name` differs from the table's header is
@@ -140,17 +143,24 @@ that no package records (root ADR 0010).
    - A JSON or YAML document is at most `max_document_bytes` (8 MiB, the compiler's limit for
      parsed documents), and walking it costs its text plus its nesting: an 8 MiB document of
      tiny nodes peaks at 8.4 MB (JSON) and 18 MB (YAML) beyond its bytes, where building it
-     cost 1.5 GB and 1.1 GB per 48 and 4 MiB. Time is linear: on a loaded 20-thread host
-     such a worst case takes about 19 s (JSON) and 160 s (YAML); real documents take far less.
-     YAML aliases are refused.
+     cost 1.5 GB and 1.1 GB per 48 and 4 MiB. Nesting past `max_document_depth` (200, the
+     compiler's config `max_depth`) is `unsafe_entry`. Time is linear in the document: an
+     8 MiB JSON worst case takes about 3 s. PyYAML's pure-Python parser is about 30 times
+     slower, so a YAML document of more than `max_yaml_events` (1M) parser events is
+     `unsafe_entry`, refused after about 8 s on a loaded 20-thread host; real documents hold
+     far fewer. YAML aliases are refused.
    - Parquet repeats the compiler's guards before a page is decoded: a footer of at most
      16 MiB that fits the file (an encrypted one is `no_decoder`), at most 16 384 leaf columns,
      row-group counts that are not negative and add up, and every column chunk read lying
      before the footer and decoding, as stated, to at most `max_decoded_bytes` in all. Only
      the cited leaves' top-level columns of the cited row group are read, 1 024 rows at a
-     time, so a run-length column decodes one batch, not its group. A footer and page headers
-     that both understate are bounded only by the batch: the decoding subprocess (§
-     Consequences) bounds the rest.
+     time, so a run-length column decodes one batch, not its group. Byte arrays are read as
+     dictionaries, so a value a dictionary repeats over a batch is held once and only the
+     cited row is decoded. What a batch decodes is bounded as the footer states it, before a
+     page is read: a value per row of a flat leaf (a fixed-length byte array at its declared
+     width) and every stated value of a repeated leaf; over `max_decoded_bytes` is
+     `unsafe_entry`. A footer and page headers that both understate are bounded only by the
+     batch: the decoding subprocess (§ Consequences) bounds the rest.
    - PDFium is not thread-safe, so every call into it holds one process-wide lock.
 6. **Findings.** `MediaFinding(code, subject, detail)`, never an exception. The codes shared
    with the catalog API (`as_of_out_of_range`, `file_digest_mismatch`, `file_missing`,

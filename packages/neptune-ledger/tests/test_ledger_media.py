@@ -13,6 +13,7 @@ import io
 import json
 import tarfile
 import threading
+import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -1063,6 +1064,51 @@ def test_documents_past_the_limit_are_refused_and_parsing_costs_no_tree(lake: La
         assert peak < 16 * limit, (name, peak)
 
 
+def test_deep_documents_and_long_yaml_walks_are_refused(lake: Lake) -> None:
+    # Nesting past the compiler's max_depth (200) is refused, in JSON and in YAML, before a
+    # level per byte is held; at 200 the document still resolves.
+    deep_json = b"[" * 201 + b"]" * 201
+    deep_yaml = b"".join(b"  " * i + b"- \n" for i in range(201))
+    edge = b"[" * 200 + b"7" + b"]" * 200
+    # A manipulator's joint table: block, flow and keyed YAML, each 40k nodes long.
+    flow = b"[" + b",".join([b"a"] * 40_000) + b"]"
+    block = b"- a\n" * 40_000
+    keys = b"{" + b",".join(b"k%d: 1" % i for i in range(40_000)) + b"}"
+    # Keys deep inside a collection used as a key, and a plain key after it: the walk stays
+    # linear (open as-key collections are counted, not searched per key) and still resolves.
+    nested = b"? " + b"{a: " * 150 + b"1" + b"}" * 150 + b"\n: 1\nk: 2\n"
+    docs = {
+        "deep.json": deep_json,
+        "deep.yaml": deep_yaml,
+        "edge.json": edge,
+        "flow.yaml": flow,
+        "block.yaml": block,
+        "keys.yaml": keys,
+        "nested.yaml": nested,
+    }
+    lake.package("hostile", docs, materialise=frozenset(docs))
+    budget = MediaLake(lake.resolver, lake.store, limits=Limits(max_yaml_events=20_000))
+
+    def pointer(path: str) -> dict[str, Any]:
+        return {"kind": "json_pointer", "pointer": path}
+
+    for name in ("deep.json", "deep.yaml"):
+        assert lake.codes(anchor(docs[name], pointer("/0")), "value") == ["unsafe_entry"], name
+    assert lake.artefact(anchor(edge, pointer("/0" * 199)), "value").read() == b"[7]"
+    assert lake.artefact(anchor(nested, pointer("/k")), "value").read() == b"2"
+    for name, path, expected in (
+        ("flow.yaml", "/5", b"a"),
+        ("block.yaml", "/5", b"a"),
+        ("keys.yaml", "/k5", b"1"),
+    ):
+        started = time.perf_counter()
+        made = budget.hydrate(anchor(docs[name], pointer(path)), "value").read()
+        assert [f.code for f in made.findings] == ["unsafe_entry"], name
+        # Refused after its budget of events, not after the whole document.
+        assert time.perf_counter() - started < 5, name
+        assert lake.artefact(anchor(docs[name], pointer(path)), "value").read() == expected
+
+
 def test_parquet_guards_hold_before_any_page_is_decoded(lake: Lake) -> None:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -1104,3 +1150,48 @@ def test_parquet_guards_hold_before_any_page_is_decoded(lake: Lake) -> None:
     tight = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=100_000))
     made = tight.hydrate(anchor(big, row), "row").read()
     assert [f.code for f in made.findings] == ["unsafe_entry"]
+
+
+def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
+    lake: Lake,
+) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    def written(table: Any) -> bytes:
+        out = io.BytesIO()
+        pq.write_table(table, out, row_group_size=200_000, store_schema=False, compression="zstd")
+        return out.getvalue()
+
+    def repeated(value: Any, rows: int, kind: Any = None) -> Any:
+        indices = pa.array([0] * rows, pa.int32())
+        return pa.DictionaryArray.from_arrays(indices, pa.array([value], kind))
+
+    # A fleet's mission notes: one 256 KiB note in the dictionary, cited by 200k rows. A batch
+    # of 1 024 decoded rows would be 256 MiB; read as a dictionary it is the note once.
+    note = "n" * (256 * 1024)
+    notes = written(pa.table({"note": repeated(note, 200_000)}))
+    nested = written(
+        pa.table({"leg": pa.StructArray.from_arrays([repeated(note, 200_000)], ["calibration"])})
+    )
+    # A fixed-width value repeated by a dictionary, and one row holding a run-length list of
+    # 1M values: what a batch decodes is bounded as the footer states it, before any page.
+    serials = written(pa.table({"serial": repeated(b"s" * 8192, 1024, pa.binary(8192))}))
+    ticks = written(pa.table({"ticks": pa.array([[7] * 1_000_000], pa.list_(pa.int64()))}))
+    files = {"notes.parquet": notes, "nested.parquet": nested}
+    files |= {"serials.parquet": serials, "ticks.parquet": ticks}
+    lake.package("fleet", files, materialise=frozenset(files))
+    tight = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=4 << 20))
+    assert len(notes) < 1024 and len(nested) < 2048
+    for data, name in ((notes, "note"), (nested, "leg.calibration")):
+        cell = {"column": 0, "column_name": name, "kind": "row_cell", "row": 5}
+        made = tight.hydrate(anchor(data, cell), "row").read()
+        assert isinstance(made.value, Artefact), made.findings
+        value = canonical_json.loads(made.value.read())
+        assert isinstance(value, dict) and value["cells"] == [
+            {"column": 0, "name": name, "type": "string", "value": note}
+        ]
+    for data in (serials, ticks):
+        made = tight.hydrate(anchor(data, {"kind": "row", "row": 0}), "row").read()
+        assert [f.code for f in made.findings] == ["unsafe_entry"]
+        assert "a batch" in made.findings[0].detail and "footer states" in made.findings[0].detail
