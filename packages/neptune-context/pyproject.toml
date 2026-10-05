@@ -9,7 +9,12 @@ authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # Context is Layer 3: it reads the Ledger's catalog API and Memory's graph schema and writes nothing
 # to either (ADR 0001). The workspace dependency list drives CI selection, so a Ledger or Memory
 # change also runs this job. The pins are contracts/lock.toml and neptune_context.pins.
-dependencies = ["neptune", "neptune-ledger", "neptune-memory"]
+dependencies = [
+    "mcp>=1.2,<2",
+    "neptune",
+    "neptune-ledger",
+    "neptune-memory",
+]
 
 [tool.uv.sources]
 neptune = { workspace = true }
