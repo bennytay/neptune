@@ -96,6 +96,7 @@ class _Validator:
     def __init__(self, query: Query) -> None:
         self.query = query
         self.findings: list[QueryFinding] = []
+        self.instant_clocks: list[Clock] = []  # every clock a valid-time diff names
 
     def add(self, code: FindingCode, at: str, message: str) -> None:
         self.findings.append(QueryFinding(code, at, message))
@@ -287,6 +288,7 @@ class _Validator:
             )
         before, after = item.before, item.after
         if isinstance(before, Instant) and isinstance(after, Instant):
+            self.instant_clocks += [before.clock, after.clock]
             self.clock(before.clock, f"{at}/before/clock")
             self.clock(after.clock, f"{at}/after/clock")
             ok = self.ticks(before.ticks, f"{at}/before/ticks")
@@ -387,7 +389,7 @@ class _Validator:
                     f"this instant's clock differs from {before_at}; name the ClockMapping that "
                     "relates them in clock_bridges",
                 )
-        used = [c for b, _, a, _ in diffs for c in (b, a)]
+        used = list(self.instant_clocks)
         if self.query.during is not None:
             used.append(self.query.during.clock)
         bridges = ordered(self.query.clock_bridges, clock_bridge_to_json)

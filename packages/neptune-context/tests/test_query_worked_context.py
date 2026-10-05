@@ -17,6 +17,8 @@ import jsonschema
 import pytest
 
 import neptune_context.query as q
+from neptune_context.packets.codec import decode
+from neptune_context.packets.model import ContextPacket
 from neptune_context.query import Query, canonical_bytes, loads, query_id, to_json, validate
 from neptune_context.query.schema import query_schema
 
@@ -69,6 +71,19 @@ def test_worked_query_is_valid_golden_and_stable(name: str, block: str) -> None:
 def test_worked_queries_are_distinct() -> None:
     ids = {query_id(_build(block)) for _, block in WORKED}
     assert len(ids) == len(WORKED)
+
+
+PACKET_QUERIES = sorted((PACKAGE / "tests" / "golden" / "queries").glob("q*.json"))
+
+
+@pytest.mark.parametrize("path", PACKET_QUERIES, ids=lambda p: p.stem[:3])
+def test_packet_golden_queries_read_back_and_key_their_packets(path: Path) -> None:
+    """ADR 0003's golden packets name their queries by this reader's ``query_id``."""
+    query = loads(path.read_bytes())
+    assert isinstance(query, Query), query
+    packet = decode((path.parent.parent / "packets" / path.name).read_bytes())
+    assert isinstance(packet, ContextPacket)
+    assert packet.query_id == query_id(query)
 
 
 def _regenerate() -> None:

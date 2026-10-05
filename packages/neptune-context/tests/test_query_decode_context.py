@@ -60,6 +60,10 @@ def test_unreadable_documents_are_syntax_findings(document: bytes) -> None:
     assert _codes(loads(document)) == [("syntax", "/")]
 
 
+def test_a_str_with_a_lone_surrogate_is_a_syntax_finding() -> None:
+    assert _codes(loads('{"as_of": "\ud800"}')) == [("syntax", "/")]
+
+
 def test_size_limit_boundary() -> None:
     text = json.dumps(_base())
     at_limit = text + " " * (MAX_DOCUMENT_BYTES - len(text))

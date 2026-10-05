@@ -342,6 +342,14 @@ ACCEPTED: list[tuple[str, Query]] = [
             clock_bridges=frozenset({ClockBridge(_rec(5), UTC_NS, DEVICE)}),
         ),
     ),
+    (
+        "bridge-reaches-a-same-clock-diff",
+        replace(
+            BASE,
+            clock_bridges=frozenset({ClockBridge(_rec(5), DEVICE, UTC_NS)}),
+            explain=(Diff(ARM, Instant(DEVICE, 1), Instant(DEVICE, 2)),),
+        ),
+    ),
     ("diff-at-as-of", replace(BASE, as_of=10, explain=(Diff(ARM, 0, 10),))),
     (
         "negative-zero-box",

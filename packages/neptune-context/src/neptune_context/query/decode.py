@@ -485,7 +485,12 @@ def _no_constants(token: str) -> Any:
 
 def loads(document: bytes | str) -> Query | Refused:
     """Read a query from JSON text: bounded size, no duplicate keys, no NaN or Infinity."""
-    data = document.encode("utf-8") if isinstance(document, str) else document
+    if isinstance(document, str):
+        if not _is_unicode(document):
+            return Refused((QueryFinding(FindingCode.SYNTAX, "/", "not UTF-8 JSON"),))
+        data = document.encode("utf-8")
+    else:
+        data = document
     if len(data) > MAX_DOCUMENT_BYTES:
         return Refused(
             (
