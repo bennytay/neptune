@@ -10,6 +10,7 @@ from memory_time_records import (
     BOTH_PLAN,
     MICRO,
     MILLI,
+    OPEN_SIDE,
     build,
     clock,
     domain,
@@ -187,3 +188,24 @@ def test_conversion_is_deterministic() -> None:
         reader(build(two_sites())), 7, clock("warehouse-b ntp"), clock("amr-12 boot"), ledger_tx(1)
     )
     assert first == again
+
+
+def test_of_two_paths_to_one_value_the_better_evidenced_is_kept() -> None:
+    records = [
+        mapping("via-x", "a", "x", anchor=(0, 0), residual=None),
+        mapping("x-b", "x", "b", anchor=(0, 0)),
+        mapping("via-y", "a", "y", anchor=(0, 0), residual=3),
+        mapping("y-b", "y", "b", anchor=(0, 0), residual=4),
+    ]
+    out = known(convert(reader(build({"p": records})), 10, clock("a"), clock("b"), ledger_tx(1)))
+    assert out.ticks == 10 and out.bound == Known(Fraction(7))  # the path with a stated bound
+
+
+def test_a_hop_stated_open_below_holds_instants_below_the_earliest_tick() -> None:
+    records = [
+        mapping("a-b", "a", "b", anchor=(0, -(2**62)), start=OPEN_SIDE),
+        mapping("b-c", "b", "c", anchor=(0, 0), start=OPEN_SIDE),
+    ]
+    graph = reader(build({"p": records}))
+    out = known(convert(graph, INT64_MIN + 5, clock("a"), clock("c"), ledger_tx(1)))
+    assert out.ticks == INT64_MIN + 5 - 2**62

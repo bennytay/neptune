@@ -41,7 +41,10 @@ same fields and is a fit, `inferred`. Neither is ever re-estimated or re-timed. 
   own `[first, last + 1)` on the clock the run states it on. An unstated last is `OPEN`; a last at `INT64_MAX`
   is `OPEN`. A clock no record places in time is a `time.clock_unobserved` finding and no claim; a last before
   the first is `time.untimeable_clock`. One claim per (machine, clock, run), so a new package adds claims and
-  never changes earlier ones. Assertion kind: `stated` when every cited record is, else `observed`.
+  never changes earlier ones. The claim cites the run, the streams carrying the clock, the machine field's own
+citation and the first and last instants' own citations; its assertion kind is `stated` when every one of those
+is, else `observed`. An unstated end is `OPEN` ("until further notice", as ADR 0008 §2 reads an identity window):
+`has_clock` applies no arithmetic, so it extrapolates nothing a conversion would use.
 - Run and stream records are read with the compiler's strict `run_from_json` and `stream_from_json`.
 
 ### 2. A mapping is a `maps_to` edge plus a `clock_map` literal
@@ -65,12 +68,15 @@ same fields and is a fit, `inferred`. Neither is ever re-estimated or re-timed. 
 
 - **Revision.** Mappings of one pair (same source, same target, both declared or both estimated) are pieces of a
   history. Each mapping holds over its window minus every overlapping window of its pair that **starts later**
-  (`Interval.minus`, so a short later window splits it). A cut mapping's claims cite the records that cut it.
+  (`Interval.minus`, so a short later window splits it). Each piece also cites the mappings that bound it (the
+  one it ends at, the one it resumes after), and no other.
   This is the resolver's own rule for `one` facts (the later `valid_from` wins; ADR 0005 §1) applied to windows
   the evidence states, so it needs no arrival order and gives the same pieces in any package order. Two mappings
   of a pair that start at one instant and state different parameters both stand, with a
   `time.conflicting_mappings` finding; a conversion through them is `Ambiguous`. Identical parameters
-  corroborate.
+  corroborate. Mappings of a pair in opposite directions (A → B, B → A) never revise each other: their windows
+  are on different clocks, and ordering them would mean applying one. Where both hold and disagree, a
+  conversion is `Ambiguous`.
 - **Chains.** Every chain of 2 to `MAX_CHAIN_HOPS = 4` mapping pieces followed source to target, visiting no
   clock twice, whose hops all state an anchor and a rate, is emitted as a separate `maps_to` + `clock_map` pair
   where every hop applies. Its `ClockMap` is `composed`: `chain` (the mapping records, hop by hop), `via` (the
@@ -97,7 +103,9 @@ finding. Malformed or conflicting records are reported once, by the consolidator
 the direct `clock_map` claims of one snapshot breadth first, forward (`rate * t + offset`) or backward (the exact
 inverse), applying a mapping only where its valid interval holds the instant on its source clock. Ticks are exact
 `Fraction`s, never rounded; the bound accumulates `rate * bound + residual` forward and
-`(bound + residual) / rate` backward, `Unknown` once a hop states none. Declared mappings first; estimated ones
+`(bound + residual) / rate` backward, `Unknown` once a hop states none. A window starting at `INT64_MIN` (stated
+open below) holds any earlier instant a hop carries. Of readings with one value, the one with declared hops only,
+then a stated bound, then the tightest bound, then the lowest claim ids is kept. Declared mappings first; estimated ones
 only when no declared chain converts, and the result is marked `inferred`. `result` is `Known`, `Ambiguous`
 (readings that hold disagree; never one picked) or `Unknown` with `MissingHop`: the clocks reached, the clock not
 reached, and the mappings that exist but do not apply (outside validity, or no anchor or rate). Caller errors

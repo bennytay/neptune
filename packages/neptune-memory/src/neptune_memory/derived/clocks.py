@@ -16,8 +16,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
+from neptune.derived.clocks import inferred_clock_mapping_from_json
+from neptune.derived.provenance import INFERRED
 from neptune.derived.temporal import CLOCKS_ID, CLOCKS_VERSION
 from neptune.model.knowledge import Unknown
+from neptune_memory.consolidate import time_records
 from neptune_memory.consolidate.base import ConsolidatorOutput, ModelRef
 from neptune_memory.consolidate.time import chains, piece_drafts, read, revise, unknown_config
 
@@ -26,12 +29,23 @@ if TYPE_CHECKING:
 
     from neptune.model.jsonvalue import JsonValue
     from neptune_memory.consolidate.base import ClaimDraft
+    from neptune_memory.consolidate.time_records import Hop
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim
 
 ESTIMATES_CONSOLIDATOR_ID: Final = "memory.time_estimates"
 # The fit whose output this relays: the compiler's clock-alignment pass (root ADR 0060).
 CLOCKS_MODEL: Final = ModelRef(CLOCKS_ID, CLOCKS_VERSION)
+
+
+def estimate(record: Mapping[str, object]) -> Hop:
+    """A ``derived/clock_mapping`` line, read by the compiler's strict reader, as an inferred hop
+    citing its anchors' evidence, its record and the transform record that fitted it."""
+    try:
+        parsed = inferred_clock_mapping_from_json(dict(record))  # type: ignore[arg-type]
+    except (ValueError, TypeError, KeyError, RecursionError) as exc:
+        raise time_records.Malformed(str(exc) or type(exc).__name__) from exc
+    return time_records.hop(parsed, INFERRED, parsed.evidence, (parsed.id, parsed.transform))
 
 
 class EstimatedClocksConsolidator:
@@ -50,7 +64,7 @@ class EstimatedClocksConsolidator:
         previous: Sequence[Claim],
         config: Mapping[str, JsonValue],
     ) -> ConsolidatorOutput:
-        view = read(ledger, timing=False, estimated=True)
+        view = read(ledger, timing=False, estimates=estimate)
         extra = {key: value for key, value in config.items() if key != "model"}
         if extra:
             view.findings.append(unknown_config(extra, self.consolidator_id))

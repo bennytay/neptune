@@ -30,7 +30,6 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import TYPE_CHECKING, Final
 
-from neptune.derived.provenance import INFERRED
 from neptune.model.finding import Severity
 from neptune.model.knowledge import NotApplicable
 from neptune.model.time import INT64_MAX, INT64_MIN, Timestamp
@@ -43,6 +42,7 @@ from neptune_memory.consolidate.time_records import (
     STREAM,
     Hop,
     RunClocks,
+    Stamp,
     StreamClocks,
     weakest,
 )
@@ -118,12 +118,18 @@ class View:
     findings: list[ConsolidationFinding] = field(default_factory=list)
 
 
-def read(ledger: LedgerReader, *, timing: bool, estimated: bool) -> View:
-    """Parse runs and streams (``timing``) and clock mappings: the declared ones always, the
-    estimated ones when ``estimated``. A record seen twice with two contents is used nowhere.
+def read(
+    ledger: LedgerReader,
+    *,
+    timing: bool,
+    estimates: Callable[[Mapping[str, object]], Hop] | None = None,
+) -> View:
+    """Parse runs and streams (``timing``) and clock mappings: the declared ones always, and the
+    estimates with ``estimates`` when given (else each is skipped with an INFO finding, if
+    ``timing``). A record seen twice with two contents is used nowhere.
 
     Findings name only what this caller reads: ``memory.time`` reports runs, streams and declared
-    mappings; ``memory.time_estimates`` only estimated mappings, so nothing is reported twice.
+    mappings; ``memory.time_estimates`` only estimates, so nothing is reported twice.
     """
     view = View()
     seen: dict[RecordId, object] = {}
@@ -136,14 +142,15 @@ def read(ledger: LedgerReader, *, timing: bool, estimated: bool) -> View:
     for ref in ledger.list_packages():
         for kind, parser in parsers:
             for index, record in enumerate(ledger.read_records(ref.package_id, kind) or ()):
-                guessed = kind == CLOCK_MAPPING and parse.is_estimate(record)
-                reports = timing if kind != CLOCK_MAPPING else guessed == estimated
-                if guessed and not estimated:
-                    if timing:
-                        view.findings.append(_estimate_skipped(ref.package_id, index))
-                    continue
+                read_one, reports = parser, timing
+                if kind == CLOCK_MAPPING and parse.is_estimate(record):
+                    if estimates is None:
+                        if timing:
+                            view.findings.append(_estimate_skipped(ref.package_id, index))
+                        continue
+                    read_one, reports = estimates, True
                 try:
-                    value = parser(record)
+                    value = read_one(record)
                 except parse.Unstated as exc:
                     if reports:
                         view.findings.append(_unstated(exc, ref.package_id, index))
@@ -207,19 +214,21 @@ def _unstated(exc: parse.Unstated, package_id: str, index: int) -> Consolidation
 
 def _observed(
     clock: RecordId, run: RunClocks, carrying: Sequence[StreamClocks]
-) -> tuple[Timestamp, Timestamp | Open] | None:
-    """The interval the records observe ``clock``: on the clock itself where they state an
-    instant on it, else the run's own interval on the clock the run is stated on."""
+) -> tuple[Stamp, Stamp | None] | None:
+    """The first and last instants the records state for ``clock`` (``None``: no last): on the
+    clock itself where they state an instant on it, else the run's own on the clock the run is
+    stated on. Ties go to the run, then streams in record-id order."""
     firsts = [t for t in (run.first, *(s.first for s in carrying)) if t is not None]
     lasts = [t for t in (run.last, *(s.last for s in carrying)) if t is not None]
-    starts = [t for t in firsts if t.domain_id == clock]
+    starts = [t for t in firsts if t.at.domain_id == clock]
     if starts:
-        ends = [t for t in lasts if t.domain_id == clock]
-        return min(starts), _after(max(ends)) if ends else OPEN
+        ends = [t for t in lasts if t.at.domain_id == clock]
+        first = min(starts, key=lambda t: t.at)
+        return first, max(ends, key=lambda t: t.at) if ends else None
     if run.first is None:
         return None
-    last = run.last if run.last is not None and run.last.domain_id == run.first.domain_id else None
-    return run.first, OPEN if last is None else _after(last)
+    same_clock = run.last is not None and run.last.at.domain_id == run.first.at.domain_id
+    return run.first, run.last if same_clock else None
 
 
 def _after(last: Timestamp) -> Timestamp | Open:
@@ -237,7 +246,7 @@ def has_clock(view: View) -> list[ClaimDraft]:
             continue  # the run states no machine (explicitly, in the Ledger); nothing to attach
         streams = by_run.get(run.record, [])
         clocks = {c for s in streams for c in s.clocks}
-        clocks.update(t.domain_id for t in (run.first, run.last) if t is not None)
+        clocks.update(t.at.domain_id for t in (run.first, run.last) if t is not None)
         for clock in sorted(clocks):
             carrying = [s for s in streams if clock in s.clocks]
             records = (run.record, *(s.record for s in carrying))
@@ -253,7 +262,8 @@ def has_clock(view: View) -> list[ClaimDraft]:
                     )
                 )
                 continue
-            start, end = span
+            first, last = span
+            start, end = first.at, OPEN if last is None else _after(last.at)
             if isinstance(end, Timestamp) and not start < end:
                 view.findings.append(
                     finding(
@@ -264,6 +274,8 @@ def has_clock(view: View) -> list[ClaimDraft]:
                     )
                 )
                 continue
+            last_kinds = () if last is None else last.kinds
+            last_evidence = () if last is None else last.evidence
             drafts.append(
                 ClaimDraft(
                     subject=node_ref(NodeType.MACHINE, run.machine),
@@ -271,8 +283,15 @@ def has_clock(view: View) -> list[ClaimDraft]:
                     object=clock_node(clock),
                     valid_from=start,
                     valid_to=end,
-                    assertion_kind=weakest((*run.kinds, *(s.kind for s in carrying))),
-                    evidence=(*run.evidence, *(s.evidence for s in carrying)),
+                    assertion_kind=weakest(
+                        (*run.kinds, *(s.kind for s in carrying), *first.kinds, *last_kinds)
+                    ),
+                    evidence=(
+                        *run.evidence,
+                        *(s.evidence for s in carrying),
+                        *first.evidence,
+                        *last_evidence,
+                    ),
                     records=records,
                 )
             )
@@ -288,7 +307,7 @@ class Piece:
 
     hop: Hop
     interval: Interval
-    closed_by: tuple[Hop, ...]  # the later-starting mappings of its pair that overlap it
+    closed_by: tuple[Hop, ...]  # the later-starting mappings of its pair that bound it
 
     @property
     def source(self) -> RecordId:
@@ -336,9 +355,19 @@ def revise(
                             target=hop.target,
                         )
                     )
-            kept = hop.interval.minus(g.interval for g in later)
-            pieces.extend(Piece(hop, interval, tuple(later)) for interval in kept)
+            for interval in hop.interval.minus(g.interval for g in later):
+                pieces.append(Piece(hop, interval, _closers(interval, later)))
     return sorted(pieces, key=lambda p: (p.source, p.target, p.interval.start.ticks, p.hop.record))
+
+
+def _closers(piece: Interval, later: Sequence[Hop]) -> tuple[Hop, ...]:
+    """The later mappings that bound ``piece``: the one it ends at, the one it resumes after."""
+    return tuple(
+        g
+        for g in later
+        if (isinstance(piece.end, Timestamp) and g.start == piece.end)
+        or (isinstance(g.end, Timestamp) and g.end == piece.start)
+    )
 
 
 def _literal(clock_map: ClockMap) -> TypedLiteral:
@@ -385,10 +414,6 @@ def piece_drafts(piece: Piece, confidence: Knowledge[float] | None = None) -> li
 
 
 # --- Chains -------------------------------------------------------------------------------------
-
-
-def _clamp(ticks: int) -> int:
-    return max(INT64_MIN, min(INT64_MAX, ticks))
 
 
 def _intersect(a: Interval, b: Interval) -> Interval | None:
@@ -462,9 +487,7 @@ class Chain:
         )
 
     def kind(self) -> ClaimAssertionKind:
-        if self.estimated:
-            return INFERRED
-        return weakest(tuple(p.hop.assertion_kind for p in self.pieces))  # type: ignore[misc]
+        return weakest(tuple(p.hop.assertion_kind for p in self.pieces))
 
     def drafts(self, confidence: Knowledge[float] | None = None) -> list[ClaimDraft]:
         return mapping_drafts(
@@ -529,7 +552,7 @@ class TimeDomainConsolidator:
         previous: Sequence[Claim],
         config: Mapping[str, JsonValue],
     ) -> ConsolidatorOutput:
-        view = read(ledger, timing=True, estimated=False)
+        view = read(ledger, timing=True)
         if config:
             view.findings.append(unknown_config(config, self.consolidator_id))
         pieces = revise(view.hops, view.findings)

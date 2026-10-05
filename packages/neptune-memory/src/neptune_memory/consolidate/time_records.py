@@ -11,8 +11,9 @@ Every kind is the compiler's and is read by the compiler's own strict reader:
 - ``stream`` (root ADR 0018 §2): ``run`` and ``clocks``, the ``TimestampDomain`` of every clock its
   samples carry, with ``first`` / ``last`` on one of them.
 - ``clock_mapping`` (root ADR 0050 §5): canonical when a source states the relation (``observed`` or
-  ``stated``), or a ``derived/`` line a fit estimated (root ADR 0060 §6, ``inferred``). Both share
-  the kind; a derived line says ``assertion_kind: inferred`` at its top level.
+  ``stated``). A ``derived/`` line a fit estimated (root ADR 0060 §6) shares the kind and says
+  ``assertion_kind: inferred`` at its top level; ``is_estimate`` tells them apart, and only
+  ``neptune_memory.derived.clocks`` parses one (into the same ``Hop``, through ``hop``).
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, TypeVar
 
-from neptune.derived.clocks import inferred_clock_mapping_from_json
 from neptune.derived.provenance import INFERRED
 from neptune.model.alignment import ValidityWindow, clock_mapping_from_json
 from neptune.model.knowledge import (
@@ -92,17 +92,42 @@ def _cited(*states: object) -> list[EvidenceRef]:
     return found
 
 
-def _kind(provenance: object) -> AssertionKind | None:
-    return provenance.assertion_kind if isinstance(provenance, Provenance) else None
+def _kinds(*states: object) -> list[AssertionKind]:
+    """The assertion kind of each state's own provenance, in order; none for an inherited one."""
+    found: list[AssertionKind] = []
+    for state in states:
+        provenance = getattr(state, "provenance", None)
+        if isinstance(provenance, Provenance):
+            found.append(provenance.assertion_kind)
+    return found
 
 
-def weakest(kinds: tuple[AssertionKind, ...]) -> AssertionKind:
-    """``stated`` when every record a claim rests on is stated; otherwise ``observed``."""
+def weakest(kinds: tuple[ClaimAssertionKind, ...]) -> ClaimAssertionKind:
+    """What a claim resting on all of ``kinds`` is: ``inferred`` if any is, else ``stated`` when
+    every one is stated, else ``observed``."""
+    for kind in kinds:
+        if not isinstance(kind, AssertionKind):
+            return kind
     return (
         AssertionKind.STATED
         if all(k is AssertionKind.STATED for k in kinds)
-        else (AssertionKind.OBSERVED)
+        else AssertionKind.OBSERVED
     )
+
+
+@dataclass(frozen=True)
+class Stamp:
+    """An instant a record states as ``Known``, with what its own provenance cites, if anything."""
+
+    at: Timestamp
+    evidence: tuple[EvidenceRef, ...]
+    kinds: tuple[AssertionKind, ...]
+
+
+def _stamp(state: Knowledge[Timestamp]) -> Stamp | None:
+    if not isinstance(state, Known):
+        return None
+    return Stamp(state.value, tuple(_cited(state)), tuple(_kinds(state)))
 
 
 # --- Runs and streams ---------------------------------------------------------------------------
@@ -114,8 +139,8 @@ class RunClocks:
 
     record: RecordId
     machine: LogicalId | None
-    first: Timestamp | None
-    last: Timestamp | None
+    first: Stamp | None
+    last: Stamp | None
     evidence: tuple[EvidenceRef, ...]  # the declaration, then the machine field's own citation
     kinds: tuple[AssertionKind, ...]  # of the declaration and of the machine field, if its own
 
@@ -123,14 +148,13 @@ class RunClocks:
 def run(record: Mapping[str, object]) -> RunClocks:
     parsed = _strict(run_from_json, record)
     machine = _known(parsed.machine)
-    own = _kind(parsed.machine.provenance) if isinstance(parsed.machine, Known) else None
     return RunClocks(
         record=parsed.id,
         machine=None if machine is None else declared(machine),
-        first=_known(parsed.first),
-        last=_known(parsed.last),
+        first=_stamp(parsed.first),
+        last=_stamp(parsed.last),
         evidence=(parsed.provenance.evidence, *_cited(parsed.machine)),
-        kinds=(parsed.provenance.assertion_kind, *([] if own is None else [own])),
+        kinds=(parsed.provenance.assertion_kind, *_kinds(parsed.machine)),
     )
 
 
@@ -141,8 +165,8 @@ class StreamClocks:
     record: RecordId
     run: RecordId
     clocks: tuple[RecordId, ...]
-    first: Timestamp | None
-    last: Timestamp | None
+    first: Stamp | None
+    last: Stamp | None
     evidence: EvidenceRef
     kind: AssertionKind
 
@@ -153,8 +177,8 @@ def stream(record: Mapping[str, object]) -> StreamClocks:
         record=parsed.id,
         run=parsed.run,
         clocks=parsed.clocks,
-        first=_known(parsed.first),
-        last=_known(parsed.last),
+        first=_stamp(parsed.first),
+        last=_stamp(parsed.last),
         evidence=parsed.provenance.evidence,
         kind=parsed.provenance.assertion_kind,
     )
@@ -232,25 +256,13 @@ def _window(validity: Knowledge[ValidityWindow]) -> tuple[Timestamp, Timestamp |
     raise Unstated(f"the window's end is {end.state}")
 
 
-def mapping(record: Mapping[str, object]) -> Hop:
-    """A compiler clock mapping, declared or estimated, read by the compiler's strict reader."""
-    if is_estimate(record):
-        estimate = _strict(inferred_clock_mapping_from_json, record)
-        kind: ClaimAssertionKind = INFERRED
-        evidence: tuple[EvidenceRef, ...] = estimate.evidence
-        records: tuple[RecordId, ...] = (estimate.id, estimate.transform)
-        parsed: Any = estimate
-    else:
-        stated = _strict(clock_mapping_from_json, record)
-        kind = stated.provenance.assertion_kind
-        bounds = [w.value for w in (stated.validity,) if isinstance(w, Known)]
-        evidence = (
-            stated.provenance.evidence,
-            *_cited(stated.anchor, stated.rate, stated.residual_bound, stated.validity),
-            *_cited(*(state for w in bounds for state in (w.start, w.end))),
-        )
-        records = (stated.id,)
-        parsed = stated
+def hop(
+    parsed: Any,
+    kind: ClaimAssertionKind,
+    evidence: tuple[EvidenceRef, ...],
+    records: tuple[RecordId, ...],
+) -> Hop:
+    """A ``Hop`` from a parsed compiler mapping (canonical or derived: the same fields)."""
     try:
         start, end = _window(parsed.validity)
     except Unstated as exc:
@@ -263,9 +275,9 @@ def mapping(record: Mapping[str, object]) -> Hop:
             rate=_inherit("rate", parsed.rate),
             residual_bound=_inherit("residual_bound", parsed.residual_bound),
         )
+    except Malformed:
+        raise
     except (ValueError, TypeError) as exc:
-        if isinstance(exc, Malformed):
-            raise
         raise Malformed(str(exc)) from exc
     return Hop(
         record=parsed.id,
@@ -277,3 +289,18 @@ def mapping(record: Mapping[str, object]) -> Hop:
         evidence=evidence,
         records=records,
     )
+
+
+def mapping(record: Mapping[str, object]) -> Hop:
+    """A declared compiler ``ClockMapping``, read by the compiler's strict reader. An estimate
+    (``is_estimate``) is ``neptune_memory.derived.clocks``'s to read."""
+    if is_estimate(record):
+        raise Malformed("an estimate (derived/ line) is not a declared clock mapping")
+    stated = _strict(clock_mapping_from_json, record)
+    windows = [w.value for w in (stated.validity,) if isinstance(w, Known)]
+    evidence = (
+        stated.provenance.evidence,
+        *_cited(stated.anchor, stated.rate, stated.residual_bound, stated.validity),
+        *_cited(*(state for w in windows for state in (w.start, w.end))),
+    )
+    return hop(stated, stated.provenance.assertion_kind, evidence, (stated.id,))

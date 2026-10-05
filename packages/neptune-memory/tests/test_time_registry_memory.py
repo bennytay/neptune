@@ -25,6 +25,7 @@ from memory_time_records import (
     UNSTATED,
     at,
     build,
+    cite,
     claims,
     clock,
     clock_map,
@@ -421,6 +422,52 @@ def test_a_padded_machine_id_is_malformed_and_a_config_is_refused() -> None:
     padded = run("padded.bag", LogicalId("asset-tag", " AMR-12"), at("px4 boot", 0))
     results = build({"p": [padded]}, plan=((BOTH_PLAN[0][0], {"slack": 1}),))
     assert findings(results) == ["time.malformed_record", "time.unknown_config"]
+
+
+def test_has_clock_cites_and_is_no_stronger_than_the_instants_it_rests_on() -> None:
+    records = [
+        run(
+            "manifest-run",
+            DRONE,
+            at("px4 boot", 0),
+            at("px4 boot", 99),
+            kind=STATED,
+            last_read_from="flight-17.ulg tail",
+        )
+    ]
+    (has,) = claims(build({"p": records}))
+    assert has.assertion_kind == OBSERVED  # the end was read from the log, not stated
+    assert cite("flight-17.ulg tail") in has.provenance.evidence
+    (alone,) = claims(build({"p": [run("stated-run", DRONE, at("px4 boot", 0), kind=STATED)]}))
+    assert alone.assertion_kind == STATED
+
+
+def test_a_piece_cites_only_the_mappings_that_bound_it() -> None:
+    records = [
+        mapping("long", "a", "b", anchor=(0, 0), start=0, end=100),
+        mapping("short", "a", "b", anchor=(0, 1), start=10, end=20),
+        mapping("later", "a", "b", anchor=(0, 2), start=50, end=60),
+    ]
+    pieces = sorted(
+        (
+            c
+            for c in claims(build({"p": records}), "clock_map")
+            if c.subject == clock_node(clock("a"))
+        ),
+        key=lambda c: c.valid_from,
+    )
+    cited = {
+        (c.valid_from.ticks, c.valid_to.ticks): set(c.provenance.records)  # type: ignore[union-attr]
+        for c in pieces
+    }
+    long, short, later = mapping_id("long"), mapping_id("short"), mapping_id("later")
+    assert cited == {
+        (0, 10): {long, short},
+        (10, 20): {short},
+        (20, 50): {long, short, later},
+        (50, 60): {later},
+        (60, 100): {long, later},
+    }
 
 
 # --- Boundaries ---------------------------------------------------------------------------------

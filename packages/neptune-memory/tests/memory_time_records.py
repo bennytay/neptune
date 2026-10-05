@@ -117,15 +117,18 @@ def run(
     first: Timestamp | None,
     last: Timestamp | None = None,
     kind: AssertionKind = OBSERVED,
+    last_read_from: str | None = None,
 ) -> Record:
-    """A ``Run`` declared by ``name``; ``None`` fields are not stated."""
+    """A ``Run`` declared by ``name``; ``None`` fields are not stated. ``last_read_from`` gives
+    the last instant its own observed citation (a recording's last message, not its header)."""
+    own = None if last_read_from is None else _provenance(last_read_from, OBSERVED)
     record = Run(
         id=run_id(name),
         provenance=_provenance(name, kind),
         logical_id=Unknown(),
         machine=NotCovered() if machine is None else Known(machine),
         first=Unknown() if first is None else Known(first),
-        last=Unknown() if last is None else Known(last),
+        last=Unknown() if last is None else Known(last) if own is None else Known(last, own),
     )
     return dict(record.to_json())
 

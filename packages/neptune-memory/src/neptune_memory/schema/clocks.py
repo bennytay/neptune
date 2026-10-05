@@ -117,14 +117,19 @@ class _Graph:
 
     def __init__(self, reader: MemoryReader, as_of: LedgerTx, inferred: bool) -> None:
         self._reader, self._as_of, self._inferred = reader, as_of, inferred
+        self._views: dict[RecordId, tuple[tuple[Claim, ...], tuple[Claim, ...]]] = {}
         self._out: dict[RecordId, tuple[tuple[Claim, ClockMap], ...]] = {}
         self._steps: dict[RecordId, tuple[_Step, ...]] = {}
 
     def _view(self, clock: RecordId) -> tuple[tuple[Claim, ...], tuple[Claim, ...]]:
-        view = self._reader.node(_clock(clock), self._as_of, include_inferred=self._inferred)
-        if not isinstance(view, Known):
-            return (), ()
-        return view.value.claims, view.value.incoming
+        """The claims about ``clock`` and pointing at it, from one ``node`` call per clock."""
+        if clock not in self._views:
+            view = self._reader.node(_clock(clock), self._as_of, include_inferred=self._inferred)
+            if isinstance(view, Known):
+                self._views[clock] = (view.value.claims, view.value.incoming)
+            else:
+                self._views[clock] = ((), ())
+        return self._views[clock]
 
     def outgoing(self, clock: RecordId) -> tuple[tuple[Claim, ClockMap], ...]:
         if clock not in self._out:
@@ -155,9 +160,12 @@ class _Graph:
 
 
 def _holds(claim: Claim, ticks: Fraction) -> bool:
-    """Whether the claim's valid interval, on its source clock, holds the instant ``ticks``."""
+    """Whether the claim's valid interval, on its source clock, holds the instant ``ticks``. A
+    start at ``INT64_MIN`` is a window stated open below (ADR 0011 §2): it holds any earlier
+    instant a hop can carry, as the chain windows of ``consolidate.time.preimage`` assume."""
     start, end = claim.valid_from, claim.valid_to
-    return start.ticks <= ticks and (isinstance(end, Open) or ticks < end.ticks)
+    below = start.ticks == INT64_MIN or start.ticks <= ticks
+    return below and (isinstance(end, Open) or ticks < end.ticks)
 
 
 def _apply(step: _Step, reading: _Reading) -> _Reading | str:
@@ -179,6 +187,14 @@ def _apply(step: _Step, reading: _Reading) -> _Reading | str:
     if not _holds(step.claim, source_ticks):
         return "outside"
     return _Reading(ticks, bound, (*reading.path, step.claim), (*reading.backward, step.backward))
+
+
+def _preference(reading: _Reading) -> tuple[bool, bool, Fraction, tuple[str, ...]]:
+    """Of readings with one value, keep the best-evidenced: declared hops only, a stated bound,
+    the tightest bound, then the path's claim ids (so the choice is deterministic)."""
+    inferred = any(is_inferred(c.assertion_kind) for c in reading.path)
+    bound = reading.bound
+    return (inferred, bound is None, bound or Fraction(0), tuple(c.id for c in reading.path))
 
 
 def _search(
@@ -210,7 +226,7 @@ def _search(
         frontier = {}
         for clock, readings in found.items():
             distinct: dict[Fraction, _Reading] = {}
-            for reading in readings:
+            for reading in sorted(readings, key=_preference):
                 distinct.setdefault(reading.ticks, reading)
             if len(distinct) > MAX_READINGS:
                 crowded = True
