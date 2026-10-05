@@ -14,8 +14,9 @@ ALLOWED = {
     "neptune_ledger": ("neptune_ledger.api",),
     "neptune_memory": ("neptune_memory.schema",),
 }
-# The compiler's store and runtime write packages; Context reads packages only via the Ledger.
-FORBIDDEN_COMPILER = ("neptune.store", "neptune.runtime", "neptune.adapters", "neptune.discovery")
+# From the compiler Context may use only the canonical model and identity; its store, runtime and
+# adapters write or parse packages, and Context reads packages only via the Ledger.
+ALLOWED_COMPILER = ("neptune.model", "neptune.identity")
 SUBPACKAGES = ("query", "retrieve", "packets", "render", "sdk", "mcp", "explain", "eval")
 
 
@@ -41,9 +42,8 @@ def test_imports_stay_on_the_published_read_surface(path: Path) -> None:
         for package, allowed in ALLOWED.items():
             if _under(name, package):
                 assert any(_under(name, a) for a in allowed), f"{path.name} imports {name}"
-        assert not any(_under(name, bad) for bad in FORBIDDEN_COMPILER), (
-            f"{path.name} imports {name}"
-        )
+        if _under(name, "neptune"):
+            assert any(_under(name, a) for a in ALLOWED_COMPILER), f"{path.name} imports {name}"
 
 
 def test_the_repo_map_subpackages_exist() -> None:
