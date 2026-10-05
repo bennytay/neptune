@@ -39,7 +39,7 @@ from neptune_memory.schema.supersede import is_closure
 # ADR 0007 §2: the shape MVL-126 added to the core vocabulary (a minor graph-schema release).
 HAS_NAME = PredicateSpec(
     "has_name",
-    1,
+    2,  # 2: every node type includes event (ADR 0013 §6)
     frozenset(NodeType),
     frozenset({ValueType.TEXT}),
     Cardinality.ONE,

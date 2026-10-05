@@ -16,7 +16,7 @@ from memory_event_records import SECOND, incident, intervention, table
 from memory_identity_records import Record, ambiguous, ledger
 from memory_run_records import domain, mapping
 from neptune.identity import canonical_json
-from neptune.model.ids import LogicalId
+from neptune.model.ids import LogicalId, RecordId
 from neptune.model.knowledge import Ambiguous, to_json
 from neptune.model.time import INT64_MAX, Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
@@ -79,7 +79,7 @@ EVENTS: Final = {
 }
 
 
-def plc(*rows: Sequence[object], name: str = "plc alarms") -> tuple[list[Record], list[str]]:
+def plc(*rows: Sequence[object], name: str = "plc alarms") -> tuple[list[Record], list[RecordId]]:
     records, _, ids = table(name, ("t", "code", "cell", "zone", "prio"), rows)  # type: ignore[arg-type]
     return records, ids
 
@@ -289,7 +289,7 @@ def test_co_occurrence_is_capped_nearest_first() -> None:
     sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0))
     config = {"co_occurrence": {"max_partners": 2}}
     records = [CLOCK, OTHER, sync, alarm, *(r for r, _ in reports)]
-    result = consolidate({"p": records}, config)  # type: ignore[arg-type]
+    result = consolidate({"p": records}, config)
     partners = {
         c.object for c in result.claims if c.predicate == "co_occurs_within" and
         c.subject == event_node(alarm_id)

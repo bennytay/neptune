@@ -1,10 +1,11 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.3.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.6.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.3.0 (minor) adds the
-run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6). Earlier goldens still
+run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.6.0 (minor) adds the
+`event` node type, the event predicates and `EventKind` ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §6). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -30,6 +31,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 | entity | `stream` | one recorded stream of a run: a topic, a channel, a log message type |
 | entity | `document` | a declared document: a manual, an SOP, a datasheet, a register |
 | entity | `episode` | a bounded segment of a run (an entity, not the Episode tier) |
+| entity | `event` | something one record states happened: an e-stop, a fault, an intervention, an incident |
 | context | `deployment` | a deployment, with a summary |
 | context | `fleet` | a fleet, with a summary |
 | context | `programme` | a programme, with a summary |
@@ -37,7 +39,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 5`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 8`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -45,21 +47,29 @@ major version (ADR 0002 §5).
 
 | Predicate | Subject | Object | Cardinality | Meaning |
 |---|---|---|---|---|
-| `at_site` | run | site | one | the site a run took place at, as declared |
-| `at_site_candidate` | run | site | many | ambiguous: the evidence names several sites for the run |
+| `at_site` | event, run | site | one | the site a run or event took place at, as declared |
+| `at_site_candidate` | event, run | site | many | ambiguous: the evidence names several sites |
+| `co_occurs_within` | event | event | many | both events began inside the claim's valid interval, which is the configured window on that clock; different sources; never a cause |
 | `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
+| `declared_kind` | event | text, integer | one | the event's kind exactly as its source declares it: a level, a code, a mode |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
 | `episode_of` | episode | run | one | the run an episode segments |
+| `event_kind` | event | text | one | a registered event kind (`EventKind`), through a vendor mapping the config declares |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
 | `executes_task_candidate` | episode, run | task | many | ambiguous: the evidence names several tasks |
 | `governed_by` | deployment, fleet, machine, site | policy | many | an operating rule or control policy that applies |
 | `has_calibration` | sensor | configuration | one | the calibration in force |
 | `has_configuration` | deployment, machine, sensor | configuration | many | a parameter set, description file or other configuration in force |
+| `has_description` | event | text | one | what the record says happened, verbatim: a message, a description, a reason |
 | `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
 | `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
+| `in_zone` | event | zone | one | the zone an event took place in, as declared |
+| `in_zone_candidate` | event | zone | many | ambiguous: the record names several zones |
+| `involves` | event | asset, machine | many | a machine or asset the record names as involved, or the machine whose log it is |
+| `involves_candidate` | event | asset, machine | many | ambiguous: the record names several possible machines or assets |
 | `located_at` | asset, machine | site, zone | one | where it is |
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
 | `member_of_fleet` | machine | fleet | one | the fleet a machine belongs to |
@@ -73,7 +83,13 @@ major version (ADR 0002 §5).
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
+| `stated_severity` | event | text, integer | one | the severity a record states, verbatim; never ranked or compared |
 | `zone_of` | zone | site | one | the site a zone belongs to |
+
+`EventKind` (`#/$defs/EventKind`) lists the registered event kinds, the only objects of `event_kind`:
+`collision`, `emergency_stop`, `failsafe`, `fault`, `incident`, `intervention`, `mode_change`, `near_miss`,
+`protective_stop`, `reset`, `safety_field_violation`, `stale`, `warning`. A kind is added with a vocabulary
+version and never renamed or removed within a major.
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
 `Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock) and `record`.
@@ -119,7 +135,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.3.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.6.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -168,6 +184,15 @@ def test_graph_schema_contract(check):
     and `at_site` are `Known` only when every ground names one id, and `executes_task` holds every task stated;
     otherwise each reading is a `*_candidate` claim. `consolidate.runs.involvement` reads a role back as `Known`,
     `Ambiguous`, `Unknown` or `NotCovered`.
+13. **Events are what one record states, and co-occurrence is never cause**
+    ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md)). An event node is
+    `record:<rec id>` (a timeline entry `record:<rec id>/timeline/<i>`). Each event comes from an
+    `incident_record`, an `intervention`, or a row of a table the event consolidator's config declares. Every
+    claim about an event holds over its time as declared (an instant is `[t, t + 1 tick)`), and again on each
+    clock a stated `clock_mapping` reaches directly, citing that mapping. `event_kind` is set only through a
+    declared vendor mapping. `co_occurs_within` links two events from different sources, one claim each way, and
+    its valid interval is the window. Events on clocks no mapping relates are never compared, and a mapping
+    too coarse to decide gives a finding, never a claim.
 
 ## Caveat: a resolver configuration is a store generation
 

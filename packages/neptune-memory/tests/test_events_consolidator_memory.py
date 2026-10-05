@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from memory_event_records import SECOND, incident, intervention, table
 from memory_identity_records import Record, ledger
@@ -92,7 +92,7 @@ WH_NORTH, AISLE_14 = LogicalId("site", "WH-NORTH"), LogicalId("zone", "WH-NORTH/
 B0: Final = 1_000 * SECOND  # the AMR's boot clock at T0
 
 
-def warehouse(*, mapped: bool = True) -> tuple[dict[str, list[Record]], dict[str, object]]:
+def warehouse(*, mapped: bool = True) -> tuple[dict[str, list[Record]], dict[str, Any]]:
     cmms_clock, cmms = domain("cmms export", civil=True)
     sys_clock, syslog_domain = domain("syslog host clock", civil=True)
     boot_clock, boot = domain("amr-07 boot", civil=False)
@@ -126,7 +126,7 @@ def warehouse(*, mapped: bool = True) -> tuple[dict[str, list[Record]], dict[str
     records: list[Record] = [cmms_clock, sys_clock, boot_clock, report, *estop, *syslog]
     if mapped:
         records.append(mapping("amr-07 ntp log", boot, cmms, anchor=(B0, T0)))
-    config: dict[str, object] = {
+    config: dict[str, Any] = {
         "vendors": {
             "ros.estop": {"ESTOP_PRESSED": "emergency_stop", "ESTOP_RELEASED": "reset"},
             "syslog": {"err": "fault", "warning": "warning", "info": "not_an_event"},
@@ -158,11 +158,11 @@ def warehouse(*, mapped: bool = True) -> tuple[dict[str, list[Record]], dict[str
 
 def test_warehouse_incident_is_reconstructed_from_three_sources() -> None:
     packages, built = warehouse()
-    result = consolidate(packages, built["config"])  # type: ignore[arg-type]
+    result = consolidate(packages, built["config"])
     contract_holds(result)
-    report = event_node(built["report"])  # type: ignore[arg-type]
-    pressed, released = (event_node(r) for r in built["estop"])  # type: ignore[attr-defined]
-    fault, info = (event_node(r) for r in built["syslog"])  # type: ignore[attr-defined]
+    report = event_node(built["report"])
+    pressed, released = (event_node(r) for r in built["estop"])
+    fault, info = (event_node(r) for r in built["syslog"])
 
     # The CMMS record: its kind, its severity verbatim, what and where, on civil time.
     (kind,) = of(result, "event_kind", report)
@@ -219,11 +219,11 @@ def test_warehouse_incident_is_reconstructed_from_three_sources() -> None:
 
 def test_warehouse_without_the_mapping_compares_only_civil_sources() -> None:
     packages, built = warehouse(mapped=False)
-    result = consolidate(packages, built["config"])  # type: ignore[arg-type]
+    result = consolidate(packages, built["config"])
     contract_holds(result)
-    report = event_node(built["report"])  # type: ignore[arg-type]
-    pressed = event_node(built["estop"][0])  # type: ignore[index]
-    fault = event_node(built["syslog"][0])  # type: ignore[index]
+    report = event_node(built["report"])
+    pressed = event_node(built["estop"][0])
+    fault = event_node(built["syslog"][0])
     assert pairs(result) == {(report, fault), (fault, report)}
     assert "events.clocks_unrelated" in codes(result)
     assert {c.valid_from.domain_id for c in of(result, "event_kind", pressed)} == {built["boot"]}
@@ -236,7 +236,7 @@ AHEAD: Final = 96_700_000_000  # the cell PC's clock runs 96.7 s ahead of the HM
 ARM3A: Final = LogicalId("cmms.asset", "ARM-3A")
 
 
-def arm_cell(*, mapped: bool) -> tuple[dict[str, list[Record]], dict[str, object]]:
+def arm_cell(*, mapped: bool) -> tuple[dict[str, list[Record]], dict[str, Any]]:
     hmi_clock, hmi = domain("cell3 hmi", civil=False)
     pc_clock, pc = domain("cell3 ipc header.stamp", civil=False)
     report, report_id = incident(
@@ -282,7 +282,7 @@ def arm_cell(*, mapped: bool) -> tuple[dict[str, list[Record]], dict[str, object
         records.append(
             mapping("time-sync survey", pc, hmi, anchor=(H0 + AHEAD, H0), bound=50_000_000)
         )
-    config: dict[str, object] = {
+    config: dict[str, Any] = {
         "vendors": {
             "deploy.ros2_diagnostics": {
                 "diagnostic.ok": "not_an_event",
@@ -317,10 +317,10 @@ def arm_cell(*, mapped: bool) -> tuple[dict[str, list[Record]], dict[str, object
 
 def test_arm_cell_incident_links_the_bag_to_the_hmi_timeline_through_the_survey() -> None:
     packages, built = arm_cell(mapped=True)
-    result = consolidate(packages, built["config"])  # type: ignore[arg-type]
+    result = consolidate(packages, built["config"])
     contract_holds(result)
-    report_id: RecordId = built["report"]  # type: ignore[assignment]
-    warn, ok, protective, estop = (event_node(r) for r in built["rows"])  # type: ignore[attr-defined]
+    report_id: RecordId = built["report"]
+    warn, ok, protective, estop = (event_node(r) for r in built["rows"])
     entry_stop, entry_estop = (event_node(report_id, "timeline", i) for i in (0, 1))
 
     # The bag's e-stop is an emergency stop on the PC clock, and again on the HMI clock.
@@ -355,17 +355,18 @@ def test_arm_cell_incident_links_the_bag_to_the_hmi_timeline_through_the_survey(
     assert claim.valid_from.domain_id == built["hmi"]
     assert isinstance(claim.valid_to, Timestamp)
     assert claim.valid_to.ticks - claim.valid_from.ticks == WINDOW
-    survey = [r for r in claim.provenance.records if r not in (report_id, *built["rows"])]  # type: ignore[misc]
+    survey = [r for r in claim.provenance.records if r not in (report_id, *built["rows"])]
     assert survey  # the mapping record and its target clock are cited
 
 
 def test_arm_cell_without_a_mapping_compares_nothing_across_the_two_clocks() -> None:
     packages, built = arm_cell(mapped=False)
-    result = consolidate(packages, built["config"])  # type: ignore[arg-type]
+    result = consolidate(packages, built["config"])
     contract_holds(result)
     assert not of(result, "co_occurs_within")
     (unrelated,) = [f for f in result.findings if f.code == "events.clocks_unrelated"]
-    assert sorted(unrelated.details["clocks"]) == sorted([built["hmi"], built["pc"]])  # type: ignore[arg-type]
+    clocks: list[str] = unrelated.details["clocks"]  # type: ignore[assignment]
+    assert sorted(clocks) == sorted([built["hmi"], built["pc"]])
 
 
 # --- A near miss known only from an operator's note --------------------------------------------
@@ -382,7 +383,7 @@ def test_near_miss_from_an_operator_note_states_only_what_the_note_states() -> N
         site=LogicalId("site", "WH-SOUTH"),
     )
     config = {"vendors": {"incident_record": {"near miss": "near_miss"}}}
-    result = consolidate({"notes": [clock, note]}, config)  # type: ignore[arg-type]
+    result = consolidate({"notes": [clock, note]}, config)
     contract_holds(result)
     event = event_node(note_id)
     assert [c.object for c in of(result, "event_kind", event)] == [text("near_miss")]
@@ -434,7 +435,7 @@ def test_events_on_two_clocks_without_a_mapping_are_unknown_together() -> None:
     result, _, _, a, b = two_clocks(anchor=False)
     assert not of(result, "co_occurs_within")
     (finding,) = [f for f in result.findings if f.code == "events.clocks_unrelated"]
-    assert sorted(finding.details["clocks"]) == sorted([a, b])  # type: ignore[arg-type]
+    assert sorted(finding.details["clocks"]) == sorted([a, b])  # type: ignore[arg-type,type-var]
 
 
 def test_events_on_two_clocks_with_a_mapping_co_occur_on_the_target_clock() -> None:
@@ -475,7 +476,7 @@ def test_the_window_is_configured_in_seconds_and_scaled_by_each_clock() -> None:
     two, two_id = incident("two", occurred=Timestamp(1400, b))
     sync = mapping("sync", a, b, anchor=(0, 0))
     config = {"co_occurrence": {"window_seconds": "0.5"}}
-    result = consolidate({"p": [a_clock, b_clock, one, two, sync]}, config)  # type: ignore[arg-type]
+    result = consolidate({"p": [a_clock, b_clock, one, two, sync]}, config)
     (claim,) = of(result, "co_occurs_within", event_node(one_id))
     assert claim.object == event_node(two_id)
     assert (claim.valid_from, claim.valid_to) == (Timestamp(1000, b), Timestamp(1500, b))
