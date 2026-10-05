@@ -24,15 +24,16 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Consumes
 
-- Compiler package schema: `SCHEMA_VERSION = 6` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
-  0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061). Alignment records (MVL-82,
-  package-schema 3.0.0) and human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of
-  root ADR 0062) are consumed through the Ledger. The identity consolidator reads `identity_link`, `assertion`
-  and `timestamp_domain` with the compiler's own strict readers (ADR 0008 §1). The configuration lineage
-  consolidator reads `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`,
-  `authorisation_envelope` (lifecycle records, root ADR 0051), `run`, `snapshot_binding` (root ADR 0050 §8) and the
-  snapshot kinds a binding names, the same way ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §1); the time-domain registry reads
-  `run`, `stream` and `clock_mapping` the same way, and `derived/clock_mapping` lines (root ADR 0060) with the
+- Compiler package schema: `SCHEMA_VERSION = 7` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
+  0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the task kinds, root ADR
+  0063). Alignment records (MVL-82, package-schema 3.0.0), human assertions (MVL-183, package-schema 5.0.0, the
+  `neptune.assertions` file of root ADR 0062) and task records (MVL-33, package-schema 7.0.0) are consumed through
+  the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
+  compiler's own strict readers (ADR 0008 §1). The configuration lineage consolidator reads
+  `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`, `authorisation_envelope`
+  (lifecycle records, root ADR 0051), `run`, `snapshot_binding` (root ADR 0050 §8) and the snapshot kinds a binding
+  names, the same way ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §1); the time-domain registry
+  reads `run`, `stream` and `clock_mapping` the same way, and `derived/clock_mapping` lines (root ADR 0060) with the
   compiler's `neptune.derived.clocks` reader (ADR 0011 §1, §4).
 - Ledger catalog API: `CATALOG_API_VERSION = "pending: pinned when MVL-85 (Ledger catalog API) lands"`.
   Until then Memory codes against the `LedgerReader` Protocol in `neptune_memory/ledger.py` and tests

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from neptune.model.kinds import RECORD_KINDS
+from neptune.model.kinds import RECORD_KINDS, package_version
 from neptune.model.knowledge import AssertionKind, Known, Unknown
 from neptune.model.provenance import ByteRange, JsonPointer
 from neptune.store.package import IngestPackage, read_files, read_package
@@ -220,7 +220,7 @@ def test_the_result_is_byte_identical_and_the_base_is_never_changed() -> None:
 
 def test_every_record_round_trips_the_compilers_strict_readers() -> None:
     out = mapped()
-    assert PACKAGE_SCHEMA_VERSION == 6
+    assert package_version(record.kind for record in out.records) <= PACKAGE_SCHEMA_VERSION
     for record in out.records:
         assert RECORD_KINDS[record.kind][1](record.to_json()) == record
 

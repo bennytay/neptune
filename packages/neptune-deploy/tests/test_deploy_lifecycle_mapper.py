@@ -21,9 +21,9 @@ from neptune.identity.hashing import content_id
 from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, NotApplicable, Unknown
 from neptune.model.lifecycle import LIFECYCLE_KINDS, LIFECYCLE_SINCE
 from neptune.model.provenance import ByteRange, JsonPointer, Provenance, RowCell, Span
+from neptune.model.reference import CIVIL_ZONE_SINCE
 from neptune.model.time import Timescale
 from neptune.store.package import IngestPackage, package_files, read_files, read_package
-from neptune_deploy import PACKAGE_SCHEMA_VERSION
 from neptune_deploy.lifecycle import (
     MAPPER_ID,
     MAPPER_VERSION,
@@ -391,8 +391,9 @@ def test_map_package_writes_a_readable_package_and_leaves_the_base_untouched(
     assert _tree(root) == before
     written = read_package(tmp_path / "out")
     assert written.id == package_id
-    # The mapped clocks' zones and the blank lists are version 6 records (root ADR 0061 §6).
-    assert written.manifest.version == PACKAGE_SCHEMA_VERSION > LIFECYCLE_SINCE
+    # The mapped clocks' zones and the blank lists are version 6 records (root ADR 0061 §6); Deploy
+    # writes no newer kind, so the package states that version, not the newest it can read.
+    assert written.manifest.version == CIVIL_ZONE_SINCE > LIFECYCLE_SINCE
 
 
 # --- Rules, tables and the command line ----------------------------------------------------------
