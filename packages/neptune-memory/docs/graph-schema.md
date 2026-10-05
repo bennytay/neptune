@@ -1,10 +1,12 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.2.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.7.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
-configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6). Every earlier
+configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6). 1.7.0 (minor) adds
+the calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
+§4, §6). Every earlier
 golden still validates and its graph still passes the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -37,7 +39,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 4`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 9`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -46,10 +48,14 @@ major version (ADR 0002 §5).
 | Predicate | Subject | Object | Cardinality | Meaning |
 |---|---|---|---|---|
 | `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
+| `calibrated_by` | configuration | record | many | the maintenance or requalification record that states the calibration resulted from it |
+| `calibrated_with` | sensor | configuration | many | a calibration of the sensor, from its valid_from to its stated end or the next one |
+| `calibration_candidate` | sensor | configuration | many | ambiguous: the calibration could be the sensor's over the interval; one claim per reading |
 | `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
 | `configuration_candidate` | machine, run | configuration | many | ambiguous: the configuration in force could be this one; one claim per reading |
 | `configuration_unknown` | machine, run | record | many | no configuration is stated over the interval; the record leaves it open, never filled |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
+| `drift` | sensor | delta | many | observed: two consecutive calibrations' declared values differ by the delta; no judgement |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
@@ -75,7 +81,11 @@ major version (ADR 0002 §5).
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
-`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock) and `record`.
+`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `delta` and `record`. A `delta`
+(`#/$defs/Delta`) is `later - earlier`, component by component, between two calibration records (`earlier`,
+`later`): a parameter by its declared `name`, or the `translation` or `rotation` of the transforms both bind to one
+edge (`parent`, `child`), in the `representation` both declare. Its unit is the one both declare (`Known`), or
+`not_applicable` for a form without one (a quaternion, a rotation matrix); it is never converted.
 
 ## The claim and the finding
 
@@ -118,7 +128,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.2.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.7.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -173,6 +183,12 @@ def test_graph_schema_contract(check):
     `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
     made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
     envelope end is never read as open.
+13. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
+    places a calibration on a sensor only through its declared machine and subject and the hardware configurations
+    the machine declares or its chain places; several readings are `calibration_candidate`s, and so is a calibration
+    whose frame binding contradicts its sensor's configuration graph. A `calibrated_with` starts at a stated
+    `valid_from` only. `drift` exists only between equal declared units (or forms without one) and equal declared
+    interpretations; anything else is a finding, never a converted value, and no threshold is applied.
 
 ## Caveat: a resolver configuration is a store generation
 

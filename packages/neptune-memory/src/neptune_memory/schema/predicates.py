@@ -30,9 +30,10 @@ if TYPE_CHECKING:
 # Bumped whenever CORE_PREDICATES changes. 2: ``same_as`` and ``same_as_candidate`` joined the
 # core (ADR 0006 §4). 3: ``has_name`` joined (ADR 0007 §2), and the predicates that hold for every
 # node type widened to ``stream`` and ``document`` (ADR 0008 §6). 4: the configuration lineage
-# predicates joined (ADR 0010 §6). The vocabulary is part of graph-schema
+# predicates joined (ADR 0010 §6). 9: the calibration history predicates joined (ADR 0014 §6;
+# 5-8 are taken by vocabularies released before it). The vocabulary is part of graph-schema
 # (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 4
+VOCABULARY_VERSION: Final = 9
 
 # Identity predicates (ADR 0003 §1). Only ``memory.identity`` grounds ``same_as``, never by
 # inference; ``same_as_candidate`` is pairwise, one claim each way. The runner enforces both.
@@ -47,6 +48,12 @@ CONFIGURATION_CANDIDATE: Final = "configuration_candidate"
 CONFIGURATION_UNKNOWN: Final = "configuration_unknown"
 AUTHORISED_CONFIGURATION: Final = "authorised_configuration"
 NOT_COVERED_BY_AUTHORISATION: Final = "not_covered_by_authorisation"
+
+# Calibration history predicates (ADR 0014). ``drift`` states a difference, never a judgement.
+CALIBRATED_WITH: Final = "calibrated_with"
+CALIBRATION_CANDIDATE: Final = "calibration_candidate"
+CALIBRATED_BY: Final = "calibrated_by"
+DRIFT: Final = "drift"
 
 
 class Cardinality(StrEnum):
@@ -333,6 +340,34 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_N.CONFIGURATION},
         _MANY,
         "observed: no authorisation envelope in the Ledger names the configuration then",
+    ),
+    _p(
+        CALIBRATED_WITH,
+        {_N.SENSOR},
+        {_N.CONFIGURATION},
+        _MANY,
+        "a calibration of the sensor, from its valid_from to its stated end or the next one",
+    ),
+    _p(
+        CALIBRATION_CANDIDATE,
+        {_N.SENSOR},
+        {_N.CONFIGURATION},
+        _MANY,
+        "ambiguous: the calibration could be the sensor's over the interval; one claim per reading",
+    ),
+    _p(
+        CALIBRATED_BY,
+        {_N.CONFIGURATION},
+        {_V.RECORD},
+        _MANY,
+        "the maintenance or requalification record that states the calibration resulted from it",
+    ),
+    _p(
+        DRIFT,
+        {_N.SENSOR},
+        {_V.DELTA},
+        _MANY,
+        "observed: two consecutive calibrations' declared values differ by the delta; no judgement",
     ),
     _p(
         "governed_by",

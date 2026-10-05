@@ -16,11 +16,12 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import cached_property
-from typing import TYPE_CHECKING, Literal, NewType, TypeAlias
+from typing import TYPE_CHECKING, Final, Literal, NewType, TypeAlias
 
 from neptune.derived.provenance import INFERRED
 from neptune.identity.canonical_json import dumps
 from neptune.identity.hashing import content_id
+from neptune.model.frames import FrameRef
 from neptune.model.ids import (
     ConfigHash,
     RecordId,
@@ -48,6 +49,8 @@ from neptune_memory.schema.interval import OPEN, Interval, LedgerTx, Open, ledge
 from neptune_memory.schema.nodes import NodeRef, NodeType
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from neptune.model.jsonvalue import JsonObject, JsonValue
 
 # "claim:sha256:<64 lowercase hex>": a Memory id, kept apart from compiler record ids by prefix.
@@ -90,9 +93,114 @@ class ValueType(StrEnum):
     QUANTITY = "quantity"  # a number with its unit as declared (Known, Unknown or Ambiguous)
     INSTANT = "instant"  # a compiler Timestamp, on its own clock
     RECORD = "record"  # a Ledger record by id (LedgerRecordRef)
+    # The component-wise difference of two calibrations' declared numbers (``Delta``, ADR 0014).
+    DELTA = "delta"
 
 
-LiteralValue: TypeAlias = str | int | bool | float | NonFinite | Timestamp
+class DeltaQuantity(StrEnum):
+    """What a ``Delta`` compares: a declared parameter, or one part of a bound transform."""
+
+    PARAMETER = "parameter"
+    TRANSLATION = "translation"
+    ROTATION = "rotation"
+
+
+# The declared form a delta compares, by quantity, with its component count and whether its
+# numbers carry a declared unit (ADR 0014 §4). ``values`` is a parameter's own numbers (any count);
+# a homogeneous matrix's rotation is its nine non-translation entries in declared order.
+DELTA_FORMS: Final[Mapping[DeltaQuantity, Mapping[str, tuple[int | None, bool]]]] = {
+    DeltaQuantity.PARAMETER: {"values": (None, True)},
+    DeltaQuantity.TRANSLATION: {"translation": (3, True), "homogeneous_matrix": (3, True)},
+    DeltaQuantity.ROTATION: {
+        "quaternion": (4, False),
+        "rotation_matrix": (9, False),
+        "euler_angles": (3, True),
+        "rotation_vector": (3, True),
+        "homogeneous_matrix": (9, False),
+    },
+}
+MAX_DELTA_VALUES: Final = 100_000  # the compiler's per-array bound (root ADR 0055 §6)
+
+
+@dataclass(frozen=True)
+class Delta:
+    """``later - earlier``, component by component, between two ``Calibration`` records.
+
+    Exact IEEE-754 subtraction of the numbers each record declares, in their declared order and
+    form: nothing is converted, reordered, normalised or composed (root ADR 0015). The two
+    records state the compared value in the same form with the same interpretation, and in the
+    same declared unit where the form has one; the unit is the enclosing literal's.
+
+    - ``earlier`` / ``later``: the two calibration records, ``earlier``'s instant first.
+    - ``quantity`` and ``representation``: what was compared (``DELTA_FORMS``).
+    - ``name``: a parameter's declared name, verbatim; ``None`` for a transform.
+    - ``edge``: ``(parent, child)``, the frame-graph edge both calibrations bind the compared
+      transform to; ``None`` for a parameter.
+    - ``values``: the finite differences.
+    """
+
+    earlier: RecordId
+    later: RecordId
+    quantity: DeltaQuantity
+    representation: str
+    values: tuple[float, ...]
+    name: str | None = None
+    edge: tuple[FrameRef, FrameRef] | None = None
+
+    def __post_init__(self) -> None:
+        parse_record_id(self.earlier)
+        parse_record_id(self.later)
+        if self.earlier == self.later:
+            raise ValueError("a delta compares two different calibration records")
+        if not isinstance(self.quantity, DeltaQuantity):
+            raise TypeError(f"quantity must be a DeltaQuantity, got {self.quantity!r}")
+        forms = DELTA_FORMS[self.quantity]
+        if self.representation not in forms:
+            raise ValueError(f"a {self.quantity} delta is one of {sorted(forms)}")
+        count, _ = forms[self.representation]
+        if not isinstance(self.values, tuple) or not self.values:
+            raise ValueError("a delta holds at least one difference, as a tuple")
+        if count is not None and len(self.values) != count:
+            raise ValueError(f"a {self.representation} delta has {count} components")
+        if len(self.values) > MAX_DELTA_VALUES:
+            raise ValueError(f"a delta holds at most {MAX_DELTA_VALUES} differences")
+        for value in self.values:
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise TypeError(f"a difference is a finite float, got {value!r}")
+        if self.quantity is DeltaQuantity.PARAMETER:
+            if not isinstance(self.name, str) or self.edge is not None:
+                raise ValueError("a parameter delta names its parameter and no edge")
+            check_text("name", self.name)
+            return
+        if self.name is not None or not isinstance(self.edge, tuple) or len(self.edge) != 2:
+            raise ValueError("a transform delta names its edge (parent, child) and no parameter")
+        parent, child = self.edge
+        if not isinstance(parent, FrameRef) or not isinstance(child, FrameRef):
+            raise TypeError("an edge is two FrameRefs")
+        if parent.frame_graph_id != child.frame_graph_id or parent == child:
+            raise ValueError("an edge joins two frames of one graph")
+
+    @property
+    def has_unit(self) -> bool:
+        """Whether the compared numbers carry a declared unit (a rotation matrix's do not)."""
+        return DELTA_FORMS[self.quantity][self.representation][1]
+
+    def to_json(self) -> JsonObject:
+        out: dict[str, JsonValue] = {
+            "earlier": self.earlier,
+            "later": self.later,
+            "quantity": str(self.quantity),
+            "representation": self.representation,
+            "values": [real_to_json(v) for v in self.values],
+        }
+        if self.edge is not None:
+            out["parent"], out["child"] = self.edge[0].to_json(), self.edge[1].to_json()
+        elif self.name is not None:
+            out["name"] = self.name
+        return out
+
+
+LiteralValue: TypeAlias = str | int | bool | float | NonFinite | Timestamp | Delta
 
 
 @dataclass(frozen=True)
@@ -121,12 +229,23 @@ class TypedLiteral:
             ValueType.BOOLEAN: lambda: isinstance(value, bool),
             ValueType.QUANTITY: lambda: _is_int(value) or _is_real(value),
             ValueType.INSTANT: lambda: isinstance(value, Timestamp),
+            ValueType.DELTA: lambda: isinstance(value, Delta),
         }[datatype]()
         if not ok:
             raise TypeError(f"{value!r} is not a {datatype} value")
         if isinstance(value, str):
             check_verbatim("value", value)
-        if datatype is ValueType.QUANTITY:
+        if isinstance(value, Delta):
+            # A delta exists only between equal Known units, or where the form has no unit.
+            wanted = Known if value.has_unit else NotApplicable
+            if not isinstance(self.unit, wanted):
+                raise ValueError(f"a {value.representation} delta's unit is {wanted.__name__}")
+            if isinstance(self.unit, Known):
+                if not isinstance(self.unit.value, Unit):
+                    raise TypeError(f"a delta's unit must be a Unit: {self.unit!r}")
+                if not isinstance(self.unit.provenance, Inherited):
+                    raise ValueError("a literal's unit inherits the claim's provenance (INHERITED)")
+        elif datatype is ValueType.QUANTITY:
             if not isinstance(self.unit, Known | Unknown | Ambiguous):
                 raise ValueError(f"a quantity's unit is Known, Unknown or Ambiguous: {self.unit!r}")
             readings = (
@@ -151,7 +270,7 @@ class TypedLiteral:
     def to_json(self) -> JsonObject:
         value = self.value
         encoded: JsonValue
-        if isinstance(value, Timestamp):
+        if isinstance(value, Timestamp | Delta):
             encoded = value.to_json()
         elif isinstance(value, float | NonFinite):
             encoded = real_to_json(value)

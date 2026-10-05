@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from neptune.model.schema import canonical_schema
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
-from neptune_memory.schema.claim import ValueType
+from neptune_memory.schema.claim import DELTA_FORMS, DeltaQuantity, ValueType
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import VOCABULARY_VERSION, Cardinality
 from neptune_memory.schema.supersede import FindingCode
@@ -113,6 +113,19 @@ def _memory_defs() -> dict[str, JsonValue]:
         "description": "a quantity's unit exactly as declared; it inherits the claim's provenance",
     }
     na: JsonObject = _ref("NotApplicable")
+    delta_unit: JsonObject = {
+        "anyOf": [_obj({"knowledge": _const("known"), "value": _ref("Unit")}), na],
+        "description": (
+            "the unit both calibrations declare, as declared; not_applicable for a form without"
+            " one (a quaternion, a rotation matrix)"
+        ),
+    }
+    finite: JsonObject = {"type": "number"}
+    delta_common: dict[str, JsonValue] = {
+        "earlier": _ref("RecordId"),
+        "later": _ref("RecordId"),
+        "values": _array(finite, min_items=1),
+    }
     return {
         "ClaimAssertionKind": {"enum": ["inferred", "observed", "stated"]},
         "Cardinality": {"enum": sorted(str(c) for c in Cardinality)},
@@ -159,6 +172,34 @@ def _memory_defs() -> dict[str, JsonValue]:
             ),
         },
         "ClaimId": _pattern("claim:"),
+        "Delta": {
+            "anyOf": [
+                _obj(
+                    {
+                        **delta_common,
+                        "name": {"type": "string"},
+                        "quantity": _const(str(DeltaQuantity.PARAMETER)),
+                        "representation": _const("values"),
+                    }
+                ),
+                *(
+                    _obj(
+                        {
+                            **delta_common,
+                            "child": _ref("FrameRef"),
+                            "parent": _ref("FrameRef"),
+                            "quantity": _const(str(quantity)),
+                            "representation": {"enum": sorted(DELTA_FORMS[quantity])},
+                        }
+                    )
+                    for quantity in (DeltaQuantity.TRANSLATION, DeltaQuantity.ROTATION)
+                ),
+            ],
+            "description": (
+                "later - earlier, component by component, between two calibration records, in"
+                " their declared form and unit; never converted (neptune-memory ADR 0014)"
+            ),
+        },
         "ClaimObject": {"anyOf": [_ref("NodeRef"), _ref("TypedLiteral"), _ref("LedgerRecordRef")]},
         "ClaimProvenance": _obj(
             {
@@ -291,6 +332,7 @@ def _memory_defs() -> dict[str, JsonValue]:
                 _literal(ValueType.BOOLEAN, {"type": "boolean"}, na),
                 _literal(ValueType.QUANTITY, number, quantity_unit),
                 _literal(ValueType.INSTANT, _ref("Timestamp"), na),
+                _literal(ValueType.DELTA, _ref("Delta"), delta_unit),
             ]
         },
         "ValueType": {"enum": sorted(str(t) for t in ValueType)},
