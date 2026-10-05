@@ -46,18 +46,23 @@ Three upstream facts shape it:
      into the query. Findings are Memory resolver findings that name a hit claim. `superseded` lists
      supersessions in `(memory_as_of, head]` of hit claims. A hit that names claims (scene,
      configuration) only names claims among the hits. `answer(channel, scored, ...)` builds one.
-   - `RetrievalChannel`: `channel` and `retrieve(request) -> ChannelAnswer`. Deterministic, read-only,
-     total: what a channel cannot answer is a gap, never an exception.
+   - `RetrievalChannel`: `channel`, `config` (every setting that decides its answers; it enters the
+     engine's config hash) and `retrieve(request) -> ChannelAnswer`. Deterministic, read-only, total:
+     what a channel cannot answer is a gap, never an exception. The engine still turns a channel that
+     raises into a `not_covered` gap from that channel, so the other channels' answers survive.
 
    A channel never fuses, cuts or assembles; nothing in the interface names a particular channel.
 3. **The graph channel** (`retrieve.graph.GraphChannel(memory, catalog=None)`).
    - **Seeds.** Each subject with a `declared_id` whose kind is a graph-schema node type is the node
      `NodeRef(kind, declared_id)`. It widens along `same_as` up to its `same_as_depth`
      (`same_as_closure`, never candidates); the `same_as` claims that justify the widening are hits.
-     The site and its zones are seeds too (ADR 0002 §5: the anchors). A subject with a thread kind, or
-     a kind-wide subject with no other seed, is a `not_covered` gap: Memory's reader has no by-kind or
-     thread index. A kind-wide subject next to other seeds filters: only claims touching a node of
-     that kind, or joining two seeds, are kept.
+     With no such subject, the site and its zones are the seeds (ADR 0002 §5: the anchors). With one,
+     the site scopes instead: a declared seed is kept only if admitted claims connect it to the site
+     (or, given zones, to one of them) within two hops, else a `not_covered` gap at `/site` names it.
+     A declared subject Memory holds nothing about is a `not_covered` gap and never falls back to the
+     site's neighbourhood. A subject with a thread kind, or a kind-wide subject with no seed, is a
+     `not_covered` gap: Memory's reader has no by-kind or thread index. A kind-wide subject next to
+     seeds filters: only claims touching a node of that kind, or joining two seeds, are kept.
    - **Traversal.** Breadth first from the seeds, `hops` levels (default 1), following claims whose
      predicate is allowed and whose direction matches (`out`: the node is the subject; `in`: the
      object; `both`). `predicates: any` allows every pinned predicate except `same_as_candidate`;
@@ -80,7 +85,9 @@ Three upstream facts shape it:
      `image`, at the packet's `as_of`, under a row budget. A row whose record a carried claim names, or
      whose source a carried claim cites, becomes a `SeriesWindowItem` (a stream: its stated interval
      clipped to the window, Arrow handle `series/<stream>.parquet` of its package) or a `FrameItem` (an
-     image: its instant when the record states one). A bridged window is not carried to the Ledger: a
+     image: its instant when the record states one). Its transform comes from the Ledger's lineage;
+     a row with no source, transform or assertion kind is an `unknown` gap, never an assumed
+     `observed`. A Ledger read that fails is a gap; the claims stay. A bridged window is not carried to the Ledger: a
      `not_covered` gap cites Ledger ADR 0016 §9. Without a catalog, a window or region is a
      `not_covered` gap; site and zones are graph seeds and need no catalog.
    - **Scores.** A claim's distance is the walk level at which it was reached (1 for a claim touching a
