@@ -21,9 +21,9 @@ from neptune.model.knowledge import (
     NotCovered,
     Unknown,
 )
+from neptune.model.lists import LIST_STATES_SINCE
 from neptune.model.provenance import Provenance, RowCell
 from neptune.store.package import IngestPackage, package_files, read_files, read_package
-from neptune_deploy import PACKAGE_SCHEMA_VERSION
 from neptune_deploy.lifecycle import (
     LifecycleMapping,
     MappingError,
@@ -256,7 +256,7 @@ def test_parts_that_are_all_blank_are_an_unknown_list() -> None:
 
 def test_a_version_6_record_is_written_for_a_list_state_and_reads_back() -> None:
     package = _mapped(_base("warehouse_amr"), _mapping("unstated", RELATED))
-    assert package.manifest.version == PACKAGE_SCHEMA_VERSION
+    assert package.manifest.version == LIST_STATES_SINCE
 
 
 # --- The streamed write -------------------------------------------------------------------------

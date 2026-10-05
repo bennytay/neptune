@@ -19,7 +19,7 @@ from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import ValueType
 from neptune_memory.schema.clock_map import MapMethod
 from neptune_memory.schema.nodes import NodeType
-from neptune_memory.schema.predicates import VOCABULARY_VERSION, Cardinality
+from neptune_memory.schema.predicates import EVENT_KINDS, VOCABULARY_VERSION, Cardinality
 from neptune_memory.schema.supersede import FindingCode
 
 if TYPE_CHECKING:
@@ -270,6 +270,11 @@ def _memory_defs() -> dict[str, JsonValue]:
             }
         ),
         "NodeType": {"enum": sorted(str(t) for t in NodeType)},
+        # The registered event kinds (ADR 0013 §3): the text objects ``event_kind`` claims carry.
+        "EventKind": {
+            "description": "a registered event kind: the object of an event_kind claim",
+            "enum": sorted(EVENT_KINDS),
+        },
         "NotApplicable": not_applicable,
         "PredicateRegistry": _obj({"predicates": _array(_ref("PredicateSpec"))}),
         "PredicateSpec": _obj(

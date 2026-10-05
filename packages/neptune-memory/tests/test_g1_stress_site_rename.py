@@ -69,9 +69,10 @@ def _name(text: str, when: int, register: str) -> ClaimDraft:
 
 def test_has_name_is_core_in_adr_0007_s_shape() -> None:
     """The GAP pin flipped (MVL-126): the core vocabulary holds ``has_name`` as fixed, at version
-    2 since every node type grew ``clock`` (ADR 0011 §1), which only widens it."""
+    3 since every node type grew ``clock`` (ADR 0011 §1) and ``event`` (ADR 0013 §6), which only
+    widens it."""
     spec = CORE_PREDICATES.spec("has_name")
-    assert spec == replace(HAS_NAME, version=2)
+    assert spec == replace(HAS_NAME, version=3)
     assert spec.widens(HAS_NAME)
 
 

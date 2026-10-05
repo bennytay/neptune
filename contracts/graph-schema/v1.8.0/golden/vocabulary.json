@@ -2,27 +2,29 @@
   "predicates": [
     {
       "cardinality": "one",
-      "description": "the site a run took place at, as declared",
+      "description": "the site a run or event took place at, as declared",
       "domain": [
+        "event",
         "run"
       ],
       "name": "at_site",
       "range": [
         "site"
       ],
-      "version": 1
+      "version": 2
     },
     {
       "cardinality": "many",
-      "description": "ambiguous: the evidence names several sites for the run; which is undecided",
+      "description": "ambiguous: the evidence names several sites; which is undecided",
       "domain": [
+        "event",
         "run"
       ],
       "name": "at_site_candidate",
       "range": [
         "site"
       ],
-      "version": 1
+      "version": 2
     },
     {
       "cardinality": "many",
@@ -45,6 +47,18 @@
       "name": "clock_map",
       "range": [
         "clock_map"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "both events began inside the claim's valid interval, which is the configured window on that clock; from different sources; co-occurrence, never a cause",
+      "domain": [
+        "event"
+      ],
+      "name": "co_occurs_within",
+      "range": [
+        "event"
       ],
       "version": 1
     },
@@ -112,6 +126,19 @@
     },
     {
       "cardinality": "one",
+      "description": "the event's kind exactly as its source declares it: a level, a code, a mode",
+      "domain": [
+        "event"
+      ],
+      "name": "declared_kind",
+      "range": [
+        "integer",
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
       "description": "where a deployment takes place",
       "domain": [
         "deployment"
@@ -119,6 +146,30 @@
       "name": "deployed_at",
       "range": [
         "site"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "where an episode ends, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at_candidate",
+      "range": [
+        "instant"
       ],
       "version": 1
     },
@@ -135,6 +186,18 @@
       "version": 1
     },
     {
+      "cardinality": "one",
+      "description": "a registered event kind (EVENT_KINDS), through a vendor mapping the config declares",
+      "domain": [
+        "event"
+      ],
+      "name": "event_kind",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "many",
       "description": "a Ledger record about the node (Episode tier, by id)",
       "domain": [
@@ -144,6 +207,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
@@ -162,7 +226,7 @@
       "range": [
         "record"
       ],
-      "version": 3
+      "version": 4
     },
     {
       "cardinality": "many",
@@ -256,6 +320,18 @@
       "version": 1
     },
     {
+      "cardinality": "one",
+      "description": "what the record says happened, verbatim: a message, a description, a reason",
+      "domain": [
+        "event"
+      ],
+      "name": "has_description",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "many",
       "description": "a source file the compiler's run assembly places in the run (its SourceRevision)",
       "domain": [
@@ -277,6 +353,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
@@ -295,7 +372,7 @@
       "range": [
         "text"
       ],
-      "version": 2
+      "version": 3
     },
     {
       "cardinality": "one",
@@ -312,6 +389,30 @@
       "version": 1
     },
     {
+      "cardinality": "one",
+      "description": "the zone an event took place in, as declared",
+      "domain": [
+        "event"
+      ],
+      "name": "in_zone",
+      "range": [
+        "zone"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the record names several zones; which is undecided",
+      "domain": [
+        "event"
+      ],
+      "name": "in_zone_candidate",
+      "range": [
+        "zone"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "many",
       "description": "a compiler finding about the evidence (truncation, corruption, a dropout); the object is its severity, verbatim",
       "domain": [
@@ -321,6 +422,56 @@
       "name": "integrity_finding",
       "range": [
         "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a human intervention during the episode (an Intervention record, by id)",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the intervention may have been during the episode; the evidence does not say",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened_candidate",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a machine or asset the record names as involved, or the machine whose log it is",
+      "domain": [
+        "event"
+      ],
+      "name": "involves",
+      "range": [
+        "asset",
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the record names several possible machines or assets; which is undecided",
+      "domain": [
+        "event"
+      ],
+      "name": "involves_candidate",
+      "range": [
+        "asset",
+        "machine"
       ],
       "version": 1
     },
@@ -410,6 +561,18 @@
       "name": "operated_by",
       "range": [
         "person"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the outcome a record declares for the episode, verbatim; never inferred",
+      "domain": [
+        "episode"
+      ],
+      "name": "outcome",
+      "range": [
+        "text"
       ],
       "version": 1
     },
@@ -533,6 +696,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
@@ -555,6 +719,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
@@ -569,7 +734,7 @@
         "task",
         "zone"
       ],
-      "version": 3
+      "version": 4
     },
     {
       "cardinality": "many",
@@ -581,6 +746,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
@@ -603,6 +769,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
@@ -617,7 +784,7 @@
         "task",
         "zone"
       ],
-      "version": 3
+      "version": 4
     },
     {
       "cardinality": "many",
@@ -652,6 +819,31 @@
       "name": "sensor_recorded",
       "range": [
         "sensor"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "where an episode starts, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "starts_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the severity a record states, verbatim; never ranked or compared",
+      "domain": [
+        "event"
+      ],
+      "name": "stated_severity",
+      "range": [
+        "integer",
+        "text"
       ],
       "version": 1
     },

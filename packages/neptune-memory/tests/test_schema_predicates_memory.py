@@ -38,7 +38,7 @@ def codes(found: tuple[SchemaViolation, ...]) -> set[ViolationCode]:
 
 def test_core_vocabulary_is_versioned_sorted_and_covers_every_node_type() -> None:
     # 4: configuration lineage (ADR 0010); 5: runs (ADR 0009); 6: clocks (ADR 0011);
-    # 10: coverage and health (ADR 0015)
+    # 7: episodes (ADR 0012); 8: events (ADR 0013); 10: coverage and health (ADR 0015)
     assert VOCABULARY_VERSION == 10
     names = [spec.name for spec in CORE_PREDICATES.specs]
     assert names == sorted(set(names))

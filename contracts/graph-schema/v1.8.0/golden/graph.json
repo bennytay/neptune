@@ -1310,15 +1310,15 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
-      "id": "claim:sha256:2780b32730b33a666bb60fe99b041566e1eb327e00187c3724bb4856b35c6084",
+      "id": "claim:sha256:1450b612ab6dbf671c3b953d88beb033b6e9de8ce82b6b47f0fba61925d4a04c",
       "object": {
         "kind": "node",
-        "node_id": "asset-tag:ARM-05",
+        "node_id": "asset-tag:UAV-0042",
         "node_type": "machine"
       },
       "predicate": "recorded_by",
       "provenance": {
-        "config_hash": "sha256:729fe190c9f7a35597addf1bee9217e9736539e92b88f6bf438fe10369b8dcaf",
+        "config_hash": "sha256:f5db3cd361fd93d1feb0b4fdc392e9dadc4e17291220b2889efa261db2d44eac",
         "consolidator_id": "memory.supersede",
         "consolidator_version": "2",
         "evidence": [
@@ -1326,8 +1326,8 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 65,
-                "offset": 252
+                "length": 62,
+                "offset": 68
               }
             ],
             "source": "sha256:b6d3d9e91e3a0e6bcc19128f93ed02daedd47e75722945564f6b87fbe9b83df7"
@@ -1336,36 +1336,36 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 70,
-                "offset": 63
+                "length": 62,
+                "offset": 0
               }
             ],
             "source": "sha256:68c74b9743851a06b3c3d669a28a887ed1475faf75e629c9a048621c08779b79"
           }
         ],
         "records": [
-          "rec:sha256:80aa2cdd3e6b338d2f33d92cef66c6396c3ebe7f526750a580b391d056e9d773",
-          "rec:sha256:fb0742011d0e1806c412d178d8ddeb870c592def8d365b963fda1f9a5c67ac36"
+          "rec:sha256:005b3588b78c0d15893a890187f76547497c9d2f8425099d9f8af0c281a92336",
+          "rec:sha256:53371bc0dd8074648a500b2c9138b57ac1bfa050dc06076b57198d5b1462d752"
         ]
       },
       "recorded_at": 4,
       "subject": {
         "kind": "node",
-        "node_id": "record:rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
+        "node_id": "record:rec:sha256:bbe0a997b0284bd7a1f3982de3dbddf3abcd70485034c4d1af9fe1709da3401b",
         "node_type": "run"
       },
       "superseded_at": "open",
       "supersedes": [
-        "claim:sha256:8f2e29da5ab992ba0529e5b162e024e2781d475a2d89d699adc0fac799c39125"
+        "claim:sha256:1b635d30f06962626b3b64caea462becbcc5aaaa5c6975d1e153036fa6e72730"
       ],
       "valid": {
         "end": {
-          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
-          "ticks": 1790762401010000000
+          "domain_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
+          "ticks": 1790766000
         },
         "start": {
-          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
-          "ticks": 1790762401000000000
+          "domain_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
+          "ticks": 1790762400
         }
       }
     },
@@ -1424,15 +1424,15 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
-      "id": "claim:sha256:5663de43e51907c27c8a09c3ba1f9c99f72aa613353ed1ec0e6c285a921b1493",
+      "id": "claim:sha256:865c626a4f0a0e24d44c67bf767ea7b4dde03ea8de1d01c341f9e2fdc487b1f9",
       "object": {
         "kind": "node",
-        "node_id": "asset-tag:UAV-0042",
+        "node_id": "asset-tag:ARM-05",
         "node_type": "machine"
       },
       "predicate": "recorded_by",
       "provenance": {
-        "config_hash": "sha256:0ef5fd48f6a42fc86732ab9ed61b7bf283dec2ee77d208ded9737599c71d21d5",
+        "config_hash": "sha256:c62d6ecb1e4a6568ecb02bdcf9956b9601d8edae7a7203234b058b0281cc2ec0",
         "consolidator_id": "memory.supersede",
         "consolidator_version": "2",
         "evidence": [
@@ -1440,8 +1440,8 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 62,
-                "offset": 68
+                "length": 65,
+                "offset": 252
               }
             ],
             "source": "sha256:b6d3d9e91e3a0e6bcc19128f93ed02daedd47e75722945564f6b87fbe9b83df7"
@@ -1450,36 +1450,36 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 62,
-                "offset": 0
+                "length": 70,
+                "offset": 63
               }
             ],
             "source": "sha256:68c74b9743851a06b3c3d669a28a887ed1475faf75e629c9a048621c08779b79"
           }
         ],
         "records": [
-          "rec:sha256:005b3588b78c0d15893a890187f76547497c9d2f8425099d9f8af0c281a92336",
-          "rec:sha256:53371bc0dd8074648a500b2c9138b57ac1bfa050dc06076b57198d5b1462d752"
+          "rec:sha256:80aa2cdd3e6b338d2f33d92cef66c6396c3ebe7f526750a580b391d056e9d773",
+          "rec:sha256:fb0742011d0e1806c412d178d8ddeb870c592def8d365b963fda1f9a5c67ac36"
         ]
       },
       "recorded_at": 4,
       "subject": {
         "kind": "node",
-        "node_id": "record:rec:sha256:bbe0a997b0284bd7a1f3982de3dbddf3abcd70485034c4d1af9fe1709da3401b",
+        "node_id": "record:rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
         "node_type": "run"
       },
       "superseded_at": "open",
       "supersedes": [
-        "claim:sha256:1b635d30f06962626b3b64caea462becbcc5aaaa5c6975d1e153036fa6e72730"
+        "claim:sha256:8f2e29da5ab992ba0529e5b162e024e2781d475a2d89d699adc0fac799c39125"
       ],
       "valid": {
         "end": {
-          "domain_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
-          "ticks": 1790766000
+          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+          "ticks": 1790762401010000000
         },
         "start": {
-          "domain_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
-          "ticks": 1790762400
+          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+          "ticks": 1790762401000000000
         }
       }
     }
@@ -1488,12 +1488,12 @@
     {
       "claim": "claim:sha256:1b635d30f06962626b3b64caea462becbcc5aaaa5c6975d1e153036fa6e72730",
       "code": "clock_mismatch",
-      "id": "finding:sha256:2a58e9351f9e25ef4e11200ba25d81c8b28db0c2f8726dedf75e7b46c736e0d0",
+      "id": "finding:sha256:85e729fd7ed7adffefaded61495e8ecad70eb89b88e3c962bddc88b6620a37de",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+        "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1503,12 +1503,12 @@
     {
       "claim": "claim:sha256:3851e105c8c27785e837ea268680a14f1a468ee8e37c2d32c8059f8cc7c6e28b",
       "code": "overridden_on_arrival",
-      "id": "finding:sha256:46603075511bc123260519b8cf1902af5b45cd6285a76e08f7cf3464c5d7f3bd",
+      "id": "finding:sha256:e0cb9638727c66917ed349703fe7a115c33012afd28d9aa1c81ba800ab6dbcad",
       "others": [
         "claim:sha256:8f2e29da5ab992ba0529e5b162e024e2781d475a2d89d699adc0fac799c39125"
       ],
       "provenance": {
-        "config_hash": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+        "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1518,12 +1518,12 @@
     {
       "claim": "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097",
       "code": "clock_mismatch",
-      "id": "finding:sha256:604349979ac1d36af5503645f5f87973ab1f498cb6d20f32ae204767b5344605",
+      "id": "finding:sha256:053d1a193ce3a2433174f6abee38d0393f7dc70182564ef55f89bce7d08353d9",
       "others": [
         "claim:sha256:1b635d30f06962626b3b64caea462becbcc5aaaa5c6975d1e153036fa6e72730"
       ],
       "provenance": {
-        "config_hash": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+        "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1533,12 +1533,12 @@
     {
       "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
       "code": "clock_mismatch",
-      "id": "finding:sha256:c2cb03ceb184496b467497a872de0478ff695faf120abe74669ec2ea5de7d9b3",
+      "id": "finding:sha256:81428cdcad60f0693c6d0afc49ce24f42cabcfb246b8c2fa789c50ced3bfc09f",
       "others": [
         "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
       ],
       "provenance": {
-        "config_hash": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+        "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1548,12 +1548,12 @@
     {
       "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
       "code": "clock_mismatch",
-      "id": "finding:sha256:78acdc501e9ebfd93aaa386f1e94dda1a16d47ec6157a50d100313f95f4dba03",
+      "id": "finding:sha256:d447155cf3edb4192ad880452f131e19949d871a5b047a562ded7e7830ba89a1",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+        "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1561,14 +1561,14 @@
       "superseded_at": "open"
     },
     {
-      "claim": "claim:sha256:5663de43e51907c27c8a09c3ba1f9c99f72aa613353ed1ec0e6c285a921b1493",
+      "claim": "claim:sha256:1450b612ab6dbf671c3b953d88beb033b6e9de8ce82b6b47f0fba61925d4a04c",
       "code": "clock_mismatch",
-      "id": "finding:sha256:c7c4d77f9f6ac00de1bba3bea5ce8cd3a0f82acafc202cda7c9de44fadb4ab45",
+      "id": "finding:sha256:5320d37802fde0a5e3478aeef1f2eb5e9174b06d89b6b92265a1e39824962b72",
       "others": [
         "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
       ],
       "provenance": {
-        "config_hash": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+        "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1576,14 +1576,14 @@
       "superseded_at": "open"
     },
     {
-      "claim": "claim:sha256:5663de43e51907c27c8a09c3ba1f9c99f72aa613353ed1ec0e6c285a921b1493",
+      "claim": "claim:sha256:1450b612ab6dbf671c3b953d88beb033b6e9de8ce82b6b47f0fba61925d4a04c",
       "code": "clock_mismatch",
-      "id": "finding:sha256:94195e93d9f852527a15a98b55f907f2b8c6ccae1d26906409e4995865b85a9a",
+      "id": "finding:sha256:2dbf843986aca747c04736502a5c509c1b7719135f33c41818b8f456418b600f",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+        "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1591,7 +1591,7 @@
       "superseded_at": "open"
     }
   ],
-  "generation": "sha256:b404e755d6b223b1669f90db79da8062e1afdbba0c5aa14b3c702c55dce19d3b",
+  "generation": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
   "graph_schema_version": 1,
   "head": 5,
   "kind": "memory.graph",
@@ -1607,27 +1607,29 @@
       "predicates": [
         {
           "cardinality": "one",
-          "description": "the site a run took place at, as declared",
+          "description": "the site a run or event took place at, as declared",
           "domain": [
+            "event",
             "run"
           ],
           "name": "at_site",
           "range": [
             "site"
           ],
-          "version": 1
+          "version": 2
         },
         {
           "cardinality": "many",
-          "description": "ambiguous: the evidence names several sites for the run; which is undecided",
+          "description": "ambiguous: the evidence names several sites; which is undecided",
           "domain": [
+            "event",
             "run"
           ],
           "name": "at_site_candidate",
           "range": [
             "site"
           ],
-          "version": 1
+          "version": 2
         },
         {
           "cardinality": "many",
@@ -1650,6 +1652,18 @@
           "name": "clock_map",
           "range": [
             "clock_map"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "both events began inside the claim's valid interval, which is the configured window on that clock; from different sources; co-occurrence, never a cause",
+          "domain": [
+            "event"
+          ],
+          "name": "co_occurs_within",
+          "range": [
+            "event"
           ],
           "version": 1
         },
@@ -1717,6 +1731,19 @@
         },
         {
           "cardinality": "one",
+          "description": "the event's kind exactly as its source declares it: a level, a code, a mode",
+          "domain": [
+            "event"
+          ],
+          "name": "declared_kind",
+          "range": [
+            "integer",
+            "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
           "description": "where a deployment takes place",
           "domain": [
             "deployment"
@@ -1724,6 +1751,30 @@
           "name": "deployed_at",
           "range": [
             "site"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "where an episode ends, as its records state it: one claim per clock, never two on one",
+          "domain": [
+            "episode"
+          ],
+          "name": "ends_at",
+          "range": [
+            "instant"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+          "domain": [
+            "episode"
+          ],
+          "name": "ends_at_candidate",
+          "range": [
+            "instant"
           ],
           "version": 1
         },
@@ -1740,6 +1791,18 @@
           "version": 1
         },
         {
+          "cardinality": "one",
+          "description": "a registered event kind (EVENT_KINDS), through a vendor mapping the config declares",
+          "domain": [
+            "event"
+          ],
+          "name": "event_kind",
+          "range": [
+            "text"
+          ],
+          "version": 1
+        },
+        {
           "cardinality": "many",
           "description": "a Ledger record about the node (Episode tier, by id)",
           "domain": [
@@ -1749,6 +1812,7 @@
             "deployment",
             "document",
             "episode",
+            "event",
             "fleet",
             "machine",
             "model_version",
@@ -1767,7 +1831,7 @@
           "range": [
             "record"
           ],
-          "version": 3
+          "version": 4
         },
         {
           "cardinality": "many",
@@ -1861,6 +1925,18 @@
           "version": 1
         },
         {
+          "cardinality": "one",
+          "description": "what the record says happened, verbatim: a message, a description, a reason",
+          "domain": [
+            "event"
+          ],
+          "name": "has_description",
+          "range": [
+            "text"
+          ],
+          "version": 1
+        },
+        {
           "cardinality": "many",
           "description": "a source file the compiler's run assembly places in the run (its SourceRevision)",
           "domain": [
@@ -1882,6 +1958,7 @@
             "deployment",
             "document",
             "episode",
+            "event",
             "fleet",
             "machine",
             "model_version",
@@ -1900,7 +1977,7 @@
           "range": [
             "text"
           ],
-          "version": 2
+          "version": 3
         },
         {
           "cardinality": "one",
@@ -1917,6 +1994,30 @@
           "version": 1
         },
         {
+          "cardinality": "one",
+          "description": "the zone an event took place in, as declared",
+          "domain": [
+            "event"
+          ],
+          "name": "in_zone",
+          "range": [
+            "zone"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: the record names several zones; which is undecided",
+          "domain": [
+            "event"
+          ],
+          "name": "in_zone_candidate",
+          "range": [
+            "zone"
+          ],
+          "version": 1
+        },
+        {
           "cardinality": "many",
           "description": "a compiler finding about the evidence (truncation, corruption, a dropout); the object is its severity, verbatim",
           "domain": [
@@ -1926,6 +2027,56 @@
           "name": "integrity_finding",
           "range": [
             "text"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "a human intervention during the episode (an Intervention record, by id)",
+          "domain": [
+            "episode"
+          ],
+          "name": "intervened",
+          "range": [
+            "record"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: the intervention may have been during the episode; the evidence does not say",
+          "domain": [
+            "episode"
+          ],
+          "name": "intervened_candidate",
+          "range": [
+            "record"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "a machine or asset the record names as involved, or the machine whose log it is",
+          "domain": [
+            "event"
+          ],
+          "name": "involves",
+          "range": [
+            "asset",
+            "machine"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: the record names several possible machines or assets; which is undecided",
+          "domain": [
+            "event"
+          ],
+          "name": "involves_candidate",
+          "range": [
+            "asset",
+            "machine"
           ],
           "version": 1
         },
@@ -2015,6 +2166,18 @@
           "name": "operated_by",
           "range": [
             "person"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the outcome a record declares for the episode, verbatim; never inferred",
+          "domain": [
+            "episode"
+          ],
+          "name": "outcome",
+          "range": [
+            "text"
           ],
           "version": 1
         },
@@ -2138,6 +2301,7 @@
             "deployment",
             "document",
             "episode",
+            "event",
             "fleet",
             "machine",
             "model_version",
@@ -2160,6 +2324,7 @@
             "deployment",
             "document",
             "episode",
+            "event",
             "fleet",
             "machine",
             "model_version",
@@ -2174,7 +2339,7 @@
             "task",
             "zone"
           ],
-          "version": 3
+          "version": 4
         },
         {
           "cardinality": "many",
@@ -2186,6 +2351,7 @@
             "deployment",
             "document",
             "episode",
+            "event",
             "fleet",
             "machine",
             "model_version",
@@ -2208,6 +2374,7 @@
             "deployment",
             "document",
             "episode",
+            "event",
             "fleet",
             "machine",
             "model_version",
@@ -2222,7 +2389,7 @@
             "task",
             "zone"
           ],
-          "version": 3
+          "version": 4
         },
         {
           "cardinality": "many",
@@ -2257,6 +2424,31 @@
           "name": "sensor_recorded",
           "range": [
             "sensor"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "where an episode starts, as its records state it: one claim per clock, never two on one",
+          "domain": [
+            "episode"
+          ],
+          "name": "starts_at",
+          "range": [
+            "instant"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the severity a record states, verbatim; never ranked or compared",
+          "domain": [
+            "event"
+          ],
+          "name": "stated_severity",
+          "range": [
+            "integer",
+            "text"
           ],
           "version": 1
         },

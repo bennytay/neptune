@@ -7,7 +7,9 @@ records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` 
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
 run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.4.0 (minor) adds the `clock` node
 type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
-([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.8.0 (minor) adds the
+([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.5.0 (minor) adds the
+episode predicates ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md) §5); 1.6.0 (minor) adds the
+`event` node type, the event predicates and `EventKind` ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §6); 1.8.0 (minor) adds the
 coverage and health predicates ([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
@@ -36,6 +38,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 | entity | `document` | a declared document: a manual, an SOP, a datasheet, a register |
 | entity | `episode` | a bounded segment of a run (an entity, not the Episode tier) |
 | entity | `clock` | one declared clock; `node_id` is its compiler `TimestampDomain` record id |
+| entity | `event` | something one record states happened: an e-stop, a fault, an intervention, an incident |
 | context | `deployment` | a deployment, with a summary |
 | context | `fleet` | a fleet, with a summary |
 | context | `programme` | a programme, with a summary |
@@ -51,17 +54,22 @@ major version (ADR 0002 §5).
 
 | Predicate | Subject | Object | Cardinality | Meaning |
 |---|---|---|---|---|
-| `at_site` | run | site | one | the site a run took place at, as declared |
-| `at_site_candidate` | run | site | many | ambiguous: the evidence names several sites for the run |
+| `at_site` | event, run | site | one | the site a run or event took place at, as declared |
+| `at_site_candidate` | event, run | site | many | ambiguous: the evidence names several sites |
 | `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
 | `clock_map` | clock | clock_map | many | a `maps_to`'s parameters as the evidence states them, or the chain it composes |
+| `co_occurs_within` | event | event | many | both events began inside the claim's valid interval, which is the configured window on that clock; different sources; never a cause |
 | `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
 | `configuration_candidate` | machine, run | configuration | many | ambiguous: the configuration in force could be this one; one claim per reading |
 | `configuration_unknown` | machine, run | record | many | no configuration is stated over the interval; the record leaves it open, never filled |
 | `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
+| `declared_kind` | event | text, integer | one | the event's kind exactly as its source declares it: a level, a code, a mode |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
+| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
+| `ends_at_candidate` | episode | instant | many | ambiguous: may end here (a stated end, or a stop event inside it) |
 | `episode_of` | episode | run | one | the run an episode segments |
+| `event_kind` | event | text | one | a registered event kind (`EventKind`), through a vendor mapping the config declares |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
 | `executes_task_candidate` | episode, run | task | many | ambiguous: the evidence names several tasks |
@@ -70,10 +78,17 @@ major version (ADR 0002 §5).
 | `has_calibration` | sensor | configuration | one | the calibration in force |
 | `has_clock` | machine | clock | many | a clock the machine's records carry, over the interval they observe it |
 | `has_configuration` | deployment, machine, sensor | configuration | many | a parameter set, description file or other configuration in force |
+| `has_description` | event | text | one | what the record says happened, verbatim: a message, a description, a reason |
 | `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
 | `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
+| `in_zone` | event | zone | one | the zone an event took place in, as declared |
+| `in_zone_candidate` | event | zone | many | ambiguous: the record names several zones |
 | `integrity_finding` | run, stream | text | many | a compiler finding about the evidence (truncation, corruption, a dropout); the object is its severity, verbatim |
+| `intervened` | episode | record | many | a human intervention during the episode (an `Intervention` record) |
+| `intervened_candidate` | episode | record | many | ambiguous: the intervention may have been during the episode |
+| `involves` | event | asset, machine | many | a machine or asset the record names as involved, or the machine whose log it is |
+| `involves_candidate` | event | asset, machine | many | ambiguous: the record names several possible machines or assets |
 | `located_at` | asset, machine | site, zone | one | where it is |
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
 | `maps_to` | clock | clock | many | a declared or estimated mapping, or a chain of them, takes its ticks to another clock's |
@@ -81,6 +96,7 @@ major version (ADR 0002 §5).
 | `mounted_on` | sensor | asset, machine | one | what a sensor is attached to |
 | `not_covered_by_authorisation` | run | configuration | many | observed: no authorisation envelope in the Ledger names the configuration then |
 | `operated_by` | run | person | many | a declared operator or supervisor |
+| `outcome` | episode | text | one | the outcome a record declares for the episode, verbatim; never inferred |
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rate_declared` | stream | quantity | many | the mean sample rate the source's index declares: (count - 1) over its first-to-last span, in Hz, on a clock with a stated resolution |
 | `rate_observed` | stream | quantity | many | the mean sample rate the series holds: (known rows - 1) over its first-to-last known span, in Hz |
@@ -95,8 +111,15 @@ major version (ADR 0002 §5).
 | `sensor_not_recorded` | run | sensor | many | known absent: a sensor of a configuration bound to the run recorded nothing in it, and the recording covers the run |
 | `sensor_presence_unknown` | run | sensor | many | unknown: the evidence does not decide whether a configured sensor recorded in the run |
 | `sensor_recorded` | run | sensor | many | a sensor of a configuration bound to the run recorded in it: a run's file declares its identifier |
+| `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
+| `stated_severity` | event | text, integer | one | the severity a record states, verbatim; never ranked or compared |
 | `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
 | `zone_of` | zone | site | one | the site a zone belongs to |
+
+`EventKind` (`#/$defs/EventKind`) lists the registered event kinds, the only objects of `event_kind`:
+`collision`, `emergency_stop`, `failsafe`, `fault`, `incident`, `intervention`, `mode_change`, `near_miss`,
+`protective_stop`, `reset`, `safety_field_violation`, `stale`, `warning`. A kind is added with a vocabulary
+version and never renamed or removed within a major.
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
 `Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record` and `clock_map` (`#/$defs/ClockMap`:
@@ -222,7 +245,26 @@ def test_graph_schema_contract(check):
     or on a chain of them; Memory never estimates an offset, never assumes an unstated validity open, and never
     re-times a claim. A later-starting mapping of one clock pair holds from its start, and the earlier one's
     claims end there ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)).
-15. **Coverage is never inferred** ([ADR 0015](adr/0015-coverage-and-health-consolidator.md)). `recorded` spans and
+15. **Episodes are stated attempts, never inferred** ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md)).
+    A run with stated task evidence holds one episode (`episode_of`, its `executes_task`), bounded on each clock by
+    the span its records state (`starts_at`, `ends_at`, only on a clock the records state it on, never on a
+    mapping's projection); a run with none, or with no time placement, holds no episode. A stated stop
+    (`incident_record`) inside the episode makes the end `ends_at_candidate` readings. `intervened` names an
+    `Intervention` that names the run, or names its machine and surely overlaps it on one clock; an overlap that
+    holds only within a projection's error is `intervened_candidate`. No record declares an outcome yet, so
+    `outcome` reads `Unknown`. `consolidate.episodes.episodes_of`, `boundary_of` and `outcome_of` read them back
+    as `Known`, `Ambiguous`, `Unknown` or `NotCovered`.
+16. **Events are what one record states, and co-occurrence is never cause**
+    ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md)). An event node is
+    `record:<rec id>` (a timeline entry `record:<rec id>/timeline/<i>`). Each event comes from an
+    `incident_record`, an `intervention`, or a row of a table the event consolidator's config declares. Every
+    claim about an event holds over its time as declared (an instant is `[t, t + 1 tick)`), and again on each
+    clock a stated `clock_mapping` reaches directly, citing that mapping. `event_kind` is set only through a
+    declared vendor mapping. `co_occurs_within` links two events from different sources, one claim each way, and
+    its valid interval is the window. Events on clocks no mapping relates are never compared. A mapping that is
+    too coarse to decide, or that states no residual bound, gives a finding, never a claim. An end that is
+    declared but not stated (blank or ambiguous) leaves the event open and is never an instant.
+17. **Coverage is never inferred** ([ADR 0015](adr/0015-coverage-and-health-consolidator.md)). `recorded` spans and
     `rate_observed` come from the Ledger's series coverage; `gap` only where the stream's declared first or last
     instant predicts samples the series does not reach, and never while a sample lacks a tick on that clock.
     `rate_declared` and `rate_observed` stand side by side; nothing judges a tolerance. `integrity_finding` carries
@@ -242,7 +284,8 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
 
 ## Not in v1
 
-- `episodes` and `spatial` structure (G3).
+- The `episodes` and `spatial` queries (G3). Episode claims exist from 1.5.0; `MemoryReader.episodes` still
+  answers `NotCovered`.
 - Cross-clock comparison inside the resolver: claims on two clocks are still never compared there
   (`clock_mismatch`). A consumer relates them with `schema.clocks.convert`; no claim is ever re-timed.
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,

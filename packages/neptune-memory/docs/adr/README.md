@@ -18,4 +18,6 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0009](0009-run-threads-and-cross-package-continuation.md) | Run threads and cross-package continuation from RunAssembly records | Accepted |
 | [0010](0010-configuration-lineage-consolidator.md) | The configuration lineage consolidator | Accepted |
 | [0011](0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md) | The time-domain registry: clocks, mappings and chains, never estimated | Accepted |
+| [0012](0012-episodes-from-stated-task-evidence.md) | Episodes from stated task evidence: one attempt per tasked run, stated boundaries, no inferred outcome | Accepted |
+| [0013](0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) | Event index: evidence-linked event claims and co-occurrence that is never cause | Accepted |
 | [0015](0015-coverage-and-health-consolidator.md) | The coverage and health consolidator | Accepted |

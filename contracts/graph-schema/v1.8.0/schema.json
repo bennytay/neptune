@@ -609,6 +609,24 @@
         }
       ]
     },
+    "EventKind": {
+      "description": "a registered event kind: the object of an event_kind claim",
+      "enum": [
+        "collision",
+        "emergency_stop",
+        "failsafe",
+        "fault",
+        "incident",
+        "intervention",
+        "mode_change",
+        "near_miss",
+        "protective_stop",
+        "reset",
+        "safety_field_violation",
+        "stale",
+        "warning"
+      ]
+    },
     "EvidenceRef": {
       "additionalProperties": false,
       "properties": {
@@ -1049,6 +1067,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
