@@ -29,8 +29,8 @@ corpus sets.
 ### 1. What events reads, and how it is parsed
 
 `consolidate/event_records.py` parses, with the compiler's strict readers: `incident_record`, `intervention`,
-`structured_table`, `structured_record`, `timestamp_domain` (its resolution, and whether it is civil) and
-`clock_mapping`. A record they refuse is `events.malformed_record`. An inferred record is `events.inferred_record`
+`structured_table`, `structured_record`, `timestamp_domain` (read by `identity_records.clock`, which now also
+carries its stated resolution) and `clock_mapping` (`run_records.mapping`). A record they refuse is `events.malformed_record`. An inferred record is `events.inferred_record`
 and is never a ground. One record id with two contents is `events.record_conflict`, and neither is used. The same
 record in two packages is one record. `consolidate/events.py` decides.
 
@@ -69,10 +69,13 @@ record in two packages is one record. `consolidate/events.py` decides.
 - `declared_kind` and `stated_severity` (`one`, text or integer as declared) and `has_description` (`one`,
   text) are verbatim, and a severity is never ranked.
 - `involves` (`many`, machine or asset), `at_site` (widened to events) and `in_zone` (`one`) come from declared
-  ids. An `Ambiguous` id is one `*_candidate` claim per reading, and an unstated one is no claim.
+  ids. An `Ambiguous` id is one `*_candidate` claim per reading, and an unstated one is no claim. A field stating a
+  blank or padded id (ADR 0006 §9) is not used at all and gives `events.id_unusable`: the record's other fields
+  still count.
   `runs.involvement` reads these back as `Known`, `Ambiguous`, `Unknown` or `NotCovered`. Timeline entries carry
   only their time, text and record. They do not inherit their incident's machine or place.
-- **Assertion kind** is the value's own, else its record's. Lifecycle records are `stated`.
+- **Assertion kind** is the value's own, else its record's. An `event_kind` takes the kind of the declared
+  value it was mapped from. Lifecycle records are `stated`.
 
 ### 4. Co-occurrence, never causation
 
@@ -85,18 +88,24 @@ record in two packages is one record. `consolidate/events.py` decides.
   instants that means `|a − b| < W`. Then `co_occurs_within` is claimed, one claim each way, `observed` (the
   records' times show it). **The claim's valid interval is that window**: its length is `W`, its clock is the
   clock compared on, and it cites both events, their placements and any mapping used.
-- **When it is not.** If some readings fit and others do not, the result is `events.co_occurrence_undecided` and
-  no claim. A clock with no stated resolution cannot measure the window (`events.window_unscaled`). Two event
-  clocks that no mapping relates, directly or through a shared target, are `events.clocks_unrelated`: Unknown,
-  never compared.
-- **Limits.** At most `max_partners` (default 64) partners per event, nearest first; the rest are
-  `events.co_occurrence_capped`.
+- **When it is not.** If some readings fit and others do not, no claim is made. There is one
+  `events.co_occurrence_undecided` finding per clock, with a count. A clock with no stated resolution cannot
+  measure the window (`events.window_unscaled`), and neither can a window shorter than one of its ticks
+  (`events.window_below_resolution`). Two event clocks that no mapping relates, directly or through a shared
+  target, are `events.clocks_unrelated`: Unknown, never compared.
+- **Limits.** The scan visits onsets in order and stops where a later onset can no longer share a window. It
+  skips a run of the event's own source in one step and takes at most `max_partners` (default 64) later
+  partners per event, so the work is bounded by events times `max_partners`, never by events squared. The
+  claimed pairs are the nearest first, in seconds, so clocks with different resolutions rank alike. At most
+  `max_partners` pairs are claimed per event; an event that had more is `events.co_occurrence_capped`.
 - **No cause.** No predicate names a cause. A record's own stated root cause stays in the record.
 
 ### 5. Consolidator and config
 
 `memory.events` version `1`, deterministic, reads no previous claims. Its config, resolved by `resolve_config`, is
-`{co_occurrence: {window_seconds: "5", max_partners: 64}, vendors: {}, tables: []}`. A table is declared by its
+`{co_occurrence: {window_seconds: "5", max_partners: 64}, vendors: {}, tables: []}`. `window_seconds` is an
+integer or plain decimal text with at most nine decimals, at most one day (86,400 s). It is resolved to one
+spelling (`5`, `"5"` and `"5.0"` hash alike), and `max_partners` is at most 4,096. A table is declared by its
 declared name: `vendor`, `kind`, `at` (`{ticks}` or `{seconds, nanoseconds}`), `clock` (`{column}`, a companion
 cell holding a `timestamp_domain` id, or `{record}`), and optionally `end`, `machine`, `site`, `zone`
 (`{column, namespace}`), `severity` and `description`. Each refused part is one `events.invalid_config` finding,

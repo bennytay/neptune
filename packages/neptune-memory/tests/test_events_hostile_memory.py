@@ -8,6 +8,7 @@ whatever the package or record order.
 from __future__ import annotations
 
 import random
+from fractions import Fraction
 from typing import TYPE_CHECKING, Final
 
 import pytest
@@ -241,9 +242,12 @@ def test_an_ambiguous_place_is_candidates_never_a_definite_one() -> None:
     ("config", "fragment"),
     [
         ({"surprise": 1}, "unexpected keys"),
-        ({"co_occurrence": {"window_seconds": "-1"}}, "positive"),
-        ({"co_occurrence": {"window_seconds": "soon"}}, "decimal"),
-        ({"co_occurrence": {"window_seconds": "Infinity"}}, "finite"),
+        ({"co_occurrence": {"window_seconds": "-1"}}, "plain decimal"),
+        ({"co_occurrence": {"window_seconds": "soon"}}, "plain decimal"),
+        ({"co_occurrence": {"window_seconds": "Infinity"}}, "plain decimal"),
+        ({"co_occurrence": {"window_seconds": "1e30"}}, "plain decimal"),
+        ({"co_occurrence": {"window_seconds": 86_401}}, "at most"),
+        ({"co_occurrence": {"window_seconds": 0}}, "positive"),
         ({"co_occurrence": {"max_partners": 0}}, "max_partners"),
         ({"vendors": {"x": {"A": "explosion"}}}, "not a registered event kind"),
         ({"vendors": {"incident_record": {"S1": "not_an_event"}}}, "always an event"),
@@ -278,33 +282,80 @@ def test_an_invalid_config_is_a_finding_and_valid_parts_still_run() -> None:
 def test_defaults_resolve_to_one_config_hash() -> None:
     assert resolve_config(None) == resolve_config({}) == resolve_config(dict(DEFAULT_CONFIG))
     assert resolve_config({"co_occurrence": {"max_partners": 64}}) == resolve_config({})
+    for spelling in (5, "5", "5.0", "5.000000000"):
+        assert resolve_config({"co_occurrence": {"window_seconds": spelling}}) == resolve_config()
+    half = resolve_config({"co_occurrence": {"window_seconds": "0.50"}})
+    assert half["co_occurrence"]["window_seconds"] == "0.5"  # type: ignore[index,call-overload]
+
+
+def test_a_window_shorter_than_a_tick_is_named_as_such() -> None:
+    seconds, seconds_id = domain("rtc", civil=False, resolution=Fraction(1))
+    one, _ = incident("one", occurred=Timestamp(5, seconds_id))
+    two, _ = incident("two", occurred=Timestamp(5, seconds_id))
+    result = consolidate({"p": [seconds, one, two]}, {"co_occurrence": {"window_seconds": "0.5"}})
+    assert "events.window_below_resolution" in codes(result)
+    assert "events.window_unscaled" not in codes(result)
+
+
+def test_a_padded_id_in_a_lifecycle_record_is_not_a_node() -> None:
+    record, rid = incident(
+        "padded",
+        occurred=at(5),
+        machines=[LogicalId("serial", " SPOT-1")],
+        site=LogicalId("site", "S"),
+    )
+    result = consolidate({"p": [CLOCK, record]})
+    predicates = {c.predicate for c in result.claims if c.subject == event_node(rid)}
+    assert "involves" not in predicates and "at_site" in predicates
+    assert "events.id_unusable" in codes(result)
 
 
 # --- Co-occurrence boundaries ---------------------------------------------------------------------
 
 
 def test_co_occurrence_is_capped_nearest_first() -> None:
-    reports = [incident(f"r{i}", occurred=at(i * SECOND // 10)) for i in range(4)]
+    """One panel alarm and four PLC rows (one export, so never paired with each other)."""
+    rows, ids = plc(*((i * SECOND // 10, "E-STOP", "CELL-3", "Z1", 1) for i in range(1, 5)))
     alarm, alarm_id = incident("alarm panel", occurred=Timestamp(0, OTHER_ID))
     sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0))
-    config = {"co_occurrence": {"max_partners": 2}}
-    records = [CLOCK, OTHER, sync, alarm, *(r for r, _ in reports)]
-    result = consolidate({"p": records}, config)
+    config = {**EVENTS, "co_occurrence": {"max_partners": 2}}
+    result = consolidate({"p": [CLOCK, OTHER, sync, alarm, *rows]}, config)  # type: ignore[arg-type]
     partners = {
         c.object for c in result.claims if c.predicate == "co_occurs_within" and
         c.subject == event_node(alarm_id)
     }  # fmt: skip
-    assert partners == {event_node(reports[0][1]), event_node(reports[1][1])}
-    assert "events.co_occurrence_capped" in codes(result)
+    assert partners == {event_node(ids[0]), event_node(ids[1])}
+    capped = [f for f in result.findings if f.code == "events.co_occurrence_capped"]
+    assert [f.details["event"] for f in capped] == [
+        event_node(alarm_id).node_id
+    ]  # only the full one
 
 
-def test_a_clock_with_no_stated_resolution_cannot_measure_the_window() -> None:
-    record = {**CLOCK, "resolution": {"knowledge": "unknown"}}
-    one, _ = incident("one", occurred=at(5))
-    two, _ = incident("two", occurred=at(6))
-    result = consolidate({"p": [record, one, two]})
+def test_dense_logs_from_two_sources_stay_bounded() -> None:
+    """Two exports with 1,500 alarms each at one instant: every pair would be 2.25 million; the
+    sweep takes at most ``max_partners`` per event, and the findings stay one per clock."""
+    rows = [(100, "E-STOP", "CELL-3", "Z1", 1)] * 1500
+    first, _ = plc(*rows)
+    second, _, _ = table("plc alarms", ("t", "code", "cell", "zone", "prio"), rows, file="mirror")
+    config = {**EVENTS, "co_occurrence": {"max_partners": 2}}
+    result = consolidate({"a": [CLOCK, *first], "b": second}, config)  # type: ignore[arg-type]
+    pairs = [c for c in result.claims if c.predicate == "co_occurs_within"]
+    assert 0 < len(pairs) <= 2 * 1500 * 2
+
+
+def test_a_huge_residual_bound_is_undecided_once_per_clock_not_per_pair() -> None:
+    rows, _ = plc(*((i * SECOND, "E-STOP", "CELL-3", "Z1", 1) for i in range(30)))
+    panel = {**EVENTS["tables"][0], "name": "panel", "clock": {"record": OTHER_ID}}  # type: ignore[index]
+    alarms, _, _ = table(
+        "panel",
+        ("t", "code", "cell", "zone", "prio"),
+        [(i * SECOND, "E-STOP", "C", "Z", 1) for i in range(30)],
+    )
+    vague = mapping("vague", OTHER_ID, CLOCK_ID, anchor=(0, 0), bound=10**15)
+    config = {**EVENTS, "tables": [*EVENTS["tables"], panel]}
+    result = consolidate({"p": [CLOCK, OTHER, vague, *rows, *alarms]}, config)  # type: ignore[arg-type]
     assert not [c for c in result.claims if c.predicate == "co_occurs_within"]
-    assert "events.window_unscaled" in codes(result)
+    assert codes(result).count("events.co_occurrence_undecided") == 1
 
 
 # --- Determinism ----------------------------------------------------------------------------------

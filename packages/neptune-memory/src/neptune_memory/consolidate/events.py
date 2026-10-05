@@ -45,7 +45,8 @@ from neptune_memory.consolidate import event_records as parse
 from neptune_memory.consolidate.base import ClaimDraft, ConsolidationFinding, ConsolidatorOutput
 from neptune_memory.consolidate.identity import node_ref
 from neptune_memory.consolidate.identity_records import declared
-from neptune_memory.consolidate.runs import EVIDENCED_BY
+from neptune_memory.consolidate.runs import EVIDENCED_BY, _within
+from neptune_memory.consolidate.runs import Placement as RunPlacement
 from neptune_memory.schema.claim import LedgerRecordRef, TypedLiteral, ValueType
 from neptune_memory.schema.interval import OPEN, CivilClock, Open
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -59,6 +60,7 @@ from neptune_memory.schema.predicates import (
     IN_ZONE,
     INVOLVES,
     STATED_SEVERITY,
+    is_declared_value,
 )
 
 if TYPE_CHECKING:
@@ -119,7 +121,7 @@ class _View:
     interventions: dict[RecordId, Intervention] = field(default_factory=dict)
     tables: dict[RecordId, StructuredTable] = field(default_factory=dict)
     rows: dict[RecordId, StructuredRecord] = field(default_factory=dict)
-    domains: dict[RecordId, parse.Domain] = field(default_factory=dict)
+    domains: dict[RecordId, parse.Clock] = field(default_factory=dict)
     mappings: dict[RecordId, list[ClockMapping]] = field(default_factory=dict)  # by source clock
     resolutions: dict[RecordId, Fraction] = field(default_factory=dict)  # by placed clock id
     findings: list[ConsolidationFinding] = field(default_factory=list)
@@ -138,7 +140,7 @@ class _View:
 
 
 _PARSERS: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
-    parse.TIMESTAMP_DOMAIN: parse.domain,
+    parse.TIMESTAMP_DOMAIN: parse.clock,
     parse.CLOCK_MAPPING: parse.mapping,
     parse.INCIDENT_RECORD: parse.incident,
     parse.INTERVENTION: parse.intervention,
@@ -148,7 +150,7 @@ _PARSERS: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
 
 
 def _record_id(parsed: object) -> RecordId:
-    if isinstance(parsed, parse.Domain):
+    if isinstance(parsed, parse.Clock):
         return parsed.record
     assert isinstance(
         parsed, ClockMapping | IncidentRecord | Intervention | StructuredTable | StructuredRecord
@@ -214,7 +216,7 @@ def _read(ledger: LedgerReader) -> _View:
         if key in conflicted:
             continue
         parsed = seen[key]
-        if isinstance(parsed, parse.Domain):
+        if isinstance(parsed, parse.Clock):
             view.domains[parsed.record] = parsed
         elif isinstance(parsed, ClockMapping):
             view.mappings.setdefault(parsed.source, []).append(parsed)
@@ -277,6 +279,19 @@ def _verbatim(value: CellValue) -> TypedLiteral | None:
     return None
 
 
+def _declared(knowledge: Knowledge[LogicalId]) -> bool:
+    """Whether every id a field states is a declared value (ADR 0006 §9): never blank or padded.
+    A field that states one that is not is no field: none of its readings is used."""
+    values = (
+        (knowledge.value,)
+        if isinstance(knowledge, Known)
+        else tuple(c.value for c in knowledge.candidates)
+        if isinstance(knowledge, Ambiguous)
+        else ()
+    )
+    return all(is_declared_value(v.value) for v in values)
+
+
 def _ids(
     knowledge: Knowledge[LogicalId],
     predicate: str,
@@ -284,7 +299,9 @@ def _ids(
     default: AssertionKind,
 ) -> list[_Fact]:
     """``predicate`` for a ``Known`` id, a candidate claim per reading of an ``Ambiguous`` one,
-    and nothing for any other state."""
+    and nothing for any other state or for a field stating an undeclared id."""
+    if not _declared(knowledge):
+        return []
     if isinstance(knowledge, Known):
         return [
             _Fact(
@@ -369,13 +386,32 @@ class _Builder:
         if isinstance(declared_as, Known) and declared_as.value in mapping:
             target = mapping[declared_as.value]
             assert target is not None  # parse_config refuses "not an event" for a lifecycle kind
-            return [_Fact(EVENT_KIND, _text(target), STATED, _cited(declared_as.provenance))]
+            kind = _kind(declared_as.provenance, STATED)
+            return [_Fact(EVENT_KIND, _text(target), kind, _cited(declared_as.provenance))]
         if isinstance(declared_as, Ambiguous) and any(
             c.value in mapping for c in declared_as.candidates
         ):
             self.ambiguous["event_kind"].append(record)
             return []
         return [_Fact(EVENT_KIND, _text(default), STATED)]
+
+    def vet(self, record: RecordId, **fields: object) -> None:
+        """An ``id_unusable`` finding for each id field (or list item) stating an undeclared id."""
+        for name, value in sorted(fields.items()):
+            items = (
+                value.value
+                if isinstance(value, Known) and isinstance(value.value, tuple)
+                else (value,)
+            )
+            if not all(_declared(item) for item in items):
+                self.findings.append(
+                    _finding(
+                        "id_unusable",
+                        f"{name} states a blank or padded id; it is not used",
+                        (record,),
+                        Severity.INFO,
+                    )
+                )
 
     def note_ambiguous(self, record: RecordId, **fields: object) -> None:
         for name, value in sorted(fields.items()):
@@ -392,6 +428,13 @@ class _Builder:
             record.id,
             severity=record.severity,
             description=record.description,
+        )
+        self.vet(
+            record.id,
+            machines=record.machines,
+            assets=record.assets,
+            site=record.site,
+            zone=record.zone,
         )
         occurred = self.instant(record.id, record.occurred, "the incident states no time")
         if occurred is not None:
@@ -427,6 +470,7 @@ class _Builder:
 
     def intervention(self, record: Intervention) -> list[_Event]:
         self.note_ambiguous(record.id, mode=record.mode, reason=record.reason)
+        self.vet(record.id, machines=record.machines, site=record.site)
         began = self.instant(record.id, record.start, "the intervention states no start")
         if began is None:
             return []
@@ -557,7 +601,7 @@ class _Builder:
                 target = mapping[key]
                 if target is None:
                     return None  # the vendor mapping declares this kind is not an event
-                facts.append(_Fact(EVENT_KIND, _text(target), kind, kind_evidence))
+                facts.append(_Fact(EVENT_KIND, _text(target), declared_as, kind_evidence))
             else:
                 self.unmapped[(spec.vendor, key)].append(row.id)
         clock, clock_evidence = self.clock(spec, cell)
@@ -807,18 +851,6 @@ def _primary(view: _View, event: _Event) -> Placement | None:
     )
 
 
-def _covers(mapping: ClockMapping, start: int, end: int | None) -> bool:
-    """Whether the mapping's window covers ``[start, end)``; a bound it does not state is open."""
-    if not isinstance(mapping.validity, Known):
-        return True
-    window = mapping.validity.value
-    if isinstance(window.start, Known) and start < window.start.value.ticks:
-        return False
-    if isinstance(window.end, Known):
-        return end is not None and end <= window.end.value.ticks
-    return True
-
-
 def _projections(view: _View, event: _Event, primary: Placement) -> list[Placement]:
     """The event on each clock a stated mapping from its own clock reaches directly, computed
     exactly, rounded out to whole ticks and widened by the residual bound where the mapping states
@@ -826,11 +858,12 @@ def _projections(view: _View, event: _Event, primary: Placement) -> list[Placeme
     out: list[Placement] = []
     start = primary.start.ticks
     end = primary.end.ticks if isinstance(primary.end, Timestamp) else None
+    span = RunPlacement(primary.start, primary.end, (), ())
     for mapping in view.mappings.get(event.start.domain_id, ()):
         anchor, rate = mapping.anchor, mapping.rate
         if not isinstance(anchor, Known) or not isinstance(rate, Known):
             continue
-        if not _covers(mapping, start, end):
+        if not _within(mapping, span):  # a window that does not cover the event: not used
             continue
         civil = view.civil(mapping.target)
         target = mapping.target if civil is None else civil.domain_id
@@ -906,12 +939,73 @@ def _readings(placements: Sequence[Placement]) -> dict[RecordId, _Reading]:
     }
 
 
-def _window_ticks(view: _View, clock: RecordId, window: Fraction) -> int | None:
+def _window_ticks(view: _View, clock: RecordId, window: Fraction) -> int | str:
+    """The window in the clock's ticks, rounded down; or why it cannot be measured there."""
     resolution = view.resolutions.get(clock)
     if resolution is None:
-        return None
+        return "window_unscaled"
     ticks = math.floor(window / resolution)
-    return ticks if ticks >= 1 else None
+    return ticks if ticks >= 1 else "window_below_resolution"
+
+
+_UNMEASURED: Final[Mapping[str, str]] = {
+    "window_unscaled": "the clock states no resolution, so the window cannot be measured on it",
+    "window_below_resolution": "the window is shorter than one tick of the clock",
+}
+
+
+@dataclass(frozen=True)
+class _Pair:
+    """Two events decided to co-occur on ``clock``: the window ``[lo, lo + size)`` there."""
+
+    seconds: Fraction  # how far apart their onsets are: the nearest are kept first
+    first: int
+    second: int
+    clock: RecordId
+    lo: int
+    size: int
+
+    def key(self, events: Sequence[_Event]) -> tuple[Fraction, str, str]:
+        a, b = events[self.first].node.node_id, events[self.second].node.node_id
+        return (self.seconds, min(a, b), max(a, b))
+
+
+def _candidates(
+    events: Sequence[_Event],
+    entries: Sequence[tuple[int, int, int]],
+    size: int,
+    limit: int,
+) -> tuple[set[tuple[int, int]], set[int]]:
+    """Pairs of events from different sources whose onset ranges may fall in one window, and the
+    events that had more than ``limit`` such later partners on this clock.
+
+    ``entries`` are ``(lo, hi, event)`` sorted by onset. A later onset ``b`` can share a window with
+    ``a`` only while ``b.lo < a.hi - 1 + size``, so the scan stops there; a run of ``a``'s own
+    source is skipped in one step, and at most ``limit`` partners are taken per event (nearest
+    first), so the work is bounded by events times limit, never by events squared."""
+    sources = [events[i].source for _, _, i in entries]
+    skip = list(range(1, len(entries) + 1))  # the next entry after a run of one source
+    for k in range(len(entries) - 2, -1, -1):
+        if sources[k + 1] == sources[k]:
+            skip[k] = skip[k + 1]
+    pairs: set[tuple[int, int]] = set()
+    capped: set[int] = set()
+    for a, (_, hi_a, i) in enumerate(entries):
+        taken, b = 0, a + 1
+        while b < len(entries):
+            lo_b, _, j = entries[b]
+            if lo_b >= hi_a - 1 + size:
+                break
+            if sources[b] == sources[a]:
+                b = skip[b]
+                continue
+            if taken == limit:
+                capped.add(i)
+                break
+            pairs.add((min(i, j), max(i, j)))
+            taken += 1
+            b += 1
+    return pairs, capped
 
 
 def _co_occurrence(
@@ -926,69 +1020,63 @@ def _co_occurrence(
     if window is None:
         return []
     readings = [_readings(found) for found in placements]
-    ticks: dict[RecordId, int | None] = {
-        clock: _window_ticks(view, clock, window) for found in readings for clock in found
-    }
-    # Candidate pairs: onsets near each other on some clock (a sweep, not every pair).
-    pairs: set[tuple[int, int]] = set()
-    unscaled: dict[RecordId, set[str]] = defaultdict(set)
     by_clock: dict[RecordId, list[tuple[int, int, int]]] = defaultdict(list)
     for index, found in enumerate(readings):
         for clock, reading in found.items():
             by_clock[clock].append((reading.lo, reading.hi, index))
+    ticks = {clock: _window_ticks(view, clock, window) for clock in by_clock}
+    pairs: set[tuple[int, int]] = set()
+    capped: set[int] = set()
     for clock in sorted(by_clock):
         entries = sorted(by_clock[clock])
         size = ticks[clock]
-        if size is None:
-            unscaled[clock].update(events[i].source for _, _, i in entries)
-            continue
-        widest = max(hi - lo for lo, hi, _ in entries)
-        for a, (lo_a, _, i) in enumerate(entries):
-            for lo_b, _, j in entries[a + 1 :]:
-                if lo_b - lo_a >= size + widest:
-                    break
-                if events[i].source != events[j].source:
-                    pairs.add((min(i, j), max(i, j)))
-    for clock, sources in sorted(unscaled.items()):
-        if len(sources) > 1:
-            view.findings.append(
-                _finding(
-                    "window_unscaled",
-                    "events from several sources are on a clock that states no resolution; the"
-                    " window cannot be measured on it, so none is compared there",
-                    severity=Severity.INFO,
-                    clock=clock,
+        if isinstance(size, str):
+            if len({events[i].source for _, _, i in entries}) > 1:
+                view.findings.append(
+                    _finding(
+                        size,
+                        f"{_UNMEASURED[size]}; events from several sources on it are not compared"
+                        " there",
+                        severity=Severity.INFO,
+                        clock=clock,
+                    )
                 )
-            )
+            continue
+        near, over = _candidates(events, entries, size, config.max_partners)
+        pairs |= near
+        capped |= over
     _unrelated(view, events, readings)
-    decided: list[tuple[int, str, str, int, int, RecordId, int, int]] = []
+    decided: list[_Pair] = []
+    undecided: dict[RecordId, list[tuple[int, int]]] = defaultdict(list)
     for i, j in sorted(pairs):
-        shared = [c for c in set(readings[i]) & set(readings[j]) if ticks[c] is not None]
+        shared = [c for c in set(readings[i]) & set(readings[j]) if isinstance(ticks[c], int)]
         clock = min(shared, key=lambda c: (readings[i][c].mapped + readings[j][c].mapped, c))
         one, two, size = readings[i][clock], readings[j][clock], ticks[clock]
-        assert size is not None
+        assert isinstance(size, int)
         lo, hi = min(one.lo, two.lo), max(one.hi, two.hi)
         if hi - lo <= size:
-            distance = abs(one.lo - two.lo)
-            ni, nj = events[i].node.node_id, events[j].node.node_id
-            decided.append((distance, min(ni, nj), max(ni, nj), i, j, clock, lo, size))
+            seconds = abs(one.lo - two.lo) * view.resolutions[clock]
+            decided.append(_Pair(seconds, i, j, clock, lo, size))
             continue
         overlap = one.lo < two.hi and two.lo < one.hi
         nearest = 0 if overlap else max(one.lo, two.lo) - (min(one.hi, two.hi) - 1)
         if nearest < size:
-            view.findings.append(
-                _finding(
-                    "co_occurrence_undecided",
-                    "on the clock that relates them, the two events may or may not fall in one"
-                    " window: the mapping's rounding or residual bound is too coarse to decide;"
-                    " no co-occurrence is claimed",
-                    (*events[i].records[:1], *events[j].records[:1]),
-                    Severity.INFO,
-                    clock=clock,
-                    events=sorted([events[i].node.node_id, events[j].node.node_id]),
-                )
+            undecided[clock].append((i, j))
+    for clock, found_pairs in sorted(undecided.items()):
+        involved = sorted({events[k].records[0] for pair in found_pairs for k in pair})
+        view.findings.append(
+            _finding(
+                "co_occurrence_undecided",
+                f"on this clock {len(found_pairs)} pairs of events may or may not fall in one"
+                " window: the mapping's rounding or residual bound is too coarse to decide; no"
+                " co-occurrence is claimed for them",
+                involved[:MAX_LISTED],
+                Severity.INFO,
+                clock=clock,
+                pairs=len(found_pairs),
             )
-    return _emit_pairs(view, config, events, readings, decided)
+        )
+    return _emit_pairs(view, config, events, readings, decided, capped)
 
 
 def _emit_pairs(
@@ -996,19 +1084,21 @@ def _emit_pairs(
     config: parse.EventConfig,
     events: Sequence[_Event],
     readings: Sequence[Mapping[RecordId, _Reading]],
-    decided: list[tuple[int, str, str, int, int, RecordId, int, int]],
+    decided: list[_Pair],
+    capped: set[int],
 ) -> list[ClaimDraft]:
-    """The decided pairs nearest first, at most ``max_partners`` per event."""
+    """The decided pairs nearest first (in seconds), at most ``max_partners`` per event."""
     drafts: list[ClaimDraft] = []
     partners: dict[int, int] = defaultdict(int)
-    dropped: dict[int, int] = defaultdict(int)
-    for _, _, _, i, j, clock, lo, size in sorted(decided):
-        if partners[i] >= config.max_partners or partners[j] >= config.max_partners:
-            dropped[i] += 1
-            dropped[j] += 1
+    for pair in sorted(decided, key=lambda p: p.key(events)):
+        i, j = pair.first, pair.second
+        full = [k for k in (i, j) if partners[k] >= config.max_partners]
+        if full:
+            capped.update(full)
             continue
         try:
-            start, end = Timestamp(lo, clock), Timestamp(lo + size, clock)
+            start = Timestamp(pair.lo, pair.clock)
+            end = Timestamp(pair.lo + pair.size, pair.clock)
         except ValueError:
             view.findings.append(
                 _finding(
@@ -1020,7 +1110,7 @@ def _emit_pairs(
             continue
         partners[i] += 1
         partners[j] += 1
-        a, b = readings[i][clock], readings[j][clock]
+        a, b = readings[i][pair.clock], readings[j][pair.clock]
         evidence = (*a.evidence, *b.evidence)
         records = (*a.records, *b.records)
         for subject, other in ((i, j), (j, i)):
@@ -1036,15 +1126,14 @@ def _emit_pairs(
                     records=records,
                 )
             )
-    for index, count in sorted(dropped.items()):
+    for index in sorted(capped):
         view.findings.append(
             _finding(
                 "co_occurrence_capped",
-                f"the event co-occurs with more than {config.max_partners} events; the nearest"
-                f" are claimed and {count} pairs are not",
+                f"the event may co-occur with more than {config.max_partners} events; the"
+                " nearest are claimed and the rest are not",
                 events[index].records[:1],
                 event=events[index].node.node_id,
-                dropped=count,
             )
         )
     return drafts

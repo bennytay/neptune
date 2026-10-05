@@ -12,8 +12,9 @@ Every kind is a compiler kind, read with the compiler's own strict reader:
   events only where the config declares the table an event table (by its declared name). Deploy's
   ROS 2 diagnostics mapper writes such a table (``diagnostic events``, with a ``@clock:stamp``
   companion naming the clock); a PLC, safety-controller or syslog export is another.
-- ``timestamp_domain``: a clock's resolution (to scale the co-occurrence window) and whether it
-  declares itself civil; ``clock_mapping`` (root ADR 0050 §5): a stated map between two clocks.
+- ``timestamp_domain`` (``identity_records.clock``): a clock's resolution (to scale the
+  co-occurrence window) and whether it declares itself civil; ``clock_mapping`` (root ADR 0050 §5,
+  ``run_records.mapping``): a stated map between two clocks.
 
 No stand-in kind is read. A bag's topics, a flight log's logged messages and any time written as
 text are not records the compiler produces as events yet, so nothing here reads them.
@@ -26,30 +27,30 @@ part, so one bad table never disables the others.
 
 from __future__ import annotations
 
+import contextlib
+import re
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from fractions import Fraction
 from typing import TYPE_CHECKING, Final, TypeVar
 
 from neptune.identity import canonical_json
 from neptune.model.ids import RecordId, check_token, parse_record_id
-from neptune.model.knowledge import Known
 from neptune.model.lifecycle import (
     IncidentRecord,
     Intervention,
     incident_record_from_json,
     intervention_from_json,
 )
-from neptune.model.reference import timestamp_domain_from_json
 from neptune.model.world import (
     StructuredRecord,
     StructuredTable,
     structured_record_from_json,
     structured_table_from_json,
 )
-from neptune_memory.consolidate.identity_records import Malformed
+from neptune_memory.consolidate.identity_records import Clock, Malformed, clock
 from neptune_memory.consolidate.run_records import Inferred, mapping
-from neptune_memory.schema.interval import CivilClock
+from neptune_memory.consolidate.run_records import _strict as _strict  # one gate for every kind
 from neptune_memory.schema.predicates import EVENT_KINDS
 
 if TYPE_CHECKING:
@@ -79,6 +80,8 @@ LIFECYCLE_DEFAULT_KIND: Final[Mapping[str, str]] = {
 NOT_AN_EVENT: Final = "not_an_event"
 
 DEFAULT_WINDOW: Final = "5"  # seconds, as decimal text
+MAX_WINDOW: Final = 86_400  # seconds: a day; anything wider is not "at the same time"
+_DECIMAL: Final = re.compile(r"(0|[1-9][0-9]{0,5})(\.[0-9]{1,9})?")
 DEFAULT_MAX_PARTNERS: Final = 64
 MAX_PARTNERS_LIMIT: Final = 4096
 DEFAULT_CONFIG: Final[Mapping[str, JsonValue]] = {
@@ -97,15 +100,15 @@ __all__ = [
     "STRUCTURED_RECORD",
     "STRUCTURED_TABLE",
     "TIMESTAMP_DOMAIN",
+    "Clock",
     "ClockSpec",
-    "Domain",
     "EventConfig",
     "IdColumn",
     "Inferred",
     "Malformed",
     "TableSpec",
     "TimeSpec",
-    "domain",
+    "clock",
     "incident",
     "intervention",
     "mapping",
@@ -114,17 +117,6 @@ __all__ = [
     "row",
     "table",
 ]
-
-
-def _strict(parse: Callable[[JsonValue], _T], record: Mapping[str, object]) -> _T:
-    """A compiler reader over one record; whatever it refuses is malformed here."""
-    provenance = record.get("provenance")
-    if isinstance(provenance, dict) and provenance.get("assertion_kind") == "inferred":
-        raise Inferred(f"an inferred {record.get('kind')!r} record is a derived/ record")
-    try:
-        return parse(dict(record))  # type: ignore[arg-type]
-    except (ValueError, TypeError, KeyError, RecursionError) as exc:
-        raise Malformed(str(exc) or type(exc).__name__) from exc
 
 
 def incident(record: Mapping[str, object]) -> IncidentRecord:
@@ -141,37 +133,6 @@ def table(record: Mapping[str, object]) -> StructuredTable:
 
 def row(record: Mapping[str, object]) -> StructuredRecord:
     return _strict(structured_record_from_json, record)
-
-
-@dataclass(frozen=True)
-class Domain:
-    """A clock as the event policy needs it: its stated resolution (seconds per tick), and the
-    ``CivilClock`` it names when it declares a civil timescale, an absolute epoch and its
-    resolution (ADR 0002 §3)."""
-
-    record: RecordId
-    resolution: Fraction | None
-    civil: CivilClock | None
-
-
-def domain(record: Mapping[str, object]) -> Domain:
-    parsed = _strict(timestamp_domain_from_json, record)
-
-    def known(value: object) -> object:
-        return value.value if isinstance(value, Known) else None
-
-    resolution, timescale, epoch = (
-        known(parsed.resolution),
-        known(parsed.timescale),
-        known(parsed.epoch),
-    )
-    civil: CivilClock | None = None
-    if isinstance(resolution, Fraction) and timescale is not None and epoch is not None:
-        try:
-            civil = CivilClock(timescale, epoch, resolution)  # type: ignore[arg-type]
-        except ValueError:  # a timescale or epoch that is not civil
-            civil = None
-    return Domain(parsed.id, resolution if isinstance(resolution, Fraction) else None, civil)
 
 
 # --- The config ---------------------------------------------------------------------------------
@@ -258,8 +219,19 @@ def resolve_config(config: Mapping[str, JsonValue] | None = None) -> dict[str, J
     out: dict[str, JsonValue] = {**DEFAULT_CONFIG, **given}
     co = given.get("co_occurrence")
     if isinstance(co, dict):
-        out["co_occurrence"] = {**DEFAULT_CONFIG["co_occurrence"], **co}  # type: ignore[dict-item]
+        merged: dict[str, JsonValue] = {**DEFAULT_CONFIG["co_occurrence"], **co}  # type: ignore[dict-item]
+        # One spelling per window: 5, "5" and "5.0" are one config. A window it cannot read is
+        # kept as given, for parse_config to refuse.
+        with contextlib.suppress(_Bad):
+            merged["window_seconds"] = _decimal_text(_window(merged["window_seconds"]))
+        out["co_occurrence"] = merged
     return canonical_json.loads(canonical_json.dumps(out))  # type: ignore[return-value]
+
+
+def _decimal_text(seconds: Fraction) -> str:
+    """A window's canonical decimal text: no exponent, no trailing zeros."""
+    text = format(Decimal(seconds.numerator) / Decimal(seconds.denominator), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 _TOP: Final = frozenset({"co_occurrence", "tables", "vendors"})
@@ -302,22 +274,14 @@ def _keys(value: object, allowed: frozenset[str], where: str) -> Mapping[str, ob
 
 
 def _window(value: object) -> Fraction:
-    if isinstance(value, bool):
+    """Seconds in ``(0, MAX_WINDOW]``: an integer, or decimal text with at most 9 decimals."""
+    if isinstance(value, bool) or not isinstance(value, int | str):
         raise _Bad("co_occurrence.window_seconds must be a decimal text or an integer")
-    if isinstance(value, int):
-        seconds = Fraction(value)
-    elif isinstance(value, str):
-        try:
-            decimal = Decimal(value)
-        except InvalidOperation:
-            raise _Bad("co_occurrence.window_seconds is not a decimal number") from None
-        if not decimal.is_finite():
-            raise _Bad("co_occurrence.window_seconds must be finite")
-        seconds = Fraction(decimal)
-    else:
-        raise _Bad("co_occurrence.window_seconds must be a decimal text or an integer")
-    if seconds <= 0:
-        raise _Bad("co_occurrence.window_seconds must be positive")
+    if isinstance(value, str) and not _DECIMAL.fullmatch(value):
+        raise _Bad("co_occurrence.window_seconds is not a plain decimal number of seconds")
+    seconds = Fraction(Decimal(value)) if isinstance(value, str) else Fraction(value)
+    if not 0 < seconds <= MAX_WINDOW:
+        raise _Bad(f"co_occurrence.window_seconds must be positive and at most {MAX_WINDOW}")
     return seconds
 
 
