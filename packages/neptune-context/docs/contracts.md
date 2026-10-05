@@ -14,6 +14,11 @@ consumes nothing, and an entry in `contracts/packages.toml`.
   the query language and the context packet, consumed by Deploy and Learn. No version is published and
   no schema is exported yet, so the owner rule has nothing to check; the first version lands with the
   `packets/` issues and registers `schema_export` and `version_constant` in `contract.toml`.
+- The packet half is defined ([ADR 0003](adr/0003-the-context-packet.md)): `PACKET_VERSION = 1`
+  (`neptune_context.packets.model`), the JSON Schema export `neptune_context.packets.schema:packet_schema`,
+  the consumer checks `neptune_context.packets.conformance.check` and ten golden packets under
+  `tests/golden/`. It is published with the query half as `query-packet`'s first version by the C1 gate
+  (MVL-111), not before (ADR 0003 §9).
 
 ## Consumes
 

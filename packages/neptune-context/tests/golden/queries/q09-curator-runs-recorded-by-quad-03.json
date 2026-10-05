@@ -1,0 +1,26 @@
+{
+  "as_of": "head",
+  "budget": {
+    "items": 20
+  },
+  "clock_bridges": [],
+  "explain": [],
+  "frame_bridges": [],
+  "graph": {
+    "direction": "in",
+    "hops": 1,
+    "predicates": [
+      "recorded_by"
+    ]
+  },
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [],
+  "subjects": [
+    {
+      "declared_id": "asset-tag:QUAD-03",
+      "kind": "machine",
+      "same_as_depth": 1
+    }
+  ]
+}
