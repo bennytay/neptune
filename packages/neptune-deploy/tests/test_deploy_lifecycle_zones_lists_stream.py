@@ -13,7 +13,9 @@ import pytest
 
 from neptune.model.knowledge import (
     INHERITED,
+    Ambiguous,
     AssertionKind,
+    Candidate,
     Known,
     KnownAbsent,
     NotCovered,
@@ -91,9 +93,14 @@ def test_a_declared_zone_is_a_civil_time_zone_record_and_nothing_converts() -> N
     ]
     assert transform.config["mapping"]["zone"] == "Europe/Berlin"
     # The ticks still count the civil clock: 2026-03-02 09:40, never moved to UTC.
-    event = next(e for e in _of(package, "maintenance_event") if isinstance(e.performed, Known))
+    (event,) = [
+        e
+        for e in _of(package, "maintenance_event")
+        if any(i.value.value == "WO-26-0311" for i in e.identifiers.value)
+    ]
     assert event.performed.value.domain_id == domain.id
-    assert event.performed.value.ticks % 86400 in range(24 * 3600)
+    # 2026-03-02 09:40 as written: the civil clock's ticks, not moved by the zone's offset.
+    assert event.performed.value.ticks == 20514 * 86400 + 9 * 3600 + 40 * 60
     assert isinstance(domain.timescale, Unknown)
 
 
@@ -121,7 +128,20 @@ def test_an_instant_has_no_civil_zone() -> None:
     assert not _of(package, "civil_time_zone")
 
 
-@pytest.mark.parametrize("zone", ["+01:00", "W. Europe Standard Time", "Europe/", "-05", "a b"])
+@pytest.mark.parametrize(
+    "zone",
+    [
+        "+01:00",
+        "W. Europe Standard Time",
+        "Europe/",
+        "-05",
+        "a b",
+        "none",
+        "N/A",
+        "Unstated",
+        "local",
+    ],
+)
 def test_a_zone_that_is_not_an_iana_name_is_refused_at_load(zone: str) -> None:
     with pytest.raises(MappingError, match="zone"):
         _mapping(zone)
@@ -284,7 +304,7 @@ def test_a_mapping_error_leaves_the_output_empty(tmp_path: Path) -> None:
     twice = [preset("cmms_maximo"), preset("cmms_maximo")]
     with pytest.raises(MappingError):
         map_package(base_root, twice, out)
-    assert not out.exists() or not any(out.iterdir())
+    assert not out.exists()  # refused before anything is written
 
 
 def test_records_are_yielded_lazily_and_equal_the_listed_ones() -> None:
@@ -295,3 +315,32 @@ def test_records_are_yielded_lazily_and_equal_the_listed_ones() -> None:
     rest = list(stream)
     assert [first, *rest] == map_records(base, mappings)
     assert map_records(base, mappings) == map_records(base, mappings)
+
+
+def test_an_unreadable_cell_beside_items_is_not_reported_as_blank() -> None:
+    base = _base("warehouse_amr")
+    table = next(
+        t
+        for t in _of(base, "structured_table")
+        if isinstance(t.header, Known) and "Related" in t.header.value
+    )
+    index = table.header.value.index("Related")
+    records = []
+    for record in base.records:
+        if record.kind == "structured_record" and record.table == table.id:
+            cells = list(record.cells)
+            cells[index] = Ambiguous(
+                (Candidate("A;B"), Candidate("A"))
+            )  # two readings: no text to list
+            record = replace(record, cells=tuple(cells))
+        records.append(record)
+    columns = {
+        "related": [
+            {"column": "Related", "namespace": "cmms.reference", "split": ";"},
+            {"column": "Removed Serial", "namespace": "serial"},
+        ]
+    }
+    package = _mapped(read_files(package_files(records)), _mapping("unstated", columns))
+    codes = {f.code.split(".")[-1] for f in _of(package, "ingest_finding")}
+    assert "value_unreadable" in codes
+    assert "list_cell_blank" not in codes

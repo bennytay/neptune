@@ -362,7 +362,8 @@ class _Findings:
 @dataclass(frozen=True)
 class _Read:
     """What one list cell states: its parts, each with its citation and the cell's; with no part,
-    ``gap`` is why (the list's state if no other cell states items) and ``place`` the blank cell."""
+    ``gap`` is why (the list's state if no other cell states items) and ``place`` the blank cell
+    (none for an unreadable one, which has its own finding)."""
 
     parts: list[tuple[str, EvidenceRef, EvidenceRef]]
     gap: Knowledge[tuple[Any, ...]] | None = None
@@ -519,7 +520,7 @@ class _Values:
         text = _text(state.value) if isinstance(state, Known) else None
         if text is None:
             self.cell_finding("value_unreadable", spec.column, path, place)
-            return _Read([], Unknown(self.provenance(place)), place)
+            return _Read([], Unknown(self.provenance(place)))  # its finding is value_unreadable
         if spec.split is None:
             return _Read([(text, place, place)])
         out: list[tuple[str, EvidenceRef, EvidenceRef]] = []

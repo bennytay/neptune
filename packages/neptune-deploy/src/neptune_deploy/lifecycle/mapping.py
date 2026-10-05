@@ -195,6 +195,8 @@ def spec_columns(spec: Spec) -> set[str]:
 
 # The civil zone a mapping declares when the export states none: written as an ``Unknown`` zone.
 UNSTATED: Final = "unstated"
+# Spellings that pass the IANA syntax but state no zone, so would become a stated one by accident.
+_NOT_A_ZONE: Final = frozenset({"unstated", "unknown", "none", "n/a", "na", "local", "null", "tbd"})
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -470,6 +472,8 @@ def _scalar(
         declared = _text(obj["zone"], f"{where}.zone") if "zone" in obj else zone
         if declared is None:
             raise MappingError(f"{where}: a time needs its civil zone declared (or 'unstated')")
+        if declared.lower() in _NOT_A_ZONE and declared != UNSTATED:
+            raise MappingError(f"{where}.zone: {declared!r} states no zone; declare 'unstated'")
         if declared != UNSTATED:
             try:
                 check_iana_zone("zone", declared)

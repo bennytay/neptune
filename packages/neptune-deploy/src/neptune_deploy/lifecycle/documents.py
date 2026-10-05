@@ -694,6 +694,10 @@ class _DocRow(_Values):
             if _role(block) is BlockRole.LIST_ITEM and (text := _text(block.text)):
                 self.read_blocks.add(block.id)
                 out.append((text, block.provenance.evidence, block.provenance.evidence))
+        if not out:
+            # A section that shows text but no list item states no list: not "none".
+            self.cell_finding("value_unreadable", spec.column, path, place)
+            return _Read([], Unknown(self.provenance(place)))
         return _Read(out)
 
     def blank(self, spec: Part) -> bool:

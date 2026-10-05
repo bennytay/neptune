@@ -39,7 +39,7 @@ from neptune_deploy.lifecycle.mapping import (
     load_mapping,
     parse_mapping,
 )
-from neptune_deploy.lifecycle.run import iter_records, map_records
+from neptune_deploy.lifecycle.run import check_declared, iter_records, map_records
 from neptune_deploy.lifecycle.templates import (
     TEMPLATE_SCHEMA,
     DocumentTemplate,
@@ -111,6 +111,7 @@ def map_package(
         raise PackageError(f"{out} is inside the base package {base_root}; write it elsewhere")
     if not mappings and not templates:
         raise MappingError("name at least one mapping file or document template")
+    check_declared(mappings, templates)
     spill = out.parent if scratch is None else scratch
     spill.mkdir(parents=True, exist_ok=True)
     records = iter_records(read_package(base_root), mappings, templates)

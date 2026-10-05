@@ -39,7 +39,9 @@ The compiler now loads plugins (MVL-200), so the archetype generator must say ho
    - `Known(())` citing the cell when the compiler's cell is `KnownAbsent` (the source states
      none), and `Known(())` inheriting provenance when the cell holds text that lists nothing
      (only delimiters). A list of parts (`tests`, `hazards`) whose every part is blank is `Unknown`
-     citing the row, or `NotCovered` when every column its parts read is absent.
+     citing the row, or `NotCovered` when every column its parts read is absent. A document
+     section that shows text but no list item is `Unknown` citing its heading, with
+     `value_unreadable`: prose is not a list stated empty.
    - A list read from several cells, one blank and another stating items: `Known(items)` plus
      `list_cell_blank`, now meaning only this case (the list lacks what the blank cell would have
      stated). Whole-list `Ambiguous` and `KnownAbsent` are not written (root ADR 0061 §4).
@@ -55,6 +57,8 @@ The compiler now loads plugins (MVL-200), so the archetype generator must say ho
    - A zone must be spelled as an IANA name (root ADR 0061 §1) or be `unstated`; a mapping file
      that declares anything else (`+01:00`, `W. Europe Standard Time`) is refused at load with a
      `MappingError`, because the operator wrote it and a silent `Unknown` would hide the typo.
+     Words that pass the IANA syntax but state no zone (`none`, `N/A`, `local`, `Unstated`) are
+     refused too: only the exact `unstated` means `Unknown`.
    - The zone stays in the domain's reading step (its citation), as an identity discriminator
      only: two rules reading one column under two zones are two clocks. This keeps every
      `TimestampDomain` byte and id as it was; the authoritative zone is the companion.
@@ -68,6 +72,8 @@ The compiler now loads plugins (MVL-200), so the archetype generator must say ho
    - `plan_tables` builds every mapper, and so every transform, before any row is read; the base's
      lineage to carry is therefore known before the first record is yielded. Documents are mapped
      first and held as a list (a document's size bounds it, D1 §Measurements).
+   - A run that names no file, or one twice, is refused before `out` is created
+     (`check_declared`); any other error ends the write, which leaves `out` empty.
    - `map_files` and `map_records` stay (lists for a package that fits in memory) and give the same
      bytes.
 4. **The archetype generator ingests with `--no-plugins`.** The base packages hold the compiler's
