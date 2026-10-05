@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:977641362958fd461d1451f0d9274697e7e2c78513b7b971399481aa5b9afdda`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:81b88669780356bbc55918780b95c1533f01048504ac3df72b255f2d00b71f92`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -18,28 +18,28 @@ Receipt `rec:sha256:977641362958fd461d1451f0d9274697e7e2c78513b7b971399481aa5b9a
 | `calibration/CAL-ARM3A-0415.yaml` | 326 | `sha256:7734a681a3f1` | not read |
 | `calibration/CAL-ARM3A-0623.yaml` | 334 | `sha256:530ef05aaa16` | not read |
 | `calibration/CAL-ARM3A-0818.yaml` | 334 | `sha256:a2d19ecfbcda` | not read |
-| `changes/servicenow_changes.csv` | 626 | `sha256:fdca33396278` | deploy_lifecycle_map 0.1.0 |
-| `cmms/work_orders.csv` | 950 | `sha256:96d3810cd8c7` | deploy_lifecycle_map 0.1.0 |
-| `documents/commissioning_CR-C3-2026-02.pdf` | 12618 | `sha256:5e9fde08afd8` | deploy_document_map 0.1.0 |
-| `documents/risk_assessment_CELL3-RA-009.pdf` | 11475 | `sha256:9929112c0ec5` | deploy_document_map 0.1.0 |
-| `documents/sop_CELL-014_finger_set.pdf` | 6551 | `sha256:962616825f67` | deploy_document_map 0.1.0 |
+| `changes/servicenow_changes.csv` | 626 | `sha256:fdca33396278` | deploy_lifecycle_map 0.2.0 |
+| `cmms/work_orders.csv` | 950 | `sha256:96d3810cd8c7` | deploy_lifecycle_map 0.2.0 |
+| `documents/commissioning_CR-C3-2026-02.pdf` | 12618 | `sha256:5e9fde08afd8` | deploy_document_map 0.2.0 |
+| `documents/risk_assessment_CELL3-RA-009.pdf` | 11475 | `sha256:9929112c0ec5` | deploy_document_map 0.2.0 |
+| `documents/sop_CELL-014_finger_set.pdf` | 6551 | `sha256:962616825f67` | deploy_document_map 0.2.0 |
 | `neptune.yaml` | 149 | `sha256:2c6ff33f9633` | not read |
-| `requalification/requalification_tests.csv` | 987 | `sha256:30be864d249a` | deploy_lifecycle_map 0.1.0 |
-| `tickets/near_miss_export.json` | 1046 | `sha256:a48873e408ee` | deploy_lifecycle_map 0.1.0 |
-| `urdf/arm6.urdf` | 1767 | `sha256:7f79c49b41ef` | deploy_document_map 0.1.0 |
+| `requalification/requalification_tests.csv` | 987 | `sha256:30be864d249a` | deploy_lifecycle_map 0.2.0 |
+| `tickets/near_miss_export.json` | 1046 | `sha256:a48873e408ee` | deploy_lifecycle_map 0.2.0 |
+| `urdf/arm6.urdf` | 1767 | `sha256:7f79c49b41ef` | deploy_document_map 0.2.0 |
 
 ## Adapters
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
-| `deploy_document_map` | `0.1.0` | `sha256:c06d491d3f64` | none | `rec:63594ab56820` |
-| `deploy_document_map` | `0.1.0` | `sha256:d23d19fd4031` | none | `rec:7529dbff697e` |
-| `deploy_document_map` | `0.1.0` | `sha256:525c4fa02a06` | none | `rec:891c785f7a20` |
-| `deploy_document_map` | `0.1.0` | `sha256:ad04a2d69f3b` | none | `rec:fb599a927d34` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:24419b23ef87` | none | `rec:5c37f27bbc67` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:5c88caade1ed` | none | `rec:797c5627a924` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:144bb3a3916c` | none | `rec:991cc2e4ce5a` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:aeb24866e226` | none | `rec:c0adaa7ba15a` |
+| `deploy_document_map` | `0.2.0` | `sha256:66f0d68e6646` | none | `rec:341c5b30fa9f` |
+| `deploy_document_map` | `0.2.0` | `sha256:10d2e7853316` | none | `rec:872da325117f` |
+| `deploy_document_map` | `0.2.0` | `sha256:67ef41692d04` | none | `rec:bc6c62eb9a73` |
+| `deploy_document_map` | `0.2.0` | `sha256:c629d0ba9c9c` | none | `rec:e45218a80b62` |
+| `deploy_lifecycle_map` | `0.2.0` | `sha256:fccc9e52e714` | none | `rec:039839dfe1b2` |
+| `deploy_lifecycle_map` | `0.2.0` | `sha256:fe3666df3a59` | none | `rec:6229daa54f6b` |
+| `deploy_lifecycle_map` | `0.2.0` | `sha256:e864f07a8fc9` | none | `rec:daac8de125fa` |
+| `deploy_lifecycle_map` | `0.2.0` | `sha256:c16992b5ced4` | none | `rec:f54880ed9534` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
 | `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
 | `text` | `0.1.0` | `sha256:12b7c5463bbb` | none | `rec:3b8cd771874a` |
@@ -49,6 +49,7 @@ Receipt `rec:sha256:977641362958fd461d1451f0d9274697e7e2c78513b7b971399481aa5b9a
 | Kind | Records |
 |---|---|
 | `change_record` | 2 |
+| `civil_time_zone` | 11 |
 | `commissioning_baseline` | 1 |
 | `incident_record` | 1 |
 | `ingest_finding` | 16 |
@@ -77,22 +78,22 @@ Receipt `rec:sha256:977641362958fd461d1451f0d9274697e7e2c78513b7b971399481aa5b9a
 
 ## Findings
 
-- **warning** `deploy_document_map.column_unmapped` (unsupported): columns of a table the template reads that no field reads and the template does not ignore; their cells stay in the base package only · `rec:faad1484dae0`
-- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:9e996f9fc5ed`
-- **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:a33eca55698d`
-- **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:b5c3d649ba68`
-- **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:4be533b3fd5a`
-- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:ac25aff717c1`
-- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:0e57eea9407f`
-- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:2b4488f82f16`
-- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:ae7f8fdf81d5`
-- **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:96d1d3794a1e`
-- **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:9b1a2e6de323`
-- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:cad6bdda0b4c`
-- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:d7417072b996`
-- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:e3f680511822`
-- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:f0209a033648`
-- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:f53c259118e4`
+- **warning** `deploy_document_map.column_unmapped` (unsupported): columns of a table the template reads that no field reads and the template does not ignore; their cells stay in the base package only · `rec:ddeceefb1c51`
+- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:f3caa0e1c04b`
+- **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:38e21d02fb24`
+- **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:ba4e00a34c4d`
+- **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:faaa4d144183`
+- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:77ddf97237e5`
+- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:128d895727e9`
+- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:aedd83ae16f1`
+- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:c0a2a37593c5`
+- **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:9ae9463f45be`
+- **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:e8c2dc3936c2`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value or list is not covered, never read as none · `rec:060da2bad239`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value or list is not covered, never read as none · `rec:2d55f2ac19cd`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value or list is not covered, never read as none · `rec:db67d421ee8a`
+- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:bf3917a8d20e`
+- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:d2d15048f8b8`
 
 ## Ambiguous fields
 

@@ -146,7 +146,7 @@ def test_json_scalars_map_uniformly_into_text_fields() -> None:
     assert {i.severity.value for i in _of(package, "incident_record")} == {"4"}
 
 
-# --- Blank list cells: one finding per cell, every record named ---------------------------------
+# --- Blank list cells: an Unknown list per cell, citing it ---------------------------------
 
 
 def _cloned_rows(package: IngestPackage, column: str, count: int) -> IngestPackage:
@@ -181,18 +181,19 @@ def _cloned_rows(package: IngestPackage, column: str, count: int) -> IngestPacka
     return read_files(package_files(blanked))
 
 
-def test_every_blank_list_cell_names_its_record_field_and_cell() -> None:
+def test_every_blank_list_cell_is_an_unknown_list_citing_its_cell() -> None:
     base = _cloned_rows(_base("warehouse_amr"), "Robots", 12)
     package = _mapped(base, "register_zone")
     envelopes = _of(package, "authorisation_envelope")
     assert len(envelopes) == 14
-    blanks = _codes(package, "list_cell_blank")
-    assert len(blanks) == 14  # one per cell, never capped
-    assert sorted(r for f in blanks for r in f.records) == sorted(e.id for e in envelopes)
-    assert {f.details["field"] for f in blanks} == {"/machines"}
-    for finding in blanks:
-        cell = finding.subject.locator[-1]
-        assert (cell.column_name, cell.row) == ("Robots", finding.details["rows"][0])
+    # A blank list is the state Unknown, not () and not a finding (ADR 0012 §1).
+    assert not _codes(package, "list_cell_blank")
+    blank = [e for e in envelopes if isinstance(e.machines, Unknown)]
+    assert len(blank) == 14  # the column is blank in every row
+    for envelope in blank:
+        cell = envelope.machines.provenance.evidence.locator[-1]
+        assert cell.column_name == "Robots"
+        assert isinstance(envelope.machines.provenance, Provenance)
 
 
 def test_empty_split_parts_and_repeated_ids_are_findings() -> None:
