@@ -8,7 +8,7 @@ flowchart LR
     LIF["adapters/lifecycle"]
     MAP["lifecycle/ mapper · mapping files · document templates · vendor presets"]
     DIAG["diagnostics/ ROS 2 vendor mapping: statuses to event rows"]
-    PACKS["packs/ evidence-pack compiler"]
+    PACKS["packs/ evidence-pack compiler: spec + snapshot → cited sections · templates · JSON · PDF"]
     CONSOLE["console/"]
   end
   subgraph C["neptune (compiler)"]
@@ -29,7 +29,8 @@ flowchart LR
   MODEL -->|record kinds| MAP
   STORE -->|exported diagnostics tables| DIAG
   DIAG -->|new package of stated event rows| STORE
-  CON -->|package-schema 7.0.0| PACKS
+  CON -->|graph-schema 1.2.0 snapshot| PACKS
+  PACKS -->|catalog-api 1.6.0 resolve requests| CON
   PACKS --> CONSOLE
 
   subgraph KEY[" "]
@@ -44,8 +45,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1,CONF,MODEL,STORE,MAP built
-  class K2,LIF,EP,SRC,DIAG partial
-  class PACKS,CONSOLE,K3 todo
+  class K2,LIF,EP,SRC,DIAG,PACKS partial
+  class CONSOLE,K3 todo
   class CON,EXT ext
   style P fill:#8b949e0f,stroke:#8b949e
   style C fill:#8b949e0f,stroke:#8b949e
