@@ -269,9 +269,13 @@ def parse_evidence_uri(uri: str) -> tuple[EvidenceRef, int | None]:
     token, _, query = uri[len(EVIDENCE_SCHEME) :].partition("?")
     as_of: int | None = None
     if query:
-        if not query.startswith("as_of=") or not query[6:].isascii() or not query[6:].isdigit():
+        digits = query[6:]
+        # At most 19 digits: an int64 transaction, and never Python's int-string limit.
+        if not query.startswith("as_of=") or not digits.isascii() or not digits.isdigit():
             raise bad
-        as_of = int(query[6:])
+        if len(digits) > 19 or int(digits) > 2**63 - 1:
+            raise bad
+        as_of = int(digits)
     try:
         raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
         ref = evidence_ref_from_json(json.loads(raw.decode("utf-8")))

@@ -130,6 +130,8 @@ def test_a_missing_source_folder_fails_the_compiler_stage_with_a_code(tmp_path: 
 def test_the_context_stub_serves_a_published_query_packet_golden(tmp_path: Path) -> None:
     copy = tmp_path / "contracts"
     shutil.copytree(REPO / "contracts", copy)
+    for published in (copy / "query-packet").glob("v*"):  # only the draft below is published
+        shutil.rmtree(published)
     version = copy / "query-packet" / "v0.0.1"
     (version / "golden").mkdir(parents=True)
     (version / "schema.json").write_text("{}\n", encoding="utf-8")
