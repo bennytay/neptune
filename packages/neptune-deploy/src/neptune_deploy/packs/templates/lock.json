@@ -1,4 +1,6 @@
 {
   "configuration-lineage@1": "sha256:bba16faad7dd9a6c6d77b531f9e4f8c753692ee37da20e7724d38fc08221210d",
-  "event-timeline@1": "sha256:5ee5cbab8c4a7424a4d9d7cb03d353af499e23f84ac5cce14436d4db87be3021"
+  "configuration-traceability@1": "sha256:8c2875ae2ea03f30f3123121675e0152867d2ccef1e804858654b356594c3018",
+  "event-timeline@1": "sha256:5ee5cbab8c4a7424a4d9d7cb03d353af499e23f84ac5cce14436d4db87be3021",
+  "incident-timeline@1": "sha256:75a3744df6c388e3c93d2663197307ad8b94a0ffc20aed0f91cdd4950d560284"
 }

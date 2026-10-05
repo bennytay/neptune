@@ -163,6 +163,7 @@ def claim_object(value: Mapping[str, JsonValue]) -> str:
         )
         return (
             f"delta {literal.get('quantity')} {json.dumps(literal.get('name', ''))}:"
-            f" [{shown}] later minus earlier ({literal.get('later')} - {literal.get('earlier')})"
+            f" [{shown}] {_unit(value.get('unit', ''))}, later minus earlier"
+            f" ({literal.get('later')} - {literal.get('earlier')})"
         )
     return _number(literal)

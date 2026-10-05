@@ -36,6 +36,10 @@ STATE_CAPTIONS: Final[Mapping[str, str]] = {
     "unknown": "UNKNOWN - stated as not known; the cited claim names the record leaving it open",
     "conflict": "CONFLICT - these statements disagree; none is chosen",
 }
+TIME_CONFLICT: Final = (
+    "CONFLICT - this event is placed at different times on the pack clock; every time is shown,"
+    " none is chosen"
+)
 
 
 def render_json(pack: EvidencePack) -> bytes:
@@ -115,6 +119,8 @@ def _inferred_mark(statement: Statement) -> str:
 
 def _entry(out: _Layout, entry: Entry, indent: int) -> None:
     caption = STATE_CAPTIONS.get(entry.knowledge, entry.knowledge.upper())
+    if entry.differences:
+        caption = TIME_CONFLICT
     out.line(f"[{caption}] {entry.node.node_type} {entry.node.node_id}", font="F3", indent=indent)
     out.line(f"valid {t.interval(entry.valid)}", indent=indent + 2)
     for statement in entry.statements:
