@@ -1,10 +1,11 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.1.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.2.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
-([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.0.0's goldens still
-validate and its graph still passes the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
+([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
+configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6). Every earlier
+golden still validates and its graph still passes the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
 ## Nodes
@@ -36,7 +37,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 3`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 4`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -44,6 +45,10 @@ major version (ADR 0002 §5).
 
 | Predicate | Subject | Object | Cardinality | Meaning |
 |---|---|---|---|---|
+| `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
+| `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
+| `configuration_candidate` | machine, run | configuration | many | ambiguous: the configuration in force could be this one; one claim per reading |
+| `configuration_unknown` | machine, run | record | many | no configuration is stated over the interval; the record leaves it open, never filled |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
@@ -57,6 +62,7 @@ major version (ADR 0002 §5).
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
 | `member_of_fleet` | machine | fleet | one | the fleet a machine belongs to |
 | `mounted_on` | sensor | asset, machine | one | what a sensor is attached to |
+| `not_covered_by_authorisation` | run | configuration | many | observed: no authorisation envelope in the Ledger names the configuration then |
 | `operated_by` | run | person | many | a declared operator or supervisor |
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
@@ -65,6 +71,7 @@ major version (ADR 0002 §5).
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
+| `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
@@ -111,7 +118,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.1.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.2.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -147,6 +154,12 @@ def test_graph_schema_contract(check):
     ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md)).
     `same_as_candidate` is pairwise: every candidate of an `Ambiguous` link, and threads citing one source. People are named only by declared
     identifiers: never blank, never padded with whitespace.
+12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
+    places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
+    the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
+    nearest configuration in time; where records disagree, every reading is a `configuration_candidate`. No
+    `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
+    made only where the windows compare on one clock.
 
 ## Caveat: a resolver configuration is a store generation
 
