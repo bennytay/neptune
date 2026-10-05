@@ -63,8 +63,6 @@ if TYPE_CHECKING:
 # predicates are core (ADR 0006 §4), so this is ``CORE_PREDICATES``; kept as a name for callers.
 IDENTITY_PREDICATES: Final = CORE_PREDICATES
 
-# The kinds this consolidator reads, in the order it reads them from each package.
-KINDS: Final = (THREAD, TIMESTAMP_DOMAIN, IDENTITY_LINK, CONFIGURATION_LINEAGE, ASSERTION)
 
 Key = bytes  # a logical id's canonical JSON: the order subjects are chosen in (ADR 0003 §1.4)
 
@@ -169,8 +167,10 @@ class _Admitted:
         return False
 
 
+# The kinds this consolidator reads, in the order it reads them from each package.
 _PARSERS: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
     THREAD: parse.thread,
+    TIMESTAMP_DOMAIN: parse.clock,
     IDENTITY_LINK: parse.identity_link,
     CONFIGURATION_LINEAGE: parse.configuration_lineage,
     ASSERTION: parse.assertion,
@@ -184,11 +184,8 @@ def _read(ledger: LedgerReader) -> _View:
     threads: dict[Key, dict[RecordId, Thread]] = {}
     links: dict[RecordId, Link] = {}
     statements: dict[RecordId, Statement] = {}
+    clocks: dict[RecordId, parse.Clock] = {}
     for ref in ledger.list_packages():
-        for record in ledger.read_records(ref.package_id, TIMESTAMP_DOMAIN) or ():
-            placed = parse.civil_clock(record)
-            if placed is not None:
-                view.clocks[placed[0]] = placed[1]
         for kind, parser in _PARSERS.items():
             for index, record in enumerate(ledger.read_records(ref.package_id, kind) or ()):
                 try:
@@ -208,11 +205,18 @@ def _read(ledger: LedgerReader) -> _View:
                     links[rid] = parsed
                 elif isinstance(parsed, Statement):
                     statements[rid] = parsed
+                elif isinstance(parsed, parse.Clock):
+                    clocks[rid] = parsed
     for group in threads.values():
         for rid in admitted.conflicted & group.keys():
             del group[rid]
     view.links = [links[r] for r in sorted(links.keys() - admitted.conflicted)]
     view.statements = [statements[r] for r in sorted(statements.keys() - admitted.conflicted)]
+    view.clocks = {
+        rid: c.civil
+        for rid, c in clocks.items()
+        if c.civil is not None and rid not in admitted.conflicted
+    }
     for key in sorted(k for k in threads if threads[k]):
         group_ = tuple(threads[key][rid] for rid in sorted(threads[key]))
         types = sorted({t.node_type for t in group_})
@@ -255,52 +259,48 @@ def _statuses(statements: Sequence[Statement]) -> dict[RecordId, Status]:
     """Whether each assertion stands (root ADR 0062 §5, ADR 0008 §3).
 
     An assertion is retracted when an effective ``retract`` names its declared identifier, and
-    effective otherwise; a retraction of a retraction therefore restores. A chain that loops
-    back on itself (a ``retract`` naming its own id, or two naming each other) is undecided:
-    nothing rests on it, and it is reported.
+    effective when every ``retract`` naming it is itself retracted (or none does); a retraction
+    of a retraction therefore restores. What neither rule settles is a loop (a ``retract``
+    naming its own id, or two naming each other) and whatever rests on one: undecided. This is
+    the grounded labelling, computed with a worklist so a chain of any length is safe.
     """
-    by_identifier: dict[Key, list[Statement]] = {}
+    attackers: dict[RecordId, list[RecordId]] = {s.record: [] for s in statements}
+    targets: dict[RecordId, list[RecordId]] = {s.record: [] for s in statements}
+    by_identifier: dict[Key, list[RecordId]] = {}
+    for statement in statements:
+        if statement.identifier is not None:
+            by_identifier.setdefault(_key(statement.identifier), []).append(statement.record)
     for statement in statements:
         if statement.assertion_type is AssertionType.RETRACT and statement.retracts is not None:
-            by_identifier.setdefault(_key(statement.retracts), []).append(statement)
+            for target in by_identifier.get(_key(statement.retracts), ()):
+                attackers[target].append(statement.record)
+                targets[statement.record].append(target)
     status: dict[RecordId, Status] = {}
-    visiting: set[RecordId] = set()
-
-    def of(statement: Statement) -> Status:
-        known = status.get(statement.record)
-        if known is not None:
-            return known
-        if statement.record in visiting:
-            return "undecided"
-        visiting.add(statement.record)
-        named = (
-            ()
-            if statement.identifier is None
-            else by_identifier.get(_key(statement.identifier), ())
-        )
-        verdicts = [of(retraction) for retraction in named]
-        visiting.discard(statement.record)
-        if "effective" in verdicts:
-            result: Status = "retracted"
-        elif "undecided" in verdicts:
-            result = "undecided"
-        else:
-            result = "effective"
-        if not visiting or result != "undecided":
-            status[statement.record] = result
-        return result
-
-    for statement in statements:
-        status[statement.record] = of(statement)
-    return status
+    pending = {record: len(found) for record, found in attackers.items()}
+    effective = [record for record, count in pending.items() if count == 0]
+    while effective:
+        record = effective.pop()
+        if record in status:
+            continue
+        status[record] = "effective"
+        for target in targets[record]:
+            if target in status:
+                continue
+            status[target] = "retracted"
+            for freed in targets[target]:
+                pending[freed] -= 1
+                if pending[freed] == 0 and freed not in status:
+                    effective.append(freed)
+    return {s.record: status.get(s.record, "undecided") for s in statements}
 
 
-def _from_statements(view: _View) -> tuple[list[Link], set[frozenset[Key]]]:
-    """``same_identity`` assertions that stand, as links; ``distinct_identity`` ones, as pairs."""
+def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[RecordId]]]:
+    """``same_identity`` assertions that stand, as links; ``distinct_identity`` ones, as pairs
+    with the assertions that declare them distinct."""
     status = _statuses(view.statements)
     known_ids = {_key(s.identifier) for s in view.statements if s.identifier is not None}
     links: list[Link] = []
-    distinct: set[frozenset[Key]] = set()
+    distinct: dict[frozenset[Key], set[RecordId]] = {}
     for statement in view.statements:
         kind, rid = statement.assertion_type, (statement.record,)
         if kind is None:
@@ -346,7 +346,9 @@ def _from_statements(view: _View) -> tuple[list[Link], set[frozenset[Key]]]:
             continue
         ordered = sorted(ids, key=_key)
         if kind is AssertionType.DISTINCT_IDENTITY:
-            distinct |= {frozenset((_key(a), _key(b))) for a in ordered for b in ordered if a != b}
+            for a in ordered:
+                for b in ordered[ordered.index(a) + 1 :]:
+                    distinct.setdefault(frozenset((_key(a), _key(b))), set()).add(statement.record)
             continue
         links.append(
             Link(
@@ -414,24 +416,26 @@ class IdentityConsolidator:
         links = sorted((*view.links, *stated), key=lambda link: link.record)
         drafts: list[ClaimDraft] = []
         components = _Components()
-        joined: set[frozenset[Key]] = set()
         for link in (link for link in links if link.decided):
             for side in link.right:
                 outcome = _same_as(view, link, side)
                 if outcome is None:
                     continue
                 drafts.append(outcome)
-                pair = frozenset((_key(link.left), _key(side.node)))
-                components.union(*sorted(pair))
-                joined.add(pair)
-        for pair in sorted(joined & distinct, key=sorted):
+                components.union(_key(link.left), _key(side.node))
+        for pair, declared in sorted(distinct.items(), key=lambda item: sorted(item[0])):
             a, b = sorted(pair)
+            if components.find(a) != components.find(b):
+                continue
+            # same_as reaches across a pair a person declared distinct, directly or through a
+            # chain: both stand, and the contest names the declaration and any direct ground.
+            nodes_ = [view.nodes[a].ref, view.nodes[b].ref]
             view.findings.append(
                 _finding(
                     "contested",
-                    "a same_as ground and a distinct_identity assertion name the same pair",
-                    _grounds(drafts, view.nodes[a].ref, view.nodes[b].ref),
-                    nodes=[view.nodes[a].ref.node_id, view.nodes[b].ref.node_id],
+                    "same_as joins two ids a distinct_identity assertion declares distinct",
+                    (*declared, *_grounds(drafts, *nodes_)),
+                    nodes=[n.node_id for n in nodes_],
                 )
             )
 

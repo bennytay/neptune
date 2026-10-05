@@ -109,6 +109,10 @@ def _strict(parse: Callable[[JsonValue], _T], record: Mapping[str, object]) -> _
         raise Malformed(str(exc) or type(exc).__name__) from exc
 
 
+def _known(knowledge: Knowledge[_T]) -> _T | None:
+    return knowledge.value if isinstance(knowledge, Known) else None
+
+
 def _cited(provenance: object) -> tuple[EvidenceRef, ...]:
     """The evidence a value's own provenance cites; nothing when it inherits its record's."""
     return (provenance.evidence,) if isinstance(provenance, Provenance) else ()
@@ -179,17 +183,14 @@ class Link:
     evidence: tuple[EvidenceRef, ...]
 
 
-def _bound(knowledge: Knowledge[Timestamp]) -> Timestamp | None:
-    return knowledge.value if isinstance(knowledge, Known) else None
-
-
 def _window(link: IdentityLink) -> Window:
-    """``[start, end)`` as the link states it; an end the evidence states as open is ``OPEN``."""
+    """``[start, end)`` as the link states it. An end that is not ``Known`` is ``OPEN``: valid
+    until further notice, as for a run whose last instant is not stated (ADR 0008 §2)."""
     if not isinstance(link.validity, Known):
         return UNSTATED
     window = link.validity.value
-    end = window.end
-    return Window(_bound(window.start), end.value if isinstance(end, Known) else OPEN)
+    end = _known(window.end)
+    return Window(_known(window.start), OPEN if end is None else end)
 
 
 def identity_link(record: Mapping[str, object]) -> Link:
@@ -260,10 +261,6 @@ class Statement:
     evidence: tuple[EvidenceRef, ...]
 
 
-def _known(knowledge: Knowledge[_T]) -> _T | None:
-    return knowledge.value if isinstance(knowledge, Known) else None
-
-
 def assertion(record: Mapping[str, object]) -> Statement:
     """The compiler's ``Assertion``, read by the compiler's strict reader."""
     parsed = _strict(assertion_from_json, record)
@@ -289,20 +286,24 @@ def assertion(record: Mapping[str, object]) -> Statement:
 # --- Clocks -------------------------------------------------------------------------------------
 
 
-def civil_clock(record: Mapping[str, object]) -> tuple[RecordId, CivilClock] | None:
-    """A ``TimestampDomain`` that declares a civil timescale, an absolute epoch and its
-    resolution, as the ``CivilClock`` it names (ADR 0002 §3); ``None`` for any other clock,
-    including one this reader refuses (its instants then stay on their own domain)."""
-    try:
-        domain = timestamp_domain_from_json(dict(record))  # type: ignore[arg-type]
-    except (ValueError, TypeError, KeyError, RecursionError):
-        return None
+@dataclass(frozen=True)
+class Clock:
+    """A ``TimestampDomain``, and the ``CivilClock`` it names when it declares a civil timescale,
+    an absolute epoch and its resolution (ADR 0002 §3); ``civil`` is ``None`` for any other clock
+    (a boot clock, a GPS week count, an unset RTC), whose instants stay on their own domain."""
+
+    record: RecordId
+    civil: CivilClock | None
+
+
+def clock(record: Mapping[str, object]) -> Clock:
+    domain = _strict(timestamp_domain_from_json, record)
     timescale: Timescale | None = _known(domain.timescale)
     epoch: Epoch | None = _known(domain.epoch)
     resolution = _known(domain.resolution)
     if timescale is None or epoch is None or resolution is None:
-        return None
+        return Clock(domain.id, None)
     try:
-        return domain.id, CivilClock(timescale, epoch, resolution)
-    except ValueError:  # not civil: a boot clock, a GPS week count, an unset RTC
-        return None
+        return Clock(domain.id, CivilClock(timescale, epoch, resolution))
+    except ValueError:  # a timescale or epoch that is not civil
+        return Clock(domain.id, None)

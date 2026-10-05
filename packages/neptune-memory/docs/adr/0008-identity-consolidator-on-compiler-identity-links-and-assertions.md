@@ -48,29 +48,37 @@ is version `2`: its claims are a new lineage (ADR 0003 §3).
   right side's own citation. A scope of n ids joins each to the lowest (canonical JSON order).
 - **`same_as_candidate`**, one claim each way, for every candidate of a link whose `right` or `identifier` is
   `Ambiguous`, each citing the link and that candidate's own place; plus ADR 0003 §1.3's shared-evidence pairs.
-  Candidates are never collapsed and never repeated between nodes already joined by `same_as` or asserted
-  distinct.
-- **Valid time.** A link's window where its start is `Known`; an assertion from its `authored_at`. A statement
+  Candidates are never collapsed, and never emitted between nodes already joined by `same_as` or asserted
+  distinct. Like `same_as`, a candidate pair is emitted once per ground, so two grounds give two pairs, each
+  with its own evidence.
+- **Valid time.** A link's window where its start is `Known`; an end that is not `Known` is `OPEN`, valid until
+  further notice, as for a run whose last instant is not stated. An assertion holds from its `authored_at`. A statement
   that states no start holds from its subject's first thread record's `valid_from` (by record id), open-ended:
   a convention, not a lifetime (ADR 0007 §3). A stated end its start cannot be placed before is
   `identity.untimeable_window` and no claim. An instant on a `TimestampDomain` that declares a civil
   timescale, an absolute epoch and its resolution is placed on that `CivilClock` (ADR 0002 §3); otherwise it
-  stays on its own clock.
+  stays on its own clock. Clock records are admitted like every other record: one id with two definitions is
+  `identity.record_conflict` and places nothing.
 
 ### 3. Assertions and retraction
 
-An assertion of type `retract` names another by its declared `identifier`. An assertion is **retracted** when
-an effective `retract` names its identifier, and **effective** otherwise, so a retraction of a retraction
-restores it with its original claim id. A loop (a `retract` naming its own id, or retractions naming each
-other) leaves every assertion that depends on it **undecided**: no claim, `identity.retraction_undecided`. A
+An assertion of type `retract` names another by its declared `identifier`, and withdraws every assertion that
+carries it, whenever authored: authored times are on clocks of their own and are not compared, so a re-issued
+assertion takes a new id. An assertion is **retracted** when an effective `retract` names its identifier, and
+**effective** when every `retract` naming it is retracted (or none does), so a retraction of a retraction
+restores it with its original claim id. What neither settles, a loop (a `retract` naming its own id, or
+retractions naming each other) and whatever rests on one, is **undecided**: no claim,
+`identity.retraction_undecided`. This is the grounded labelling, computed with a worklist, so a chain of any
+length resolves. A
 `retract` naming an id no assertion carries is `identity.retraction_unmatched` and retracts nothing until one
 arrives. The build at the retraction's transaction emits no claim resting on it; ADR 0007 §5's build
 withdrawal (MVL-132) then supersedes the earlier claim at that transaction, so its interval closes in
 transaction time and `as_of` before it still shows it. Nothing is deleted or edited.
 
-`distinct_identity` suppresses candidates between its ids. Where a `same_as` ground and a standing
-`distinct_identity` name one pair, the `same_as` is still emitted and `identity.contested` names its grounds:
-evidence is never dropped for a contrary statement. An assertion whose type is not `Known` is
+`distinct_identity` suppresses candidates between its ids. Where `same_as` joins two ids a standing
+`distinct_identity` declares distinct, directly or through a chain, every `same_as` is still emitted and
+`identity.contested` names the declaration and any direct ground: evidence is never dropped for a contrary
+statement. An assertion whose type is not `Known` is
 `identity.assertion_unread`; a `same_identity` or `distinct_identity` with fewer than two logical ids in a
 `Known` scope is `identity.assertion_scope`. Record ids in a scope name evidence, not things, and are not read.
 

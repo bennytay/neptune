@@ -196,7 +196,20 @@ def test_distinct_identity_suppresses_candidates_and_contests_a_same_as() -> Non
     assert len(_of(contested, SAME_AS)) == 1  # evidence is never dropped for a contrary one
     (finding,) = contested.findings
     assert finding.code == "identity.contested"
-    assert finding.records == (joined["id"],)
+    assert finding.records == tuple(sorted((apart["id"], joined["id"])))  # type: ignore[type-var]
+
+
+def test_a_same_as_chain_across_a_declared_distinct_pair_is_contested() -> None:
+    """slot-b = H1-0001 (operator) and H1-0001 = H1-0002 (register): the walk would join slot-b
+    and H1-0002, which a person declared distinct. Both stand; the contest says so."""
+    apart = assertion("ASR-18", DISTINCT, (SLOT, UNIT_2), authored_at=at(6))
+    first = assertion("ASR-19", SAME, (SLOT, UNIT_1), authored_at=at(7))
+    result = _run(_fleet(apart, first, link("unit register row 2", UNIT_1, UNIT_2)))
+    assert len(_of(result, SAME_AS)) == 2
+    (finding,) = result.findings
+    assert finding.code == "identity.contested"
+    assert finding.records == (apart["id"],)  # no direct ground between the two
+    assert finding.details["nodes"] == ["controller:slot-b", "serial:H1-0002"]
 
 
 # --- Retraction --------------------------------------------------------------------------------
@@ -265,6 +278,23 @@ def test_a_retraction_of_an_unknown_id_retracts_nothing_and_is_reported() -> Non
     assert _codes(result) == ["identity.retraction_unmatched"]
 
 
+def test_a_retraction_chain_of_any_length_resolves_without_recursion() -> None:
+    """Each retract withdraws the previous one: the last stands, so they alternate down to the
+    confirmation, which stands when the chain has an even number of retractions."""
+    for length, stands in ((4000, True), (4001, False)):
+        chain = [
+            assertion(
+                f"R-{n}",
+                RETRACT,
+                (),
+                retracts=LogicalId("ops-console", "ASR-20" if n == 0 else f"R-{n - 1}"),
+            )
+            for n in range(length)
+        ]
+        result = _run({**_fleet(CONFIRMED), "pkg-ops-2": chain})
+        assert bool(_of(result, SAME_AS)) is stands and not result.findings
+
+
 # --- Clocks ------------------------------------------------------------------------------------
 
 
@@ -278,3 +308,16 @@ def test_a_stated_instant_on_a_declared_civil_clock_lands_on_the_civil_timeline(
     # Without the domain record the instant stays on the clock it was stated on.
     (unplaced,) = _of(_run(_fleet(said)), SAME_AS)
     assert unplaced.valid_from == at(1_790_762_400, domain_id)
+
+
+def test_one_clock_id_with_two_definitions_places_nothing_and_is_a_conflict() -> None:
+    domain, domain_id = civil_domain("assertions.json entry 0")
+    finer = {
+        **domain,
+        "resolution": {"knowledge": "known", "value": {"denominator": 1000, "numerator": 1}},
+    }
+    said = assertion("ASR-31", SAME, (SLOT, UNIT_1), authored_at=at(1_790_762_400, domain_id))
+    result = _run({**_fleet(said, domain), "pkg-other": [finer]})
+    assert [f.code for f in result.findings] == ["identity.record_conflict"]
+    (claim,) = _of(result, SAME_AS)
+    assert claim.valid_from == at(1_790_762_400, domain_id)  # never on a guessed tick length
