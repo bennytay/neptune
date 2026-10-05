@@ -6,7 +6,7 @@ version = "0.0.1"
 description = "Neptune Deploy: deployment lifecycle evidence (commissioning, authorisation, interventions) as a compiler plugin."
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
-# The compiler, at package schema 5; its deployment lifecycle kinds are from version 4
+# The compiler, at package schema 7; its deployment lifecycle kinds are from version 4
 # (root ADR 0051). The pin is contracts/lock.toml and PACKAGE_SCHEMA_VERSION (ADR 0001 §3).
 dependencies = ["neptune"]
 

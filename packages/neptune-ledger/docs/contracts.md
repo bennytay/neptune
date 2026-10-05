@@ -15,14 +15,16 @@ Lakehouse table contracts are listed here when they land.
 
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
-| Package schema (canonical records) | `neptune` (compiler) | **5** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:5` (versions 2 to 5 only add kinds: root ADR 0037 §1, MVL-23 / PR #37; root ADR 0050, MVL-82; root ADR 0051, MVL-83; root ADR 0039, MVL-24); its JSON Schema exports generate the schema-version registry, one projection spec per version (`catalog/projections.json` from `contracts/package-schema/v1.0.0/` to `v5.0.0/`; migration 0005 from v1.0.0; v2.0.0 needed none; migration 0006 from v2.0.0 to v4.0.0, a guard only: v3's `run_assembly` and `snapshot_binding` fill the existing `run_ids`, v4's lifecycle kinds fill the existing `site_namespace`/`site_value`; v5.0.0 needed none, its robot-description kinds gain no projection) | root ADR 0017; Ledger [ADR 0001](adr/0001-ledger-place-in-the-programme.md), [ADR 0009](adr/0009-record-index-bodies-pointers-and-generated-projections.md), [ADR 0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md) |
+| Package schema (canonical records) | `neptune` (compiler) | **7** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:7` (versions 2 to 5 only add kinds: root ADR 0037 §1, MVL-23 / PR #37; root ADR 0050, MVL-82; root ADR 0051, MVL-83; root ADR 0062, MVL-183; 6 adds the `civil_time_zone` kind and the states a lifecycle list may hold, root ADR 0061, MVL-202; 7 adds the robot-description kinds, root ADR 0039, MVL-24); its JSON Schema exports generate the schema-version registry, one projection spec per version (`catalog/projections.json` from `contracts/package-schema/v1.0.0/` to `v7.0.0/`; migration 0005 from v1.0.0; v2.0.0 needed none; migration 0006 from v2.0.0 to v4.0.0, a guard only: v3's `run_assembly` and `snapshot_binding` fill the existing `run_ids`, v4's lifecycle kinds fill the existing `site_namespace`/`site_value`; v5's `assertion` has no hot filter, so no migration; v6.0.0 needed none: `civil_time_zone` states no hot filter; v7.0.0 needed none, its robot-description kinds gain no projection) | root ADR 0017; Ledger [ADR 0001](adr/0001-ledger-place-in-the-programme.md), [ADR 0009](adr/0009-record-index-bodies-pointers-and-generated-projections.md), [ADR 0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md) |
+| Package series files | `neptune` (compiler) | series contract of root ADRs 0018 and 0025; the manifest's `store.series` (root ADR 0022) | `neptune.store.series` (`check_settings`, `SERIES_SETTINGS`), `neptune.store.package.series_path` | Ledger [ADR 0013](adr/0013-lakehouse-layout-and-in-place-series-reads.md) |
 
 Rules:
 
 - The Ledger reads packages of every package-schema version its schema-version registry holds, within the
-  compiler's readable range: today 1 to 5 (2 adds the configuration kinds, 3 the alignment kinds, 4 the
-  deployment lifecycle kinds, 5 the robot-description kinds; none changes an earlier record). Packages of
-  every version are indexed side by side, each record with its own version's projections. Any other version is refused with
+  compiler's readable range: today 1 to 7 (2 adds the configuration kinds, 3 the alignment kinds, 4 the
+  deployment lifecycle kinds, 5 the `assertion` kind, 6 the civil time zone kind and lifecycle list
+  states, 7 the robot-description kinds; none changes an earlier record). Packages of every version are indexed side
+  by side, each record with its own version's projections. Any other version is refused with
   `unsupported_schema_version`; the Ledger does not guess at its shape.
 - catalog-api does not list record kinds (1.6.0, ADR 0011 §4). A compiler PR that raises `SCHEMA_VERSION`
   changes no catalog-api file. Instead it runs

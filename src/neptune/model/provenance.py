@@ -21,12 +21,13 @@ import math
 import re
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Final, TypeAlias
 
 from neptune.model._fields import exact_object, is_int, json_str
 from neptune.model.frames import FrameRef, frame_ref_from_json
 from neptune.model.ids import (
+    EXTERNAL,
     ConfigHash,
     ContentId,
     ExternalObjectRef,
@@ -512,7 +513,7 @@ class TransformRecord:
     config_hash: ConfigHash
     config: JsonObject
     libraries: tuple[tuple[str, str], ...]
-    upstream: tuple[RecordId, ...]
+    upstream: tuple[RecordId, ...] = field(metadata=EXTERNAL)  # lineage, in any package (ADR 0069)
 
     def __post_init__(self) -> None:
         parse_record_id(self.id)

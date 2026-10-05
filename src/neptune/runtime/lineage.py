@@ -20,17 +20,17 @@ problems as objects, each naming its ``law``.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Final
+from typing import Final, TypeAlias
 
 from neptune.adapters.contract import Documented
 from neptune.discovery.source import SkipReason
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import transform_record
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
-from neptune.model.ids import ContentId
+from neptune.model.ids import ContentId, ExternalObjectRef
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
-from neptune.model.source import LocalPath, RawLocalPath
+from neptune.model.source import SourceLocation
 from neptune.runtime.sandbox import DEFAULT_LIMITS, Isolation, Limits
 
 RUNTIME_ID: Final = "neptune.runtime"
@@ -39,13 +39,17 @@ RUNTIME_ID: Final = "neptune.runtime"
 # chunks and verdicts record it, so a new version judges what is kept again (ADR 0031). The sandbox
 # (ADR 0030) does not bump it: isolation and limits ride in the transform config, and a crash or a
 # limit stops a chunk before it commits, so they never re-judge what is kept.
-RUNTIME_VERSION: Final = "0.2.0"  # 0.2.0: walk entries are discovery's findings (ADR 0033 §3)
+# 0.2.0: walk entries are discovery's findings (ADR 0033 §3). 0.3.0: a lost chunk no longer
+# quarantines its source; what committed is admitted when it stands alone (ADR 0069).
+RUNTIME_VERSION: Final = "0.3.0"
 
 ADAPTER_CRASHED: Final = f"{RUNTIME_ID}.adapter_crashed"
 CHUNK_FAILED: Final = f"{RUNTIME_ID}.chunk_failed"
 LIMIT_EXCEEDED: Final = f"{RUNTIME_ID}.limit_exceeded"
 OUTPUT_INVALID: Final = f"{RUNTIME_ID}.output_invalid"
 PLAN_FAILED: Final = f"{RUNTIME_ID}.plan_failed"
+SALVAGE_REFUSED: Final = f"{RUNTIME_ID}.salvage_refused"
+SOURCE_PARTIAL: Final = f"{RUNTIME_ID}.source_partial"
 SOURCE_CHANGED: Final = f"{RUNTIME_ID}.source_changed"
 SOURCE_UNREADABLE: Final = f"{RUNTIME_ID}.source_unreadable"
 
@@ -57,20 +61,21 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
     Documented(
         ADAPTER_CRASHED,
         "the sandboxed process running an adapter's plan or a chunk's ingest died without a"
-        " reply (a signal, an exit, or a reply that does not decode), after every attempt; the"
-        " source is not in this package (failed, error)",
+        " reply (a signal, an exit, or a reply that does not decode), after every attempt; a"
+        " plan's source, or a chunk's output, is not in this package (failed, error)",
     ),
     Documented(
         CHUNK_FAILED,
         "an adapter raised, or broke the contract, on a chunk after every attempt (cause"
-        " scratch_unavailable: the call needed scratch space and had none); the source is not in"
-        " this package (failed, error)",
+        " scratch_unavailable: the call needed scratch space and had none); the chunk's output is"
+        " not in this package, and its extent, when the adapter declares one, is cited (failed,"
+        " error)",
     ),
     Documented(
         LIMIT_EXCEEDED,
         "an adapter's plan or a chunk's ingest was stopped at a sandbox limit (cpu_seconds,"
-        " wall_seconds, memory_bytes, reply_bytes, scratch_bytes); never retried in the job; the"
-        " source is not in this package (failed, error)",
+        " wall_seconds, memory_bytes, reply_bytes, scratch_bytes); never retried in the job; a"
+        " plan's source, or a chunk's output, is not in this package (failed, error)",
     ),
     Documented(
         OUTPUT_INVALID,
@@ -84,9 +89,21 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
         " this package (failed, error)",
     ),
     Documented(
+        SALVAGE_REFUSED,
+        "chunks of a source were lost and the ones that committed cannot stand alone: none"
+        " committed, or together they break a cross-chunk law (rows of a stream declared in a"
+        " lost chunk, a record naming one only a lost chunk held); the source is not in this"
+        " package (failed, error)",
+    ),
+    Documented(
         SOURCE_CHANGED,
         "a file's bytes changed after it was fingerprinted; it was not read, and the next job"
         " fingerprints it again (inconsistent, error)",
+    ),
+    Documented(
+        SOURCE_PARTIAL,
+        "chunks of a source were lost and the ones that committed are in this package: the"
+        " account of what was lost, by chunk, and the byte ranges not covered (failed, error)",
     ),
     Documented(
         SOURCE_UNREADABLE,
@@ -126,6 +143,8 @@ class Law(StrEnum):
     RUN_BREAKS_STREAM = "run_breaks_stream"  # a chunk's run breaks its stream's row contract
     RUN_COLUMNS_DISAGREE = "run_columns_disagree"  # two chunks' runs of a stream differ in columns
     SEQ_RANGES_OVERLAP = "seq_ranges_overlap"  # two chunks' seq ranges of a stream overlap
+    # Salvage only (ADR 0069): a kept record names one of the source's that only a lost chunk held.
+    REFERENCE_LOST = "reference_lost"
 
 
 def type_name(value: object) -> str:
@@ -198,8 +217,47 @@ def runtime_transform(
     return transform_record(adapter_id=RUNTIME_ID, adapter_version=RUNTIME_VERSION, config=config)
 
 
+# A chunk's ``[start, end)`` source bytes, as its adapter's ``ChunkExtent`` names them (ADR 0069).
+Extent: TypeAlias = tuple[int, int]
+
+# How many not-covered ranges a ``source_partial`` message spells out; ``details`` holds them all.
+_MESSAGE_RANGES: Final = 4
+
+
 def _whole(source: ContentId, size: int) -> EvidenceRef:
     return EvidenceRef(source, (ByteRange(0, size),))
+
+
+def _cited(source: ContentId, size: int, extent: Extent | None) -> EvidenceRef:
+    """The chunk's own bytes when its adapter names them; else the whole source."""
+    if extent is None:
+        return _whole(source, size)
+    start, end = extent
+    return EvidenceRef(source, (ByteRange(start, end - start),))
+
+
+def _range_json(start: int, end: int) -> JsonObject:
+    return {"length": end - start, "offset": start}
+
+
+def _chunk_tail(extent: Extent | None) -> str:
+    if extent is None:
+        return "the chunk's output is not in this package"
+    return f"the chunk's output (bytes [{extent[0]}, {extent[1]})) is not in this package"
+
+
+def merged(extents: Sequence[Extent]) -> list[Extent]:
+    """``extents`` as the fewest sorted, disjoint ``[start, end)`` ranges covering the same bytes.
+
+    Empty ranges cover nothing and are dropped; touching ranges join.
+    """
+    joined: list[Extent] = []
+    for start, end in sorted(e for e in extents if e[0] < e[1]):
+        if joined and start <= joined[-1][1]:
+            joined[-1] = (joined[-1][0], max(joined[-1][1], end))
+        else:
+            joined.append((start, end))
+    return joined
 
 
 def _tries(attempts: int) -> str:
@@ -215,23 +273,31 @@ def chunk_failed(
     chunk: str,
     attempts: int,
     failure: Failure,
+    *,
+    extent: Extent | None = None,
 ) -> IngestFinding:
-    """``adapter_id`` at ``version`` failed on ``chunk`` as ``failure`` says, after ``attempts``."""
-    details = {
+    """``adapter_id`` at ``version`` failed on ``chunk`` as ``failure`` says, after ``attempts``.
+
+    The chunk's output is lost, not its source (ADR 0069): the finding cites the chunk's
+    ``extent`` when its adapter names one, else the whole source.
+    """
+    details: dict[str, JsonValue] = {
         **failure.details(),
         "adapter": adapter_id,
         "attempts": attempts,
         "chunk": chunk,
         "version": version,
     }
+    if extent is not None:
+        details["extent"] = _range_json(*extent)
     return ingest_finding(
         code=CHUNK_FAILED,
         category=FindingCategory.FAILED,
         severity=Severity.ERROR,
-        subject=_whole(source, size),
+        subject=_cited(source, size, extent),
         transform=transform,
         message=f"{adapter_id} {version} failed on chunk {chunk} after {_tries(attempts)}"
-        f" ({failure.error} at {failure.step}); the source is not in this package",
+        f" ({failure.error} at {failure.step}); {_chunk_tail(extent)}",
         details=details,
     )
 
@@ -261,13 +327,21 @@ _CALLS: Final = frozenset({Step.PLAN, Step.INGEST})
 _CRASH_CAUSES: Final = frozenset({"exit_status", "reply", "signal"})
 
 
-def _call(step: Step, chunk: str | None) -> tuple[str, dict[str, JsonValue]]:
-    """The sandboxed call, in words and as details: a chunk's ``ingest``, or ``plan``."""
+def _call(
+    step: Step, chunk: str | None, extent: Extent | None
+) -> tuple[str, str, dict[str, JsonValue]]:
+    """The sandboxed call, in words, what it cost and as details: a chunk's ``ingest``, or
+    ``plan``. Only a chunk has an extent."""
     if step not in _CALLS or (step is Step.INGEST) != (chunk is not None):
         raise ValueError(f"a sandboxed call is plan, or ingest of a chunk: {step}, {chunk}")
     if chunk is None:
-        return "while planning the source", {"step": str(step)}
-    return f"on chunk {chunk}", {"chunk": chunk, "step": str(step)}
+        if extent is not None:
+            raise ValueError("a plan reads the whole source; only a chunk has an extent")
+        return "while planning the source", "the source is not in this package", {"step": str(step)}
+    details: dict[str, JsonValue] = {"chunk": chunk, "step": str(step)}
+    if extent is not None:
+        details["extent"] = _range_json(*extent)
+    return f"on chunk {chunk}", _chunk_tail(extent), details
 
 
 def _death(cause: Mapping[str, JsonValue]) -> str:
@@ -288,25 +362,28 @@ def adapter_crashed(
     chunk: str | None,
     cause: Mapping[str, JsonValue],
     attempts: int,
+    *,
+    extent: Extent | None = None,
 ) -> IngestFinding:
     """The sandboxed process running ``adapter_id``'s ``step`` died without a reply, every attempt.
 
-    ``chunk`` is the chunk ``ingest`` was reading (``None`` for ``plan``). ``cause`` is exactly
-    one of ``{"signal": "SIGSEGV"}``, ``{"exit_status": 3}`` or ``{"reply": "malformed"}``.
+    ``chunk`` is the chunk ``ingest`` was reading (``None`` for ``plan``), cited by its
+    ``extent`` when its adapter names one. ``cause`` is exactly one of ``{"signal": "SIGSEGV"}``,
+    ``{"exit_status": 3}`` or ``{"reply": "malformed"}``.
     """
     if len(cause) != 1 or not cause.keys() <= _CRASH_CAUSES:
         raise ValueError(f"a crash has one cause: a signal, an exit status or a reply: {cause}")
-    where, call = _call(step, chunk)
+    where, cost, call = _call(step, chunk, extent)
     details: dict[str, JsonValue] = {"adapter": adapter_id, "attempts": attempts}
     details |= {"version": version, **call, **cause}
     return ingest_finding(
         code=ADAPTER_CRASHED,
         category=FindingCategory.FAILED,
         severity=Severity.ERROR,
-        subject=_whole(source, size),
+        subject=_cited(source, size, extent),
         transform=transform,
         message=f"{adapter_id} {version} crashed {where} after {_tries(attempts)}"
-        f" ({_death(cause)}); the source is not in this package",
+        f" ({_death(cause)}); {cost}",
         details=details,
     )
 
@@ -321,23 +398,26 @@ def limit_exceeded(
     chunk: str | None,
     limit: str,
     value: int,
+    *,
+    extent: Extent | None = None,
 ) -> IngestFinding:
     """``adapter_id``'s ``step`` was stopped at the sandbox's ``limit`` of ``value``.
 
     Never retried in the job: the same bytes under the same limit hit it again. The next job, or
-    a higher limit (another runtime config, so another lineage), tries again.
+    a higher limit (another runtime config, so another lineage), tries again. A chunk is cited by
+    its ``extent`` when its adapter names one.
     """
-    where, call = _call(step, chunk)
+    where, cost, call = _call(step, chunk, extent)
     details: dict[str, JsonValue] = {"adapter": adapter_id, "limit": limit, "value": value}
     details |= {"version": version, **call}
     return ingest_finding(
         code=LIMIT_EXCEEDED,
         category=FindingCategory.FAILED,
         severity=Severity.ERROR,
-        subject=_whole(source, size),
+        subject=_cited(source, size, extent),
         transform=transform,
         message=f"{adapter_id} {version} was stopped {where} at its {limit} limit ({value});"
-        " the source is not in this package",
+        f" {cost}",
         details=details,
     )
 
@@ -377,25 +457,162 @@ def output_invalid(
     )
 
 
-def source_changed(
-    transform: TransformRecord, location: LocalPath | RawLocalPath, source: ContentId
+@dataclass(frozen=True)
+class Lost:
+    """A chunk whose output is not in the package: its id, the code of the runtime finding that
+    says why, and its extent when its adapter names one."""
+
+    chunk: str
+    code: str
+    extent: Extent | None
+
+    def to_json(self) -> JsonObject:
+        found: dict[str, JsonValue] = {"chunk": self.chunk, "code": self.code}
+        if self.extent is not None:
+            found["extent"] = _range_json(*self.extent)
+        return found
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _spans(ranges: Sequence[Extent]) -> str:
+    shown = ", ".join(f"[{start}, {end})" for start, end in ranges[:_MESSAGE_RANGES])
+    more = len(ranges) - _MESSAGE_RANGES
+    return shown if more <= 0 else f"{shown} and {more} more"
+
+
+def source_partial(
+    transform: TransformRecord,
+    source: ContentId,
+    size: int,
+    adapter_id: str,
+    version: str,
+    chunks: int,
+    lost: Sequence[Lost],
 ) -> IngestFinding:
-    """The file at ``location`` no longer holds the bytes it was fingerprinted as."""
+    """The account of a salvaged source (ADR 0069 §3): of ``chunks`` planned, ``lost`` are not in
+    this package and the rest are.
+
+    ``not_covered`` is the merged byte ranges the lost chunks name, each also cited in
+    ``related``: bytes whose evidence the package may lack (another chunk sharing the bytes may
+    still have landed). ``undeclared`` counts lost chunks whose adapter names no extent, whose
+    bytes are somewhere in the source. Lists are sorted, so the finding is the same every run.
+    """
+    if not lost or len(lost) >= chunks:
+        raise ValueError("a partial source lost some of its chunks, not none and not all")
+    gaps = merged([item.extent for item in lost if item.extent is not None])
+    undeclared = sum(1 for item in lost if item.extent is None)
+    missing = sum(end - start for start, end in gaps)
+    codes: dict[str, int] = {}
+    for item in lost:
+        codes[item.code] = codes.get(item.code, 0) + 1
+    whole = _whole(source, size)
+    related = tuple(
+        ref
+        for ref in (EvidenceRef(source, (ByteRange(s, e - s),)) for s, e in gaps)
+        if ref != whole
+    )
+    said = f"{_plural(missing, 'byte')} not covered"
+    if gaps:
+        said += f" ({_spans(gaps)})"
+    if undeclared:
+        said += f"; {_plural(undeclared, 'lost chunk')} without a declared extent"
+    return ingest_finding(
+        code=SOURCE_PARTIAL,
+        category=FindingCategory.FAILED,
+        severity=Severity.ERROR,
+        subject=whole,
+        transform=transform,
+        message=f"{adapter_id} {version} lost {len(lost)} of {_plural(chunks, 'chunk')} of the"
+        f" source: {said}; the other {chunks - len(lost)} are in this package",
+        details={
+            "adapter": adapter_id,
+            "chunks": chunks,
+            "codes": dict(sorted(codes.items())),
+            "committed": chunks - len(lost),
+            "lost": [item.to_json() for item in sorted(lost, key=lambda i: i.chunk)],
+            "not_covered": [_range_json(start, end) for start, end in gaps],
+            "not_covered_bytes": missing,
+            "undeclared": undeclared,
+            "version": version,
+        },
+        related=related,
+    )
+
+
+def salvage_refused(
+    transform: TransformRecord,
+    source: ContentId,
+    size: int,
+    adapter_id: str,
+    version: str,
+    chunks: int,
+    lost: int,
+    problems: Sequence[Mapping[str, JsonValue]],
+) -> IngestFinding:
+    """``lost`` of a source's ``chunks`` were lost and what committed cannot stand alone: nothing
+    committed (``problems`` empty), or the committed chunks break the cross-chunk laws listed.
+    """
+    if not 0 < lost <= chunks or (lost < chunks) != bool(problems):
+        raise ValueError("salvage is refused when every chunk was lost, or for the laws broken")
+    laws: list[str] = []
+    for problem in problems:
+        law = problem.get("law")
+        if not isinstance(law, str) or not law:
+            raise ValueError("every cross-chunk problem names its law")
+        if law not in laws:
+            laws.append(law)
+    why = (
+        f"every chunk was lost ({_plural(chunks, 'chunk')})"
+        if lost == chunks
+        else f"{lost} of {_plural(chunks, 'chunk')} were lost and the rest break"
+        f" {_plural(len(laws), 'cross-chunk law')} without them ({', '.join(laws)})"
+    )
+    return ingest_finding(
+        code=SALVAGE_REFUSED,
+        category=FindingCategory.FAILED,
+        severity=Severity.ERROR,
+        subject=_whole(source, size),
+        transform=transform,
+        message=f"{adapter_id} {version}: {why}; the source is not in this package",
+        details={
+            "adapter": adapter_id,
+            "chunks": chunks,
+            "lost": lost,
+            "problems": [dict(problem) for problem in problems],
+            "version": version,
+        },
+    )
+
+
+def source_changed(
+    transform: TransformRecord, location: SourceLocation, source: ContentId
+) -> IngestFinding:
+    """The file (or a connector's object) at ``location`` no longer holds the bytes it was
+    fingerprinted as."""
+    message = (
+        "the object's store served other bytes than it was fingerprinted as; it was not read,"
+        " and the next job fetches it again"
+        if isinstance(location, ExternalObjectRef)
+        else "the file changed after it was fingerprinted; it was not read, and the next job"
+        " fingerprints it again"
+    )
     return ingest_finding(
         code=SOURCE_CHANGED,
         category=FindingCategory.INCONSISTENT,
         severity=Severity.ERROR,
         subject=location,
         transform=transform,
-        message="the file changed after it was fingerprinted; it was not read, and the next job"
-        " fingerprints it again",
+        message=message,
         details={"source": source},
     )
 
 
 def source_unreadable(
     transform: TransformRecord,
-    location: LocalPath | RawLocalPath,
+    location: SourceLocation,
     reason: SkipReason,
     errno: str | None = None,
 ) -> IngestFinding:
@@ -407,12 +624,13 @@ def source_unreadable(
     if errno is not None:
         details["errno"] = errno
     said = f"{reason}, {errno}" if errno is not None else str(reason)
+    noun = "object" if isinstance(location, ExternalObjectRef) else "file"
     return ingest_finding(
         code=SOURCE_UNREADABLE,
         category=FindingCategory.SKIPPED,
         severity=Severity.ERROR,
         subject=location,
         transform=transform,
-        message=f"the file could not be opened or read ({said})",
+        message=f"the {noun} could not be opened or read ({said})",
         details=details,
     )

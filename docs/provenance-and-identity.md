@@ -48,7 +48,9 @@ anything not byte-canonical.
   (ADR 0035 §9). So the same folder gives the same package whatever earlier jobs or dry runs saw.
 - Locations are `LocalPath` (relative to the ingest root), `RawLocalPath` (the same, for names that are not
   valid UTF-8, kept as exact bytes) or `ExternalObjectRef` `(connector id, object id, revision token)` for
-  object stores (MVL-45). A new token over identical bytes is not a new revision.
+  object stores (MVL-45). A new token over identical bytes is not a new revision; the ledger keeps every
+  token seen over the head revision's bytes (`SourceLedger.recognise`, the workspace's `tokens.jsonl`), so a
+  re-uploaded object is hashed once and recognised after (ADR 0067). Tokens never enter an id.
 
 ## Walking local sources
 

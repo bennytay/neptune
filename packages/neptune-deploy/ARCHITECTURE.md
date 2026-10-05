@@ -29,7 +29,7 @@ flowchart LR
   MODEL -->|record kinds| MAP
   STORE -->|exported diagnostics tables| DIAG
   DIAG -->|new package of stated event rows| STORE
-  CON -->|package-schema 5.0.0| PACKS
+  CON -->|package-schema 7.0.0| PACKS
   PACKS --> CONSOLE
 
   subgraph KEY[" "]

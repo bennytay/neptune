@@ -17,7 +17,9 @@ print(result.package, result.receipt)
 `mypy --strict`-checked by the tests.
 
 - **Source**: a folder or one regular file, as a path or a `file:` URI. A file ingests exactly as a
-  folder holding only it would (ADR 0043).
+  folder holding only it would (ADR 0043). Or a connector's source (ADR 0067): a URI of another
+  scheme, read by the installed `neptune.sources` connector declaring it, or a
+  `RemoteSource(uri, connector=None, options=None)` naming the connector and its options.
 - **Ignore rules**: `JobOptions(ignore=IgnorePolicy(...))`. By default version-control internals and
   OS metadata (`DEFAULT_PATTERNS`) and the root's `.neptune-ignore` are left unread; each ignored
   entry is a `neptune.discovery.ignored` finding. A refused pattern, or a `.neptune-ignore` that cannot
@@ -164,13 +166,13 @@ Every SDK call raises only `NeptuneError` subclasses; branch on `error.code`, ne
 
 | Code | Class | When |
 |---|---|---|
-| `invalid_source` | `InvalidSourceError` | missing, neither a directory nor a regular file, a `file:` URI with a query |
+| `invalid_source` | `InvalidSourceError` | missing, neither a directory nor a regular file, a `file:` URI with a query, a connector URI with credentials, a query or a fragment |
 | `destination_exists` | `DestinationExistsError` | anything at the destination, a dangling symlink too |
 | `invalid_destination` | `InvalidDestinationError` | the destination is inside the source |
-| `invalid_configuration` | `ConfigurationError` | adapters conflict, config names an unknown adapter/option/value, bad `remote`, ignore rules that cannot be used |
+| `invalid_configuration` | `ConfigurationError` | adapters conflict, config names an unknown adapter/option/value, bad `remote`, ignore rules that cannot be used; a URI scheme no installed connector (or two) declares, a connector that cannot build the source, options that are not one JSON object, a manifest or ignore patterns with a connector's source |
 | `nothing_to_resume` | `NothingToResumeError` | `resume=True` and the workspace holds no earlier work on the source |
 | `network_refused` | `NetworkRefusedError` | a remote source or `remote=` while the workspace is local-only |
-| `unsupported` | `UnsupportedError` | a URI scheme with no connector; remote execution (MVL-46) |
+| `unsupported` | `UnsupportedError` | remote execution (MVL-46) |
 | `sandbox_unavailable` | `SandboxUnavailableError` | the host cannot confine adapters (ADR 0030 §3) |
 | `workspace_unusable` | `WorkspaceUnusableError` | cannot open, lock or sweep the workspace, or read or write what a job keeps there (ledger, plans, chunks, runs, derivatives, scratch) |
 | `package_invalid` | `PackageInvalidError` | a package or receipt that does not verify |
@@ -183,9 +185,23 @@ Every SDK call raises only `NeptuneError` subclasses; branch on `error.code`, ne
 
 ## Local-only and remote
 
-New workspaces are local-only: `s3://…` sources and `remote="https://…"` raise `network_refused`.
-`workspace.allow_network(True)` lifts it (remembered); this version then raises `unsupported`, since
-no connector (MVL-45) or service (MVL-46) exists yet.
+New workspaces are local-only: a connector's source and `remote="https://…"` raise
+`network_refused`, before the connector is built. `workspace.allow_network(True)` lifts it
+(remembered). Remote execution then raises `unsupported`, since no service (MVL-46) exists yet.
+
+```python
+from neptune.sdk import Neptune, RemoteSource
+
+client = Neptune()
+client.workspace.allow_network(True)
+source = RemoteSource("s3://fleet-logs/arm-cell/", options={"endpoint": "https://s3.example"})
+result = client.ingest(source, "packages/arm-cell")  # again later: only new or changed objects
+```
+
+A connector's source is synced incrementally (ADR 0067): unchanged objects are carried forward by
+their revision token (`source_recognised` events), changed and new ones fetched once into a
+job-scoped spool and hashed; adapters read the spool in the sandbox. Its ledger is the URI's,
+exactly as given.
 
 ## Gotchas
 

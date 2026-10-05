@@ -24,12 +24,12 @@ python -m neptune.cli ingest ...        # the same command
 
 | Option | Does |
 |---|---|
-| `SOURCE` | a folder or one regular file; a path or a `file:` URI. Other schemes (`s3://`, …) are refused while the workspace is local-only (exit 9) |
+| `SOURCE` | a folder or one regular file; a path or a `file:` URI. Any other scheme (`s3://…`) is read by the installed connector (`neptune.sources` plugin) that declares it; none, or two, is exit 6. A URI with credentials, a query or a fragment is exit 3. Refused while the workspace is local-only (exit 9). See [Connectors](#connectors) |
 | `-o, --out DEST` | where the package is written. Must not exist and must not be inside the source. Required unless `--dry-run` |
 | `-n, --dry-run` | discover, fingerprint, probe and plan only; no package. The plans are kept, so the ingest that follows plans nothing again |
 | `--explain` | a dry run that also prints its explanation (ADR 0044): every file, each adapter's verdict and why, the proposed sessions, the work left, what would be left out. Implies `--dry-run`; `--out` with it is a usage error (exit 2) |
 | `--resume` | continue earlier work on this source in the workspace (an interrupted ingest or a dry run); exit 7 if there is none. A plain rerun reuses that work too; `--resume` only refuses to start from nothing |
-| `--attempts N` | tries per adapter call before its source is quarantined (default 2) |
+| `--attempts N` | tries per adapter call before its chunk is lost or its source quarantined (default 2) |
 | `-w, --workspace DIR` | the workspace (cache and checkpoints). Default `$NEPTUNE_HOME`, else `$XDG_CACHE_HOME/neptune`, else `~/.cache/neptune` |
 | `--ignore PATTERN` | leave matching entries unread; repeatable |
 | `--no-default-ignores` | read version-control internals and OS metadata too |
@@ -40,9 +40,27 @@ python -m neptune.cli ingest ...        # the same command
 | `--allow-degraded-sandbox` | run where not every sandbox guarantee is available; the receipt records which were lost |
 | `--no-plugins` | use only the shipped adapters: read no installed plugin (`neptune.adapters` / `neptune.sources` entry points, ADR 0058) |
 | `--plugin DIST` | read only the plugins of the installed distribution `DIST`; repeatable. Default: every installed plugin. A plugin that cannot be used is a `neptune.plugins.*` finding, not an error; a `DIST` that is not installed or registers no plugin is refused before anything runs. With `--no-plugins`: usage error (exit 2). A plugin whose import hangs blocks every run: leave it out with `--no-plugins` or `--plugin` |
+| `--connector ID` | the installed connector that reads `SOURCE` (`deploy_s3`), instead of the one declaring its scheme |
+| `--source-options JSON` | the connector's own options, one JSON object (`{"endpoint": ..., "region": ...}`). Never credentials: the connector reads those itself |
+| `--allow-network` | let the workspace use the network from now on; it remembers (ADR 0026 §6). A connector needs it |
 | `--job NAME` | the job's name in the package's envelope (`volatile/`); default a random token |
 | `--json` | JSON Lines on stdout (below) |
 | `-v, --verbose` | one progress line per job event on stderr |
+
+## Connectors
+
+```
+neptune ingest s3://fleet-logs/arm-cell/ --connector deploy_s3 \
+  --source-options '{"endpoint": "https://s3.example", "store": "site-a"}' --allow-network --out pkg
+```
+
+A connector's source runs the same job as a folder (ADR 0067): it lists the URI against the
+workspace's ledger of that URI; an object whose revision token the ledger knows for its bytes is
+carried forward (`source_recognised`), never fetched or hashed; the rest are fetched once and
+hashed (`source_hashed`); what a complete listing no longer holds is absent (`source_absent`).
+So a re-sync of an unchanged bucket fetches and parses nothing. An object that cannot be fetched
+is a finding, and the job commits. Manifests and `--ignore` name local paths and are refused for
+a connector's source (exit 6).
 
 ## Manifests
 

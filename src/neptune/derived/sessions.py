@@ -32,11 +32,24 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Final, TypeAlias
 
+from neptune.derived.bindings import BINDING_KIND, inferred_snapshot_binding_from_json
 from neptune.derived.clocks import (
     DOMAIN_KIND,
     MAPPING_KIND,
     inferred_clock_mapping_from_json,
     inferred_timestamp_domain_from_json,
+)
+from neptune.derived.frames import (
+    EDGE_KIND,
+    GROUP_KIND,
+    LINK_KIND,
+    REFERENCE_KIND,
+    TREE_KIND,
+    frame_edge_from_json,
+    frame_group_from_json,
+    frame_link_from_json,
+    frame_tree_from_json,
+    spatial_reference_from_json,
 )
 from neptune.derived.media import MEDIA_KIND, media_stream_from_json
 from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
@@ -592,6 +605,12 @@ DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     MEDIA_KIND: media_stream_from_json,  # ADR 0056
     DOMAIN_KIND: inferred_timestamp_domain_from_json,  # ADR 0060
     MAPPING_KIND: inferred_clock_mapping_from_json,
+    BINDING_KIND: inferred_snapshot_binding_from_json,  # ADR 0064
+    TREE_KIND: frame_tree_from_json,  # ADR 0068
+    EDGE_KIND: frame_edge_from_json,
+    LINK_KIND: frame_link_from_json,
+    GROUP_KIND: frame_group_from_json,
+    REFERENCE_KIND: spatial_reference_from_json,
 }
 
 

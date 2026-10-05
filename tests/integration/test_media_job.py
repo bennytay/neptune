@@ -145,6 +145,7 @@ def test_a_window_keeps_every_declared_clock_and_selects_on_the_one_named(
     assert [(t.field, t.ticks) for t in frame.times] == [
         ("log_time", T0 + 201 * 10**6),
         ("publish_time", T0 + 199 * 10**6),
+        ("header.stamp", T0 + 194 * 10**6),  # the Image header's stamp, decoded (ADR 0068)
     ]
     assert all(t.state is KnowledgeState.KNOWN for t in frame.times)
     assert frame.ticks(frame.times[1].clock) == T0 + 199 * 10**6

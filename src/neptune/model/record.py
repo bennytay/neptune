@@ -27,13 +27,15 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 
 # The newest version of the canonical model: what this code reads and can write. It became 1 at
 # the M1 gate (ADR 0023), 2 with the configuration kinds (ADR 0037), 3 with the alignment kinds
-# (ADR 0050), 4 with the deployment lifecycle kinds (ADR 0051) and 5 with the robot-description
-# kinds (ADR 0039). The model only grows: a newer version adds record kinds, enum members or
-# locator steps, through an ADR, and never changes an existing field. A record of any version from
-# OLDEST_READABLE_VERSION on is therefore valid as it is: its migration is the identity. A record is
-# written at the version that added its kind, so an addition never changes the bytes of records
-# that do not use it (ADR 0037 §1).
-SCHEMA_VERSION: Final = 5
+# (ADR 0050), 4 with the deployment lifecycle kinds (ADR 0051), 5 with the assertion kind
+# (ADR 0062), 6 with the civil time zone kind and list states (ADR 0061) and 7 with the
+# robot-description kinds (ADR 0039). The model only grows: a newer version adds record kinds, enum
+# members, locator steps or states a field may hold, through an ADR, and never changes an existing
+# field's JSON. A record of any version from
+# OLDEST_READABLE_VERSION on is therefore valid as it is: its migration is the identity. A record
+# is written at the version that added its kind, or the later version that added a shape it uses,
+# so an addition never changes the bytes of records that do not use it (ADR 0037 §1, ADR 0061 §6).
+SCHEMA_VERSION: Final = 7
 OLDEST_READABLE_VERSION: Final = 1
 ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 
@@ -41,8 +43,8 @@ ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 class Family(StrEnum):
     """What a record kind describes. Every kind belongs to exactly one family (ADR 0017 §4).
 
-    The last four are the design contract's source domains. A source is attributed to a domain by
-    the families of the records that cite it; no record kind straddles two.
+    ``machine`` to ``run`` are the design contract's source domains. A source is attributed to a
+    domain by the families of the records that cite it; no record kind straddles two.
     """
 
     SOURCE = "source"  # which bytes exist and where they were seen
@@ -54,6 +56,7 @@ class Family(StrEnum):
     TASK = "task"  # task context: briefs, SOPs, requirements, work orders (MVL-33)
     RUN = "run"  # run / experience evidence: sessions and their timestamped streams
     ALIGNMENT = "alignment"  # what evidence says relates other records: ids, clocks, frames, runs
+    ASSERTION = "assertion"  # what a person declared about other records: identities, baselines
 
 
 class SchemaVersionError(ValueError):

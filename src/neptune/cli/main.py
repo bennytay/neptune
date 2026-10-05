@@ -54,6 +54,7 @@ from neptune.sdk import (
     NeptuneError,
     PluginPolicy,
     PublishIncompleteError,
+    RemoteSource,
     committed_result,
 )
 from neptune.store.package import RECEIPT
@@ -95,7 +96,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=_EPILOG.format(table=exit_codes.table()),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ingest.add_argument("source", help="a folder or a file: a path, or a file: URI")
+    ingest.add_argument(
+        "source",
+        help="a folder or a file: a path, or a file: URI; or a URI a connector reads (s3://...)",
+    )
     ingest.add_argument(
         "-o",
         "--out",
@@ -127,7 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive,
         default=JobOptions.attempts,
         metavar="N",
-        help="tries per adapter call before its source is quarantined (default %(default)s)",
+        help="tries per adapter call before its chunk is lost or its source quarantined"
+        " (default %(default)s)",
     )
     ingest.add_argument(
         "-w",
@@ -176,6 +181,23 @@ def build_parser() -> argparse.ArgumentParser:
         "were lost",
     )
     _plugin_arguments(ingest)
+    ingest.add_argument(
+        "--connector",
+        metavar="ID",
+        help="the installed connector that reads SOURCE (default: the one declaring its scheme)",
+    )
+    ingest.add_argument(
+        "--source-options",
+        metavar="JSON",
+        help="the connector's options, as one JSON object (an endpoint, a region); never "
+        "credentials, which the connector reads itself",
+    )
+    ingest.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="let the workspace use the network from now on, as a connector needs; the workspace "
+        "remembers it (it is local-only until told)",
+    )
     ingest.add_argument("--job", metavar="NAME", help="name the job in the package's envelope")
     ingest.add_argument(
         "--json",
@@ -333,10 +355,13 @@ class _Ingest:
         args = self.args
         try:
             client = Neptune(args.workspace, options=self._options(), plugins=_plugins(args))
+            if args.allow_network:
+                client.workspace.allow_network(True)
             manifest: str | Literal[False] | None = False if args.no_manifest else args.manifest
+            source = self._source()
             if args.dry_run:
                 result = client.dry_run(
-                    args.source,
+                    source,
                     on_event=self._event,
                     cancel=self.cancel,
                     resume=args.resume,
@@ -344,7 +369,7 @@ class _Ingest:
                 )
             else:
                 result = client.ingest(
-                    args.source,
+                    source,
                     args.out,
                     on_event=self._event,
                     cancel=self.cancel,
@@ -361,6 +386,21 @@ class _Ingest:
         except Exception as exc:  # a bug: say so, with the traceback, and a stable code
             traceback.print_exception(exc, file=self.stderr)
             return self._failed("internal", f"{type(exc).__name__}: {exc}", None)
+
+    def _source(self) -> str | RemoteSource:
+        """SOURCE as the SDK takes it: a ``RemoteSource`` when a connector or options are named."""
+        args = self.args
+        if args.connector is None and args.source_options is None:
+            return str(args.source)
+        options = None
+        if args.source_options is not None:
+            try:
+                options = json.loads(args.source_options)
+            except ValueError as exc:
+                raise ConfigurationError(f"--source-options is not JSON: {exc}") from exc
+            if not isinstance(options, dict):
+                raise ConfigurationError("--source-options is one JSON object")
+        return RemoteSource(args.source, connector=args.connector, options=options)
 
     def _options(self) -> JobOptions:
         args = self.args

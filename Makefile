@@ -75,6 +75,7 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/golden/packages/make_packages.py
 > $(UV) run python tests/golden/mcap/make_mcap_golden.py
 > $(UV) run python tests/golden/config/make_config_golden.py
+> $(UV) run python tests/golden/assertion/make_assertion_golden.py
 > $(UV) run python tests/golden/urdf/make_urdf_golden.py
 
 # One `check` call covers every selected member (and, without PKG, every package in lock.toml), so

@@ -35,7 +35,7 @@ from neptune.model.machine import (
 )
 from neptune.model.package import SEVERITY_ORDER
 from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, Row, adapter_locator
-from neptune.model.reference import Frame, FrameGraph, TimestampDomain
+from neptune.model.reference import CivilTimeZone, Frame, FrameGraph, TimestampDomain
 from neptune.model.run import Run, Stream
 from neptune.model.series import (
     ColumnType,
@@ -513,6 +513,51 @@ def test_a_stream_naming_a_clock_the_package_lacks(tmp_path: Path) -> None:
     assert finding.code.endswith("dangling_reference") and finding.details["target"] == ghost.id
 
 
+def _zone(kit: Kit, domain: RecordId, name: str) -> CivilTimeZone:
+    """A zone the kit's source declares on its own row (ADR 0061)."""
+    at = kit.row(len(kit.records))
+    return kit.add(
+        CivilTimeZone(
+            id=kit.id_of("civil_time_zone", at), provenance=at, domain=domain, zone=Known(name)
+        )
+    )
+
+
+def test_a_civil_zone_naming_a_clock_the_package_lacks(tmp_path: Path) -> None:
+    kit = Kit("register", "cmms")
+    ghost = Kit("register", "other").clock()
+    zone = _zone(kit, ghost.id, "Europe/Berlin")
+    (finding,) = validate_package(build(tmp_path, kit)).findings
+    assert finding.code.endswith("dangling_reference")
+    assert finding.details["kind"] == "civil_time_zone" and finding.details["target"] == ghost.id
+    assert list(finding.records) == [zone.id]
+
+
+@pytest.mark.parametrize(
+    ("names", "zones"),
+    [
+        (("Europe/Berlin", "Europe/Vienna"), ["Europe/Berlin", "Europe/Vienna"]),
+        (("Europe/Berlin", "Europe/Berlin"), ["Europe/Berlin"]),
+    ],
+    ids=["disagree", "agree"],
+)
+def test_two_civil_zones_on_one_clock_are_in_doubt_even_when_they_agree(
+    tmp_path: Path, names: tuple[str, str], zones: list[str]
+) -> None:
+    kit = Kit("register", "cmms")
+    clock = kit.clock()
+    first = _zone(kit, clock.id, names[0])
+    second = _zone(kit, clock.id, names[1])
+    (finding,) = validate_package(build(tmp_path, kit)).findings
+    assert finding.code.endswith("civil_zone_repeated")
+    assert finding.category is FindingCategory.AMBIGUOUS
+    assert finding.details["zones"] == zones
+    assert set(finding.records) == {first.id, second.id}
+    one = Kit("register", "cmms")
+    _zone(one, one.clock().id, "UTC")
+    assert validate_package(build(tmp_path / "one", one)).findings == ()
+
+
 # --- Unresolved frames ----------------------------------------------------------------------------
 
 
@@ -561,10 +606,14 @@ def test_frames_a_graph_never_declares_or_a_graph_that_is_missing(tmp_path: Path
             )
         )
     found = validate_package(build(tmp_path, kit)).findings
-    assert sorted((f.details["frame"], f.details["reason"]) for f in found) == [
+    frames = [f for f in found if f.code.endswith("frame_unresolved")]
+    assert sorted((f.details["frame"], f.details["reason"]) for f in frames) == [
         ("tcp", "graph_missing"),
         ("wrist_camera", "frame_undeclared"),
     ]
+    # The missing graph is also a dangling reference: the model types frame_graph_id as one.
+    (dangling,) = [f for f in found if f.code.endswith("dangling_reference")]
+    assert (dangling.details["field"], dangling.details["target"]) == ("frame", missing_graph)
 
 
 # --- Stale configuration -------------------------------------------------------------------------
@@ -906,3 +955,55 @@ def test_calibration_rules_scale_n_log_n_on_hostile_counts(tmp_path: Path, name:
         )
         assert all(len(f.records) <= Bounds().records_per_finding for f in report.findings)
     assert seconds[1] / seconds[0] <= 5.5, seconds
+
+
+def _config_package(directory: Path, drop: Iterable[str]) -> IngestPackage:
+    """A robot controller's config read by the config adapter, without the records ``drop``
+    picks by kind or id: what a package with a dangling reference would hold."""
+    from neptune.adapters.config import ConfigAdapter
+    from neptune.adapters.harness import ingest_source
+    from neptune.discovery.reader import BytesReader
+
+    data = b'{"arm": {"joint_1_max_rad": 2.9, "joint_1_max_rad": 3.1}, "payload_kg": 5}\n'
+    output = ingest_source(ConfigAdapter(chunk_values=1), BytesReader(data))
+    ledger = SourceLedger()
+    ledger.observe(LocalPath("controller.json"), digest_stream(io.BytesIO(data)))
+    gone = set(drop)
+    every: list[Any] = [r for o in output.outputs for r in (*o.records, *o.findings)]
+    kept = [r for r in every if r.kind not in gone and r.id not in gone]
+    records = [*ledger.artifacts(), *ledger.revisions(), output.config.transform, *kept]
+    directory.mkdir(parents=True, exist_ok=True)
+    write_package(directory / "package", package_contents(records))
+    return read_package(directory / "package")
+
+
+def test_a_value_naming_a_snapshot_the_package_lacks(tmp_path: Path) -> None:
+    package = _config_package(tmp_path, ["configuration_snapshot"])
+    (finding,) = [
+        f for f in validate_package(package).findings if f.code.endswith("dangling_reference")
+    ]
+    assert (finding.details["kind"], finding.details["field"]) == (
+        "configuration_value",
+        "snapshot",
+    )
+    assert finding.details["target_kind"] == "configuration_snapshot"
+
+
+def test_a_finding_naming_a_record_the_package_lacks(tmp_path: Path) -> None:
+    whole = _config_package(tmp_path / "whole", [])
+    assert not [
+        f for f in validate_package(whole).findings if f.code.endswith("dangling_reference")
+    ]
+    (duplicate,) = [r for r in whole.records if getattr(r, "code", "") == "config.duplicate_key"]
+    lost = duplicate.records[-1]
+    package = _config_package(tmp_path / "part", [lost])
+    (finding,) = [
+        f for f in validate_package(package).findings if f.code.endswith("dangling_reference")
+    ]
+    assert finding.details == {
+        "field": "records",
+        "kind": "ingest_finding",
+        "rule": "neptune.validate.dangling_reference/3",
+        "target": lost,
+    }
+    assert finding.records == (duplicate.id,)

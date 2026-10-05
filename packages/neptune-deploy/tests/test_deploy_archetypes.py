@@ -246,9 +246,9 @@ def test_the_stale_config_is_a_finding_and_a_stated_revision(
     (change,) = (
         r
         for r in _of(mapped, "change_record")
-        if any(isinstance(m, Known) and m.value.value == "AMR-09" for m in r.machines)
+        if any(isinstance(m, Known) and m.value.value == "AMR-09" for m in r.machines.value)
     )
-    assert change.changes[0].after.value == "4.3.1"
+    assert change.changes.value[0].after.value == "4.3.1"
     # Deploy states no comparison: nothing in the mapped package cites a config, and no lifecycle
     # record cites a log (a finding may name the bag's metadata table it could not map).
     cited = {paths_of_mapped[source] for r in mapped.records for source in _sources(r)}
@@ -276,7 +276,7 @@ def test_the_fleet_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> 
         m.value.value
         for r in mapped.records
         if r.kind in ("maintenance_event", "change_record", "requalification_record")
-        for m in r.machines
+        for m in r.machines.value
         if isinstance(m, Known)
     }
     assert machines == {f"AMR-{n:02d}" for n in range(5, 11)}

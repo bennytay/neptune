@@ -8,7 +8,9 @@ A bag is a directory: a ``metadata.yaml`` and one or more storage files, ``.db3`
   and tables (topics with their QoS, the parts, the scalar entries), all ``stated``; a sqlite3
   file gives what an MCAP file gives (ADR 0034): a ``Run``, a clock, a ``Stream`` per topic and a
   series row per message citing its cell, so the two storage backends of one recording give
-  equivalent runs and streams.
+  equivalent runs and streams. A CDR payload whose type ``message_definitions`` defines is
+  decoded into ``value/<field path>`` columns, as the MCAP adapter decodes it (ADR 0068), and a
+  leading ``std_msgs/Header`` adds its stamp as a second clock.
 - ``.mcap`` files are the MCAP adapter's, unchanged: nothing of MCAP is read or copied here.
 
 Timestamps are ticks of the bag's own clock as declared, never converted. The parts of a split bag
@@ -39,6 +41,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.rosbag2 import metadata, storage
 from neptune.adapters.rosbag2._sqlite import MAGIC, Database, SqliteError, Walk, read_schema
+from neptune.adapters.rosmsg.streams import with_decode_options
 
 DEFAULT_MAX_ROWS: Final = 100_000
 ROOT: Final = "rosbag2_bagfile_information"
@@ -50,7 +53,7 @@ def _code(name: str, description: str) -> Documented:
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id="rosbag2",
-    version="0.1.0",
+    version="0.2.0",
     abi=ABI_VERSION,
     summary="ROS 2 bags: metadata.yaml as stated tables and a run, sqlite3 storage as a run and a"
     " stream per topic with every message's cell.",
@@ -59,7 +62,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         FormatSpec("rosbag2 sqlite3 storage", extensions=(".db3",), magic=(Magic(0, MAGIC),)),
     ),
     record_kinds=("run", "stream", "structured_record", "structured_table", "timestamp_domain"),
-    config=(),
+    config=with_decode_options(),
     libraries=(),
     finding_codes=(
         _code("bad_database", "the source is not a SQLite database this reader opens (corrupt)"),
@@ -132,7 +135,20 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code(
             "payload_not_decoded",
-            "a stream's payloads are not decoded; each row cites its message (unsupported, info)",
+            "a stream's payloads are not decoded, with the reason: not CDR, no definition in"
+            " message_definitions, a definition that does not parse, decoding turned off; each"
+            " row cites its message (unsupported, info)",
+        ),
+        _code(
+            "payload_partly_decoded",
+            "a stream's payloads are decoded, but byte arrays or arrays of arrays are walked"
+            " without a column, or only the leading header is decoded (unsupported, info)",
+        ),
+        _code(
+            "payload_undecodable",
+            "payloads that do not hold their definition's layout (corrupt), pass a decoding"
+            " limit or spill out of their cell's page (limit); their values are unknown or not"
+            " covered (warning)",
         ),
         _code(
             "storage_mismatch",
@@ -189,7 +205,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "rosbag2:time_field",
             "the time column `name` (timestamp) of a sqlite3 bag's messages table, cited after"
-            " the bytes that establish the format",
+            " the bytes that establish the format; or header.stamp, which a topic's definition"
+            " declares, cited after its topics row",
         ),
     ),
     conventions=(
@@ -202,8 +219,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "clocks",
             "clock 0 is the messages table's timestamp column (scope (), role receive), ticks as"
-            " stored; the metadata's start and duration are on a clock of their own (field"
-            " starting_time.nanoseconds_since_epoch) with unknown role and epoch",
+            " stored; clock 1 a leading std_msgs/Header's stamp where the payload decodes"
+            " (scope (topic,)); the metadata's start and duration are on a clock of their own"
+            " (field starting_time.nanoseconds_since_epoch) with unknown role and epoch",
         ),
         Documented(
             "locators",
@@ -218,7 +236,10 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "series",
             "seq (rank among the topic's messages by rowid), time/0, value/message_id (rowid),"
-            " value/data_bytes (payload size), locator/0/length and locator/0/offset",
+            " value/data_bytes (payload size), locator/0/length and locator/0/offset; a decoded"
+            " payload's fields as value/<path> (segments joined by '.', '[]' after an array: a"
+            " list column), each with its state column; a payload that spills out of its cell's"
+            " page is not covered",
         ),
         Documented(
             "streams",
@@ -236,8 +257,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " scalar its text",
         ),
     ),
-    # A data chunk holds up to DEFAULT_MAX_ROWS rows of six columns; a metadata file is at most
-    # 4 MiB of YAML and 200,000 nodes. Neither holds a payload.
+    # A data chunk holds up to DEFAULT_MAX_ROWS rows of six columns and what each row's payload
+    # decodes to (no byte array, every array bounded); a metadata file is at most 4 MiB of YAML
+    # and 200,000 nodes.
     resources=Resources(max_memory=256 * 1024 * 1024, streaming=True),
     security=(
         "The database is never handed to an SQL engine: its b-trees are walked from the source's"

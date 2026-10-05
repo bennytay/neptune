@@ -6,7 +6,9 @@ once. A test checks that every record class in ``neptune.model`` is listed.
 
 A kind added after the M1 gate says so with a class attribute ``since``, the schema version that
 added it; every other kind is from version 1. A package written at version ``v`` holds a table for
-each kind of ``kinds_at(v)``, and no other (ADR 0037 §1).
+each kind of ``kinds_at(v)``, and no other (ADR 0037 §1). A record whose content uses a shape a
+later version added (a list state, ADR 0061 §6) says so with a ``schema_version`` property, and is
+written at that version (``record_version``).
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -24,6 +26,7 @@ from neptune.model.alignment import (
     run_assembly_from_json,
     snapshot_binding_from_json,
 )
+from neptune.model.assertion import Assertion, assertion_from_json
 from neptune.model.configuration import (
     ConfigurationSnapshot,
     ConfigurationValue,
@@ -71,10 +74,12 @@ from neptune.model.machine import (
 from neptune.model.provenance import TransformRecord, transform_record_from_json
 from neptune.model.record import OLDEST_READABLE_VERSION, check_schema_version
 from neptune.model.reference import (
+    CivilTimeZone,
     Frame,
     FrameGraph,
     FrameTransform,
     TimestampDomain,
+    civil_time_zone_from_json,
     frame_from_json,
     frame_graph_from_json,
     frame_transform_from_json,
@@ -122,6 +127,7 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (TransformRecord, transform_record_from_json),
         (IngestFinding, ingest_finding_from_json),
         (TimestampDomain, timestamp_domain_from_json),
+        (CivilTimeZone, civil_time_zone_from_json),
         (FrameGraph, frame_graph_from_json),
         (Frame, frame_from_json),
         (FrameTransform, frame_transform_from_json),
@@ -159,6 +165,7 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (IncidentRecord, incident_record_from_json),
         (ChangeRecord, change_record_from_json),
         (RiskAssessment, risk_assessment_from_json),
+        (Assertion, assertion_from_json),
     )
 }
 
@@ -182,6 +189,20 @@ def package_version(kinds: Iterable[str]) -> int:
     use it (ADR 0037 §1).
     """
     return max((KIND_SINCE[kind] for kind in kinds), default=OLDEST_READABLE_VERSION)
+
+
+def record_version(record: Any) -> int:
+    """The version ``record`` is written at: its kind's ``since``, or a later version whose
+    shapes it uses (ADR 0061 §6)."""
+    return max(KIND_SINCE[record.kind], getattr(record, "schema_version", OLDEST_READABLE_VERSION))
+
+
+def records_version(records: Iterable[Any]) -> int:
+    """The lowest schema version that holds ``records``: what a package of them is written at.
+
+    ``package_version`` of their kinds, raised to any record's own later version.
+    """
+    return max((record_version(record) for record in records), default=OLDEST_READABLE_VERSION)
 
 
 def record_key(record: Any) -> str:

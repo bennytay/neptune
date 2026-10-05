@@ -350,6 +350,30 @@ class Resources:
 
 
 @dataclass(frozen=True)
+class ChunkExtent:
+    """Where an adapter's chunk contexts name the source bytes each chunk decodes (ADR 0069 §2).
+
+    A chunk whose context holds both keys decodes ``[context[start], context[end])``: integers with
+    ``0 <= start <= end <= size``, which ``check_plan`` enforces. A chunk with neither (a
+    declarations chunk, a whole-document chunk) names no extent. The runtime cites the extent when
+    the chunk is lost, so a receipt says exactly which bytes the package does not cover. It is
+    read from the context the plan already holds, so it never changes a chunk id.
+    """
+
+    start: str = "start"
+    end: str = "end"
+
+    def __post_init__(self) -> None:
+        check_token("extent start key", self.start)
+        check_token("extent end key", self.end)
+        if self.start == self.end:
+            raise ContractError("an extent's start and end are two context keys")
+
+    def to_json(self) -> JsonObject:
+        return {"end": self.end, "start": self.start}
+
+
+@dataclass(frozen=True)
 class AdapterDescriptor:
     """Everything static about an adapter: who it is, what it reads and writes, and its rules.
 
@@ -362,6 +386,8 @@ class AdapterDescriptor:
       ``conventions`` document what the output means, as ADR 0006 §3 and ADR 0017 §9 require.
       The checks refuse a code or step that is not declared here.
     - ``resources`` and ``security`` are for the sandbox (MVL-10).
+    - ``extent``, if given, names the context keys of each chunk's source byte range, so a lost
+      chunk is cited exactly (ADR 0069 §2). Optional: ``None`` cites a lost chunk's whole source.
     """
 
     id: str
@@ -377,6 +403,7 @@ class AdapterDescriptor:
     conventions: tuple[Documented, ...]
     resources: Resources
     security: tuple[str, ...]
+    extent: ChunkExtent | None = None
 
     def __post_init__(self) -> None:
         check_token("adapter id", self.id)
@@ -415,6 +442,8 @@ class AdapterDescriptor:
             raise ContractError("resources must be a Resources")
         for note in self.security:
             check_text("security note", note)
+        if self.extent is not None and not isinstance(self.extent, ChunkExtent):
+            raise ContractError(f"adapter {self.id}: extent must be a ChunkExtent or None")
 
     def option(self, name: str) -> ConfigOption:
         for option in self.config:
@@ -423,8 +452,10 @@ class AdapterDescriptor:
         raise ConfigError(f"adapter {self.id} has no option {name!r}")
 
     def to_json(self) -> JsonObject:
-        """The descriptor for explanations and dry runs (MVL-15)."""
+        """The descriptor for explanations and dry runs (MVL-15). ``extent`` only when declared."""
+        declared: JsonObject = {} if self.extent is None else {"extent": self.extent.to_json()}
         return {
+            **declared,
             "abi": self.abi,
             "config": [option.to_json() for option in self.config],
             "conventions": [convention.to_json() for convention in self.conventions],
@@ -714,6 +745,30 @@ def make_chunk(
         context,
         cost,
     )
+
+
+def chunk_extent(extent: ChunkExtent | None, chunk: Chunk, size: int) -> tuple[int, int] | None:
+    """The ``[start, end)`` source bytes ``chunk`` decodes, as its adapter's ``extent`` names them.
+
+    ``None`` when the adapter declares no extent or the chunk's context holds neither key. A
+    context holding one key without the other, or values that are not integers with
+    ``0 <= start <= end <= size``, breaks the contract (``ContractError``).
+    """
+    if extent is None:
+        return None
+    start, end = chunk.context.get(extent.start), chunk.context.get(extent.end)
+    if start is None and end is None:
+        return None
+    for value in (start, end):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ContractError(
+                f"chunk {chunk.id}: its extent ({extent.start}, {extent.end}) is two integers,"
+                f" got {start!r}, {end!r}"
+            )
+    assert isinstance(start, int) and isinstance(end, int)
+    if not 0 <= start <= end <= size:
+        raise ContractError(f"chunk {chunk.id}: its extent [{start}, {end}) is not in {size} bytes")
+    return start, end
 
 
 @dataclass(frozen=True)

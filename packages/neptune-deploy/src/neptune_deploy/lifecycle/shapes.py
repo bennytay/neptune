@@ -57,6 +57,9 @@ def _is_part(tp: Any) -> bool:
 
 
 def _shape(name: str, tp: Any) -> FieldShape:
+    listed = _known_of(tp)
+    if typing.get_origin(listed) is tuple:
+        tp = listed  # a list field is a state of a tuple (root ADR 0061 §4); map the tuple
     if tp is str:
         return FieldShape(name, Shape.LABEL)
     if _is_part(tp):

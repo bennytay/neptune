@@ -35,10 +35,88 @@
       ],
       "type": "object"
     },
+    "Assertion": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_type": {
+          "$ref": "#/$defs/Knowledge_AssertionType"
+        },
+        "author": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "authored_at": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "authored_zone": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifier": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "kind": {
+          "const": "assertion"
+        },
+        "payload": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "rationale": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "retracts": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "schema_version": {
+          "const": 5
+        },
+        "scope": {
+          "$ref": "#/$defs/Knowledge_list_of_RecordId_or_LogicalId"
+        },
+        "signature": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "ticket": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "assertion_type",
+        "author",
+        "authored_at",
+        "authored_zone",
+        "id",
+        "identifier",
+        "kind",
+        "payload",
+        "provenance",
+        "rationale",
+        "retracts",
+        "schema_version",
+        "scope",
+        "signature",
+        "ticket"
+      ],
+      "type": "object"
+    },
     "AssertionKind": {
       "enum": [
         "observed",
         "stated"
+      ]
+    },
+    "AssertionType": {
+      "enum": [
+        "same_identity",
+        "distinct_identity",
+        "accept_baseline",
+        "reject_baseline",
+        "annotate",
+        "retract"
       ]
     },
     "Asset": {
@@ -285,7 +363,7 @@
         },
         "parameters": {
           "items": {
-            "$ref": "#/$defs/DeclaredParameter"
+            "$ref": "#/$defs/CalibrationParameter"
           },
           "type": "array"
         },
@@ -321,6 +399,26 @@
         "subject",
         "valid_from",
         "valid_until"
+      ],
+      "type": "object"
+    },
+    "CalibrationParameter": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "value": {
+          "$ref": "#/$defs/Knowledge_string_or_list_of_number_or_NonFinite"
+        }
+      },
+      "required": [
+        "name",
+        "unit",
+        "value"
       ],
       "type": "object"
     },
@@ -914,26 +1012,6 @@
       ],
       "type": "object"
     },
-    "DeclaredParameter": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "unit": {
-          "$ref": "#/$defs/Knowledge_Unit"
-        },
-        "value": {
-          "$ref": "#/$defs/Knowledge_string_or_list_of_number_or_NonFinite"
-        }
-      },
-      "required": [
-        "name",
-        "unit",
-        "value"
-      ],
-      "type": "object"
-    },
     "DeclaredVersion": {
       "additionalProperties": false,
       "properties": {
@@ -947,88 +1025,6 @@
       "required": [
         "kind",
         "value"
-      ],
-      "type": "object"
-    },
-    "DescriptionExpansion": {
-      "additionalProperties": false,
-      "properties": {
-        "arguments": {
-          "items": {
-            "$ref": "#/$defs/DeclaredParameter"
-          },
-          "type": "array"
-        },
-        "digest": {
-          "$ref": "#/$defs/ContentId"
-        },
-        "id": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "kind": {
-          "const": "description_expansion"
-        },
-        "language": {
-          "type": "string"
-        },
-        "provenance": {
-          "$ref": "#/$defs/Provenance"
-        },
-        "schema_version": {
-          "const": 5
-        },
-        "size": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "arguments",
-        "digest",
-        "id",
-        "kind",
-        "language",
-        "provenance",
-        "schema_version",
-        "size"
-      ],
-      "type": "object"
-    },
-    "DescriptionExtension": {
-      "additionalProperties": false,
-      "properties": {
-        "configuration": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "element": {
-          "type": "string"
-        },
-        "id": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "kind": {
-          "const": "description_extension"
-        },
-        "parameters": {
-          "items": {
-            "$ref": "#/$defs/DeclaredParameter"
-          },
-          "type": "array"
-        },
-        "provenance": {
-          "$ref": "#/$defs/Provenance"
-        },
-        "schema_version": {
-          "const": 5
-        }
-      },
-      "required": [
-        "configuration",
-        "element",
-        "id",
-        "kind",
-        "parameters",
-        "provenance",
-        "schema_version"
       ],
       "type": "object"
     },
@@ -1737,41 +1733,6 @@
       ],
       "type": "object"
     },
-    "HardwareSpecification": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "kind": {
-          "const": "hardware_specification"
-        },
-        "parameters": {
-          "items": {
-            "$ref": "#/$defs/DeclaredParameter"
-          },
-          "type": "array"
-        },
-        "provenance": {
-          "$ref": "#/$defs/Provenance"
-        },
-        "schema_version": {
-          "const": 5
-        },
-        "subject": {
-          "$ref": "#/$defs/RecordId"
-        }
-      },
-      "required": [
-        "id",
-        "kind",
-        "parameters",
-        "provenance",
-        "schema_version",
-        "subject"
-      ],
-      "type": "object"
-    },
     "HashAlgorithm": {
       "enum": [
         "md5",
@@ -2372,6 +2333,107 @@
         "pointer"
       ],
       "type": "object"
+    },
+    "Knowledge_AssertionType": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/AssertionType"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/AssertionType"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Knowledge_AxisConvention": {
       "anyOf": [
@@ -5905,6 +5967,127 @@
         }
       ]
     },
+    "Knowledge_list_of_RecordId_or_LogicalId": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/RecordId"
+                  },
+                  {
+                    "$ref": "#/$defs/LogicalId"
+                  }
+                ]
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/RecordId"
+                        },
+                        {
+                          "$ref": "#/$defs/LogicalId"
+                        }
+                      ]
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Knowledge_list_of_string": {
       "anyOf": [
         {
@@ -8776,15 +8959,6 @@
       "$ref": "#/$defs/ConfigurationValue"
     },
     {
-      "$ref": "#/$defs/HardwareSpecification"
-    },
-    {
-      "$ref": "#/$defs/DescriptionExtension"
-    },
-    {
-      "$ref": "#/$defs/DescriptionExpansion"
-    },
-    {
       "$ref": "#/$defs/Site"
     },
     {
@@ -8849,6 +9023,9 @@
     },
     {
       "$ref": "#/$defs/RiskAssessment"
+    },
+    {
+      "$ref": "#/$defs/Assertion"
     }
   ],
   "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). The package's manifest, receipt and receipt envelope are #/$defs/PackageManifest, #/$defs/IngestReceipt and #/$defs/ReceiptEnvelope (ADR 0022). Generated from neptune.model; the Python readers are stricter (ADR 0021).",

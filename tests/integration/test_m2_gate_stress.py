@@ -167,8 +167,13 @@ class Job:
     def of(self, kind: str) -> list[JobEvent]:
         return [event for event in self.events if event.kind == kind]
 
+    @property
+    def found(self) -> list[IngestFinding]:
+        """The job's findings but snapshot binding's (ADR 0064): its runs bind to nothing here."""
+        return [f for f in self.outcome.findings if not f.code.startswith("neptune.bindings.")]
+
     def codes(self) -> list[str]:
-        return sorted(finding.code for finding in self.outcome.findings)
+        return sorted(finding.code for finding in self.found)
 
     def findings(self, code: str) -> list[IngestFinding]:
         return [finding for finding in self.outcome.findings if finding.code == code]
@@ -255,7 +260,7 @@ def test_a_job_killed_mid_parse_resumes_to_the_clean_package(tmp_path: Path) -> 
     assert napped  # the slow chunk, and every chunk after it, parsed by the resuming job
     clean = Job(root, tmp_path / "clean-home", tmp_path / "clean", registry(), options)
     assert resumed.outcome.package == clean.outcome.package
-    assert resumed.outcome.findings == () and len(resumed.outcome.ingested) == 3
+    assert resumed.found == [] and len(resumed.outcome.ingested) == 3
     assert list((home / "scratch").iterdir()) == [] and list((home / "staging").iterdir()) == []
 
 
@@ -275,7 +280,11 @@ def test_a_crash_inside_the_sandbox_costs_one_chunk_and_the_rerun_retries_only_i
     crashy = first.source("crashy.hostile")
     committed = [e for e in first.of("chunk_committed") if e.details["source"] == crashy]
     assert len(committed) == 4  # the document, a, b and d: one chunk lost, not the source's work
-    assert len(first.outcome.ingested) == 1  # the notes landed
+    assert len(first.outcome.ingested) == 2  # the notes, and crashy salvaged without it (ADR 0069)
+    (partial,) = first.findings("neptune.runtime.source_partial")
+    assert partial.details["lost"] == [
+        {"chunk": crash.details["chunk"], "code": crash.code, "extent": crash.details["extent"]}
+    ]
 
     again = Job(root, tmp_path / "home", tmp_path / "again", registry())
     assert again.outcome.cache.calls.ingest == 2  # the crashed chunk's two attempts, nothing else
@@ -298,7 +307,8 @@ def test_findings_on_half_the_chunks_land_with_everything_else(tmp_path: Path) -
     found = [
         r
         for r in first.package.records
-        if isinstance(r, IngestFinding) and not r.code.startswith("neptune.validate.")
+        if isinstance(r, IngestFinding)
+        and not r.code.startswith(("neptune.validate.", "neptune.bindings."))
     ]
     assert not [r for r in first.package.records if getattr(r, "code", "") == RULE_FAILED]
     assert sorted(f.code for f in found) == ["tally.bad_row"] * 5 and first.codes() == []

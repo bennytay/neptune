@@ -39,7 +39,8 @@ def test_store_imports_only_model_and_identity() -> None:
 
 def test_format_adapters_are_leaves() -> None:
     """A format subpackage sees only the model, identity, the contract and itself (ADR 0008 §4),
-    and the shared structured-text readers, which are no adapter and obey the same rule (ADR 0055).
+    and the shared structured-text readers and ROS message decoders, which are no adapter and
+    obey the same rule (ADR 0055, ADR 0068).
     """
     adapters = Path(neptune.__file__).parent / "adapters"
     formats = [path for path in adapters.iterdir() if path.is_dir() and path.name != "__pycache__"]
@@ -51,6 +52,7 @@ def test_format_adapters_are_leaves() -> None:
             "neptune.identity",
             "neptune.adapters.contract",
             "neptune.adapters.structured",
+            "neptune.adapters.rosmsg",
         )
         for path in package.rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text())):

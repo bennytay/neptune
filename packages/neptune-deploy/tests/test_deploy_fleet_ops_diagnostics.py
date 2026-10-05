@@ -220,7 +220,7 @@ def test_the_result_is_byte_identical_and_the_base_is_never_changed() -> None:
 
 def test_every_record_round_trips_the_compilers_strict_readers() -> None:
     out = mapped()
-    assert PACKAGE_SCHEMA_VERSION == 5
+    assert PACKAGE_SCHEMA_VERSION == 7
     for record in out.records:
         assert RECORD_KINDS[record.kind][1](record.to_json()) == record
 

@@ -21,8 +21,11 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Consumes
 
-- Compiler package schema: `SCHEMA_VERSION = 5` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
-  0050, 0051 and 0039). Alignment records (MVL-82, package-schema 3.0.0) are consumed through the Ledger.
+- Compiler package schema: `SCHEMA_VERSION = 7` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
+  0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the robot-description
+  kinds, root ADR 0039). Alignment records (MVL-82,
+  package-schema 3.0.0) and human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of
+  root ADR 0062) are consumed through the Ledger.
 - Ledger catalog API: `CATALOG_API_VERSION = "pending: pinned when MVL-85 (Ledger catalog API) lands"`.
   Until then Memory codes against the `LedgerReader` Protocol in `neptune_memory/ledger.py` and tests
   against `StubLedger`.

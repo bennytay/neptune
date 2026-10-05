@@ -57,6 +57,7 @@ from neptune_ledger.contract_tests.examples import (
     evidence_anchor,
     materialise,
     reparse,
+    with_changed_body,
     write,
 )
 
@@ -523,11 +524,19 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
 def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
-    """Boundary: the newest worked package (the schema-4 manipulator cell) registers; the same
-    package one version past the registry's newest is a future version. Version 5 (robot
-    descriptions) has no worked package of its own."""
-    cell = materialise("manipulator_cell", tmp_path / "manipulator_cell")
-    assert cell.schema_version <= shipped_registry().latest.version
+    """Boundary: the newest worked package registers; the same package one version past the
+    registry's newest is a future version. No worked example reaches schema 6 (root ADR 0061 §7),
+    so the newest is the manipulator cell with one maintenance event's parts left blank: an
+    ``Unknown`` list, which writes that record, and so the package, at version 6 (root ADR 0061
+    §6). Version 7 (robot descriptions, root ADR 0039) has no worked package of its own."""
+    blank = with_changed_body(
+        "manipulator_cell",
+        "maintenance_event",
+        lambda record: {**record, "parts": {"knowledge": "unknown"}, "schema_version": 6},
+    )
+    cell = write("manipulator_cell", tmp_path / "manipulator_cell", blank)
+    assert cell.schema_version == 6
+    assert cell.schema_version <= shipped_registry().latest.version == SCHEMA_VERSION
     manifest = dict(cell.manifest)
     manifest["schema_version"] = shipped_registry().latest.version + 1
     future = tmp_path / "manipulator_cell-next"
