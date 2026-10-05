@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 
     from mcp.client.session import ClientSession
 
+    from neptune.model.provenance import EvidenceRef
+
 T = TypeVar("T")
 CLAIM = "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a"
 AGV = {"kind": "machine", "declared_id": "asset_tag:agv-114"}
@@ -165,10 +167,10 @@ def test_neptune_query_returns_the_cited_text_and_a_link_per_evidence_ref(stem: 
         f"E{n}" for n in range(1, len(packet.evidence_refs()) + 1)
     ]
     assert [str(link.uri) for link in links(result)] == [
-        mcp_server.evidence_uri(r) for r in packet.evidence_refs()
+        mcp_server.evidence_uri(r, packet.as_of) for r in packet.evidence_refs()
     ]
     for link, ref in zip(links(result), packet.evidence_refs(), strict=True):
-        assert mcp_server.parse_evidence_uri(str(link.uri)) == ref
+        assert mcp_server.parse_evidence_uri(str(link.uri)) == (ref, packet.as_of)
 
 
 def test_inferred_items_stay_marked_through_the_tool() -> None:
@@ -269,7 +271,7 @@ def test_resources_are_addressed_by_link_never_enumerated() -> None:
 
     resources, templates = run(golden_client(), use)
     assert resources == []
-    assert [t.uriTemplate for t in templates] == ["neptune://evidence/{ref}"]
+    assert [t.uriTemplate for t in templates] == ["neptune://evidence/{ref}{?as_of}"]
 
 
 def test_the_same_call_twice_returns_identical_content() -> None:
@@ -412,7 +414,10 @@ def test_evidence_uris_round_trip_and_refuse_everything_else() -> None:
     uri = mcp_server.evidence_uri(ref)
     assert uri.startswith("neptune://evidence/")
     assert "=" not in uri
-    assert mcp_server.parse_evidence_uri(uri) == ref
+    assert mcp_server.parse_evidence_uri(uri) == (ref, None)
+    pinned = mcp_server.evidence_uri(ref, 5)
+    assert pinned == uri + "?as_of=5"
+    assert mcp_server.parse_evidence_uri(pinned) == (ref, 5)
     token = uri.removeprefix("neptune://evidence/")
     bad = [
         "",
@@ -425,11 +430,75 @@ def test_evidence_uris_round_trip_and_refuse_everything_else() -> None:
         "neptune://evidence/" + "!!!!",
         "neptune://evidence/" + "A" * 20000,
         "neptune://evidence/" + token.replace("A", "B", 1),
+        uri + "?as_of=",
+        uri + "?as_of=-1",
+        uri + "?as_of=05",
+        uri + "?as_of=1&as_of=2",
+        uri + "?as_of=1.5",
+        uri + "?other=1",
+        uri + "?as_of=\u0665",
     ]
     for candidate in bad:
         with pytest.raises(SdkError) as raised:
             mcp_server.parse_evidence_uri(candidate)
         assert raised.value.code is ErrorCode.INVALID_ARGUMENT, candidate[:40]
+
+
+def test_reading_a_link_hydrates_at_the_snapshot_the_answer_was_made_at() -> None:
+    item = next(i for i in golden_packet("q04").items if isinstance(i, EvidenceItem))
+    asked: list[int | None] = []
+
+    class Recording(StubEngine):
+        def hydrate(self, evidence: EvidenceRef, *, as_of: int | None) -> Any:
+            asked.append(as_of)
+            return super().hydrate(evidence, as_of=as_of)
+
+    engine = Recording(
+        {query_id(golden_query("q04")): golden_packet("q04")},
+        {item.evidence: unresolvable(item.evidence)},
+    )
+
+    async def use(session: ClientSession) -> None:
+        answer = await session.call_tool(
+            "neptune_why", {"claim_id": CLAIM, "include_inferred": False}
+        )
+        for link in links(answer):
+            if mcp_server.parse_evidence_uri(str(link.uri))[0] == item.evidence:
+                await session.read_resource(link.uri)
+
+    run(AsyncClient(engine), use)
+    assert asked == [golden_packet("q04").as_of]
+
+
+def test_mcp_why_and_diff_build_the_queries_the_sdk_builds() -> None:
+    from neptune_context.sdk import diff_query, why_query
+
+    why = mcp_server.query_from_arguments(
+        "neptune_why", {"claim_id": CLAIM, "include_inferred": True, "as_of": 7, "max_items": 3}
+    )
+    assert why == why_query(CLAIM, include_inferred=True, as_of=7, budget=Budget(items=3))
+    assert mcp_server.query_from_arguments(
+        "neptune_why", {"claim_id": CLAIM, "include_inferred": False}
+    ) == why_query(CLAIM, include_inferred=False)
+    diff = mcp_server.query_from_arguments(
+        "neptune_diff",
+        {"subject": AGV, "before": 1, "after": 2, "include_inferred": False, "as_of": 9},
+    )
+    assert diff == diff_query(
+        Subject("machine", "asset_tag:agv-114"), 1, 2, include_inferred=False, as_of=9
+    )
+
+
+def test_each_tool_schema_carries_only_the_definitions_it_reaches() -> None:
+    schemas = mcp_server.input_schemas()
+    hydrate = set(schemas["neptune_hydrate"]["$defs"])
+    assert "EvidenceRef" in hydrate
+    assert not hydrate & {"Query", "Subject", "Budget", "During"}
+    assert set(schemas["neptune_why"]["$defs"]) == {"ClaimId"}
+    assert {"Query", "Budget", "Text", "Explain"} <= set(schemas["neptune_query"]["$defs"])
+    for schema in schemas.values():  # every reference resolves inside its own schema
+        refs = json.dumps(schema).split('"$ref": "#/$defs/')[1:]
+        assert {r.split('"')[0] for r in refs} <= set(schema["$defs"])
 
 
 def test_reading_a_bad_resource_is_a_protocol_error() -> None:

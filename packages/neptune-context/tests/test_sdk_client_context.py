@@ -272,11 +272,18 @@ def test_the_async_client_retries_the_same_way_and_hydrate_too() -> None:
     assert engine.calls == 2
 
 
-def test_local_clients_do_not_retry_unless_asked() -> None:
+def test_local_clients_do_not_retry_unless_asked_and_remote_ones_do() -> None:
+    for make in (Client, Client.local):
+        engine = ScriptedEngine(golden_stub(), [UNAVAILABLE])
+        assert _code(lambda: make(engine).query(golden_query("q01"))) is ErrorCode.UNAVAILABLE  # noqa: B023
+        assert engine.calls == 1
     engine = ScriptedEngine(golden_stub(), [UNAVAILABLE])
-    assert _code(lambda: Client.local(engine).query(golden_query("q01"))) is ErrorCode.UNAVAILABLE
-    assert engine.calls == 1
+    asked = Client(engine, retry=RetryPolicy(attempts=2), sleep=_no_sleep)
+    assert asked.query(golden_query("q01")) == golden_packet("q01")
     assert NO_RETRY.attempts == 1
+    assert Client("https://example.org")._retry == RetryPolicy()
+    assert AsyncClient("https://example.org")._retry == RetryPolicy()
+    assert AsyncClient(golden_stub())._retry == NO_RETRY
 
 
 def test_retry_policy_bounds() -> None:
@@ -351,6 +358,16 @@ def test_the_stub_loads_the_golden_directory() -> None:
     from context_packet_goldens import PACKETS
 
     assert StubEngine.from_directory(PACKETS).query_ids == golden_stub().query_ids
+
+
+def test_errors_survive_pickling_and_copying() -> None:
+    import copy
+    import pickle
+
+    error = SdkError(ErrorCode.TIMEOUT, "slow")
+    for clone in (pickle.loads(pickle.dumps(error)), copy.copy(error), copy.deepcopy(error)):
+        assert clone.to_json() == error.to_json()
+        assert str(clone) == "timeout: slow"
 
 
 def test_error_messages_are_bounded_and_structured() -> None:

@@ -52,7 +52,10 @@ class SdkError(Exception):
         self.code = code
         self.message = bounded(message)
         self.findings = findings
-        super().__init__(f"{code}: {self.message}")
+        super().__init__(code, self.message)
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.message}"
 
     @property
     def retryable(self) -> bool:

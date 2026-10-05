@@ -38,16 +38,18 @@ inferences may enter its context will take the default, and the default becomes 
    packet JSON out) and `POST /v1/hydrate` (`{"evidence", "as_of"?}` in, `Resolution` JSON out); non-200
    answers carry `{"error": {"code", "message", "findings"}}`. `HttpEngine` uses the standard library (no new
    dependency for it), accepts only `http(s)` URLs without credentials, query or fragment, never follows a
-   redirect, bounds responses at the packet maximum (64 MiB) and reads them with the strict packet decoder.
+   redirect, ignores proxy variables in the environment (a proxy would see the token), bounds responses at the
+   packet maximum (64 MiB), enforces `timeout` as a deadline on the whole answer (not per socket wait), maps
+   every transport failure to `unavailable` or `timeout`, and reads answers with the strict packet decoder.
    Servers are Platform's (X2); this package defines only what both ends share.
 5. **Errors, retries, auth.** Every failure is an `SdkError` with an `ErrorCode` (`invalid_argument`,
    `query_refused`, `unauthenticated`, `forbidden`, `not_found`, `unavailable`, `timeout`, `invalid_response`,
    `engine_error`), a bounded message and `retryable` (`unavailable` and `timeout` only). Every call is a
    read, hence idempotent: only retryable failures are retried, under `RetryPolicy` (default 3 tries, 0.2 s
-   then 0.8 s, no jitter, injectable sleep); a local client does not retry unless asked. Remote auth is a
+   then 0.8 s, no jitter, injectable sleep); a client over an in-process engine does not retry unless given a policy. Remote auth is a
    bearer token (Platform X2 issues it) sent only over `https` or to a loopback host; local mode has an
    implicit tenant and refuses a token. A token is never in a `repr`, a message or a log line.
-6. **MCP server.** Built on the official `mcp` Python SDK (`mcp>=1.2,<2`, low-level `Server`), over an
+6. **MCP server.** Built on the official `mcp` Python SDK (`mcp>=1.12,<2`, low-level `Server`), over an
    `AsyncClient`: `build_server(client)`. Transport: stdio first (what Claude Code and other hosts spawn);
    `python -m neptune_context.mcp --url U | --packets DIR`, token from `$NEPTUNE_TOKEN`. The low-level server
    is used rather than `FastMCP` because tool schemas must be the contract's own JSON Schema, not one
@@ -63,8 +65,8 @@ inferences may enter its context will take the default, and the default becomes 
    lists, `same_as_depth: 0`) may be left out; the strict query reader still decides everything else.
 8. **Answers.** A packet answers as `render_text` (ADR 0003 §7: `[E1]` keys, `Evidence:` footer, `INFERRED`
    marks) followed by one `resource_link` per evidence ref, `neptune://evidence/<base64url of the ref's
-   canonical JSON>`, at most 100 per answer (the footer lists all; the text says how many links there are).
-   Reading a link hydrates it. One URI per ref: padded, re-ordered or aliased forms are refused. Resources are
+   canonical JSON>?as_of=<the answer's transaction>`, at most 100 per answer (the footer lists all; the text says how many links there are).
+   Reading a link hydrates it at the transaction the answer was made at. One URI per ref: padded, re-ordered or aliased forms are refused. Resources are
    never enumerated. Failures are tool errors (`isError`) whose text is the SDK error as JSON, so an agent
    reads `code`, `retryable` and the query findings instead of prose. Server `instructions` tell the agent to
    cite `[E]` keys, present inferences as inferences, and treat "Not answered" as a gap, not a no.

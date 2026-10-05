@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from functools import cache
 from typing import TYPE_CHECKING
 
@@ -11,7 +12,9 @@ from neptune_ledger.api.types import CatalogFinding
 from neptune_memory.schema.interval import ledger_tx
 
 from context_packet_goldens import PACKETS, QUERIES
+from neptune.identity.canonical_json import dumps
 from neptune.model.knowledge import Known, NotCovered
+from neptune.model.provenance import evidence_ref_from_json
 from neptune_context.packets.codec import decode
 from neptune_context.packets.model import ContextPacket
 from neptune_context.query import Query, loads, query_id
@@ -114,3 +117,45 @@ class LyingEngine:
 
 
 UNAVAILABLE = SdkError(ErrorCode.UNAVAILABLE, "down")
+
+
+# The server half of the wire (ADR 0004 §4), for the tests' loopback server: the package ships only
+# the client's half, since engines behind the wire are Platform's.
+_STATUS_BY_CODE = {
+    ErrorCode.INVALID_ARGUMENT: 400,
+    ErrorCode.QUERY_REFUSED: 422,
+    ErrorCode.UNAUTHENTICATED: 401,
+    ErrorCode.FORBIDDEN: 403,
+    ErrorCode.NOT_FOUND: 404,
+    ErrorCode.UNAVAILABLE: 503,
+    ErrorCode.TIMEOUT: 504,
+    ErrorCode.INVALID_RESPONSE: 502,
+    ErrorCode.ENGINE_ERROR: 500,
+}
+
+
+def status_for(error: SdkError) -> int:
+    return _STATUS_BY_CODE[error.code]
+
+
+def error_body(error: SdkError) -> bytes:
+    return dumps({"error": error.to_json()})
+
+
+def parse_hydrate_request(body: bytes) -> tuple[EvidenceRef, int | None]:
+    """Read a hydrate request strictly; ``SdkError(INVALID_ARGUMENT)`` on any defect."""
+    try:
+        document = json.loads(body.decode("utf-8"))
+        if not isinstance(document, dict) or not {"evidence"} <= set(document) <= {
+            "as_of",
+            "evidence",
+        }:
+            raise ValueError("a hydrate request has evidence and, optionally, as_of")
+        as_of = document.get("as_of")
+        if as_of is not None and (
+            isinstance(as_of, bool) or not isinstance(as_of, int) or not 0 <= as_of < 2**63
+        ):
+            raise ValueError("as_of is a Ledger transaction or null")
+        return evidence_ref_from_json(document["evidence"]), as_of
+    except (ValueError, TypeError, RecursionError) as error:
+        raise SdkError(ErrorCode.INVALID_ARGUMENT, f"bad hydrate request: {error}") from error

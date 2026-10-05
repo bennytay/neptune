@@ -8,7 +8,8 @@ read strictly. A token is never part of ``repr``, an error message or a log line
 
 from __future__ import annotations
 
-import socket
+import http.client
+import time
 import urllib.error
 import urllib.request
 from typing import TYPE_CHECKING, Any, Final
@@ -30,6 +31,36 @@ if TYPE_CHECKING:
 
 LOOPBACK: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 DEFAULT_TIMEOUT_S: Final = 30.0
+
+
+_TIMED_OUT: Final = SdkError(ErrorCode.TIMEOUT, "the engine did not answer in time")
+_CHUNK: Final = 64 * 1024
+
+
+def _unreachable(reason: object) -> SdkError:
+    return SdkError(
+        ErrorCode.UNAVAILABLE, f"the engine is unreachable or broke the connection: {reason}"
+    )
+
+
+def _read(stream: Any, limit: int, deadline: float) -> bytes:
+    """Up to ``limit`` bytes of ``stream`` by ``deadline``; ``timeout`` when it is not all there.
+
+    The socket timeout bounds each wait, not the whole answer, so a server that drips one byte per
+    wait is cut off here.
+    """
+    chunks: list[bytes] = []
+    size = 0
+    take = getattr(stream, "read1", stream.read)  # read1 returns after one socket wait
+    while size < limit:
+        if time.monotonic() > deadline:
+            raise _TIMED_OUT
+        chunk = take(min(_CHUNK, limit - size))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    return b"".join(chunks)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -72,7 +103,9 @@ class HttpEngine:
         self._base = _check_url(url, token is not None)
         self._token = token
         self._timeout = timeout
-        self._opener = urllib.request.build_opener(_NoRedirect)
+        # No proxies from the environment: the caller named this engine, and a proxy would see a
+        # plaintext token sent to a loopback host.
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
     def __repr__(self) -> str:
         return f"HttpEngine({self._base!r}, token={'set' if self._token else None})"
@@ -89,21 +122,27 @@ class HttpEngine:
         request = urllib.request.Request(
             self._base + path, data=body, headers=headers, method="POST"
         )
+        deadline = time.monotonic() + self._timeout
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
-                data: bytes = response.read(wire.MAX_RESPONSE_BYTES)
+                data = _read(response, wire.MAX_RESPONSE_BYTES, deadline)
         except urllib.error.HTTPError as error:
-            raise wire.error_from_status(error.code, error.read(wire.MAX_REQUEST_BYTES)) from None
+            with error:
+                try:
+                    detail = _read(error, wire.MAX_REQUEST_BYTES, deadline)
+                except (OSError, http.client.HTTPException, SdkError):
+                    detail = b""
+            raise wire.error_from_status(error.code, detail) from None
+        except SdkError:
+            raise
         except TimeoutError:
-            raise SdkError(ErrorCode.TIMEOUT, "the engine did not answer in time") from None
+            raise _TIMED_OUT from None
         except urllib.error.URLError as error:
-            if isinstance(error.reason, TimeoutError | socket.timeout):
-                raise SdkError(ErrorCode.TIMEOUT, "the engine did not answer in time") from None
-            raise SdkError(
-                ErrorCode.UNAVAILABLE, f"the engine is unreachable: {error.reason}"
-            ) from None
-        except OSError as error:
-            raise SdkError(ErrorCode.UNAVAILABLE, f"the engine is unreachable: {error}") from None
+            if isinstance(error.reason, TimeoutError):
+                raise _TIMED_OUT from None
+            raise _unreachable(error.reason) from None
+        except (OSError, http.client.HTTPException) as error:
+            raise _unreachable(error) from None
         if len(data) >= wire.MAX_RESPONSE_BYTES:
             raise SdkError(ErrorCode.INVALID_RESPONSE, "the engine's answer is too large")
         return data

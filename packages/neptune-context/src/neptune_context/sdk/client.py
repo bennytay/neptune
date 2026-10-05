@@ -191,14 +191,15 @@ def _split_target(
 
 
 class Client:
-    """Synchronous client. ``target`` is an engine URL or an in-process ``Engine``."""
+    """Synchronous client. ``target`` is an engine URL (retries by default) or an in-process
+    ``Engine`` (no retries unless you pass a ``RetryPolicy``)."""
 
     def __init__(
         self,
         target: str | Engine,
         *,
         token: str | None = None,
-        retry: RetryPolicy = RetryPolicy(),  # noqa: B008  (frozen)
+        retry: RetryPolicy | None = None,
         timeout: float = DEFAULT_TIMEOUT_S,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -208,11 +209,11 @@ class Client:
             if isinstance(resolved, str)
             else _sync(resolved)
         )
-        self._retry = retry
+        self._retry = retry or (RetryPolicy() if isinstance(resolved, str) else NO_RETRY)
         self._sleep = sleep
 
     @classmethod
-    def local(cls, engine: Engine, *, retry: RetryPolicy = NO_RETRY) -> Client:
+    def local(cls, engine: Engine, *, retry: RetryPolicy | None = None) -> Client:
         """A client over an in-process engine; no network, so no retries unless you ask."""
         return cls(engine, retry=retry)
 
@@ -298,7 +299,7 @@ class AsyncClient:
         target: str | Engine | AsyncEngine,
         *,
         token: str | None = None,
-        retry: RetryPolicy = RetryPolicy(),  # noqa: B008  (frozen)
+        retry: RetryPolicy | None = None,
         timeout: float = DEFAULT_TIMEOUT_S,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -309,11 +310,13 @@ class AsyncClient:
             self._engine = resolved  # type: ignore[assignment]
         else:
             self._engine = to_async(resolved)  # type: ignore[arg-type]
-        self._retry = retry
+        self._retry = retry or (RetryPolicy() if isinstance(resolved, str) else NO_RETRY)
         self._sleep = sleep
 
     @classmethod
-    def local(cls, engine: Engine | AsyncEngine, *, retry: RetryPolicy = NO_RETRY) -> AsyncClient:
+    def local(
+        cls, engine: Engine | AsyncEngine, *, retry: RetryPolicy | None = None
+    ) -> AsyncClient:
         return cls(engine, retry=retry)
 
     async def _call(self, call: Callable[[], Awaitable[T]], *, idempotent: bool = True) -> T:

@@ -26,8 +26,10 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
 - Errors are `SdkError(code, message, findings)` with `ErrorCode`: `invalid_argument`, `query_refused`,
   `unauthenticated`, `forbidden`, `not_found`, `unavailable`, `timeout`, `invalid_response`, `engine_error`.
 - Every call is a read, so `unavailable` and `timeout` are retried under `RetryPolicy` (default 3 tries,
-  0.2 s then 0.8 s; deterministic, no jitter). Nothing else is retried. `Client.local(engine)` does not retry.
-- A token is sent only over `https` or to a loopback host, never followed through a redirect, never printed.
+  0.2 s then 0.8 s; deterministic, no jitter). Nothing else is retried. A client over an in-process engine
+  does not retry unless you pass a `RetryPolicy`.
+- A token is sent only over `https` or to a loopback host, never followed through a redirect or a proxy,
+  never printed. `timeout` bounds the whole answer.
 - Build against `StubEngine.from_directory(Path("tests/golden/packets"))` before the engine (C2) exists: it
   answers exactly the queries it has recorded packets for and says `not_found` for anything else.
 
@@ -267,7 +269,7 @@ claude mcp add neptune -- python -m neptune_context.mcp --url https://neptune.ex
 | `neptune_hydrate` | what the Ledger knows about a cited source | `evidence`, `as_of` |
 
 - An answer is the packet as cited text (`[E1]` keys, an `Evidence:` footer, every inferred item marked
-  `INFERRED`) plus one resource link per evidence ref; reading `neptune://evidence/<token>` hydrates it.
+  `INFERRED`) plus one resource link per evidence ref; reading `neptune://evidence/<token>?as_of=N` hydrates it at the answer's snapshot.
 - A failure is a tool error whose text is the SDK error as JSON (`code`, `message`, `retryable`, `findings`).
 - The server holds no retrieval logic: it calls an `AsyncClient`. An in-process engine plugs in as
   `build_server(AsyncClient(engine))`; retrieval channels added later change the query schema the tools

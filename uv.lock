@@ -937,7 +937,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mcp", specifier = ">=1.2,<2" },
+    { name = "mcp", specifier = ">=1.12,<2" },
     { name = "neptune", editable = "." },
     { name = "neptune-ledger", editable = "packages/neptune-ledger" },
     { name = "neptune-memory", editable = "packages/neptune-memory" },

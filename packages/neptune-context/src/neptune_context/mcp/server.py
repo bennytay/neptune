@@ -19,6 +19,7 @@ import base64
 import binascii
 import copy
 import json
+from functools import cache
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from mcp import types
@@ -97,6 +98,7 @@ _EXAMPLE_QUERY: Final = {
 # --- Schemas, derived from the query contract so they cannot drift from it ---------------------
 
 
+@cache
 def _query_defs() -> dict[str, Any]:
     """The query schema's definitions, relaxed for an agent: ``include_inferred`` is a tool
     parameter, and members with one fixed default (version, ``head``, empty lists, depth 0) may be
@@ -144,16 +146,23 @@ def _evidence_defs() -> dict[str, Any]:
     return {names[n]: _renamed(source[n], names) for n in sorted(wanted)}
 
 
-def _object(properties: dict[str, Any], required: list[str], defs: bool = False) -> dict[str, Any]:
-    schema: dict[str, Any] = {
+def _object(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    """A tool's input schema, carrying only the definitions its own properties reach."""
+    available = _query_defs()
+    wanted: set[str] = set()
+    todo = list(_refs(properties))
+    while todo:
+        name = todo.pop()
+        if name not in wanted:
+            wanted.add(name)
+            todo.extend(_refs(available[name]))
+    return {
         "type": "object",
         "additionalProperties": False,
         "properties": properties,
         "required": sorted(required),
+        "$defs": copy.deepcopy({name: available[name] for name in sorted(wanted)}),
     }
-    if defs:
-        schema["$defs"] = _query_defs()
-    return schema
 
 
 def input_schemas() -> dict[str, dict[str, Any]]:
@@ -165,7 +174,6 @@ def input_schemas() -> dict[str, dict[str, Any]]:
                 "query": {"$ref": "#/$defs/Query"},
             },
             ["include_inferred", "query"],
-            defs=True,
         ),
         TOOL_WHY: _object(
             {
@@ -175,7 +183,6 @@ def input_schemas() -> dict[str, dict[str, Any]]:
                 "max_items": {"type": "integer", "minimum": 1, "maximum": 10000},
             },
             ["claim_id", "include_inferred"],
-            defs=True,
         ),
         TOOL_DIFF: _object(
             {
@@ -187,7 +194,6 @@ def input_schemas() -> dict[str, dict[str, Any]]:
                 "max_items": {"type": "integer", "minimum": 1, "maximum": 10000},
             },
             ["subject", "before", "after", "include_inferred"],
-            defs=True,
         ),
         TOOL_HYDRATE: _object(
             {
@@ -200,7 +206,6 @@ def input_schemas() -> dict[str, dict[str, Any]]:
                 },
             },
             ["evidence"],
-            defs=True,
         ),
     }
 
@@ -248,26 +253,33 @@ def _tools() -> list[types.Tool]:
 # --- Evidence resources ------------------------------------------------------------------------
 
 
-def evidence_uri(ref: EvidenceRef) -> str:
-    """The resource URI of ``ref``: its canonical JSON, base64url without padding."""
+def evidence_uri(ref: EvidenceRef, as_of: int | None = None) -> str:
+    """The resource URI of ``ref``: its canonical JSON, base64url without padding, and the
+    transaction of the answer that cited it (``?as_of=N``), so reading it resolves at that
+    snapshot."""
     token = base64.urlsafe_b64encode(dumps(ref.to_json())).rstrip(b"=").decode("ascii")
-    return EVIDENCE_SCHEME + token
+    return EVIDENCE_SCHEME + token + ("" if as_of is None else f"?as_of={as_of}")
 
 
-def parse_evidence_uri(uri: str) -> EvidenceRef:
-    """The evidence ref a URI names; raises ``SdkError(INVALID_ARGUMENT)`` for anything else."""
+def parse_evidence_uri(uri: str) -> tuple[EvidenceRef, int | None]:
+    """The evidence ref and snapshot a URI names; ``invalid_argument`` for anything else."""
     bad = SdkError(ErrorCode.INVALID_ARGUMENT, "not a neptune evidence URI")
     if len(uri) > MAX_URI_CHARS or not uri.startswith(EVIDENCE_SCHEME):
         raise bad
-    token = uri[len(EVIDENCE_SCHEME) :]
+    token, _, query = uri[len(EVIDENCE_SCHEME) :].partition("?")
+    as_of: int | None = None
+    if query:
+        if not query.startswith("as_of=") or not query[6:].isascii() or not query[6:].isdigit():
+            raise bad
+        as_of = int(query[6:])
     try:
         raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
         ref = evidence_ref_from_json(json.loads(raw.decode("utf-8")))
     except (binascii.Error, ValueError, TypeError, RecursionError):
         raise bad from None
-    if evidence_uri(ref) != uri:  # one URI per ref: refuse padded, re-ordered or aliased forms
+    if evidence_uri(ref, as_of) != uri:  # one URI per ref: refuse padded, re-ordered, aliased forms
         raise bad
-    return ref
+    return ref, as_of
 
 
 # --- Arguments ---------------------------------------------------------------------------------
@@ -392,7 +404,7 @@ def packet_content(packet: ContextPacket) -> list[types.ContentBlock]:
         blocks.append(
             types.ResourceLink(
                 type="resource_link",
-                uri=evidence_uri(ref),  # type: ignore[arg-type]
+                uri=evidence_uri(ref, packet.as_of),  # type: ignore[arg-type]
                 name=f"E{number}",
                 description=f"Source behind [E{number}]; reading it resolves it via the Ledger.",
                 mimeType="application/json",
@@ -450,7 +462,7 @@ def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]
     async def list_templates() -> list[types.ResourceTemplate]:
         return [
             types.ResourceTemplate(
-                uriTemplate=EVIDENCE_SCHEME + "{ref}",
+                uriTemplate=EVIDENCE_SCHEME + "{ref}{?as_of}",
                 name="evidence",
                 description="One cited source, resolved through the Ledger. Take the URI from a "
                 "resource link in an answer.",
@@ -460,7 +472,8 @@ def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]
 
     @server.read_resource()  # type: ignore[no-untyped-call,untyped-decorator]
     async def read_resource(uri: Any) -> list[ReadResourceContents]:
-        resolution = await client.hydrate(parse_evidence_uri(str(uri)))
+        ref, as_of = parse_evidence_uri(str(uri))
+        resolution = await client.hydrate(ref, as_of=as_of)
         return [
             ReadResourceContents(
                 content=ledger_dumps(resolution).decode("utf-8"), mime_type="application/json"

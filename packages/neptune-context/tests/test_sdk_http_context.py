@@ -26,7 +26,16 @@ from neptune_context.sdk import (
     StubEngine,
     wire,
 )
-from sdk_testing_context import STEMS, golden_packet, golden_query, golden_stub, unresolvable
+from sdk_testing_context import (
+    STEMS,
+    error_body,
+    golden_packet,
+    golden_query,
+    golden_stub,
+    parse_hydrate_request,
+    status_for,
+    unresolvable,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -78,10 +87,10 @@ def stub_server(stub: StubEngine) -> Callable[[str, bytes, _Seen], Reply]:
                 assert isinstance(query, Query)
                 return 200, canonical_bytes(stub.query(query))
             if path == wire.HYDRATE_PATH:
-                ref, as_of = wire.parse_hydrate_request(body)
+                ref, as_of = parse_hydrate_request(body)
                 return 200, ledger_dumps(stub.hydrate(ref, as_of=as_of))
         except SdkError as error:
-            return wire.status_for(error), wire.error_body(error)
+            return status_for(error), error_body(error)
         return 404, b""
 
     return respond
@@ -147,7 +156,7 @@ def test_status_codes_map_to_structured_errors() -> None:
 
 
 def test_a_refused_query_answer_carries_its_findings_back() -> None:
-    reply = wire.error_body(SdkError(ErrorCode.QUERY_REFUSED, "no", findings=_findings()))
+    reply = error_body(SdkError(ErrorCode.QUERY_REFUSED, "no", findings=_findings()))
     with serve(lambda *_: (422, reply)) as (url, _), pytest.raises(SdkError) as raised:
         Client(url).query(golden_query("q01"))
     assert raised.value.code is ErrorCode.QUERY_REFUSED
@@ -301,8 +310,8 @@ def test_a_base_path_is_kept() -> None:
 def test_hydrate_request_parsing_is_strict() -> None:
     item = next(i for i in golden_packet("q04").items if isinstance(i, EvidenceItem))
     good = wire.hydrate_request(item.evidence, 7)
-    assert wire.parse_hydrate_request(good) == (item.evidence, 7)
-    assert wire.parse_hydrate_request(wire.hydrate_request(item.evidence, None))[1] is None
+    assert parse_hydrate_request(good) == (item.evidence, 7)
+    assert parse_hydrate_request(wire.hydrate_request(item.evidence, None))[1] is None
     bad = [
         b"",
         b"[]",
@@ -315,7 +324,7 @@ def test_hydrate_request_parsing_is_strict() -> None:
     ]
     for body in bad:
         with pytest.raises(SdkError) as raised:
-            wire.parse_hydrate_request(body)
+            parse_hydrate_request(body)
         assert raised.value.code is ErrorCode.INVALID_ARGUMENT, body
 
 
@@ -326,3 +335,78 @@ def test_a_query_unknown_to_the_server_comes_back_as_not_found() -> None:
     with serve(stub_server(golden_stub())) as (url, _), pytest.raises(SdkError) as raised:
         Client(url).query(unknown)
     assert raised.value.code is ErrorCode.NOT_FOUND
+
+
+def _raw_server(script: Callable[[Any], None]) -> Iterator[str]:
+    import socket
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def run() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            connection.recv(65536)
+            script(connection)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        listener.close()
+        thread.join(5)
+
+
+def test_a_malformed_status_line_is_unavailable_and_retried() -> None:
+    for script in (
+        lambda c: c.sendall(b"garbage\r\n\r\n"),
+        lambda c: c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 500\r\n\r\nshort"),  # truncated
+        lambda c: None,  # closes without answering
+    ):
+        for url in _raw_server(script):
+            with pytest.raises(SdkError) as raised:
+                Client(url, retry=RetryPolicy(attempts=1)).query(golden_query("q01"))
+            assert raised.value.code is ErrorCode.UNAVAILABLE
+            assert raised.value.retryable
+
+
+def test_a_connection_reset_while_reading_an_error_body_keeps_the_status() -> None:
+    def script(c: Any) -> None:
+        c.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 500\r\n\r\npartial")
+
+    for url in _raw_server(script):
+        with pytest.raises(SdkError) as raised:
+            Client(url, retry=RetryPolicy(attempts=1)).query(golden_query("q01"))
+        assert raised.value.code is ErrorCode.UNAVAILABLE
+
+
+def test_a_server_that_drips_bytes_hits_the_total_deadline() -> None:
+    import time
+
+    def script(c: Any) -> None:
+        c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n")
+        try:
+            for _ in range(200):
+                c.sendall(b"x" * 100)
+                time.sleep(0.05)
+        except OSError:
+            pass
+
+    for url in _raw_server(script):
+        started = time.monotonic()
+        with pytest.raises(SdkError) as raised:
+            Client(url, timeout=0.5, retry=RetryPolicy(attempts=1)).query(golden_query("q01"))
+        assert raised.value.code is ErrorCode.TIMEOUT
+        assert time.monotonic() - started < 3
+
+
+def test_environment_proxies_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    with serve(lambda *_: (200, b"")) as (proxy, proxy_seen):
+        monkeypatch.setenv("http_proxy", proxy)
+        monkeypatch.setenv("HTTP_PROXY", proxy)
+        with serve(stub_server(golden_stub())) as (url, seen):
+            Client(url, token="tok").query(golden_query("q01"))
+    assert proxy_seen.requests == []
+    assert seen.requests[0]["headers"]["Authorization"] == "Bearer tok"
