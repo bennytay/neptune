@@ -484,6 +484,65 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
+      "id": "claim:sha256:1534998354bc0be0bc964b0617521e9087bfa478a815c813c1ce53b0698d63b3",
+      "object": {
+        "kind": "node",
+        "node_id": "px4.sys_uuid:000200000000343233345117003a0027",
+        "node_type": "machine"
+      },
+      "predicate": "same_as",
+      "provenance": {
+        "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "consolidator_id": "memory.identity",
+        "consolidator_version": "2",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "column": 2,
+                "column_name": "px4_sys_uuid",
+                "kind": "row_cell",
+                "row": 1
+              }
+            ],
+            "source": "sha256:1c5252870c12502a0b48afb6e30c771a9e46597543a262c8f8b4ba9ae1e7f5a0"
+          },
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 1
+              }
+            ],
+            "source": "sha256:1c5252870c12502a0b48afb6e30c771a9e46597543a262c8f8b4ba9ae1e7f5a0"
+          }
+        ],
+        "records": [
+          "rec:sha256:3d7bec033544371d2f320bdfaa2ea9f5559d5ee451659c1313d783af07f6241f",
+          "rec:sha256:f2127e432d9188b687c02c15faffe772ff89520ea3fed1884a1f943ea7700904"
+        ]
+      },
+      "recorded_at": 3,
+      "subject": {
+        "kind": "node",
+        "node_id": "asset-tag:UAV-0042",
+        "node_type": "machine"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": "open",
+        "start": {
+          "domain_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
+          "ticks": 1790762400
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
       "id": "claim:sha256:1b635d30f06962626b3b64caea462becbcc5aaaa5c6975d1e153036fa6e72730",
       "object": {
         "kind": "node",
@@ -518,64 +577,6 @@
         "node_type": "run"
       },
       "superseded_at": 4,
-      "supersedes": [],
-      "valid": {
-        "end": "open",
-        "start": {
-          "domain_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
-          "ticks": 1790762400
-        }
-      }
-    },
-    {
-      "assertion_kind": "stated",
-      "confidence": {
-        "knowledge": "not_applicable"
-      },
-      "id": "claim:sha256:37b902a316e062993ca5e63a47c53cdb2d50b51d6b88c622850729422d9b6be6",
-      "object": {
-        "kind": "node",
-        "node_id": "px4.sys_uuid:000200000000343233345117003a0027",
-        "node_type": "machine"
-      },
-      "predicate": "same_as",
-      "provenance": {
-        "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-        "consolidator_id": "memory.identity",
-        "consolidator_version": "2",
-        "evidence": [
-          {
-            "locator": [
-              {
-                "column": 2,
-                "column_name": "px4_sys_uuid",
-                "kind": "row_cell",
-                "row": 1
-              }
-            ],
-            "source": "sha256:1c5252870c12502a0b48afb6e30c771a9e46597543a262c8f8b4ba9ae1e7f5a0"
-          },
-          {
-            "locator": [
-              {
-                "kind": "row",
-                "row": 1
-              }
-            ],
-            "source": "sha256:1c5252870c12502a0b48afb6e30c771a9e46597543a262c8f8b4ba9ae1e7f5a0"
-          }
-        ],
-        "records": [
-          "rec:sha256:3d7bec033544371d2f320bdfaa2ea9f5559d5ee451659c1313d783af07f6241f"
-        ]
-      },
-      "recorded_at": 3,
-      "subject": {
-        "kind": "node",
-        "node_id": "asset-tag:UAV-0042",
-        "node_type": "machine"
-      },
-      "superseded_at": "open",
       "supersedes": [],
       "valid": {
         "end": "open",

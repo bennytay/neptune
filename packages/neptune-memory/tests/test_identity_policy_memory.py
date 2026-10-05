@@ -95,7 +95,9 @@ def test_drone_co_declared_identity_link_is_same_as_citing_the_register_row() ->
     assert claim.subject == node_ref(MACHINE, DRONE_TAG)  # lower logical id in canonical order
     assert claim.object == node_ref(MACHINE, DRONE_LOG)
     assert claim.assertion_kind is STATED  # a register row is what someone stated
-    assert claim.provenance.records == (DRONE_LINK["id"],)
+    # No window stated: it holds from the subject's first thread, which it cites as a record.
+    tag_thread = thread(DRONE_TAG)["id"]
+    assert claim.provenance.records == tuple(sorted((DRONE_LINK["id"], tag_thread)))  # type: ignore[type-var]
     # co_declared: the link's own evidence is empty; the row and the right side's cell cite it.
     assert {ref.source for ref in claim.provenance.evidence} == {source(REGISTER_ROW)}
     assert len(claim.provenance.evidence) == 2
@@ -124,6 +126,7 @@ def test_shared_identifier_link_cites_both_declarations_and_its_window() -> None
         source("flight.ulg header (other)"),
     }
     assert (claim.valid_from, claim.valid_to) == (at(150), at(900))
+    assert claim.provenance.records == (shared["id"],)  # a stated start cites no thread
 
 
 # --- legged: an operator's same_identity assertion ---------------------------------------------

@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal, TypeVar
 
-from neptune.model.alignment import IdentityLink, identity_link_from_json
+from neptune.model.alignment import identity_link_from_json
 from neptune.model.assertion import AssertionType, assertion_from_json
 from neptune.model.ids import LogicalId, RecordId, logical_id_from_json, parse_record_id
 from neptune.model.knowledge import Ambiguous, AssertionKind, Known
@@ -40,6 +40,7 @@ from neptune_memory.schema.predicates import is_declared_value
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
+    from neptune.model.alignment import ValidityWindow
     from neptune.model.jsonvalue import JsonValue
     from neptune.model.knowledge import Knowledge
     from neptune.model.time import Epoch, Timescale
@@ -155,22 +156,33 @@ class Side:
 
 @dataclass(frozen=True)
 class Window:
-    """When a statement holds, as its record states: ``start`` ``None`` when it states none."""
+    """When a statement holds, as its record states: ``start`` ``None`` when it states none.
+
+    ``evidence`` is what the window's own candidates cite, when the evidence left the window (or
+    a bound of it) ``Ambiguous`` and this is one of its readings; empty otherwise.
+    """
 
     start: Timestamp | None
     end: Timestamp | Open
+    evidence: tuple[EvidenceRef, ...] = ()
 
 
 UNSTATED: Final = Window(None, OPEN)
+
+# The most windows one statement's ambiguous validity is read as (candidate windows times their
+# bounds' candidates): past it the statement is refused, so hostile input cannot multiply claims.
+MAX_WINDOWS: Final = 64
 
 
 @dataclass(frozen=True)
 class Link:
     """One identity statement from one record: ``left`` names what ``right`` names.
 
-    ``decided`` is ``True`` when the record states the identity (one side); ``False`` when the
-    evidence leaves it ambiguous (the compiler's ``Ambiguous`` right side, or an ``Ambiguous``
-    shared identifier), and then every side is a candidate.
+    ``decided`` is ``True`` when the record states the identity (one side) over one window;
+    ``False`` when the evidence leaves it ambiguous (the compiler's ``Ambiguous`` right side, an
+    ``Ambiguous`` shared identifier, or an ``Ambiguous`` validity or bound), and then every side
+    over every window is a candidate. ``windows`` is empty when the ambiguous validity has more
+    readings than ``MAX_WINDOWS``.
     """
 
     record: RecordId
@@ -179,18 +191,52 @@ class Link:
     left: LogicalId
     right: tuple[Side, ...]
     decided: bool
-    window: Window
+    windows: tuple[Window, ...]
     evidence: tuple[EvidenceRef, ...]
 
 
-def _window(link: IdentityLink) -> Window:
-    """``[start, end)`` as the link states it. An end that is not ``Known`` is ``OPEN``: valid
-    until further notice, as for a run whose last instant is not stated (ADR 0008 §2)."""
-    if not isinstance(link.validity, Known):
-        return UNSTATED
-    window = link.validity.value
-    end = _known(window.end)
-    return Window(_known(window.start), OPEN if end is None else end)
+def _readings(knowledge: Knowledge[_T]) -> tuple[tuple[_T | None, tuple[EvidenceRef, ...]], ...]:
+    """What a value may be, each with the evidence its own candidate cites: one ``Known`` value,
+    every candidate of an ``Ambiguous`` one, or ``None`` (not stated) for any other state."""
+    if isinstance(knowledge, Known):
+        return ((knowledge.value, ()),)
+    if isinstance(knowledge, Ambiguous):
+        return tuple((c.value, _cited(c.provenance)) for c in knowledge.candidates)
+    return ((None, ()),)
+
+
+def windows(validity: Knowledge[ValidityWindow]) -> tuple[Window, ...]:
+    """``[start, end)`` as a link states it, one ``Window`` per reading (ADR 0008 §2).
+
+    A bound that is not stated (``KnownAbsent``, ``Unknown``, ``NotCovered``) follows ADR 0008
+    §2: no start, or an ``OPEN`` end, valid until further notice. An ``Ambiguous`` window or
+    bound is never read as unstated: each of its candidates is a window of its own, citing that
+    candidate, and the statement holds over none of them for certain. Empty past ``MAX_WINDOWS``.
+    """
+    found: list[Window] = []
+    total = 0
+    for value, cited in _readings(validity):
+        if value is None:
+            return (UNSTATED,)
+        starts, ends = _readings(value.start), _readings(value.end)
+        total += len(starts) * len(ends)
+        if total > MAX_WINDOWS:
+            return ()
+        for start, from_start in starts:
+            for end, from_end in ends:
+                window = Window(
+                    start, OPEN if end is None else end, (*cited, *from_start, *from_end)
+                )
+                if window not in found:
+                    found.append(window)
+    return tuple(found)
+
+
+def _ambiguous(validity: Knowledge[ValidityWindow]) -> bool:
+    return isinstance(validity, Ambiguous) or (
+        isinstance(validity, Known)
+        and any(isinstance(b, Ambiguous) for b in (validity.value.start, validity.value.end))
+    )
 
 
 def identity_link(record: Mapping[str, object]) -> Link:
@@ -212,8 +258,10 @@ def identity_link(record: Mapping[str, object]) -> Link:
         assertion_kind=link.provenance.assertion_kind,
         left=declared(link.left),
         right=sides,
-        decided=isinstance(link.right, Known) and not isinstance(link.identifier, Ambiguous),
-        window=_window(link),
+        decided=isinstance(link.right, Known)
+        and not isinstance(link.identifier, Ambiguous)
+        and not _ambiguous(link.validity),
+        windows=windows(link.validity),
         evidence=(link.provenance.evidence, *link.evidence),
     )
 
@@ -235,7 +283,7 @@ def configuration_lineage(record: Mapping[str, object]) -> Link:
         left=_parsed(record, "predecessor", _logical_id),
         right=(Side(_parsed(record, "successor", _logical_id)),),
         decided=True,
-        window=Window(_parsed(record, "valid_from", timestamp_from_json), OPEN),
+        windows=(Window(_parsed(record, "valid_from", timestamp_from_json), OPEN),),
         evidence=_evidence(record),
     )
 
@@ -250,6 +298,8 @@ class Statement:
     ``None`` is a field the record does not state as ``Known``. ``nodes`` are the logical ids of
     a ``Known`` scope in declared order, each once (record ids in a scope name evidence, not
     things, so identity does not read them); ``None`` when the scope is not ``Known``.
+    ``windows`` holds from ``authored_at``, one per reading: several, and ``timed`` ``False``,
+    when ``authored_at`` is ``Ambiguous`` (empty past ``MAX_WINDOWS``).
     """
 
     record: RecordId
@@ -257,7 +307,8 @@ class Statement:
     assertion_type: AssertionType | None
     nodes: tuple[LogicalId, ...] | None
     retracts: LogicalId | None
-    authored_at: Timestamp | None
+    windows: tuple[Window, ...]
+    timed: bool
     evidence: tuple[EvidenceRef, ...]
 
 
@@ -272,13 +323,17 @@ def assertion(record: Mapping[str, object]) -> Statement:
                 found.append(ref)
         nodes = tuple(found)
     identifier, retracts = _known(parsed.identifier), _known(parsed.retracts)
+    starts = _readings(parsed.authored_at)
     return Statement(
         record=parsed.id,
         identifier=None if identifier is None else declared(identifier),
         assertion_type=_known(parsed.assertion_type),
         nodes=nodes,
         retracts=None if retracts is None else declared(retracts),
-        authored_at=_known(parsed.authored_at),
+        windows=()
+        if len(starts) > MAX_WINDOWS
+        else tuple(Window(start, OPEN, cited) for start, cited in starts),
+        timed=not isinstance(parsed.authored_at, Ambiguous),
         evidence=(parsed.provenance.evidence,),
     )
 

@@ -10,7 +10,7 @@ Ledger stand-ins (ADR 0003 §1).
 from __future__ import annotations
 
 from fractions import Fraction
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, TypeVar
 
 from neptune.identity.hashing import content_id
 from neptune.identity.ids import record_id
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 Record = dict[str, object]
+_V = TypeVar("_V")
 TRANSFORM: Final = transform_record(adapter_id="test.identity", adapter_version="1", config={})
 # A robot's own clock: never comparable with civil time.
 CLOCK: Final = record_id("test.clock", {"name": "site-utc"})
@@ -107,6 +108,17 @@ def window(
     return Known(ValidityWindow(clock, bound(start), bound(end)))
 
 
+def ambiguous(name: str, *values: _V) -> Ambiguous[_V]:
+    """``Ambiguous`` over ``values``, each candidate citing its own place in declaration
+    ``name``."""
+    return Ambiguous(
+        tuple(
+            Candidate(v, provenance(cite(name, 256 + 8 * i, 8), STATED))
+            for i, v in enumerate(values)
+        )
+    )
+
+
 def link(
     name: str,
     left: LogicalId,
@@ -162,12 +174,12 @@ def assertion(
     *,
     identifier: LogicalId | None = None,
     retracts: LogicalId | None = None,
-    authored_at: Timestamp | None = None,
+    authored_at: Timestamp | Knowledge[Timestamp] | None = None,
 ) -> Record:
     """A person's ``Assertion`` (root ADR 0062) entered as ``name`` in an assertions file.
 
     ``identifier`` defaults to ``ops-console:<name>``; ``None`` for the type or scope is
-    ``Unknown`` (the adapter could not read it).
+    ``Unknown`` (the adapter could not read it); ``authored_at`` may be any ``Knowledge``.
     """
     declared = provenance(cite(f"assertions/{name}"), STATED)
     absent = KnownAbsent(declared)
@@ -183,7 +195,13 @@ def assertion(
         identifier=Known(identifier or LogicalId("ops-console", name)),
         assertion_type=Known(assertion_type) if assertion_type is not None else Unknown(),
         author=Known(LogicalId("staff", "ana")),
-        authored_at=Known(authored_at) if authored_at is not None else Unknown(),
+        authored_at=(
+            Known(authored_at)
+            if isinstance(authored_at, Timestamp)
+            else authored_at
+            if authored_at is not None
+            else Unknown()
+        ),
         authored_zone=Unknown(),
         scope=Known(tuple(scope)) if scope is not None else Unknown(),
         retracts=retracts_k,
