@@ -1,0 +1,1 @@
+{"as_of":"head","budget":{"items":50},"clock_bridges":[],"explain":[],"frame_bridges":[],"include_inferred":true,"query_version":1,"regions":[],"subjects":[{"kind":"run","same_as_depth":0}],"text":{"channels":["lexical","vector"],"fields":["claim_text","document","finding"],"text":"thruster stall during descent"}}
