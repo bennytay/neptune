@@ -168,7 +168,7 @@ def test_only_a_clock_map_literal_holds_a_clock_map() -> None:
     with pytest.raises(TypeError):
         TypedLiteral(ValueType.CLOCK_MAP, "offset 7")
     with pytest.raises(TypeError):
-        TypedLiteral(ValueType.TEXT, direct())  # type: ignore[arg-type]
+        TypedLiteral(ValueType.TEXT, direct())
 
 
 def test_registry_claims_round_trip_and_validate_against_the_published_schema() -> None:
