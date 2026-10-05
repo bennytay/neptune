@@ -26,6 +26,10 @@ from typing import TYPE_CHECKING, Any
 from neptune_context.pins import CATALOG_API_VERSION, GRAPH_SCHEMA_VERSION
 
 if TYPE_CHECKING:
+    from neptune_memory.schema.claim import Claim
+    from neptune_memory.schema.nodes import NodeRef
+    from neptune_memory.schema.supersede import ResolutionFinding
+
     from neptune.model.jsonvalue import JsonValue
 
 
@@ -71,6 +75,54 @@ def predicates() -> frozenset[str]:
 def thread_kinds() -> frozenset[str]:
     """catalog-api's thread kinds at the pin."""
     return frozenset(_snapshot()["catalog-api"]["thread_kinds"])
+
+
+def value_types() -> frozenset[str]:
+    """graph-schema's literal and record value types at the pin."""
+    return frozenset(_snapshot()["graph-schema"]["defs"]["ValueType"]["enum"])
+
+
+def finding_codes() -> frozenset[str]:
+    """graph-schema's resolver finding codes at the pin."""
+    return frozenset(_snapshot()["graph-schema"]["defs"]["FindingCode"]["enum"])
+
+
+def node_beyond_pin(node: NodeRef) -> str | None:
+    """Why ``node`` is not describable at the pinned graph-schema, or ``None`` when it is."""
+    if str(node.node_type) not in node_types():
+        return f"node type {str(node.node_type)!r}"
+    return None
+
+
+def claim_beyond_pin(claim: Claim) -> str | None:
+    """Why ``claim`` uses a value newer than the pinned graph-schema, or ``None`` when it does not.
+
+    Memory may run ahead of Context's pin (a predicate, node type or value type added in a
+    minor release). The pinned packet schema does not describe such a value, so Context never
+    passes it through: the engine reports it as a gap and the packet reader refuses it
+    (ADR 0006 Consequences, ADR 0007 §6). Checks the predicate, the subject and, for an edge,
+    the object node type, and for a literal its value type.
+    """
+    if claim.predicate not in predicates():
+        return f"predicate {claim.predicate!r}"
+    reason = node_beyond_pin(claim.subject)
+    if reason is not None:
+        return reason
+    obj = claim.object
+    node_type = getattr(obj, "node_type", None)
+    if node_type is not None:
+        return node_beyond_pin(obj)  # type: ignore[arg-type]
+    datatype = getattr(obj, "datatype", None)
+    if datatype is not None and str(datatype) not in value_types():
+        return f"value type {str(datatype)!r}"
+    return None
+
+
+def finding_beyond_pin(finding: ResolutionFinding) -> str | None:
+    """Why a resolver finding is newer than the pinned graph-schema, or ``None``."""
+    if str(finding.code) not in finding_codes():
+        return f"finding code {str(finding.code)!r}"
+    return None
 
 
 def graph_schema_defs() -> dict[str, JsonValue]:
