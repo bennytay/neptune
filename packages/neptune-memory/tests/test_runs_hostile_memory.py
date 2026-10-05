@@ -32,6 +32,7 @@ from neptune.model.time import INT64_MAX, Epoch, Timescale, Timestamp
 from neptune_memory.consolidate.base import Consolidation, rebuild, run_consolidator
 from neptune_memory.consolidate.identity import IdentityConsolidator
 from neptune_memory.consolidate.runs import RunConsolidator, run_node
+from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, CivilClock, ledger_tx
 from neptune_memory.schema.predicates import CORE_PREDICATES
 
@@ -293,10 +294,11 @@ def test_concurrent_and_touching_parts_on_one_clock() -> None:
     files = ["bag/a.mcap", "bag/b.mcap", "bag/c.mcap"]
     held = assembly("bag list", meta_id, [(f, REC) for f in files])[0]
     result = consolidate({"up": [civil, meta, a, b, c, held, *(revision(f)[0] for f in files)]})
-    # a and b overlap: concurrent, no link. c starts the tick after b ends: c continues b.
-    (link,) = of(result, "continues")
-    assert (link.subject, link.object) == (run_node_of(c), run_node_of(b))
-    assert of(result, "continues_candidate") == []
+    # a and b overlap: concurrent, no link. c starts after both end: it continues one of them,
+    # and which is ambiguous, so a candidate each (one way: the order is known).
+    assert of(result, "continues") == []
+    pairs = {(x.subject, x.object) for x in of(result, "continues_candidate")}
+    assert pairs == {(run_node_of(c), run_node_of(a)), (run_node_of(c), run_node_of(b))}
 
 
 def test_parts_of_different_machines_never_continue_each_other() -> None:
@@ -379,3 +381,91 @@ def test_rebuild_with_identity_is_deterministic_and_stays_in_the_vocabulary() ->
     runs = results[0][1]
     assert not [f for f in runs.findings if f.code.startswith("consolidate.")]
     assert all(c.provenance.consolidator_id == "memory.runs" for c in runs.claims)
+
+
+# --- review regressions -------------------------------------------------------------------------
+
+
+def _bag(*parts: Record, extra: Sequence[Record] = ()) -> Consolidation:
+    meta, meta_id = run("bag/metadata.yaml")
+    names = [f"bag/{chr(97 + i)}.mcap" for i in range(len(parts))]
+    held = assembly("bag list", meta_id, [(n, REC) for n in names])[0]
+    return consolidate({"up": [meta, *parts, held, *(revision(n)[0] for n in names), *extra]})
+
+
+def test_touching_parts_on_one_clock_are_ordered_there_not_on_a_widened_projection() -> None:
+    civil, clock = domain("utc", civil=True)
+    boot_record, boot = domain("boot", civil=False)
+    a = run("bag/a.mcap", first=Timestamp(0, boot), last=Timestamp(9, boot), machine=AMR)[0]
+    b = run("bag/b.mcap", first=Timestamp(10, boot), last=Timestamp(19, boot), machine=AMR)[0]
+    sync = mapping("sync", boot, clock, anchor=(0, 0), bound=5)
+    result = _bag(a, b, extra=[civil, boot_record, sync])
+    links = of(result, "continues")
+    assert {(c.subject, c.object) for c in links} == {(run_node_of(b), run_node_of(a))}
+    assert {c.valid_from.domain_id for c in links} == {boot, SECONDS.domain_id}  # each placement
+    assert of(result, "continues_candidate") == []
+
+
+def test_projections_that_overlap_only_by_their_bound_are_unordered() -> None:
+    civil, clock = domain("utc", civil=True)
+    boot_a, ba = domain("boot a", civil=False)
+    boot_b, bb = domain("boot b", civil=False)
+    a = run("bag/a.mcap", first=Timestamp(0, ba), last=Timestamp(9, ba), machine=AMR)[0]
+    b = run("bag/b.mcap", first=Timestamp(0, bb), last=Timestamp(9, bb), machine=AMR)[0]
+    maps = [
+        mapping("sync a", ba, clock, anchor=(0, 0), bound=5),
+        mapping("sync b", bb, clock, anchor=(0, 10), bound=5),
+    ]
+    result = _bag(a, b, extra=[civil, boot_a, boot_b, *maps])
+    assert of(result, "continues") == []
+    assert len(of(result, "continues_candidate")) == 2 * 2  # both ways, on each placement
+
+
+def test_a_part_of_another_machine_between_two_parts_does_not_hide_the_link() -> None:
+    civil, clock = domain("utc", civil=True)
+    other = LogicalId("asset-tag", "AMR-05")
+    a = run("bag/a.mcap", first=Timestamp(0, clock), last=Timestamp(9, clock), machine=AMR)[0]
+    b = run("bag/b.mcap", first=Timestamp(0, clock), last=Timestamp(9, clock), machine=other)[0]
+    c = run("bag/c.mcap", first=Timestamp(10, clock), last=Timestamp(19, clock), machine=AMR)[0]
+    result = _bag(a, b, c, extra=[civil])
+    (link,) = of(result, "continues")
+    assert (link.subject, link.object) == (run_node_of(c), run_node_of(a))
+
+
+def test_a_declared_id_in_the_record_namespace_cannot_forge_another_runs_node() -> None:
+    honest, honest_id = run("a.mcap", first=at(0), last=at(9), machine=AMR)
+    forged, forged_id = run(
+        "b.mcap", first=at(0), last=at(9), logical_id=LogicalId("record", honest_id)
+    )
+    result = consolidate({"log": [honest, forged]})
+    assert codes(result) == ["runs.reserved_namespace"]
+    subjects = {c.subject.node_id for c in result.claims}
+    assert subjects == {f"record:{honest_id}", f"record:{forged_id}"}
+
+
+def test_a_deeply_nested_declaration_is_one_finding_not_a_crash() -> None:
+    nested: object = "x"
+    for _ in range(5000):
+        nested = {"value": nested}
+    bad = {**declaration("d", AMR), "machine": {"knowledge": "known", "value": nested}}
+    result = consolidate({"log": [_good(), bad]})
+    assert codes(result) == ["runs.malformed_record"]
+    assert of(result, "recorded_by")
+
+
+def test_an_assembly_window_bounds_its_membership() -> None:
+    record, rid = run("x.mcap", first=at(0), last=at(99))
+    held = assembly("x list", rid, [("x.mcap", REC)])[0]
+    window = {
+        "knowledge": "known",
+        "value": {
+            "clock": CLOCK,
+            "start": {"knowledge": "known", "value": at(20).to_json()},
+            "end": {"knowledge": "unknown"},
+        },
+    }
+    result = consolidate({"log": [record, {**held, "validity": window}]})
+    assert {(c.valid_from, c.valid_to) for c in of(result, "has_member")} == {(at(20), at(100))}
+    # The run itself still holds over its whole interval: only the membership is bounded.
+    runs = [c for c in of(result, "evidenced_by") if c.object == LedgerRecordRef(rid)]
+    assert {(c.valid_from, c.valid_to) for c in runs} == {(at(0), at(100))}

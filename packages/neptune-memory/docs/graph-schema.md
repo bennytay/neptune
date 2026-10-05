@@ -119,7 +119,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.1.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.2.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -159,10 +159,10 @@ def test_graph_schema_contract(check):
     node is a compiler `Run`'s declared logical id, else `record:<run record id>`. Every claim about a run holds over
     its stated `[first, last]` on its own clock, and again on a civil clock only where a `timestamp_domain` or a
     stated `clock_mapping` puts it there. `continues` links the parts of one run its `RunAssembly` states, in time
-    order on one clock; parts whose clocks cannot be compared are `continues_candidate` both ways. `recorded_by`,
-    `at_site` and `executes_task` are `Known` only when every ground names one id; otherwise each reading is a
-    `*_candidate` claim. `consolidate.runs.involvement` reads them back as `Known`, `Ambiguous`, `Unknown` or
-    `NotCovered`.
+    order on one clock; parts whose clocks cannot be compared are `continues_candidate` both ways. `recorded_by`
+    and `at_site` are `Known` only when every ground names one id, and `executes_task` holds every task stated;
+    otherwise each reading is a `*_candidate` claim. `consolidate.runs.involvement` reads a role back as `Known`,
+    `Ambiguous`, `Unknown` or `NotCovered`.
 
 ## Caveat: a resolver configuration is a store generation
 

@@ -24,7 +24,6 @@ input is a finding and never a claim, and the rest of the build is unaffected.
 
 from __future__ import annotations
 
-import itertools
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
@@ -56,9 +55,11 @@ from neptune_memory.schema.predicates import (
     AT_SITE,
     CANDIDATE_OF,
     CONTINUES,
+    CORE_PREDICATES,
     EXECUTES_TASK,
     HAS_MEMBER,
     RECORDED_BY,
+    Cardinality,
 )
 
 if TYPE_CHECKING:
@@ -86,10 +87,22 @@ _ROLES: Final = (
 )
 
 
+def _declared_id(run: Run) -> LogicalId | None:
+    """The run's declared logical id, unless it is in the namespace record-keyed runs use: a
+    declared ``record:<id>`` could otherwise forge another run's node (ADR 0009 §2)."""
+    if (
+        isinstance(run.logical_id, Known)
+        and run.logical_id.value.namespace != parse.RECORD_NAMESPACE
+    ):
+        return run.logical_id.value
+    return None
+
+
 def run_node(run: Run) -> NodeRef:
-    """A run's node: its declared logical id, else ``record:<run record id>`` (ADR 0009 §1)."""
-    if isinstance(run.logical_id, Known):
-        return node_ref(NodeType.RUN, run.logical_id.value)
+    """A run's node: its declared logical id, else ``record:<run record id>`` (ADR 0009 §2)."""
+    declared = _declared_id(run)
+    if declared is not None:
+        return node_ref(NodeType.RUN, declared)
     return node_ref(NodeType.RUN, LogicalId(parse.RECORD_NAMESPACE, run.id))
 
 
@@ -153,6 +166,7 @@ class _View:
     site_register: bool = False  # whether any site record is in the Ledger
     declarations: list[parse.Declaration] = field(default_factory=list)  # by record id
     findings: list[ConsolidationFinding] = field(default_factory=list)
+    civil: set[RecordId] = field(default_factory=set)  # the civil clocks' domain ids
 
     def place(self, stamp: Timestamp) -> Timestamp:
         """A stamp on a clock that declares itself civil, on that ``CivilClock`` (the same
@@ -161,7 +175,7 @@ class _View:
         return stamp if clock is None else clock.at(stamp.ticks)
 
     def is_civil(self, domain: RecordId) -> bool:
-        return any(clock.domain_id == domain for clock in self.clocks.values())
+        return domain in self.civil
 
 
 class _Admitted:
@@ -273,6 +287,7 @@ def _read(ledger: LedgerReader) -> _View:
                     view.sites.add(_key(identifier.value))
         elif isinstance(parsed, parse.Declaration):
             view.declarations.append(parsed)
+    view.civil = {clock.domain_id for clock in view.clocks.values()}
     view.assemblies.sort(key=lambda item: (item[1].id, item[0]))
     view.declarations.sort(key=lambda d: d.record)
     for found in view.mappings.values():
@@ -362,9 +377,10 @@ def _within(mapping: ClockMapping, placement: Placement) -> bool:
 
 
 def _projections(view: _View, placement: Placement) -> list[Placement]:
-    """The placement on each civil clock a stated mapping from its clock reaches, widened to
-    whole ticks and by the mapping's stated residual bound, so it contains the true interval.
-    Only direct mappings, in their stated direction; chains are MVL-130's."""
+    """The placement on each civil clock a stated mapping from its clock reaches, rounded out to
+    whole ticks and widened by the residual bound where the mapping states one (an unstated bound
+    widens nothing; the claim cites the mapping). Only direct mappings, in their stated
+    direction; chains are MVL-130's."""
     if view.is_civil(placement.start.domain_id):
         return []
     out: list[Placement] = []
@@ -482,16 +498,32 @@ def _ground(
     return None  # Unknown, NotCovered, KnownAbsent, NotApplicable: nothing is stated
 
 
-def _decide(grounds: Sequence[_Ground]) -> tuple[bool, list[tuple[_Ground, _Reading]], int]:
-    """``(known, readings to emit, distinct decided ids)``. Known when the deciding grounds name
-    one id and every ambiguous ground has it among its candidates; otherwise every reading of
-    every ground is a candidate. No ground: nothing to emit (``Unknown``)."""
-    decided = {_key(g.readings[0].node) for g in grounds if g.decided}
-    if len(decided) == 1:
-        (only,) = decided
+Pairs = list[tuple[_Ground, _Reading]]
+
+
+def _decide(grounds: Sequence[_Ground], many: bool) -> tuple[Pairs, Pairs, int]:
+    """``(known, candidates, distinct decided ids)`` for one role of one run.
+
+    A ``one`` role is known when the deciding grounds name one id and every ambiguous ground has
+    it among its candidates; otherwise every reading of every ground is a candidate. A ``many``
+    role (``executes_task``) holds every decided id, so decided grounds never disagree; an
+    ambiguous ground none of whose readings is decided adds its readings as candidates. No
+    ground: nothing (``Unknown``)."""
+    decided = [(g, g.readings[0]) for g in grounds if g.decided]
+    keys = {_key(r.node) for _, r in decided}
+    if many:
+        candidates = [
+            (g, r)
+            for g in grounds
+            if not g.decided and not keys & {_key(r.node) for r in g.readings}
+            for r in g.readings
+        ]
+        return decided, candidates, len(keys)
+    if len(keys) == 1:
+        (only,) = keys
         if all(only in {_key(r.node) for r in g.readings} for g in grounds if not g.decided):
-            return True, [(g, g.readings[0]) for g in grounds if g.decided], 1
-    return False, [(g, r) for g in grounds for r in g.readings], len(decided)
+            return decided, [], 1
+    return [], [(g, r) for g in grounds for r in g.readings], len(keys)
 
 
 # --- The policy ---------------------------------------------------------------------------------
@@ -564,6 +596,15 @@ class RunConsolidator:
                         "the run's declared id is ambiguous; it is keyed by its record",
                         (rid,),
                         Severity.INFO,
+                    )
+                )
+            elif isinstance(run.logical_id, Known) and _declared_id(run) is None:
+                view.findings.append(
+                    _finding(
+                        "reserved_namespace",
+                        f"the run declares an id in the {parse.RECORD_NAMESPACE!r} namespace, "
+                        "which names runs by record; it is keyed by its own record",
+                        (rid,),
                     )
                 )
         assemblies = _assemblies(view)
@@ -639,13 +680,47 @@ def _place(
         build.order[rid] = civil[0] if civil else base
 
 
+def _membership(view: _View, assembly: RunAssembly, over: Sequence[Placement]) -> list[Placement]:
+    """Where an assembly's membership holds: the run's placements, cut to the assembly's stated
+    window where it states one. A window bounds only placements on its own clock; with none
+    there, the window itself when its start is stated."""
+    if not isinstance(assembly.validity, Known):
+        return list(over)
+    window = assembly.validity.value
+    start = view.place(window.start.value) if isinstance(window.start, Known) else None
+    end = view.place(window.end.value) if isinstance(window.end, Known) else None
+    clock = view.clocks[window.clock].domain_id if window.clock in view.clocks else window.clock
+    out: list[Placement] = []
+    for place in over:
+        if place.start.domain_id != clock:
+            continue
+        lo = place.start if start is None or start < place.start else start
+        hi: Timestamp | Open = place.end
+        if end is not None and (isinstance(hi, Open) or end < hi):
+            hi = end
+        if isinstance(hi, Open) or lo < hi:
+            out.append(Placement(lo, hi, place.evidence, place.records))
+    if not out and start is not None:
+        out.append(Placement(start, OPEN if end is None else end, (), ()))
+    if not out:
+        view.findings.append(
+            _finding(
+                "membership_unplaced",
+                "the assembly's window is on a clock no placement of its run is on",
+                (assembly.id,),
+                Severity.INFO,
+            )
+        )
+    return out
+
+
 def _members(
     build: _Build, assemblies: Mapping[RecordId, Sequence[tuple[RunAssembly, list[_Link]]]]
 ) -> None:
     for rid in sorted(assemblies):
         node = run_node(build.view.runs[rid])
-        over = build.placements[rid]
         for assembly, _ in assemblies[rid]:
+            over = _membership(build.view, assembly, build.placements[rid])
             kind = assembly.provenance.assertion_kind
             cited = (assembly.provenance.evidence,)
             grouping = (assembly.id, assembly.provenance.transform)
@@ -718,8 +793,9 @@ def _roles(
                 from_parts = bool(grounds)
             if not grounds:
                 continue  # Unknown: nothing stated, nothing claimed
-            known, readings, distinct = _decide(grounds)
-            if distinct > 1:
+            many = CORE_PREDICATES.spec(predicate).cardinality is Cardinality.MANY
+            known, candidates, distinct = _decide(grounds, many)
+            if distinct > 1 and not many:
                 view.findings.append(
                     _finding(
                         "parts_differ" if from_parts else "declarations_disagree",
@@ -730,8 +806,9 @@ def _roles(
                         run=node.node_id,
                     )
                 )
-            out = predicate if known else CANDIDATE_OF[predicate]
-            for ground, reading in readings:
+            emitted = [(predicate, pair) for pair in known]
+            emitted += [(CANDIDATE_OF[predicate], pair) for pair in candidates]
+            for out, (ground, reading) in emitted:
                 obj = node_ref(node_type, reading.node)
                 if role == "site" and view.site_register and _key(reading.node) not in view.sites:
                     view.findings.append(
@@ -827,52 +904,81 @@ def _continuation(
             build.placements[later],
         )
 
-    clocks: dict[RecordId, list[RecordId]] = {}
-    for part in parts:
-        if part in build.order:
-            clocks.setdefault(build.order[part].start.domain_id, []).append(part)
-    for clock in sorted(clocks):
+    view = build.view
+    primary = {p: build.placements[p][0] for p in parts if build.placements[p]}
+    civil = {
+        p: next((x for x in build.placements[p] if view.is_civil(x.start.domain_id)), None)
+        for p in parts
+    }
 
-        def at(part: RecordId) -> tuple[int, float, str, str]:
-            place = build.order[part]
-            end = math.inf if isinstance(place.end, Open) else place.end.ticks
-            return place.start.ticks, end, run_node(build.view.runs[part]).node_id, part
+    def relation(a: RecordId, b: RecordId) -> str:
+        """``before``, ``after``, ``concurrent`` or ``unknown``. Parts on one clock compare there,
+        and overlap means concurrent. Otherwise on a civil clock both reach, where a projection is
+        widened to whole ticks and its residual bound, so overlap there only means unordered."""
+        pa, pb = primary.get(a), primary.get(b)
+        if pa is not None and pb is not None and pa.start.domain_id == pb.start.domain_id:
+            return _order(pa, pb) or "concurrent"
+        ca, cb = civil[a], civil[b]
+        if ca is not None and cb is not None and ca.start.domain_id == cb.start.domain_id:
+            return _order(ca, cb) or "unknown"
+        return "unknown"
 
-        chain = sorted(clocks[clock], key=at)
-        for earlier, later in itertools.pairwise(chain):
-            end = build.order[earlier].end
-            if not compatible(earlier, later) or isinstance(end, Open):
-                continue
-            if end <= build.order[later].start:
-                emit(CONTINUES, later, earlier)
-    clock_of = {part: build.order[part].start.domain_id for part in parts if part in build.order}
+    before: dict[RecordId, set[RecordId]] = {p: set() for p in parts}
     for i, a in enumerate(parts):
         for b in parts[i + 1 :]:
             if not compatible(a, b):
                 continue
-            if a in clock_of and clock_of.get(a) == clock_of.get(b):
-                continue  # one clock: ordered above, or concurrent
-            emit(CANDIDATE_OF[CONTINUES], a, b)
-            emit(CANDIDATE_OF[CONTINUES], b, a)
+            rel = relation(a, b)
+            if rel == "before":
+                before[b].add(a)
+            elif rel == "after":
+                before[a].add(b)
+            elif rel == "unknown":
+                emit(CANDIDATE_OF[CONTINUES], a, b)
+                emit(CANDIDATE_OF[CONTINUES], b, a)
+    # A part's nearest predecessors are the compatible earlier parts no other compatible earlier
+    # part follows, skipping parts of other machines and concurrent ones. One: it continues that
+    # part. Several (concurrent logs that all end before it): which it continues is ambiguous.
+    for later in parts:
+        earlier = before[later]
+        nearest = [p for p in sorted(earlier) if not any(p in before[o] for o in earlier)]
+        predicate = CONTINUES if len(nearest) == 1 else CANDIDATE_OF[CONTINUES]
+        for part in nearest:
+            emit(predicate, later, part)
+
+
+def _order(a: Placement, b: Placement) -> str | None:
+    """``before`` when ``a`` ends no later than ``b`` starts, ``after`` the other way round."""
+    if isinstance(a.end, Timestamp) and a.end <= b.start:
+        return "before"
+    if isinstance(b.end, Timestamp) and b.end <= a.start:
+        return "after"
+    return None
 
 
 # --- Reading run involvement back ---------------------------------------------------------------
 
 
-def involvement(claims: Iterable[Claim], run: NodeRef, predicate: str) -> Knowledge[NodeRef]:
+def involvement(
+    claims: Iterable[Claim], run: NodeRef, predicate: str
+) -> Knowledge[tuple[NodeRef, ...]]:
     """What ``claims`` say a run's ``predicate`` is: ``recorded_by``, ``at_site``,
-    ``executes_task`` or ``continues``. Pass the claims current at one ``as_of``.
+    ``executes_task`` or ``continues``, as the objects that hold. Pass the claims current at one
+    ``as_of``.
 
-    - ``Known`` when its claims name one object and no candidate.
-    - ``Ambiguous`` over every object and candidate when there are two or more. A lone
-      ``continues_candidate`` is ``Ambiguous`` between it and the run itself, the reading "it
-      continues nothing", as a lone ``same_as_candidate`` is (ADR 0003 §1.3).
-    - ``Unknown`` when the run is in the claims but nothing names one, or a lone candidate of
-      another predicate says only that it might be.
+    - ``Known(objects)`` when no candidate: one object for a ``one`` predicate, every object for
+      a ``many`` one (``executes_task``, ``continues``).
+    - ``Ambiguous`` when there are candidates, or a ``one`` predicate has several objects. Each
+      reading is a tuple: one object for a ``one`` predicate; for a ``many`` predicate, the known
+      objects plus one candidate, and also the known objects alone for ``continues`` (a lone
+      ``continues_candidate`` may mean it continues nothing) or when there is one candidate.
+    - ``Unknown`` when the run is in the claims but nothing names one, or a lone candidate of a
+      ``one`` predicate says only that it might be.
     - ``NotCovered`` when no claim names the run.
     """
     if predicate not in CANDIDATE_OF:
         raise ValueError(f"{predicate!r} has no candidate form: one of {sorted(CANDIDATE_OF)}")
+    many = CORE_PREDICATES.spec(predicate).cardinality is Cardinality.MANY
     candidate = CANDIDATE_OF[predicate]
     named = False
     known: set[NodeRef] = set()
@@ -888,11 +994,19 @@ def involvement(claims: Iterable[Claim], run: NodeRef, predicate: str) -> Knowle
             readings.add(claim.object)
     if not named:
         return NotCovered()
-    every = sorted(known | readings, key=lambda n: (n.node_type, n.node_id))
-    if readings and len(every) == 1 and predicate == CONTINUES:
-        every = sorted({*every, run}, key=lambda n: (n.node_type, n.node_id))
-    if len(every) > 1:
-        return Ambiguous(tuple(Candidate(n) for n in every))
-    if known:
-        return Known(every[0])
+
+    def ordered(nodes: Iterable[NodeRef]) -> tuple[NodeRef, ...]:
+        return tuple(sorted(nodes, key=lambda n: (n.node_type, n.node_id)))
+
+    options: list[tuple[NodeRef, ...]]
+    if many:
+        options = [ordered({*known, c}) for c in ordered(readings - known)]
+        if options and (predicate == CONTINUES or len(options) == 1):
+            options.insert(0, ordered(known))
+    else:
+        options = [(n,) for n in ordered(known | readings)]
+    if len(options) > 1:
+        return Ambiguous(tuple(Candidate(option) for option in options))
+    if known and (many or len(known) == 1) and not (readings - known):
+        return Known(ordered(known))
     return Unknown()

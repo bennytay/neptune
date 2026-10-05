@@ -78,6 +78,15 @@ def of(result: Consolidation, predicate: str, subject: NodeRef | None = None) ->
     ]
 
 
+def known(*nodes: NodeRef) -> Known[tuple[NodeRef, ...]]:
+    return Known(tuple(nodes))
+
+
+def readings(value: object) -> set[tuple[NodeRef, ...]]:
+    assert isinstance(value, Ambiguous)
+    return {c.value for c in value.candidates}
+
+
 def codes(result: Consolidation) -> list[str]:
     return sorted(f.code for f in result.findings)
 
@@ -121,11 +130,11 @@ def test_warehouse_runs_are_known_per_machine_site_and_task() -> None:
     for k, rid in runs.items():
         subject = node(RUN, rid)
         current = [c for c in result.claims if c.subject == subject]
-        assert involvement(current, subject, "recorded_by") == Known(node(MACHINE, amr(k)))
-        assert involvement(current, subject, "at_site") == Known(
+        assert involvement(current, subject, "recorded_by") == known(node(MACHINE, amr(k)))
+        assert involvement(current, subject, "at_site") == known(
             node(SITE, NORTH if k <= 3 else SOUTH)
         )
-        assert involvement(current, subject, "executes_task") == Known(
+        assert involvement(current, subject, "executes_task") == known(
             node(TASK, LogicalId("task", "pick-wave-1"))
         )
         assert involvement(current, subject, "continues") == Unknown()
@@ -213,7 +222,7 @@ def test_a_recording_in_two_uploads_continues_across_packages() -> None:
     (span,) = {(c.valid_from, c.valid_to) for c in of(result, "has_member", whole)}
     assert span == (CIVIL.at(EPOCH_NS), CIVIL.at(EPOCH_NS + 200))
     # Its machine is its parts': both declare AMR-03.
-    assert involvement(result.claims, whole, "recorded_by") == Known(node(MACHINE, amr(3)))
+    assert involvement(result.claims, whole, "recorded_by") == known(node(MACHINE, amr(3)))
 
 
 def test_parts_whose_clocks_cannot_be_compared_are_only_candidates() -> None:
@@ -222,7 +231,11 @@ def test_parts_whose_clocks_cannot_be_compared_are_only_candidates() -> None:
     assert of(result, "continues") == []
     pairs = {(c.subject, c.object) for c in of(result, "continues_candidate")}
     assert pairs == {(node(RUN, r0), node(RUN, r1)), (node(RUN, r1), node(RUN, r0))}
-    assert isinstance(involvement(result.claims, node(RUN, r1), "continues"), Ambiguous)
+    # It may continue the other part, or nothing: the two readings.
+    assert readings(involvement(result.claims, node(RUN, r1), "continues")) == {
+        (),
+        (node(RUN, r0),),
+    }
     # The bag's own run has no instant and its parts span no one clock: no claim, a finding.
     assert "runs.untimed_run" in codes(result)
     assert involvement(result.claims, node(RUN, meta), "recorded_by") == NotCovered()
@@ -256,13 +269,12 @@ def test_a_folder_with_two_robots_logs_is_ambiguous_and_nothing_continues() -> N
     result = consolidate({"shift-3": [clock_a, clock_b, folder, log_a, log_b, held, *files]})
     shift = node(RUN, LogicalId("manifest", "shift-3"))
     reading = involvement(result.claims, shift, "recorded_by")
-    assert isinstance(reading, Ambiguous)
-    assert {c.value for c in reading.candidates} == {node(MACHINE, amr(1)), node(MACHINE, amr(2))}
+    assert readings(reading) == {(node(MACHINE, amr(1)),), (node(MACHINE, amr(2)),)}
     assert of(result, "recorded_by", shift) == []
     assert codes(result) == ["runs.parts_differ"]
     assert of(result, "continues") == [] and of(result, "continues_candidate") == []
     for rid, k in ((ra, 1), (rb, 2)):
-        assert involvement(result.claims, node(RUN, rid), "recorded_by") == Known(
+        assert involvement(result.claims, node(RUN, rid), "recorded_by") == known(
             node(MACHINE, amr(k))
         )
     (span,) = {(c.valid_from, c.valid_to) for c in of(result, "has_member", shift)}
@@ -292,7 +304,7 @@ def test_a_manifest_naming_a_site_absent_from_the_register_is_stated_and_flagged
         declaration("cell", by_record(_rid()), site=east),
         registers=[site("site register", NORTH, SOUTH)],
     )
-    assert involvement(result.claims, subject, "at_site") == Known(node(SITE, east))
+    assert involvement(result.claims, subject, "at_site") == known(node(SITE, east))
     (finding,) = result.findings
     assert finding.code == "runs.site_unregistered"
     assert finding.details["site"] == "site:WH-EAST"
@@ -311,8 +323,7 @@ def test_a_record_and_a_manifest_that_disagree_give_candidates_not_a_winner() ->
     result, subject = _one_run(declaration("cell", by_record(_rid()), machine=arm_6), machine=arm_5)
     assert of(result, "recorded_by") == []
     reading = involvement(result.claims, subject, "recorded_by")
-    assert isinstance(reading, Ambiguous)
-    assert {c.value for c in reading.candidates} == {node(MACHINE, arm_5), node(MACHINE, arm_6)}
+    assert readings(reading) == {(node(MACHINE, arm_5),), (node(MACHINE, arm_6),)}
     assert codes(result) == ["runs.declarations_disagree"]
     kinds = {c.object: c.assertion_kind for c in of(result, "recorded_by_candidate")}
     assert kinds == {node(MACHINE, arm_5): "observed", node(MACHINE, arm_6): "stated"}
@@ -325,6 +336,18 @@ def test_an_ambiguous_field_gives_one_candidate_per_reading_each_citing_its_own_
     assert {c.object for c in candidates} == {node(MACHINE, a), node(MACHINE, b)}
     assert len({c.provenance.evidence for c in candidates}) == 2
     assert codes(result) == []
+
+
+def test_a_run_attempting_two_tasks_holds_both_and_nothing_disagrees() -> None:
+    pick, place = LogicalId("task", "pick"), LogicalId("task", "place")
+    result, subject = _one_run(
+        declaration("cell pick", by_record(_rid()), task=pick),
+        declaration("cell place", by_record(_rid()), task=place),
+    )
+    assert codes(result) == [] and of(result, "executes_task_candidate") == []
+    assert involvement(result.claims, subject, "executes_task") == known(
+        node(TASK, pick), node(TASK, place)
+    )
 
 
 def test_agreeing_grounds_are_known_once_per_ground() -> None:
@@ -340,7 +363,7 @@ def test_an_ambiguous_declaration_consistent_with_a_known_one_stays_known() -> N
     result, subject = _one_run(
         declaration("cell", by_record(_rid()), machine=[arm, other]), machine=arm
     )
-    assert involvement(result.claims, subject, "recorded_by") == Known(node(MACHINE, arm))
+    assert involvement(result.claims, subject, "recorded_by") == known(node(MACHINE, arm))
 
 
 def test_nothing_stated_is_unknown_and_a_run_never_named_is_not_covered() -> None:

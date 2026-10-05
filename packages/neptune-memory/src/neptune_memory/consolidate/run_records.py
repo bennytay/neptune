@@ -164,7 +164,7 @@ def _knowledge(record: Mapping[str, object], name: str) -> Knowledge[LogicalId]:
         value = from_json(record[name], _logical_id, provenance_from_json)  # type: ignore[arg-type]
     except Malformed:
         raise
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, RecursionError) as exc:
         raise Malformed(f"{name!r}: {exc}") from exc
     return value
 
@@ -183,7 +183,7 @@ def declaration(record: Mapping[str, object]) -> Declaration:
         refs = tuple(evidence_ref_from_json(item) for item in evidence)
     except Malformed:
         raise
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, RecursionError) as exc:
         raise Malformed(str(exc) or type(exc).__name__) from exc
     return Declaration(
         record=rid,
