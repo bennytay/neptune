@@ -14,6 +14,7 @@ from deploy_pack_support import SITE, configuration_pack, events_pack
 from neptune.identity import canonical_json
 from neptune_deploy.lifecycle.cli import main
 from neptune_deploy.packs import EvidencePack, render_json, render_pdf
+from neptune_deploy.packs import cli as pack_cli
 from neptune_deploy.packs.pdf import PlacedLine, literal, write_pdf
 from neptune_deploy.packs.text import ascii_only, winansi
 
@@ -213,6 +214,28 @@ def test_cli_writes_the_pack_and_never_changes_it(
     assert main(argv) == 2
     assert "symlink" in capsys.readouterr().err
     assert not (tmp_path / "elsewhere.pdf").exists()
+
+
+def test_cli_refuses_before_writing_anything(tmp_path: Path) -> None:
+    """Review finding: a refused pack.pdf leaves no new pack.json behind."""
+    pack = configuration_pack()
+    spec_file, snapshot_file = tmp_path / "spec.json", tmp_path / "graph.json"
+    spec_file.write_text(json.dumps(pack.spec.to_json()), encoding="utf-8")
+    snapshot_file.write_bytes(
+        (TESTS / "fixtures/packs/arm_cell_configuration.graph.json").read_bytes()
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "pack.pdf").write_bytes(b"someone else's pdf")
+    argv = ["pack", "--spec", str(spec_file), "--snapshot", str(snapshot_file), "--out", str(out)]
+    assert main(argv) == 2
+    assert sorted(p.name for p in out.iterdir()) == ["pack.pdf"]
+
+
+def test_cli_reads_at_most_one_byte_past_the_limit(tmp_path: Path) -> None:
+    big = tmp_path / "big"
+    big.write_bytes(b"x" * 100)
+    assert len(pack_cli._read(big, 10)) == 11
 
 
 def test_cli_reports_refused_inputs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

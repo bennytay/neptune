@@ -1,12 +1,14 @@
 """Compiling configuration-lineage packs: ambiguity shown, never guessed; every statement cited."""
 
+import copy
 import dataclasses
 import json
 from typing import Any
 
 import pytest
 
-from deploy_pack_graphs import CIVIL, DAY, RUN1_CLOCK, T0, rec
+import deploy_pack_graphs as graphs
+from deploy_pack_graphs import CIVIL, DAY, RUN1_CLOCK, T0, fixture_path, rec
 from deploy_pack_support import (
     AMR,
     ARM,
@@ -24,11 +26,13 @@ from neptune_deploy.packs import (
     builtin_registry,
     compile_pack,
     pack_id,
+    read_snapshot,
     read_template,
     render_json,
+    render_pdf,
 )
 from neptune_deploy.packs.compile import Section
-from neptune_deploy.packs.snapshot import Interval, Node, Stamp
+from neptune_deploy.packs.snapshot import Interval, Node, Snapshot, Stamp
 
 
 def _section(pack: EvidencePack, section_id: str) -> Section:
@@ -310,3 +314,64 @@ def test_scope_hops_cite_their_claims() -> None:
     (located,) = by_node[ARM]
     assert next(c for c in pack.claims if c.id == located).predicate == "located_at"
     assert FROM_T0.start.domain == CIVIL
+
+
+def _with(document: dict[str, Any], *claims: dict[str, Any]) -> Snapshot:
+    document = copy.deepcopy(document)
+    document["claims"].extend(claims)
+    return read_snapshot(document)
+
+
+def test_an_inferred_claim_named_by_a_finding_stays_out_under_exclude() -> None:
+    """Review finding: a finding's other claims never smuggle an excluded inference in."""
+    document = plain(json.loads(fixture_path("arm_cell_configuration").read_bytes()))
+    inferred = next(c for c in document["claims"] if c["assertion_kind"] == "inferred")
+    document["findings"][0]["others"].append(inferred["id"])
+    snap = read_snapshot(document)
+    excluded = compile_pack(spec(snap), snap)
+    assert inferred["id"] not in {c.id for c in excluded.claims}
+    assert excluded.included_inferred == 0
+    assert all(
+        inferred["id"] not in e["claims"] for e in plain(excluded.appendix.to_json())["evidence"]
+    )
+    finding = _section(excluded, "configuration-in-force").findings[0]
+    assert inferred["id"] in finding.others  # the finding itself is shown whole
+    assert f"{inferred['id']} [INFERRED:excluded]".encode() in render_pdf(excluded)
+    included = compile_pack(spec(snap, inference="include"), snap)
+    assert inferred["id"] in {c.id for c in included.claims}
+
+
+def test_overlapping_spans_of_a_one_predicate_are_a_conflict() -> None:
+    """Review finding: two objects of a ``one`` predicate over overlapping spans conflict."""
+    other_site = graphs.node("site", "site-code:CELL-4")
+    moved = graphs.claim(
+        graphs.ARM,
+        "located_at",
+        other_site,
+        (graphs.at(CIVIL, T0 + DAY), "open"),
+        records=("asset register ARM-06 rev 2",),
+        evidence=(graphs.row("assets.csv", 9),),
+        consolidator="memory.identity",
+    )
+    document = json.loads(fixture_path("arm_cell_configuration").read_bytes())
+    snap = _with(document, moved)
+    section_json = plain(builtin_registry().get("configuration-lineage", 1).sections[0].to_json())
+    section_json.update(
+        id="whereabouts", predicates={"located_at": "known"}, about=[[]], subject_types=["machine"]
+    )
+    template = {
+        "schema": "neptune-deploy.pack-template/1",
+        "id": "whereabouts",
+        "version": 1,
+        "title": "Whereabouts",
+        "description": "Where a machine is.",
+        "subject_types": ["machine"],
+        "sections": [section_json],
+    }
+    registry = builtin_registry().with_template(read_template(plain(template)))
+    (section,) = compile_pack(spec(snap, "whereabouts"), snap, registry).sections
+    assert [e.knowledge for e in section.entries] == ["conflict", "conflict"]
+    # Without the overlap there is nothing to flag.
+    snap = _with(document)
+    (section,) = compile_pack(spec(snap, "whereabouts"), snap, registry).sections
+    assert [e.knowledge for e in section.entries] == ["known"]

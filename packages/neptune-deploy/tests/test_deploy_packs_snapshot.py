@@ -72,6 +72,8 @@ _DELETE = object()
         (["kind"], "memory.other", "snapshot_malformed", "/kind"),
         (["graph_schema_version"], 2, "snapshot_unsupported", "/graph_schema_version"),
         (["graph_schema_version"], True, "snapshot_unsupported", "/graph_schema_version"),
+        (["graph_schema_version"], 1.0, "snapshot_unsupported", "/graph_schema_version"),
+        (["claims", 0, "predicate"], "\ud800", "snapshot_malformed", "/claims/0/predicate"),
         (["head"], -1, "snapshot_malformed", "/head"),
         (["head"], 2**63, "snapshot_malformed", "/head"),
         (["generation"], "md5:00", "snapshot_malformed", "/generation"),

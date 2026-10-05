@@ -10,7 +10,7 @@ is the first 16 bytes of the pack id.
 """
 
 import textwrap
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Final
 
 from neptune.identity import canonical_json
@@ -119,7 +119,20 @@ def _entry(out: _Layout, entry: Entry, indent: int) -> None:
     out.space(2)
 
 
-def _section(out: _Layout, number: int, section: Section, inferred: Mapping[str, bool]) -> None:
+def _marker(pack: EvidencePack) -> Callable[[str], str]:
+    """A claim id as cited in prose: marked when inferred, or when the pack leaves it out."""
+    inferred = {c.id: c.inferred for c in pack.claims}
+
+    def mark(claim_id: str) -> str:
+        if claim_id not in inferred:
+            held = pack.snapshot.versions.get(claim_id)
+            return f"{claim_id} [{'INFERRED:excluded' if held else 'not-in-snapshot'}]"
+        return f"{claim_id} [INFERRED]" if inferred[claim_id] else claim_id
+
+    return mark
+
+
+def _section(out: _Layout, number: int, section: Section, mark: Callable[[str], str]) -> None:
     out.space(8)
     out.line(f"{number}. {section.template.title}", font="F1", size=13)
     out.line(section.template.description, font="F4", size=SMALL)
@@ -137,8 +150,7 @@ def _section(out: _Layout, number: int, section: Section, inferred: Mapping[str,
             via = (
                 "the pack subject"
                 if not node.via
-                else "via "
-                + ", ".join(f"{i}{' [INFERRED]' if inferred.get(i) else ''}" for i in node.via)
+                else "via " + ", ".join(mark(i) for i in node.via)
             )
             out.line(f"{node.node.node_type} {node.node.node_id} - {via}", indent=2)
     if section.knowledge == "not_covered":
@@ -166,8 +178,8 @@ def _section(out: _Layout, number: int, section: Section, inferred: Mapping[str,
     if section.findings:
         out.line("Resolver findings:", font="F3")
         for finding in section.findings:
-            others = f"; others {', '.join(finding.others)}" if finding.others else ""
-            out.line(f"- {finding.code} {finding.id} on {finding.claim}{others}", indent=2)
+            others = f"; others {', '.join(map(mark, finding.others))}" if finding.others else ""
+            out.line(f"- {finding.code} {finding.id} on {mark(finding.claim)}{others}", indent=2)
     left = []
     if section.outside_interval:
         left.append(f"{section.outside_interval} claims on this clock outside the interval")
@@ -280,9 +292,9 @@ def render_pdf(pack: EvidencePack) -> bytes:
     """The pack as a deterministic PDF."""
     out = _Layout()
     _header(out, pack)
-    inferred = {c.id: c.inferred for c in pack.claims}
+    mark = _marker(pack)
     for number, section in enumerate(pack.sections, start=1):
-        _section(out, number, section, inferred)
+        _section(out, number, section, mark)
     _appendix(out, pack)
     total = len(out.pages)
     pages = [

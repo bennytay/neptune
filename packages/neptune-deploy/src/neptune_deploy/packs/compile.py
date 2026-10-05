@@ -20,6 +20,7 @@ under ``other_clocks``. Inferred claims are left out unless the spec includes th
 marked on every statement.
 """
 
+import dataclasses
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -129,12 +130,7 @@ class Section:
     excluded_inferred: tuple[str, ...]
     outside_interval: int
     reason: JsonObject | None
-
-    @property
-    def cited(self) -> tuple[str, ...]:
-        ids = {i for entry in (*self.entries, *self.other_clocks) for i in entry.claim_ids}
-        ids.update(i for node in self.scope for i in node.via)
-        return tuple(sorted(ids))
+    cited: frozenset[str] = frozenset()  # every claim its entries and scope cite
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {
@@ -235,9 +231,22 @@ def compile_pack(
     for section in sections:
         cited.update(section.cited)
         for note in section.findings:
-            cited.update((note.claim, *note.others))
-    claims = tuple(snapshot.versions[i] for i in sorted(cited) if i in snapshot.versions)
+            # A finding's other claims join the claim set, but an excluded inference never does.
+            cited.update(
+                i
+                for i in (note.claim, *note.others)
+                if i in snapshot.versions
+                and (spec.inference == "include" or not snapshot.versions[i].inferred)
+            )
+    claims = tuple(snapshot.versions[i] for i in sorted(cited))
     excluded = {i for section in sections for i in section.excluded_inferred}
+    excluded.update(
+        i
+        for section in sections
+        for note in section.findings
+        for i in (note.claim, *note.others)
+        if i in snapshot.versions and i not in cited
+    )
     return EvidencePack(
         id=pack_id(spec, template),
         spec=spec,
@@ -274,9 +283,9 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
     excluded: set[str] = set()
     scope = _scope(template.about, spec.subject, snapshot, include, excluded)
     inside: list[Statement] = []
+    beyond: list[Statement] = []  # on the pack clock, outside the interval
     other: list[Statement] = []
     on_clock: set[Node] = set()  # nodes with a selected claim on the pack clock
-    outside = 0
     for node in sorted(scope):
         for claim in snapshot.by_subject.get(node, ()):
             role = template.predicates.get(claim.predicate)
@@ -291,11 +300,11 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
             if claim.valid.overlaps(spec.interval):
                 inside.append(statement)
             elif claim.valid.clock == spec.clock:
-                outside += 1
+                beyond.append(statement)
             else:
                 other.append(statement)
     if template.kind == "timeline":
-        entries = _timeline(inside, other, snapshot.cardinality)
+        entries = _timeline(inside, beyond, other, snapshot.cardinality)
         other_entries = _grouped(
             [s for s in other if s.claim.subject not in on_clock], snapshot.cardinality
         )
@@ -306,12 +315,13 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
         entries = _each(inside)
         other_entries = _each(other)
     scope_nodes = tuple(ScopeNode(node, tuple(sorted(scope[node]))) for node in sorted(scope))
-    cited = {i for e in (*entries, *other_entries) for i in e.claim_ids}
-    cited.update(i for s in scope_nodes for i in s.via)
+    shown = frozenset(i for e in (*entries, *other_entries) for i in e.claim_ids)
+    outside = sum(1 for s in beyond if s.claim.id not in shown)
+    cited = shown | {i for s in scope_nodes for i in s.via}
     findings = tuple(
         FindingNote(f.id, f.code, f.claim, f.others)
-        for f in sorted(snapshot.findings, key=lambda f: f.id)
-        if f.current and (f.claim in cited or cited.intersection(f.others))
+        for f in snapshot.current_findings
+        if f.claim in cited or cited.intersection(f.others)
     )
     reason: JsonObject | None = None
     knowledge = "known"
@@ -337,6 +347,7 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
         excluded_inferred=tuple(sorted(excluded)),
         outside_interval=outside,
         reason=reason,
+        cited=cited,
     )
 
 
@@ -413,34 +424,71 @@ def _slots(statements: Iterable[Statement]) -> dict[tuple[Node, Interval], list[
 
 def _grouped(statements: Iterable[Statement], cardinality: Mapping[str, str]) -> tuple[Entry, ...]:
     """``states`` sections: one entry per node and valid interval, its state decided by the
-    roles of its claims."""
+    roles of its claims. Entries of one node whose intervals overlap and that state different
+    objects of a ``one`` predicate are both a conflict."""
     entries = [
         Entry(node, valid, _knowledge(group, cardinality), _order(group))
         for (node, valid), group in _slots(statements).items()
     ]
-    return tuple(sorted(entries, key=lambda e: (e.node, e.valid.sort_key())))
+    entries.sort(key=lambda e: (e.node, e.valid.sort_key()))
+    by_node: dict[Node, list[int]] = defaultdict(list)
+    for index, entry in enumerate(entries):
+        by_node[entry.node].append(index)
+    conflicted: set[int] = set()
+    for indices in by_node.values():
+        for i, a in enumerate(indices):
+            for b in indices[i + 1 :]:
+                if _clash(entries[a], entries[b], cardinality):
+                    conflicted.update((a, b))
+    return tuple(
+        dataclasses.replace(e, knowledge="conflict") if i in conflicted else e
+        for i, e in enumerate(entries)
+    )
+
+
+def _clash(a: Entry, b: Entry, cardinality: Mapping[str, str]) -> bool:
+    if not a.valid.overlaps(b.valid):
+        return False
+    for left in a.statements:
+        if left.role != "known" or cardinality.get(left.claim.predicate) != "one":
+            continue
+        for right in b.statements:
+            if (
+                right.role == "known"
+                and right.claim.predicate == left.claim.predicate
+                and right.claim.object_key != left.claim.object_key
+            ):
+                return True
+    return False
 
 
 def _timeline(
-    inside: Sequence[Statement], other: Sequence[Statement], cardinality: Mapping[str, str]
+    inside: Sequence[Statement],
+    beyond: Sequence[Statement],
+    other: Sequence[Statement],
+    cardinality: Mapping[str, str],
 ) -> tuple[Entry, ...]:
     """``timeline`` sections: one entry per event placement on the pack clock, in time order. An
-    event placed at two times on that clock is a conflict at both. Records that every claim of a
-    placement cites but not every claim of the event does are that placement's own (the clock
-    mapping and target clock it was placed through)."""
+    event placed at two times on that clock is a conflict, and every placement of it on that
+    clock is shown, inside the interval or not. Records that every claim of a placement cites
+    but not every claim of the event does are that placement's own (the clock mapping and target
+    clock it was placed through)."""
     slots = _slots(inside)
-    placements: dict[Node, int] = defaultdict(int)
-    for node, _valid in slots:
-        placements[node] += 1
+    elsewhere = _slots(beyond)
+    times: dict[Node, int] = defaultdict(int)
+    for node, _valid in (*slots, *elsewhere):
+        times[node] += 1
+    conflicted = {node for node, _valid in slots if times[node] > 1}
+    shown = {**slots, **{key: group for key, group in elsewhere.items() if key[0] in conflicted}}
     shared: dict[Node, frozenset[str]] = {}
-    for s in (*inside, *other):
+    for s in (*inside, *beyond, *other):
         records = frozenset(s.claim.records)
         node = s.claim.subject
         shared[node] = shared[node] & records if node in shared else records
     entries: list[Entry] = []
-    for (node, valid), group in slots.items():
+    for (node, valid), group in shown.items():
         own = frozenset.intersection(*(frozenset(s.claim.records) for s in group))
-        knowledge = "conflict" if placements[node] > 1 else _knowledge(group, cardinality)
+        knowledge = "conflict" if node in conflicted else _knowledge(group, cardinality)
         entries.append(
             Entry(node, valid, knowledge, _order(group), tuple(sorted(own - shared[node])))
         )

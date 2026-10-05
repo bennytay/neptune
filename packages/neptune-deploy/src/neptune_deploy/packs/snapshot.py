@@ -173,6 +173,11 @@ class Snapshot:
         return tuple(by_id[key] for key in sorted(by_id))
 
     @cached_property
+    def current_findings(self) -> tuple[ResolutionFinding, ...]:
+        """Current resolver findings, ordered by id."""
+        return tuple(sorted((f for f in self.findings if f.current), key=lambda f: f.id))
+
+    @cached_property
     def versions(self) -> Mapping[str, Claim]:
         """Each claim id's current version, else its latest recorded one."""
         out: dict[str, Claim] = {}
@@ -235,9 +240,8 @@ def read_snapshot(document: JsonValue) -> Snapshot:
     )
     if graph["kind"] != "memory.graph":
         raise _R.fail("kind is not memory.graph", "/kind")
-    if graph["graph_schema_version"] != GRAPH_SCHEMA_MAJOR or isinstance(
-        graph["graph_schema_version"], bool
-    ):
+    version = graph["graph_schema_version"]
+    if type(version) is not int or version != GRAPH_SCHEMA_MAJOR:
         raise PackError(
             "snapshot_unsupported",
             f"graph_schema_version {graph['graph_schema_version']!r}: Deploy reads graph-schema"

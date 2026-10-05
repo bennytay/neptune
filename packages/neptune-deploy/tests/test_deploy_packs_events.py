@@ -109,3 +109,21 @@ def test_an_interval_with_no_events_is_not_covered_and_counts_what_lies_outside(
     on_teach = events_pack(interval=Interval(Stamp(TEACH, 0), Stamp(TEACH, 100)))
     (pendant,) = _section(on_teach, "events").entries
     assert pendant.node.node_id == PENDANT
+
+
+def test_a_conflict_shows_the_placement_outside_the_interval_too() -> None:
+    """Review finding: a window holding only one of two placements still shows the conflict."""
+    c_iv = T0 + 3_660 * 10**9  # the first of the intervention's two civil placements
+    window = Interval(Stamp(CIVIL, c_iv), Stamp(CIVIL, c_iv + 31 * 10**9))
+    timeline = _section(events_pack(interval=window), "events")
+    conflicts = [e for e in timeline.entries if e.node.node_id == INTERVENTION]
+    assert [e.knowledge for e in conflicts] == ["conflict", "conflict"]
+    assert (
+        conflicts[1].valid.start.ticks == c_iv + 97 * 10**9
+    )  # outside, shown because it conflicts
+    # Each placement still names the mapping it was placed through.
+    assert [(e.placement_records or ("",))[0] for e in conflicts] == [
+        rec("clock mapping plc->civil A"),
+        rec("clock mapping plc->civil B"),
+    ]
+    assert timeline.outside_interval > 0  # the other events' civil claims

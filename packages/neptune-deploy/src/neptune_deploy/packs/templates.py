@@ -184,7 +184,7 @@ def _section(value: JsonValue, pointer: str, template_types: tuple[str, ...]) ->
     if not isinstance(predicates, Mapping) or not predicates:
         raise _R.fail("predicates is a non-empty object", at)
     roles = {
-        _R.string(name, at, TOKEN): _R.choice(role, child(at, name), KNOWLEDGE_ROLES)
+        _R.string(name, child(at, name), TOKEN): _R.choice(role, child(at, name), KNOWLEDGE_ROLES)
         for name, role in predicates.items()
     }
     return SectionTemplate(

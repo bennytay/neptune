@@ -71,8 +71,10 @@ template hash it was built with. Shipped: `configuration-lineage@1` and `event-t
   - `ambiguous`: Memory's `*_candidate` claims, or a decided reading beside them. Every reading is shown and none is
     chosen;
   - `unknown`: `*_unknown` claims, whose object is the record that leaves the value open;
-  - `conflict`: two objects of a `one` predicate in the snapshot's own vocabulary, or (timelines) one event placed
-    at two times on the pack clock. Every statement is shown.
+  - `conflict`: two objects of a `one` predicate in the snapshot's own vocabulary, in one entry or in two entries of
+    one node whose intervals overlap, or (timelines) one event placed at two times on the pack clock. Every
+    statement is shown. A conflicting event's placements on the pack clock are all shown, including those outside
+    the interval, because the disagreement is the point.
 - Section kinds:
   - `claims`: one entry per claim;
   - `states`: one entry per node and interval, which is how a configuration chain reads;
@@ -91,7 +93,9 @@ template hash it was built with. Shipped: `configuration-lineage@1` and `event-t
   subject is `not_applicable`, with both type lists. Ambiguous and Unknown are entry states with their citing
   claims (above).
 - **Resolver findings** (`clock_mismatch`, `overridden_on_arrival`) that name a cited claim are listed with the
-  section. Their claims join the pack's claim set, and a superseded one is shown as superseded.
+  section. Their claims join the pack's claim set, and a superseded one is shown as superseded. Under `exclude`,
+  an inferred claim a finding names stays out: the finding lists its id, and the PDF marks it
+  `[INFERRED:excluded]`.
 - The pack's `claims` is every claim it cites (statements, scope hops, findings) in graph-schema form, by id. This is
   the claim set MVL-161 exports.
 
@@ -142,9 +146,10 @@ duplicate keys and NaN are refused, deep nesting is refused, and a lone surrogat
 
 ### 10. Command line
 
-`python -m neptune_deploy pack --spec <file> --snapshot <file> --out <dir>` writes `pack.json` and `pack.pdf`. An
-existing file with the same bytes is left alone. One with other bytes, or a symlink, is refused: a pack never
-changes.
+`python -m neptune_deploy pack --spec <file> --snapshot <file> --out <dir>` writes `pack.json` and `pack.pdf`. Inputs
+are read at most one byte past their limit, so an oversized file is refused, not loaded. Every output is checked
+before any is written. An existing file with the same bytes is left alone; one with other bytes, or a symlink, is
+refused, because a pack never changes. Each file is written aside and renamed into place, so it appears whole.
 
 ## Alternatives considered
 

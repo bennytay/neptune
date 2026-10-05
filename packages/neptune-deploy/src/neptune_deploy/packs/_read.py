@@ -78,6 +78,10 @@ class Reader:
     def string(self, value: JsonValue, pointer: str, pattern: re.Pattern[str] | None = None) -> str:
         if not isinstance(value, str):
             raise self.fail("expected a string", pointer)
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise self.fail("not valid Unicode (a lone surrogate)", pointer) from exc
         if pattern is not None and not pattern.fullmatch(value):
             raise self.fail(f"{value!r} does not match {pattern.pattern}", pointer)
         return value
