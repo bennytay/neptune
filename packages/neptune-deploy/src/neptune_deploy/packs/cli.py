@@ -1,4 +1,5 @@
-"""``python -m neptune_deploy pack --spec <file> --snapshot <file> --out <dir>`` (ADR 0013 §10)."""
+"""``python -m neptune_deploy pack --spec <file> --snapshot <file> --out <dir>`` (ADR 0013 §10,
+ADR 0014): writes ``pack.json``, ``pack.pdf`` and ``claims.json``."""
 
 import argparse
 import sys
@@ -7,7 +8,7 @@ from typing import Any
 
 from neptune_deploy.packs.compile import compile_pack
 from neptune_deploy.packs.errors import PackError
-from neptune_deploy.packs.render import render_json, render_pdf
+from neptune_deploy.packs.render import render_claims, render_json, render_pdf
 from neptune_deploy.packs.snapshot import MAX_SNAPSHOT_BYTES, load_snapshot
 from neptune_deploy.packs.spec import MAX_SPEC_BYTES, load_spec
 
@@ -18,7 +19,8 @@ def add_parser(commands: "argparse._SubParsersAction[Any]") -> None:
         help="compile an evidence pack from a spec and a frozen Memory snapshot",
         description=(
             "Compile a pack spec over a Memory graph document (graph-schema 1) and write"
-            " pack.json (canonical JSON) and pack.pdf to the output directory. The same spec and"
+            " pack.json (canonical JSON), pack.pdf and claims.json (the cited claims as a"
+            " graph-schema ClaimsResult) to the output directory. The same spec and"
             " snapshot always give the same bytes; existing files with other bytes are refused."
         ),
     )
@@ -51,7 +53,11 @@ def run(args: argparse.Namespace) -> int:
         spec = load_spec(_read(args.spec, MAX_SPEC_BYTES))
         snapshot = load_snapshot(_read(args.snapshot, MAX_SNAPSHOT_BYTES))
         pack = compile_pack(spec, snapshot)
-        documents = {"pack.json": render_json(pack), "pack.pdf": render_pdf(pack)}
+        documents = {
+            "claims.json": render_claims(pack),
+            "pack.json": render_json(pack),
+            "pack.pdf": render_pdf(pack),
+        }
         # Every refusal before any write; each file appears whole (written aside, then renamed).
         pending = {name: data for name, data in documents.items() if _check(args.out / name, data)}
         args.out.mkdir(parents=True, exist_ok=True)

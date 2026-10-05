@@ -43,6 +43,22 @@ def render_json(pack: EvidencePack) -> bytes:
     return canonical_json.dumps(pack.to_json())
 
 
+def render_claims(pack: EvidencePack) -> bytes:
+    """The pack's claim set for external tools: a graph-schema ``ClaimsResult`` (canonical JSON)
+    as of the snapshot's head. ``claims`` are those on the pack clock, ``other_clocks`` those on
+    any other (never compared with it, as Memory's own ``claims`` query returns them), and
+    ``findings`` the resolver findings the pack lists, each exactly as the snapshot holds it."""
+    clock = pack.spec.clock
+    noted = {note.id for section in pack.sections for note in section.findings}
+    document: JsonObject = {
+        "as_of": pack.snapshot.head,
+        "claims": [c.raw for c in pack.claims if c.valid.clock == clock],
+        "findings": [f.raw for f in pack.snapshot.current_findings if f.id in noted],
+        "other_clocks": [c.raw for c in pack.claims if c.valid.clock != clock],
+    }
+    return canonical_json.dumps(document)
+
+
 class _Layout:
     """Lines flowing down A4 pages; a page breaks before a line that would cross the bottom."""
 
@@ -116,6 +132,25 @@ def _entry(out: _Layout, entry: Entry, indent: int) -> None:
             size=SMALL,
             indent=indent + 2,
         )
+    if entry.identity:
+        out.line(
+            "same event as "
+            + ", ".join(f"{n.node_type} {n.node_id}" for n in entry.identity)
+            + " (by "
+            + ", ".join(entry.identity_claims)
+            + ")",
+            size=SMALL,
+            indent=indent + 2,
+        )
+    for difference in entry.differences:
+        ticks = difference.start_difference_ticks
+        out.line(
+            f"other placement: {difference.node.node_type} {difference.node.node_id} valid"
+            f" {t.interval(difference.valid)}, starting {ticks:+d} ticks from this one",
+            font="F3",
+            size=SMALL,
+            indent=indent + 2,
+        )
     out.space(2)
 
 
@@ -171,7 +206,15 @@ def _section(out: _Layout, number: int, section: Section, mark: Callable[[str], 
             )
     for entry in section.entries:
         _entry(out, entry, 0)
-    if section.other_clocks:
+    if section.other_clocks and section.template.kind == "timeline":
+        out.line(
+            "NOT PLACED on the pack clock - no stated mapping places these on it; each is listed"
+            " on its own clock and never compared:",
+            font="F3",
+        )
+        for entry in section.other_clocks:
+            _entry(out, entry, 2)
+    elif section.other_clocks:
         out.line("On other clocks (never compared with the pack interval):", font="F3")
         for entry in section.other_clocks:
             _entry(out, entry, 2)
@@ -183,6 +226,11 @@ def _section(out: _Layout, number: int, section: Section, mark: Callable[[str], 
     left = []
     if section.outside_interval:
         left.append(f"{section.outside_interval} claims on this clock outside the interval")
+    if section.other_clock_restated:
+        left.append(
+            f"{section.other_clock_restated} claims on other clocks that a placement on the pack"
+            " clock restates (other_clock_restated)"
+        )
     if section.excluded_inferred:
         left.append(f"{len(section.excluded_inferred)} inferred claims (inference excluded)")
     if left:

@@ -39,7 +39,18 @@ GRAPH_SCHEMA_MAJOR: Final = 1
 SNAPSHOT_PREFIX: Final = "snapshot:"
 MAX_SNAPSHOT_BYTES: Final = 512 * 1024 * 1024
 ASSERTION_KINDS: Final = ("inferred", "observed", "stated")
-LITERAL_TYPES: Final = ("boolean", "instant", "integer", "quantity", "real", "text")
+# graph-schema 1.0.0's datatypes, plus clock_map (1.4.0, Memory ADR 0011) and delta (1.7.0, Memory
+# ADR 0014): a graph Memory builds with clock mappings or calibration drift holds them.
+LITERAL_TYPES: Final = (
+    "boolean",
+    "clock_map",
+    "delta",
+    "instant",
+    "integer",
+    "quantity",
+    "real",
+    "text",
+)
 
 _R: Final = Reader("snapshot_malformed")
 
@@ -197,6 +208,14 @@ class Snapshot:
         for claim in self.current:
             index[claim.subject].append(claim)
         return {node: tuple(claims) for node, claims in index.items()}
+
+    @cached_property
+    def by_predicate_object(self) -> Mapping[tuple[str, bytes], tuple[Claim, ...]]:
+        """Current claims by predicate and object (canonical bytes): who states the same thing."""
+        index: dict[tuple[str, bytes], list[Claim]] = defaultdict(list)
+        for claim in self.current:
+            index[(claim.predicate, claim.object_key)].append(claim)
+        return {key: tuple(claims) for key, claims in index.items()}
 
     @cached_property
     def by_object(self) -> Mapping[Node, tuple[Claim, ...]]:
@@ -360,11 +379,18 @@ def _evidence(value: JsonValue, pointer: str) -> JsonObject:
     return ref
 
 
-def _tx_end(value: JsonValue, pointer: str) -> bool:
-    """Whether a ``superseded_at`` leaves the version current."""
+def _tx_end(value: JsonValue, pointer: str, recorded_at: int, head: int) -> bool:
+    """Whether a ``superseded_at`` leaves the version current. A version is superseded no earlier
+    than the transaction that recorded it (the resolver folds one transaction's assertions in
+    order, so both may be one) and no later than the graph's head."""
     if value == OPEN:
         return True
-    _R.integer(value, pointer, 0)
+    tx = _R.integer(value, pointer, 0)
+    if not recorded_at <= tx <= head:
+        raise _R.fail(
+            f"superseded at {tx}, before its recording at {recorded_at} or after the head {head}",
+            pointer,
+        )
     return False
 
 
@@ -424,7 +450,9 @@ def _claim(value: JsonValue, pointer: str, head: int) -> Claim:
         valid=read_interval(claim["valid"], child(pointer, "valid")),
         assertion_kind=kind,
         recorded_at=recorded_at,
-        current=_tx_end(claim["superseded_at"], child(pointer, "superseded_at")),
+        current=_tx_end(
+            claim["superseded_at"], child(pointer, "superseded_at"), recorded_at, head
+        ),
         evidence=evidence,
         records=records,
         raw=claim,
@@ -449,6 +477,8 @@ def _finding(value: JsonValue, pointer: str, head: int) -> ResolutionFinding:
             _R.string(item, child(child(pointer, "others"), i), CLAIM_ID)
             for i, item in enumerate(others)
         ),
-        current=_tx_end(finding["superseded_at"], child(pointer, "superseded_at")),
+        current=_tx_end(
+            finding["superseded_at"], child(pointer, "superseded_at"), recorded_at, head
+        ),
         raw=finding,
     )
