@@ -1509,9 +1509,7 @@ def fleet_register() -> Example:
     the row, whose right side cites its cell. The register states no dates, so the link's
     validity is ``NotCovered``. Rows that give no controller id state no link.
     """
-    ex = Example(
-        "fleet_register", {source.path: source for source in EXAMPLES["fleet_register"]()}
-    )
+    ex = Example("fleet_register", {source.path: source for source in EXAMPLES["fleet_register"]()})
     register = "fleet.csv"
     table_at = ex.cite("csv", register, ex.whole(register), kind=STATED)
     cells = [row.split(",") for row in ex.sources[register].data.decode().splitlines()]
