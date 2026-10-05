@@ -266,10 +266,14 @@
               "items": {
                 "enum": [
                   "authorised_configuration",
+                  "calibrated_by",
+                  "calibrated_with",
+                  "calibration_candidate",
                   "configuration_active_during",
                   "configuration_candidate",
                   "configuration_unknown",
                   "deployed_at",
+                  "drift",
                   "episode_of",
                   "evidenced_by",
                   "executes_task",
@@ -296,7 +300,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 28,
+              "maxItems": 32,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true

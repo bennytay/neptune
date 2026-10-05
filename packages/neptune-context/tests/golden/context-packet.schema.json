@@ -622,6 +622,136 @@
       ],
       "type": "object"
     },
+    "Delta": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "name": {
+              "type": "string"
+            },
+            "quantity": {
+              "const": "parameter"
+            },
+            "representation": {
+              "const": "values"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "earlier",
+            "later",
+            "name",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "translation"
+            },
+            "representation": {
+              "enum": [
+                "homogeneous_matrix",
+                "translation"
+              ]
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "enum": [
+                "euler_angles",
+                "homogeneous_matrix",
+                "quaternion",
+                "rotation_matrix",
+                "rotation_vector"
+              ]
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "later - earlier, component by component, between two calibration records, in their declared form and unit; never converted (neptune-memory ADR 0014)"
+    },
     "DocumentSpanItem": {
       "additionalProperties": false,
       "description": "a span of a document or table record and its extracted text",
@@ -2391,6 +2521,51 @@
             },
             "value": {
               "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "delta"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/Unit"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                }
+              ],
+              "description": "the unit both calibrations declare, as declared; not_applicable for a form without one (a quaternion, a rotation matrix)"
+            },
+            "value": {
+              "$ref": "#/$defs/Delta"
             }
           },
           "required": [
