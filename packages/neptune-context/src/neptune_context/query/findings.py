@@ -1,8 +1,9 @@
 """Structured query findings (ADR 0002 §7): every reason a query is refused, never an exception.
 
 A finding names a stable ``code``, where it applies (``at``: a JSON pointer into the query's
-canonical JSON, or ``line N`` for a textual-form syntax error) and a deterministic message. Any
-finding refuses the query; there are no warnings in this version.
+canonical JSON, so a set member's index is its place in canonical order) and a deterministic
+message. Any finding refuses the query; there are no warnings in this version. Codes are part of
+the contract: a new code is additive, a renamed or removed one needs a new ``QUERY_VERSION``.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 class FindingCode(StrEnum):
     # The document itself.
     TOO_LARGE = "too_large"  # beyond MAX_DOCUMENT_BYTES
-    SYNTAX = "syntax"  # not JSON, or a textual line that does not parse
+    SYNTAX = "syntax"  # not UTF-8 JSON, a duplicate key, NaN or Infinity
     SHAPE = "shape"  # a missing, extra or wrongly typed member
     UNSUPPORTED_VERSION = "unsupported_version"  # query_version is not QUERY_VERSION
     DUPLICATE = "duplicate"  # a set member or a single clause given twice

@@ -21,10 +21,16 @@ import re
 from collections.abc import Hashable
 from typing import TYPE_CHECKING, Final, Generic, TypeVar, get_args
 
+from neptune_ledger.api import ThreadKind
+from neptune_memory.schema.interval import CivilClock
+from neptune_memory.schema.nodes import NodeType
+from neptune_memory.schema.predicates import CORE_PREDICATES, is_declared_value
+
 from neptune.model.ids import check_token
 from neptune.model.time import Epoch, Timescale
 from neptune.model.units import Dimension, unit_from_json
 from neptune_context.query.codec import (
+    canonical_bytes,
     clock_bridge_to_json,
     frame_bridge_to_json,
     ordered,
@@ -48,10 +54,10 @@ from neptune_context.query.model import (
     MAX_TOKENS,
     MAX_ZONES,
     Box,
-    CivilTime,
     Clock,
     Diff,
     DomainClock,
+    Explain,
     FrameRef,
     FrameRegion,
     Instant,
@@ -59,10 +65,6 @@ from neptune_context.query.model import (
     Subject,
     Why,
 )
-from neptune_ledger.api import ThreadKind
-from neptune_memory.schema.interval import CivilClock
-from neptune_memory.schema.nodes import NodeType
-from neptune_memory.schema.predicates import CORE_PREDICATES, is_declared_value
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -130,12 +132,15 @@ class _Validator:
             return
         try:
             CivilClock(Timescale(clock.timescale), Epoch(clock.epoch), clock.resolution)
-        except (ValueError, TypeError):
+            if max(clock.resolution.numerator, clock.resolution.denominator) > INT64_MAX:
+                raise ValueError("resolution terms beyond int64")
+        except (ValueError, TypeError, AttributeError):
             self.add(
                 FindingCode.BAD_CLOCK,
                 at,
                 "a civil time is an absolute timescale (gps, posix, tai, utc), an absolute epoch "
-                "(gps, unix) and a positive resolution; a device's own clock is a domain clock",
+                "(gps, unix) and a positive resolution with int64 terms; a device's own clock is a "
+                "domain clock",
             )
 
     def ticks(self, value: int, at: str) -> bool:
@@ -178,14 +183,16 @@ class _Validator:
             )
         shape = region.shape
         at = f"{at}/shape"
-        coordinates = [*shape.min, *shape.max] if isinstance(shape, Box) else [*shape.center]
-        if not all(math.isfinite(c) for c in coordinates):
+        coordinates = (
+            [*shape.min, *shape.max] if isinstance(shape, Box) else [*shape.center, shape.radius]
+        )
+        if not all(_is_number(c) and math.isfinite(c) for c in coordinates):
             self.add(FindingCode.BAD_REGION, at, "every coordinate is finite")
         elif isinstance(shape, Box):
             if not all(low < high for low, high in zip(shape.min, shape.max, strict=True)):
                 self.add(FindingCode.BAD_REGION, at, "a box has min < max on every axis")
-        elif not (math.isfinite(shape.radius) and shape.radius > 0):
-            self.add(FindingCode.BAD_REGION, at, "a sphere's radius is finite and positive")
+        elif not shape.radius > 0:
+            self.add(FindingCode.BAD_REGION, at, "a sphere's radius is positive")
 
     def text(self) -> None:
         clause = self.query.text
@@ -251,8 +258,12 @@ class _Validator:
         """Check each item; return each valid-time diff's two clocks with their pointers."""
         pairs: list[tuple[Clock, str, Clock, str]] = []
         self.count(self.query.explain, MAX_EXPLAIN, "/explain", "explain items")
+        seen: set[Explain] = set()
         for index, item in enumerate(self.query.explain):
             at = f"/explain/{index}"
+            if item in seen:
+                self.add(FindingCode.DUPLICATE, at, "repeats an earlier explain item")
+            seen.add(item)
             if isinstance(item, Why):
                 if not _CLAIM_ID.fullmatch(item.claim_id):
                     self.add(
@@ -310,7 +321,7 @@ class _Validator:
     def run(self) -> list[QueryFinding]:
         query = self.query
         if query.as_of != "head":
-            self.bounded(query.as_of, 0, INT64_MAX, "/as_of", "as_of")  # type: ignore[arg-type]
+            self.bounded(query.as_of, 0, INT64_MAX, "/as_of", "as_of")
         self.count(query.subjects, MAX_SUBJECTS, "/subjects", "subjects")
         for index, subject in enumerate(ordered(query.subjects, subject_to_json)):
             self.subject(subject, f"/subjects/{index}")
@@ -435,7 +446,32 @@ class _Components(Generic[N]):
         return left == right or self._root(left) == self._root(right)
 
 
-def validate(query: Query) -> tuple[QueryFinding, ...]:
-    """Every reason ``query`` cannot be answered as written; empty when it can."""
-    return tuple(_Validator(query).run())
+def _is_number(value: object) -> bool:
+    """A coordinate is an ``int`` or ``float`` (never a ``bool``) that converts to a float."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        float(value)
+    except OverflowError:
+        return False
+    return True
 
+
+def validate(query: Query) -> tuple[QueryFinding, ...]:
+    """Every reason ``query`` cannot be answered as written; empty when it can.
+
+    A query built in Python may hold what JSON cannot (a lone surrogate, an integer too large for
+    a float coordinate); it is refused first, since it has no canonical bytes and so no id.
+    """
+    try:
+        canonical_bytes(query)
+    except (ValueError, TypeError, OverflowError, AttributeError):
+        return (
+            QueryFinding(
+                FindingCode.SHAPE,
+                "/",
+                "the query has no canonical JSON: a value is not representable (lone surrogate, "
+                "non-finite or oversized number, or a member of the wrong type)",
+            ),
+        )
+    return tuple(_Validator(query).run())

@@ -2,9 +2,10 @@
 
 ``to_json`` writes every member in a fixed shape: lists always present (possibly empty), absent
 single clauses omitted (canonical JSON has no ``null``), set-like members ordered by their own
-canonical JSON, coordinates always floats. ``canonical_bytes`` is the compiler's canonical JSON
-of that value, so the same query gives the same bytes on every machine, and ``query_id`` hashes
-them. Reading is ``decode``.
+canonical JSON, coordinates always floats (``-0.0`` as ``0.0``). ``canonical_bytes`` is the
+compiler's canonical JSON of that value, so equal queries give the same bytes on every machine,
+and ``query_id`` hashes them: it is the key a context packet, a cache or a log names a query by.
+Reading is ``decode``.
 """
 
 from __future__ import annotations
@@ -39,6 +40,9 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 OPEN: Final = "open"
 ANY: Final = "any"
+# A query's id: ``query:sha256:<64 lowercase hex>`` of its canonical bytes (ADR 0002 §6).
+QUERY_ID_PREFIX: Final = "query:sha256:"
+QUERY_ID_PATTERN: Final = r"^query:sha256:[0-9a-f]{64}$"
 
 
 # --- Encoding ---------------------------------------------------------------------------------
@@ -68,14 +72,19 @@ def frame_to_json(frame: FrameRef) -> JsonObject:
     return {"frame_id": frame.frame_id, "graph_id": frame.graph_id}
 
 
+def _coordinate(value: float) -> float:
+    """A float, with ``-0.0`` written as ``0.0``: the two compare equal, so they encode equal."""
+    return float(value) + 0.0
+
+
 def _vec(values: Vec3) -> list[JsonValue]:
-    return [float(v) for v in values]
+    return [_coordinate(v) for v in values]
 
 
 def _shape_to_json(shape: Shape) -> JsonObject:
     if isinstance(shape, Box):
         return {"kind": "box", "max": _vec(shape.max), "min": _vec(shape.min)}
-    return {"center": _vec(shape.center), "kind": "sphere", "radius": float(shape.radius)}
+    return {"center": _vec(shape.center), "kind": "sphere", "radius": _coordinate(shape.radius)}
 
 
 def clock_bridge_to_json(bridge: ClockBridge) -> JsonObject:
@@ -183,5 +192,8 @@ def canonical_bytes(query: Query) -> bytes:
 
 
 def query_id(query: Query) -> str:
-    """``query:sha256:<hex>`` of the canonical bytes; equal queries, equal ids."""
-    return "query:sha256:" + hashlib.sha256(canonical_bytes(query)).hexdigest()
+    """``query:sha256:<hex>`` of the canonical bytes; equal queries, equal ids.
+
+    The bytes carry ``query_version``, so a query read under another version never shares an id.
+    """
+    return QUERY_ID_PREFIX + hashlib.sha256(canonical_bytes(query)).hexdigest()

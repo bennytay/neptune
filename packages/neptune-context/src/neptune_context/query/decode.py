@@ -53,6 +53,15 @@ if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
 
 
+def _is_unicode(text: str) -> bool:
+    """JSON lets ``\\ud800`` through as a lone surrogate; canonical JSON (UTF-8) cannot carry it."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 class _Decoder:
     """Walks untrusted JSON, recording a finding at each wrong member and returning ``None``."""
 
@@ -79,6 +88,9 @@ class _Decoder:
     def string(self, value: Any, at: str) -> str | None:
         if not isinstance(value, str):
             self.fail(at, "expected a string")
+            return None
+        if not _is_unicode(value):
+            self.fail(at, "a string is valid Unicode: no lone surrogate escapes")
             return None
         return value
 
@@ -390,7 +402,7 @@ class _Decoder:
         if data is None:
             return None
         version = data["query_version"]
-        if isinstance(version, bool) or version != QUERY_VERSION:
+        if isinstance(version, bool) or not isinstance(version, int) or version != QUERY_VERSION:
             self.fail(
                 "/query_version",
                 f"this reader reads query_version {QUERY_VERSION}",

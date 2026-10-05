@@ -6,7 +6,7 @@ flowchart LR
   MEM[("Memory graph schema 1.0.0")]
   subgraph P["neptune-context"]
     PIN["pins.py + contract suites on stubs"]
-    QRY["query/"]
+    QRY["query/ language + validation (ADR 0002)"]
     RET["retrieve/"]
     PKT["packets/"]
     RND["render/"]
@@ -39,8 +39,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1,PIN built
-  class K2 partial
-  class QRY,RET,PKT,RND,SDK,MCP,EXP,EVA,K3 todo
+  class K2,QRY partial
+  class RET,PKT,RND,SDK,MCP,EXP,EVA,K3 todo
   class LED,MEM,OUT,CON ext
   style P fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

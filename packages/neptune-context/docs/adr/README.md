@@ -8,3 +8,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-place-in-the-programme-and-contract-pins.md) | Context's place in the programme, declared contract versions, and the read-only seam | Accepted |
+| [0002](0002-query-language.md) | The query language: subjects, time, space, graph, text, budget and explain, with as_of and during semantics | Accepted |

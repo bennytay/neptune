@@ -2,8 +2,8 @@
 
 A ``Query`` is plain data. It says what to retrieve and on which clock, frame and snapshot; it
 never says how (the planner chooses channels, and no channel is privileged). ``validate`` decides
-whether a query is answerable without silently mixing clocks, frames or units; the codecs in
-``codec`` and ``text`` give its canonical JSON and textual forms.
+whether a query is answerable without silently mixing clocks, frames or units; ``codec`` gives
+its canonical JSON and id, ``decode`` reads that JSON back, and ``schema`` exports its JSON Schema.
 
 Set-like clauses are ``frozenset``s so that two queries that mean the same thing are equal and
 encode to the same bytes; the codecs order them by their canonical JSON.
@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from fractions import Fraction
-from typing import Final, Literal, TypeAlias
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias
+
+if TYPE_CHECKING:
+    from fractions import Fraction
 
 # The query document's wire version. Every query's JSON carries it as ``query_version`` and the
 # textual form's header line is ``query <QUERY_VERSION>``; a reader refuses any other value.
@@ -70,7 +72,7 @@ class TextField(StrEnum):
 
 
 class Caller(StrEnum):
-    """Who asks. Only used to pick an explicit ``include_inferred``; the query records the choice."""
+    """Who asks. Only picks an explicit ``include_inferred``; the query records the choice."""
 
     AGENT = "agent"
     POLICY = "policy"
