@@ -107,6 +107,22 @@ this gate. A contract changed after 1.0.0 needs a version bump, so every fix lan
    - An evidence URI's `as_of` has at most 19 digits and is at most 2^63 − 1.
    - The CLI exits 2 on an unreadable packet directory.
 
+9. **Upstream vocabularies come from the pins, never from live owner code.** Subject kinds (graph-schema
+   node types and catalog-api thread kinds), predicate names, and the Memory definitions the packet schema
+   embeds are read from `neptune_context/pinned.json`. That file is a snapshot of
+   `contracts/graph-schema/v<pin>/` and `contracts/catalog-api/v<pin>/` at the versions in `pins.py`, and a
+   test fails when it differs from the registry. `validate`, the query schema, the packet schema and the
+   planner's prompt all read it. An upstream release (a new Memory predicate or node type, a new Ledger
+   thread kind) therefore changes nothing Context publishes: not the export, not a query id, not a prompt
+   hash. A test adds all three to the live upstream code and proves it. Adopting them is a pin bump: a
+   reviewed Context change that regenerates the snapshot, the query and packet schemas, the planner
+   recordings and a `query-packet` minor version.
+   - The query schema keeps the subject-kind and predicate enums (ADR 0002's Consequences), now sourced
+     from the pins. A pin bump already changes the packet half, because it embeds graph-schema's
+     definitions, so moving the enums out would not avoid the minor version. Widening an input enum is
+     additive: every 1.0 query stays valid. The MCP tool schema and the planner keep the vocabulary as
+     machine-readable constraints.
+
 ## Alternatives considered
 
 - **Two registry contracts, `query` and `packet`.** Each half could version alone. But consumers always need
@@ -123,6 +139,12 @@ this gate. A contract changed after 1.0.0 needs a version bump, so every fix lan
   Memory to trail the Ledger by design: consolidation is asynchronous. Forbidding the lag would make every
   packet wait for Memory. Lost.
 
+- **Declare predicates and kinds as pattern-constrained strings, with membership checked only by
+  `validate`.** The query half would stay fixed across pin bumps. But the packet half changes on every bump
+  anyway, and agents and the planner would lose the vocabulary as schema constraints. Lost (§9).
+- **Read the registry under `contracts/` at run time.** This avoids the snapshot, but an installed package
+  has no registry. The snapshot ships in the wheel, and a freshness test ties it to the registry. Lost (§9).
+
 ## Consequences
 
 - Deploy and Learn build against `contracts/query-packet/v1.0.0` and `neptune_context.contract`. They run
@@ -133,5 +155,9 @@ this gate. A contract changed after 1.0.0 needs a version bump, so every fix lan
 - A later change that an older reader would misread raises `QUERY_VERSION` or `PACKET_VERSION` together
   with `QUERY_PACKET_VERSION`, and becomes `query-packet` 2.0.0. New optional members are minor versions
   (ADR 0002 §9).
+- Memory may hold values newer than Context's graph-schema pin, such as a node type or literal type added in
+  a minor. The pinned packet schema does not describe them. Serving them requires a pin bump first, and
+  C2's engine must report such a value as a gap rather than pass it through. A Memory or Ledger PR never
+  regenerates a Context artefact (§9).
 - Revisit when Memory's spatial or episode views land (scenes gain placed nodes), when the Ledger exposes
   series reads (the Arrow handle may gain a call), or if a consumer needs packet pages.

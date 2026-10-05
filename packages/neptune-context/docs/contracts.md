@@ -57,6 +57,12 @@ and this file in step.
 | `catalog-api` | `neptune-ledger` | `CATALOG_API_VERSION = "1.6.0"` | `neptune_ledger.api.CATALOG_API_VERSION`; read through `neptune_ledger.api.CatalogApi` | Ledger ADR 0004; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md) |
 | `graph-schema` | `neptune-memory` | `GRAPH_SCHEMA_VERSION = "1.0.0"` | `neptune_memory.schema.GRAPH_SCHEMA_VERSION` (registry major 1); read through `neptune_memory.schema.reader.MemoryReader` | Memory ADR 0006; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md) |
 
+The vocabularies and definitions Context publishes from these contracts (subject kinds, predicate names, the
+Memory definitions the packet schema embeds) come from `src/neptune_context/pinned.json`, a snapshot of the
+registry at the pins, never from the owners' live code (ADR 0006 §9). A pin bump regenerates it with
+`uv run python -m neptune_context.pinned contracts packages/neptune-context/src/neptune_context/pinned.json`,
+then the query and packet schemas, the planner recordings and a `query-packet` minor version.
+
 Context declares no `package-schema` pin: packages reach it only as Ledger catalog rows and Memory claims.
 Both upstream contract suites run from this package against stubs: the Ledger's `CatalogContract` against
 `StubCatalog` (strict expected failures) and Memory's `CHECKS` against its reference and stub readers.
