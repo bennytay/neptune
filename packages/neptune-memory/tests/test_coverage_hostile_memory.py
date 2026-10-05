@@ -569,3 +569,24 @@ def test_a_declared_last_at_the_clocks_last_tick_places_no_gap() -> None:
     result = consolidate({"p": [clock_record, run_record, edge, row]})
     assert "gap" not in predicates(result)
     assert "coverage.end_unrepresentable" in codes(result)
+
+
+def test_an_inferred_message_count_leaves_a_configured_sensor_unknown() -> None:
+    """The inferred stream is not read, so the run may hold more than the records show: known
+    absence is withheld exactly as for an unreadable record (re-review of PR #128)."""
+    scene, ids = _survey()
+    records, _ = base()
+    joints = dict(records[2])
+    joints["run"] = ids["run"]
+    count = dict(joints["message_count"])  # type: ignore[call-overload]
+    count["provenance"] = {**joints["provenance"], "assertion_kind": "inferred"}  # type: ignore[dict-item]
+    joints["message_count"] = count
+    result = consolidate({"p": scene, "q": [joints]})
+    assert "coverage.inferred_record" in codes(result)
+    assert "sensor_not_recorded" not in predicates(result)
+    reasons = {
+        tuple(f.details["reasons"])  # type: ignore[arg-type]
+        for f in result.findings
+        if f.code == "coverage.presence_undecided"
+    }
+    assert reasons == {("ledger_records_unreadable",)}

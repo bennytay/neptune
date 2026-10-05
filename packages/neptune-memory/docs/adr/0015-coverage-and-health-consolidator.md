@@ -95,7 +95,7 @@ For each run and each `sensor` component of each hardware configuration a `Snaps
   configured sensor and no identifier this one may have (its `Known` identifiers and its `Ambiguous` candidates); every member's revision is in the Ledger; the
   run's span is closed on one clock; no integrity finding names the run or its streams; and no `run`,
   `run_assembly`, `source_revision`, `stream`, `ingest_finding`, `image` or `video` record anywhere in the Ledger
-  was unreadable or in conflict (it could be this run's).
+  was unreadable, in conflict or inferred (it could be this run's).
 - `sensor_presence_unknown(run → sensor)` (**Unknown**) otherwise, with `coverage.presence_undecided` naming each
   reason: `no_recording`, `streams_declare_no_sensor`, `files_not_attributed`, `members_unresolved`, `recording_not_closed`,
   `integrity_findings`, `ledger_records_unreadable`. An `Ambiguous` device identifier that includes the sensor's is never a record, and an `Ambiguous` identifier of

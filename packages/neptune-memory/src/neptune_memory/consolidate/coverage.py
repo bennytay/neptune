@@ -261,6 +261,9 @@ def _read(ledger: LedgerReader) -> _View:
                             package_id=ref.package_id,
                         )
                     )
+                    # What it says about a run is not read, so the run's content is incomplete.
+                    if kind in _RUN_CONTENT:
+                        view.unreadable.add(kind)
                     continue
                 except parse.Malformed as exc:
                     view.findings.append(_malformed(kind, ref.package_id, index, str(exc)))
