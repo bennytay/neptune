@@ -7,14 +7,15 @@ until G3 maps ``schema.Claim`` onto ``PostgresStore``. One directory per tenant 
 - ``snapshots/<ledger snapshot>.json``: the ``MemorySnapshot`` of each consolidation and every
   finding it produced, as canonical JSON.
 
-Everything is derived from the Ledger, so ``drop`` deletes it; nothing here reads or writes a
-package. Each file is written to a temporary name and renamed, so a crash leaves the old file or
-the new one, never a mix. Paths are hostile input: a tenant is a token, never a path, and a
+Everything is derived from the Ledger, so a rebuild replaces it; nothing here reads or writes a
+package. Each file is written to a temporary name, synced and renamed, so a crash leaves the old
+file or the new one, never a mix. Paths are hostile input: a tenant is a token, never a path, and a
 symlink anywhere in a tenant's directory is refused.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -44,9 +45,26 @@ def _plain(path: Path) -> Path:
 
 
 def _write(path: Path, value: JsonValue) -> None:
-    temporary = path.with_name(path.name + ".tmp")
-    _plain(temporary).write_bytes(canonical_json.dumps(value) + b"\n")
+    """Write, flush, rename over ``path`` and flush the directory: a rename is atomic but not
+    durable until its directory is synced, and a power cut must leave the old file or the new."""
+    temporary = _plain(path.with_name(path.name + TEMPORARY))
+    with temporary.open("wb") as handle:
+        handle.write(canonical_json.dumps(value) + b"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     temporary.replace(_plain(path))
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _read(path: Path) -> JsonValue:
+    try:
+        return canonical_json.loads(_plain(path).read_bytes().rstrip(b"\n"))
+    except ValueError as exc:
+        raise GraphStoreError(f"{path}: not canonical JSON: {exc}") from exc
 
 
 class TenantGraphs:
@@ -65,10 +83,16 @@ class TenantGraphs:
         path = _plain(self._tenant(tenant) / GRAPH_FILE)
         if not path.exists():
             return None
+        data = _read(path)
         try:
-            return graph_from_json(canonical_json.loads(path.read_bytes().rstrip(b"\n")))
-        except ValueError as exc:
+            return graph_from_json(data)
+        except (TypeError, ValueError) as exc:
             raise GraphStoreError(f"{path}: not a graph document: {exc}") from exc
+
+    def snapshot(self, tenant: str, ledger_snapshot: int) -> JsonValue | None:
+        """The record of the tenant's consolidation of ``ledger_snapshot``, if it has one."""
+        path = _plain(self._tenant(tenant) / SNAPSHOTS / f"{ledger_snapshot}.json")
+        return _read(path) if path.exists() else None
 
     def snapshots(self, tenant: str) -> list[JsonValue]:
         """Every snapshot record the tenant holds, in Ledger snapshot order."""
@@ -86,41 +110,48 @@ class TenantGraphs:
             if match is None:
                 raise GraphStoreError(f"unexpected file in {folder}: {path.name}")
             names.append((int(match.group(1)), path))
-        return [canonical_json.loads(p.read_bytes().rstrip(b"\n")) for _, p in sorted(names)]
+        return [_read(p) for _, p in sorted(names)]
 
-    def save(self, tenant: str, document: GraphDocument, run: ConsolidationRun) -> None:
-        """Record ``run``'s snapshot, then the graph it produced (the graph names the head)."""
+    def save(
+        self, tenant: str, document: GraphDocument, run: ConsolidationRun, *, fresh: bool = False
+    ) -> None:
+        """Record ``run``'s snapshot, then the graph it produced (the graph names the head).
+
+        ``fresh`` (a rebuild): ``document`` replaces the tenant's graph, and every other snapshot
+        record goes once the new graph is in place. A directory holding files Memory did not
+        write is refused before anything is written.
+        """
         directory = self._tenant(tenant)
+        if fresh:
+            self._ours(directory)
         folder = _plain(directory / SNAPSHOTS)
         folder.mkdir(parents=True, exist_ok=True)
         record: JsonValue = {
             "findings": run.findings_json(),
             "snapshot": run.snapshot.to_json(),
         }
-        _write(folder / f"{run.snapshot.ledger_snapshot}.json", record)
+        name = f"{run.snapshot.ledger_snapshot}.json"
+        _write(folder / name, record)
         _write(directory / GRAPH_FILE, document.to_json())
+        if fresh:
+            for path in sorted(folder.iterdir()):
+                if path.name != name:
+                    path.unlink()
 
-    def drop(self, tenant: str) -> None:
-        """Delete the tenant's graph and snapshot records; other files are refused, not deleted."""
-        directory = self._tenant(tenant)
+    def _ours(self, directory: Path) -> None:
+        """Refuse a tenant directory holding anything Memory did not write, or a symlink."""
         if not directory.exists():
             return
-        folder = _plain(directory / SNAPSHOTS)
         ours = {GRAPH_FILE, GRAPH_FILE + TEMPORARY, SNAPSHOTS}
-        unexpected = sorted(p.name for p in directory.iterdir() if p.name not in ours)
-        if folder.exists():
+        unexpected = []
+        for path in sorted(directory.iterdir()):
+            if path.name not in ours or _plain(path).is_dir() != (path.name == SNAPSHOTS):
+                unexpected.append(path.name)
+        folder = _plain(directory / SNAPSHOTS)
+        if folder.is_dir():
             for path in folder.iterdir():
-                _plain(path)
-                name = path.name.removesuffix(TEMPORARY)
-                if not SNAPSHOT_FILE.fullmatch(name):
+                name = _plain(path).name.removesuffix(TEMPORARY)
+                if not path.is_file() or not SNAPSHOT_FILE.fullmatch(name):
                     unexpected.append(f"{SNAPSHOTS}/{path.name}")
         if unexpected:
             raise GraphStoreError(f"{directory} holds files Memory did not write: {unexpected}")
-        if folder.exists():
-            for path in folder.iterdir():
-                path.unlink()
-            folder.rmdir()
-        for name in (GRAPH_FILE, GRAPH_FILE + TEMPORARY):
-            path = _plain(directory / name)
-            if path.exists():
-                path.unlink()

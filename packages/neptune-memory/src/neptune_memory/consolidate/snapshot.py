@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Final
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.model.ids import check_token
-from neptune_memory.consolidate.base import Consolidation, Consolidator, run_consolidator
+from neptune_memory.consolidate.base import (
+    Consolidation,
+    Consolidator,
+    run_consolidator,
+    skip_consolidator,
+)
 from neptune_memory.consolidate.calibration import CalibrationHistoryConsolidator
 from neptune_memory.consolidate.configuration import (
     CONFIGURATION_CONSOLIDATOR_ID,
@@ -150,12 +155,14 @@ class ConsolidatorEntry:
     priority: int
     claims: int
     findings: int
+    complete: bool
 
     def to_json(self) -> JsonObject:
         return {
             **self.transform,
             "after": list(self.after),
             "claims": self.claims,
+            "complete": self.complete,
             "findings": self.findings,
             "priority": self.priority,
         }
@@ -245,6 +252,12 @@ def consolidate(
     by_id: dict[str, Consolidation] = {}
     for registration in ordered:
         cid = registration.consolidator_id
+        failed = sorted(dep for dep in reads[cid] if not by_id[dep].complete)
+        if failed:  # its input is not what the snapshot states: it does not run
+            by_id[cid] = skip_consolidator(
+                registration.consolidator, registration.config, failed, recorded_at=tx
+            )
+            continue
         previous = sorted(
             (c for dep in sorted(reads[cid]) for c in by_id[dep].claims), key=lambda c: c.id
         )
@@ -268,6 +281,7 @@ def consolidate(
             priority=registration.priority,
             claims=len(result.claims),
             findings=len(result.findings),
+            complete=result.complete,
         )
         for registration, result in zip(ordered, results, strict=True)
     )
@@ -299,10 +313,12 @@ def extend(
     """The graph after ``run``: ``document``'s assertions and builds plus the run's, resolved.
 
     A consolidator that built ``document`` must be in the run: dropping one would leave its claims
-    current forever, so that takes a rebuild. Lineage rules are ``resolve``'s (``LineageError``).
+    current forever, so that takes a rebuild. One that did not complete records no build, so what
+    it held stands until a later build of it completes. Lineage rules are ``resolve``'s
+    (``LineageError``).
     """
     tx = run.snapshot.ledger_snapshot
-    builds = [r.build for r in run.consolidations]
+    builds = [r.build for r in run.consolidations if r.complete]
     claims: list[Claim] = list(run.claims)
     if document is not None:
         if tx <= document.head:

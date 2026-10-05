@@ -47,7 +47,10 @@ ADR 0007 §5 stands, with these details:
    `Consolidation.build` produces it. `resolve(..., builds)` refuses builds that disagree with the claims:
    two builds of one consolidator at one transaction, a build naming a claim of another lineage or not yet
    recorded, or a recording of a built consolidator that no build at its transaction emitted. Builds join
-   the lineage checks, so an empty build cannot bring a replaced lineage back.
+   the lineage checks, so an empty build cannot bring a replaced lineage back. A consolidator that did not
+   run to completion records **no** build. That covers `consolidate.failed` and `consolidate.bad_output`,
+   and also `consolidate.dependency_failed`, where something it reads failed and it was not run. Its
+   output is no statement of its lineage, so what it held stands until a later build of it completes.
 2. **Builds land before arrivals.** At transaction `t`, every build at `t` is applied, then the
    assertions first recorded at `t` arrive in ADR 0005 order. A build of a new lineage retires the
    consolidator's other lineages. Every build withdraws the current versions of its lineage that it did
@@ -106,17 +109,18 @@ gets `{}`.
   It refuses (exit 1) a snapshot that does not follow the graph's head, and a consolidator that built
   the graph but is no longer registered: its claims would stay current forever, so that takes a rebuild.
   It prints the `MemorySnapshot`. Consolidating the head again with an identical result writes nothing.
-- **`rebuild`**: computes the run first, then drops the tenant's graph and saves the run as a fresh graph.
-  If the run is refused, the old graph is left as it was.
+- **`rebuild`**: drops the tenant's graph and consolidates from scratch. The run and its graph are
+  computed first and written over the old graph; only then do the other snapshot records go. A refused
+  rebuild leaves the old graph as it was.
 - **`dump [--as-of TX] [--out FILE]`**: every claim version, or the `as_of` view, as canonical JSON Lines
   ordered by claim id.
 
 Exit status is 0 for done, 1 for refused, and 2 for usage errors or input that cannot be read.
 
 `store/graphs.TenantGraphs` keeps one directory per tenant, holding `graph.json` and
-`snapshots/<N>.json` (the snapshot and its findings). Files are canonical JSON, written to `*.tmp` and
-then renamed. A tenant is a token, never a path. A symlink in a tenant's directory is refused, and `drop`
-refuses a directory that holds files Memory did not write. This is the reference persistence until G3
+`snapshots/<N>.json` (the snapshot and its findings). Files are canonical JSON, written to `*.tmp`,
+synced, then renamed, and the directory is synced. A tenant is a token, never a path. A symlink in a
+tenant's directory is refused, and a rebuild refuses a directory that holds files Memory did not write. This is the reference persistence until G3
 maps `Claim` onto `PostgresStore`, whose row shape stays provisional (ADR 0004, 0007 §7).
 
 Until Memory adopts the catalog API, the CLI reads a **Ledger export**

@@ -40,7 +40,10 @@ from neptune_memory.schema.supersede import (
     Build,
     LineageError,
     Resolution,
+    _contest,
+    arrival_key,
     as_of,
+    assertions,
     is_closure,
     lineage_of,
     resolve,
@@ -355,3 +358,28 @@ def test_a_build_that_skips_transactions_withdraws_at_its_own() -> None:
     item = claim(AMR, "governed_by", POLICIES[1], 0, tx=1, consolidator="memory.b")
     resolution = run([item], [build_of(1, item, cid="memory.b"), build_of(3, cid="memory.b")])
     assert resolution.claims[0].superseded_at == 3
+
+
+@settings(derandomize=True, max_examples=300)
+@given(st.lists(pooled(), max_size=8))
+def test_replacement_contests_exactly_as_first_placement(pool: list[Claim]) -> None:
+    """``_contest``, which re-placement runs, gives each assertion the pieces ``resolve`` placed."""
+    items = [replace(c, recorded_at=ledger_tx(i % 3)) for i, c in enumerate(pool)]
+    resolution = resolve(items, CORE_PREDICATES, PRIORITIES)
+    root_of = roots(resolution)
+    distinct = {c.id: c for c in assertions(items)}.values()
+    facts = {(c.subject, c.predicate) for c in distinct if c.predicate == "located_at"}
+    for fact in facts:
+        standing = sorted(
+            (c for c in distinct if (c.subject, c.predicate) == fact),
+            key=lambda c: arrival_key(c, PRIORITIES),
+        )
+        expected = {
+            root.id: sorted(dumps(p.to_json()) for p in pieces)
+            for root, pieces in ((r, _contest(standing).get(r.id, [])) for r in standing)
+        }
+        placed: dict[ClaimId, list[bytes]] = {r.id: [] for r in standing}
+        for version in resolution.claims:
+            if version.is_current and (version.subject, version.predicate) == fact:
+                placed[root_of[version.id].id].append(dumps(version.valid.to_json()))
+        assert {k: sorted(v) for k, v in placed.items()} == expected

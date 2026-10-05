@@ -343,14 +343,16 @@ def resolve(
     _check_builds(claims, inputs, builds)
     state = _Resolver(registry, priorities)
     arrivals = sorted(inputs, key=lambda c: arrival_key(c, priorities))
-    pending = list(builds)
+    next_build = next_arrival = 0
     for tx in sorted({c.recorded_at for c in arrivals} | {b.recorded_at for b in builds}):
-        at_tx = [b for b in pending if b.recorded_at == tx]
-        pending = pending[len(at_tx) :]
-        if at_tx:
-            state.apply_builds(at_tx, tx)
-        while arrivals and arrivals[0].recorded_at == tx:
-            state.arrive(arrivals.pop(0))
+        first = next_build
+        while next_build < len(builds) and builds[next_build].recorded_at == tx:
+            next_build += 1
+        if next_build > first:
+            state.apply_builds(builds[first:next_build], tx)
+        while next_arrival < len(arrivals) and arrivals[next_arrival].recorded_at == tx:
+            state.arrive(arrivals[next_arrival])
+            next_arrival += 1
     versions = state.versions
     forged = sorted({c.id for c in claims if is_closure(c)} - versions.keys())
     if forged:
@@ -410,6 +412,14 @@ class _Resolver:
         self.latest: dict[str, Lineage] = {}  # consolidator id -> its latest lineage so far
         self.withdrawn: set[ClaimId] = set()  # assertions a build withdrew and none re-emitted
         self.by_lineage: dict[Lineage, list[Claim]] = {}  # every assertion arrived, by lineage
+        self.versions_of: dict[ClaimId, list[ClaimId]] = {}  # assertion id -> its version ids
+
+    def _add(self, version: Claim, root: Claim) -> None:
+        """Record ``version`` as a version of the assertion ``root``."""
+        self.versions[version.id] = version
+        if version.id not in self.origin:
+            self.versions_of.setdefault(root.id, []).append(version.id)
+        self.origin[version.id] = root
 
     def _one(self, claim: Claim) -> bool:
         return self.registry.spec(claim.predicate).cardinality is Cardinality.ONE
@@ -421,10 +431,9 @@ class _Resolver:
         if self.latest.get(cid, arriving_lineage) != arriving_lineage:
             self._retire(arriving_lineage, arriving.recorded_at)
         self.latest[cid] = arriving_lineage
-        self.origin[arriving.id] = arriving
+        self._add(arriving, arriving)
         self.by_lineage.setdefault(arriving_lineage, []).append(arriving)
         if not self._one(arriving):
-            self.versions[arriving.id] = arriving
             return
         self.roots.setdefault((arriving.subject, arriving.predicate), []).append(arriving)
         self._place(arriving, arriving.recorded_at)
@@ -473,14 +482,12 @@ class _Resolver:
             root = origin[loser.id]
             for piece in loser.valid.minus(e.valid for e in effective):
                 narrowed = _closure(loser, root, piece, (arriving,), tx, resolver_hash)
-                origin[narrowed.id] = root
-                versions[narrowed.id] = narrowed
+                self._add(narrowed, root)
                 live.append(narrowed.id)
         versions[arriving.id] = replace(stored, supersedes=tuple(sorted(r.id for r in losers)))
         for version in effective:
             if version is not arriving:
-                origin[version.id] = arriving
-                versions[version.id] = version
+                self._add(version, arriving)
             live.append(version.id)
 
     def apply_builds(self, builds: Sequence[Build], tx: LedgerTx) -> None:
@@ -505,9 +512,7 @@ class _Resolver:
                 if self._one(root):
                     touched.add((root.subject, root.predicate))
                 else:
-                    restated = _restatement(root, root.valid, (), tx, self.resolver_hash)
-                    self.origin[restated.id] = root
-                    self.versions[restated.id] = restated
+                    self._add(_restatement(root, root.valid, (), tx, self.resolver_hash), root)
         for fact in sorted(touched, key=lambda f: (f[0].node_type, f[0].node_id, f[1])):
             self._replace(fact, tx)
 
@@ -531,26 +536,22 @@ class _Resolver:
         live = self.current.setdefault(fact, [])
         for root in standing:
             pieces = holds.get(root.id, [])
-            held = [vid for vid in live if self.origin[vid].id == root.id]
-            if sorted(_valid_key(self.versions[v].valid) for v in held) == sorted(
-                _valid_key(p) for p in pieces
-            ):
-                continue
-            for vid in held:
-                self._end(vid, tx)
             cutters = _distinct(
                 other
                 for other in standing
                 if other.id != root.id
                 and _conflict(other, root)
-                and holds.get(other.id)
-                and _beats(other, root)
+                and any(p.overlaps(root.valid) for p in holds.get(other.id, ()))
             )
-            for piece in pieces:
-                restated = _restatement(root, piece, cutters, tx, self.resolver_hash)
-                self.origin[restated.id] = root
-                self.versions[restated.id] = restated
-                live.append(restated.id)
+            restated = [_restatement(root, p, cutters, tx, self.resolver_hash) for p in pieces]
+            held = [self.versions[vid] for vid in live if self.origin[vid].id == root.id]
+            if sorted(map(_placement, held)) == sorted(map(_placement, restated)):
+                continue  # the same pieces on the same grounds: its versions stand
+            for version in held:
+                self._end(version.id, tx)
+            for version in restated:
+                self._add(version, root)
+                live.append(version.id)
 
     def _retire(self, upgrade: Lineage, tx: LedgerTx) -> set[Fact]:
         """ADR 0003 §3: a new lineage retires every current claim of the consolidator's others.
@@ -561,14 +562,11 @@ class _Resolver:
         version.
         """
         touched: set[Fact] = set()
-        for vid, version in list(self.versions.items()):
-            root = lineage_of(self.origin[vid])
-            if (
-                root[0] == upgrade[0]
-                and root != upgrade
-                and isinstance(version.superseded_at, Open)
-            ):
-                touched |= self._end(vid, tx)
+        for lineage in [k for k in self.by_lineage if k[0] == upgrade[0] and k != upgrade]:
+            for root in self.by_lineage[lineage]:
+                for vid in self.versions_of[root.id]:
+                    if isinstance(self.versions[vid].superseded_at, Open):
+                        touched |= self._end(vid, tx)
         return touched
 
     def _withdraw(self, build: Build) -> set[Fact]:
@@ -589,9 +587,10 @@ class _Resolver:
             return set()
         self.withdrawn.update(gone)
         touched = {(r.subject, r.predicate) for r in gone.values() if self._one(r)}
-        for vid, version in list(self.versions.items()):
-            if isinstance(version.superseded_at, Open) and self.origin[vid].id in gone:
-                self._end(vid, build.recorded_at)
+        for root_id in gone:
+            for vid in self.versions_of[root_id]:
+                if isinstance(self.versions[vid].superseded_at, Open):
+                    self._end(vid, build.recorded_at)
         return touched
 
     def _end(self, vid: ClaimId, tx: LedgerTx) -> set[Fact]:
@@ -787,6 +786,12 @@ def _contest(standing: Sequence[Claim]) -> dict[ClaimId, list[Interval]]:
 
 def _valid_key(interval: Interval) -> bytes:
     return dumps(interval.to_json())
+
+
+def _placement(version: Claim) -> tuple[bytes, tuple[RecordId, ...], bytes]:
+    """What a re-placement compares: a version's interval and the grounds it rests on."""
+    evidence = sorted(dumps(e.to_json()) for e in version.provenance.evidence)
+    return (_valid_key(version.valid), version.provenance.records, b"\n".join(evidence))
 
 
 def _restatement(

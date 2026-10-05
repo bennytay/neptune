@@ -537,3 +537,94 @@ def test_the_graph_file_is_a_strict_graph_document(ledger_file: Path, tmp_path: 
     assert document.head == 1 and document.builds
     path.write_text('{"kind": "memory.graph"}\n', encoding="utf-8")
     assert cli("--graphs", tmp_path, "--tenant", "t", "dump")[0] == REFUSED
+
+
+# --- Partial success -----------------------------------------------------------------------------
+
+
+class Crashing:
+    """A consolidator that fails on this snapshot, standing in for one hostile record."""
+
+    consolidator_id = "memory.runs"
+    version = "1"
+    model = None
+
+    def consolidate(
+        self, ledger: LedgerReader, previous: Sequence[Claim], config: Mapping[str, JsonValue]
+    ) -> ConsolidatorOutput:
+        raise RuntimeError("a malformed record")
+
+
+def test_a_consolidator_that_crashes_withdraws_nothing_and_its_readers_do_not_run() -> None:
+    first = extend(None, consolidate(ledger(1), default_registrations(), 1))
+    crashing = [
+        Registration(Crashing()) if r.consolidator_id == "memory.runs" else r
+        for r in default_registrations()
+    ]
+    run = consolidate(ledger(2), crashing, 2)
+    by_id = {r.transform.consolidator_id: r for r in run.consolidations}
+    assert [f.code for f in by_id["memory.runs"].findings] == ["consolidate.failed"]
+    assert [f.code for f in by_id["memory.episodes"].findings] == ["consolidate.dependency_failed"]
+    entries = {e.transform["consolidator_id"]: e for e in run.snapshot.consolidators}
+    assert not entries["memory.runs"].complete and not entries["memory.episodes"].complete
+    assert entries["memory.identity"].complete
+    second = extend(first, run)
+    assert {b.consolidator_id for b in second.builds if b.recorded_at == 2} == set(
+        CONSOLIDATORS
+    ) - {"memory.runs", "memory.episodes"}
+    held = {
+        c.id
+        for c in as_of(first.resolution, ledger_tx(1)).claims
+        if c.provenance.consolidator_id in {"memory.runs", "memory.episodes"}
+    }
+    now = {c.id for c in as_of(second.resolution, ledger_tx(2)).claims}
+    assert held and held <= now  # nothing of theirs withdrawn by a run that did not complete
+
+
+def test_a_deeply_nested_ledger_export_is_a_usage_error(tmp_path: Path) -> None:
+    deep = tmp_path / "deep.json"
+    deep.write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
+    status, _, err = cli(
+        "--graphs", tmp_path, "--tenant", "t", "consolidate", "--ledger", deep, "--snapshot", "1"
+    )
+    assert status == USAGE and "nested" in err
+
+
+def test_a_stale_later_record_does_not_block_reconsolidating_the_head(
+    ledger_file: Path, tmp_path: Path
+) -> None:
+    """A crash between a snapshot record and its graph leaves a record past the head."""
+    argv = (
+        "--graphs",
+        tmp_path,
+        "--tenant",
+        "t",
+        "consolidate",
+        "--ledger",
+        ledger_file,
+        "--snapshot",
+        "1",
+    )
+    assert cli(*argv)[0] == OK
+    later = tmp_path / "t" / "snapshots" / "2.json"
+    later.write_bytes((tmp_path / "t" / "snapshots" / "1.json").read_bytes())
+    graph = (tmp_path / "t" / "graph.json").read_bytes()
+    assert cli(*argv)[0] == OK
+    assert (tmp_path / "t" / "graph.json").read_bytes() == graph
+
+
+def test_a_corrupt_snapshot_record_is_refused(ledger_file: Path, tmp_path: Path) -> None:
+    argv = (
+        "--graphs",
+        tmp_path,
+        "--tenant",
+        "t",
+        "consolidate",
+        "--ledger",
+        ledger_file,
+        "--snapshot",
+        "1",
+    )
+    assert cli(*argv)[0] == OK
+    (tmp_path / "t" / "snapshots" / "1.json").write_text("{", encoding="utf-8")
+    assert cli(*argv)[0] == REFUSED

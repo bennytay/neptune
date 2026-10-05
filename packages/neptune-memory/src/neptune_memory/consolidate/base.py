@@ -50,6 +50,12 @@ if TYPE_CHECKING:
 # ADR 0003 §1.2: only the identity consolidator grounds ``same_as``, and never by inference.
 IDENTITY_CONSOLIDATOR_ID: Final = "memory.identity"
 
+# Runner findings that mean a consolidator did not run to completion: its output is not a
+# complete statement of its lineage, so it records no build and withdraws nothing (ADR 0016 §2).
+INCOMPLETE: Final = frozenset(
+    {"consolidate.failed", "consolidate.bad_output", "consolidate.dependency_failed"}
+)
+
 # Record kind hashed into finding ids. Changing it re-lineages every finding: new ADR.
 FINDING_KIND: Final = "memory.finding"
 MAX_MESSAGE: Final = 1000
@@ -194,13 +200,19 @@ class Consolidation:
     """One consolidator's output in one build: claims and findings, each sorted by id.
 
     ``recorded_at`` is the Ledger snapshot's transaction the build ran at; ``build`` is the
-    record of the run that withdrawal reads (ADR 0007 §5), empty or not.
+    record of the run that withdrawal reads (ADR 0007 §5), empty or not. A consolidation that
+    did not run to completion (``complete`` is false: it crashed, returned something else, or
+    what it reads failed) is no statement of its lineage and must not be recorded as a build.
     """
 
     transform: ConsolidatorTransform
     claims: tuple[Claim, ...]
     findings: tuple[ConsolidationFinding, ...]
     recorded_at: LedgerTx
+
+    @property
+    def complete(self) -> bool:
+        return not any(finding.code in INCOMPLETE for finding in self.findings)
 
     @property
     def build(self) -> Build:
@@ -344,6 +356,26 @@ def run_consolidator(
         tuple(claims[key] for key in sorted(claims)),
         tuple(findings[key] for key in sorted(findings)),
         recorded_at,
+    )
+
+
+def skip_consolidator(
+    consolidator: Consolidator,
+    config: Mapping[str, JsonValue],
+    failed: Sequence[str],
+    *,
+    recorded_at: LedgerTx,
+) -> Consolidation:
+    """The consolidation of a consolidator not run because what it reads did not complete."""
+    transform = ConsolidatorTransform(
+        consolidator_id=consolidator.consolidator_id,
+        version=consolidator.version,
+        config_hash=config_hash(config),
+        model=consolidator.model,
+    )
+    message = f"not run: the consolidators it reads did not complete: {sorted(failed)}"
+    return Consolidation(
+        transform, (), (_finding("dependency_failed", transform, message),), recorded_at
     )
 
 

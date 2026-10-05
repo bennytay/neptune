@@ -7,7 +7,8 @@ Rule: thin wrappers over the library; no logic of their own, and no direct packa
   keep their first recording, and what the builds no longer emit is withdrawn at ``N``). Prints
   the ``MemorySnapshot``. Consolidating the snapshot the graph already holds, with the same
   result, changes nothing.
-- ``rebuild --snapshot N``: drop the tenant's graph and consolidate ``N`` from scratch.
+- ``rebuild --snapshot N``: consolidate ``N`` from scratch and replace the tenant's graph with it
+  (the old one stays if the rebuild is refused).
 - ``dump [--as-of TX]``: every claim version of the tenant's graph (or the graph as of ``TX``) as
   canonical JSON Lines, ordered by claim id, to ``--out`` or stdout.
 
@@ -78,27 +79,28 @@ def _constant(token: str) -> object:
 def _ledger(path: Path) -> LedgerExport:
     """Any strict JSON (no repeated keys, no NaN), canonical or not."""
     text = path.read_bytes().decode("utf-8")
-    return ledger_export_from_json(
-        json.loads(text, object_pairs_hook=_unique, parse_constant=_constant)
-    )
+    try:
+        data = json.loads(text, object_pairs_hook=_unique, parse_constant=_constant)
+    except RecursionError as exc:
+        raise ValueError("the Ledger export is nested too deeply") from exc
+    return ledger_export_from_json(data)
 
 
 def _consolidate(
     graphs: TenantGraphs, tenant: str, ledger: LedgerExport, snapshot: int, *, rebuild: bool
 ) -> bytes:
     run = consolidate(ledger.at(snapshot), default_registrations(), snapshot)
-    if rebuild:  # only once the run exists: a refused rebuild keeps the old graph
-        graphs.drop(tenant)
+    printed = canonical_json.dumps(run.snapshot.to_json())
+    if rebuild:  # the new graph exists before the old one is replaced: a refusal keeps it
+        graphs.save(tenant, extend(None, run), run, fresh=True)
+        return printed
     current = graphs.load(tenant)
     if current is not None and current.head == run.snapshot.ledger_snapshot:
-        recorded = graphs.snapshots(tenant)
-        if recorded and recorded[-1] == {
-            "findings": run.findings_json(),
-            "snapshot": run.snapshot.to_json(),
-        }:
-            return canonical_json.dumps(run.snapshot.to_json())  # already consolidated: no-op
+        record = {"findings": run.findings_json(), "snapshot": run.snapshot.to_json()}
+        if graphs.snapshot(tenant, current.head) == record:
+            return printed  # this snapshot is already consolidated, identically: nothing to do
     graphs.save(tenant, extend(current, run), run)
-    return canonical_json.dumps(run.snapshot.to_json())
+    return printed
 
 
 def _dump(graphs: TenantGraphs, tenant: str, at: int | None, out: TextIO) -> None:
