@@ -92,7 +92,6 @@ EPISODE_CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
 )
 
 
-
 class Cardinality(StrEnum):
     ONE = "one"  # at most one object per subject at any valid instant: contradictions supersede
     MANY = "many"  # any number; claims only end by their own valid_to
