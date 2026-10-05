@@ -92,13 +92,9 @@ def _parameter(name: str, param: Param) -> CalibrationParameter:
     if isinstance(param, str):
         return CalibrationParameter(name, Known(param), NotApplicable())
     values, unit = param
-    if isinstance(values, tuple) and all(isinstance(v, float) for v in values):
-        return CalibrationParameter(
-            name,
-            Known(values),  # type: ignore[arg-type]
-            unit_from_text(unit) if isinstance(unit, str) or unit is None else unit,  # type: ignore[arg-type]
-        )
-    return CalibrationParameter(name, values, unit)  # type: ignore[arg-type]
+    value = Known(values) if isinstance(values, tuple) else values
+    declared = unit_from_text(unit) if isinstance(unit, str) or unit is None else unit
+    return CalibrationParameter(name, value, declared)  # type: ignore[arg-type]
 
 
 def calibration(

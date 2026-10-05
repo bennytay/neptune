@@ -12,14 +12,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from memory_calibration_records import (
     binding,
     calibration,
     calibration_thread,
     component,
-    configuration_thread,
     frame,
     hardware,
     pose,
@@ -179,7 +178,9 @@ def test_drift_between_consecutive_recalibrations_is_exact_and_in_declared_units
     # Both calibration records are evidence of every drift claim; no threshold is applied.
     for claim in of(result, "drift"):
         assert claim.assertion_kind == "observed"
-        delta = claim.object.value  # type: ignore[union-attr]
+        assert isinstance(claim.object, TypedLiteral)
+        delta = claim.object.value
+        assert isinstance(delta, Delta)
         assert {delta.earlier, delta.later} <= set(claim.provenance.records)
 
 
@@ -309,5 +310,5 @@ def test_a_recalibration_in_another_unit_gives_no_delta_and_is_never_converted()
     # no delta, and the deg/s value is not turned into rad/s.
     assert found == {"accelerometer_noise_density": (0.0021 - 0.002,)}
     (mismatch,) = [f for f in result.findings if f.code == "calibration.unit_mismatch"]
-    (compared,) = mismatch.details["compared"]  # type: ignore[misc]
-    assert compared["of"] == "gyroscope_noise_density"  # type: ignore[index]
+    compared: Any = mismatch.details["compared"]
+    assert [c["of"] for c in compared] == ["gyroscope_noise_density"]

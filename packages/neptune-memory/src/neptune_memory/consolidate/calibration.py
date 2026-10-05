@@ -785,6 +785,9 @@ def _history(view: _View, entries: list[_Entry]) -> list[ClaimDraft]:
                     (entry.calibration.record,),
                 )
             )
+            # Its validity is not stated (an instant would come from valid_from): the finding
+            # says whether it is unstated or Ambiguous; no interval is claimed.
+            _windows(view, entry, None)
         for node in entry.placement.nodes:
             series.setdefault((node, entry.shape), []).append(entry)
     deltas: dict[tuple[RecordId, RecordId], list[_Delta]] = {}
