@@ -82,8 +82,13 @@ PASSAGE_FIELDS: Final = frozenset({TextField.RECORD, TextField.DOCUMENT, TextFie
 CLAIM_FIELDS: Final = frozenset({TextField.CLAIM_TEXT, TextField.DECLARED_ID})
 MAX_PASSAGE_CHARS: Final = 16_000
 MAX_GAP_REFS: Final = 100
+OVERFETCH: Final = 10  # hits read per requested item: some are dropped when read back
+MIN_READ: Final = 100
+MAX_READ: Final = 2000
 PAGE: Final = 500
 _TEXT_AT: Final = "/text/text"
+_TEXT_CLAUSE_AT: Final = "/text"
+_BUDGET_AT: Final = "/budget/items"
 _FIELDS_AT: Final = "/text/fields"
 _INFERRED_AT: Final = "/include_inferred"
 
@@ -132,7 +137,7 @@ class Passage:
 
     @property
     def key(self) -> str:
-        anchor = content_id(dumps(self.evidence.to_json()))
+        anchor = content_id(dumps([self.evidence.to_json(), self.text]))
         return f"{self.field}:{self.document}:{anchor}"
 
     @property
@@ -163,9 +168,13 @@ class Skipped:
 
 @dataclass(frozen=True)
 class PassageBatch:
+    """Passages and what was left out. ``through`` is the catalog transaction they were read at
+    (the first page's point, pinned for every page); ``None`` when the catalog gave none."""
+
     passages: tuple[Passage, ...] = ()
     skipped: tuple[Skipped, ...] = ()
     findings: tuple[CatalogFinding, ...] = ()
+    through: int | None = None
 
 
 def passages_from_catalog(
@@ -183,17 +192,23 @@ def passages_from_catalog(
     and registration; ``text_of(row)`` gives its text (``None``: the record has none) because the
     catalog indexes records, not their bytes. The transform's adapter, version and config hash
     come from the catalog's ``lineage``. A row without a usable anchor, assertion kind, record id
-    or transform, or with invalid text, is skipped and named; none becomes a passage.
+    or transform, or with invalid text, is skipped and named; none becomes a passage. Catalog
+    records are observed or stated, never inferred, so these passages are never inference-gated.
     """
     passages: list[Passage] = []
     skipped: list[Skipped] = []
     findings: list[CatalogFinding] = []
     transforms: dict[str, Transform | None] = {}
     cursor: QueryCursor | None = None
+    through: int | None = None
     while True:
         table = catalog.query(QuerySpec(kinds=tuple(kinds), as_of=as_of, limit=page, after=cursor))
         rows = query_rows(table)
-        findings.extend(query_meta(table).findings)
+        meta = query_meta(table)
+        findings.extend(meta.findings)
+        if through is None and isinstance(meta.as_of, Known):
+            through = meta.as_of.value.tx_seq
+            as_of = through if as_of is None else as_of  # every page reads one catalog point
         for row in rows:
             text = text_of(row)
             if text is None:
@@ -210,6 +225,7 @@ def passages_from_catalog(
         tuple(passages),
         tuple(sorted(set(skipped), key=lambda s: (s.record_id, s.reason))),
         tuple(findings),
+        through,
     )
 
 
@@ -293,6 +309,7 @@ class LexicalCorpus:
         self.tenant = check_tenant(tenant)
         self.fields: set[TextField] = set()
         self.claims_through: int | None = None
+        self.passages_through: int | None = None
         self.skipped: list[Skipped] = []
         self._claims: dict[str, _ClaimRef] = {}
         self._passages: dict[str, Passage] = {}
@@ -309,7 +326,10 @@ class LexicalCorpus:
             until = None if isinstance(claim.superseded_at, Open) else claim.superseded_at
             for text_field, text in _claim_texts(claim):
                 key = f"claim:{claim.id}:{text_field}:{claim.recorded_at}"
-                self._claims[key] = _ClaimRef(claim.subject, claim.predicate, claim.id, until)
+                # first wins, as in the index: a key held with other content is refused there
+                self._claims.setdefault(
+                    key, _ClaimRef(claim.subject, claim.predicate, claim.id, until)
+                )
                 units.append(
                     IndexedText(
                         key,
@@ -325,10 +345,13 @@ class LexicalCorpus:
         self.claims_through = max(self.claims_through or 0, through)
         return self.index.add(self.tenant, units)
 
-    def add_passages(self, passages: Iterable[Passage]) -> tuple[IndexFinding, ...]:
+    def add_passages(
+        self, passages: Iterable[Passage], *, through: int
+    ) -> tuple[IndexFinding, ...]:
+        """Index passages read from the catalog at transaction ``through``."""
         units: list[IndexedText] = []
         for passage in passages:
-            self._passages[passage.key] = passage
+            self._passages.setdefault(passage.key, passage)  # first wins, as in the index
             self.fields.add(passage.field)
             units.append(
                 IndexedText(
@@ -340,13 +363,14 @@ class LexicalCorpus:
                     visible_from=passage.registered_at,
                 )
             )
+        self.passages_through = max(self.passages_through or 0, through)
         return self.index.add(self.tenant, units)
 
     def add_batch(self, batch: PassageBatch) -> tuple[IndexFinding, ...]:
         """Passages from ``passages_from_catalog``; its skipped records are remembered so the
         channel can say they were not searched."""
         self.skipped.extend(batch.skipped)
-        return self.add_passages(batch.passages)
+        return self.add_passages(batch.passages, through=batch.through or 0)
 
     def claim(self, key: str) -> _ClaimRef | None:
         return self._claims.get(key)
@@ -354,19 +378,23 @@ class LexicalCorpus:
     def passage(self, key: str) -> Passage | None:
         return self._passages.get(key)
 
-    def superseded(self, claims: set[ClaimId], after: int, head: int) -> list[Superseded]:
-        """Which of ``claims`` stopped being current in ``(after, head]``, and the versions
-        recorded then that superseded them. A supersession whose version the corpus does not
-        hold is not reported (``by`` would be empty)."""
+    def superseded(
+        self, claims: set[ClaimId], after: int, head: int
+    ) -> tuple[list[Superseded], list[ClaimId]]:
+        """Which of ``claims`` stopped being current in ``(after, head]``, with the versions
+        recorded then that superseded them; and, apart, those that ended with no such version
+        held (a packet's ``Superseded`` must name its successors)."""
         ends = {r.claim: r.superseded_at for r in self._claims.values() if r.claim in claims}
-        out = []
+        named, unexplained = [], []
         for claim, at in sorted(ends.items()):
             if at is None or not after < at <= head:
                 continue
             by = tuple(sorted({c for tx, c in self._superseders.get(claim, ()) if tx == at}))
             if by:
-                out.append(Superseded(claim, at, by))
-        return out
+                named.append(Superseded(claim, at, by))
+            else:
+                unexplained.append(claim)
+        return named, unexplained
 
 
 # --- The channel ------------------------------------------------------------------------------
@@ -392,19 +420,46 @@ class LexicalChannel:
         if clause is None or TextChannel.LEXICAL not in clause.channels:
             return answer(Channel.LEXICAL, ())
         corpus, query, snapshot = self._corpus, request.query, request.snapshot
-        gaps = self._coverage_gaps(clause.fields, snapshot.memory_as_of)
+        gaps = self._coverage_gaps(clause.fields, snapshot)
+        unapplied = [
+            name
+            for name, member in (
+                ("subjects", query.subjects),
+                ("during", query.during),
+                ("regions", query.regions),
+                ("site", query.site),
+            )
+            if member
+        ]
+        if unapplied:
+            gaps.append(
+                _gap(
+                    GapCode.NOT_COVERED,
+                    _TEXT_CLAUSE_AT,
+                    f"text matches are not restricted by: {', '.join(unapplied)}",
+                )
+            )
         asked = SearchRequest(
             clause.text,
             frozenset(clause.fields),
             {TextSource.MEMORY: snapshot.memory_as_of, TextSource.LEDGER: snapshot.as_of},
             Inference.INCLUDE if query.include_inferred else Inference.EXCLUDE,
-            limit=min(max(4 * query.budget.items, 50), 1000),
+            limit=min(max(OVERFETCH * query.budget.items, MIN_READ), MAX_READ),
         )
         result = corpus.index.search(corpus.tenant, asked)
         if result.clauses == 0:
             gaps.append(_gap(GapCode.NOT_COVERED, _TEXT_AT, "the text has no searchable terms"))
         if result.truncated:
             gaps.append(_gap(GapCode.NOT_COVERED, _TEXT_AT, "clauses beyond the first 64 ignored"))
+        if result.total > len(result.matches):
+            gaps.append(
+                _gap(
+                    GapCode.NOT_COVERED,
+                    _BUDGET_AT,
+                    f"{result.total - len(result.matches)} further match(es) below rank "
+                    f"{len(result.matches)} were not read",
+                )
+            )
         if not query.include_inferred:
             gaps.extend(self._withheld(asked))
         scored: list[tuple[float, Item]] = []
@@ -418,17 +473,29 @@ class LexicalChannel:
         scored.extend(claim_hits)
         gaps.extend(claim_gaps)
         carried = {i.claim.id for _, i in claim_hits if isinstance(i, ClaimItem)}
+        superseded, unexplained = corpus.superseded(carried, snapshot.memory_as_of, snapshot.head)
+        if unexplained:
+            gaps.append(
+                _gap(
+                    GapCode.UNKNOWN,
+                    "",
+                    f"{len(unexplained)} hit claim(s) were superseded after the snapshot by "
+                    "versions the index does not hold",
+                    tuple(unexplained[:MAX_GAP_REFS]),
+                )
+            )
         return answer(
             Channel.LEXICAL,
             scored,
             gaps=gaps,
             findings=[f for f in findings if f.claim in carried or carried.intersection(f.others)],
-            superseded=corpus.superseded(carried, snapshot.memory_as_of, snapshot.head),
+            superseded=superseded,
         )
 
-    def _coverage_gaps(self, fields: frozenset[TextField], memory_as_of: int) -> list[Gap]:
+    def _coverage_gaps(self, fields: frozenset[TextField], snapshot: Snapshot) -> list[Gap]:
         """What the corpus cannot say about the requested fields: nothing indexed for a field,
-        claim text older than Memory's snapshot, records skipped for want of provenance."""
+        text indexed through an earlier transaction than the snapshot reads, records skipped for
+        want of provenance."""
         corpus = self._corpus
         gaps = []
         missing = sorted(str(f) for f in fields if f not in corpus.fields)
@@ -438,13 +505,25 @@ class LexicalChannel:
                     GapCode.NOT_COVERED, _FIELDS_AT, f"no text is indexed for: {', '.join(missing)}"
                 )
             )
-        if fields & CLAIM_FIELDS & corpus.fields and (corpus.claims_through or 0) < memory_as_of:
+        if fields & CLAIM_FIELDS & corpus.fields and (
+            (corpus.claims_through or 0) < snapshot.memory_as_of
+        ):
             gaps.append(
                 _gap(
                     GapCode.UNKNOWN,
                     _FIELDS_AT,
                     f"claim text is indexed through transaction {corpus.claims_through}; the "
-                    f"snapshot reads Memory at {memory_as_of}",
+                    f"snapshot reads Memory at {snapshot.memory_as_of}",
+                )
+            )
+        through = corpus.passages_through or 0
+        if fields & PASSAGE_FIELDS & corpus.fields and through < snapshot.as_of:
+            gaps.append(
+                _gap(
+                    GapCode.UNKNOWN,
+                    _FIELDS_AT,
+                    f"record text is indexed through catalog transaction {through}; "
+                    f"the snapshot reads the catalog at {snapshot.as_of}",
                 )
             )
         unread = sorted({s.record_id for s in corpus.skipped if s.field in fields})
@@ -471,15 +550,14 @@ class LexicalChannel:
                 refs.add(passage.document)
             elif (ref := corpus.claim(match.key)) is not None:
                 refs.add(ref.claim)
-        if not refs:
+        if not only.total:
             return []
-        shown = tuple(sorted(refs)[:MAX_GAP_REFS])
         return [
             _gap(
                 GapCode.INFERRED_WITHHELD,
                 _INFERRED_AT,
-                f"{len(refs)} inferred match(es) withheld: the query excludes inference",
-                shown,
+                f"{only.total} inferred match(es) withheld: the query excludes inference",
+                tuple(sorted(refs)[:MAX_GAP_REFS]),
             )
         ]
 

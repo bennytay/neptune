@@ -95,7 +95,25 @@ def test_an_exact_identifier_matches_only_itself() -> None:
     assert keys(index, '"sn a4471 9"') == ["a"]  # separator-insensitive
     assert keys(index, "sn a4471 9") == ["a", "b"]  # loose words only raise scores
     assert keys(index, "A4471") == ["a", "b"]
-    assert keys(index, "SN-A4471-") == ["a", "b"]  # a trailing dash is punctuation
+    assert keys(index, '"SN-A4471-"') == ["a", "b"]  # a quoted phrase finds the whole family
+    assert keys(index, "SN-A4471-") == []  # the compound SN-A4471 is not a whole compound there
+
+
+def test_an_unquoted_identifier_is_one_whole_compound_not_a_prefix_or_a_part() -> None:
+    index = _built(
+        [
+            unit("rc", "firmware 2.4.1-rc3"),
+            unit("exact", "firmware 2.4.1"),
+            unit("longer", "serial SN-A4471-9-B and hx-02-b"),
+            unit("words", "version 2 4 1 shipped"),
+        ]
+    )
+    assert keys(index, "2.4.1") == ["exact"]
+    assert set(keys(index, '"2.4.1"')) == {"exact", "rc", "words"}  # a quoted phrase is a prefix
+    assert keys(index, "SN-A4471-9") == []
+    assert keys(index, "hx-02") == []
+    assert keys(index, "hx-02-b") == ["longer"]
+    assert keys(index, "SN-A4471-9-B") == ["longer"]
 
 
 def test_a_topic_name_is_found_whole_or_by_its_parts() -> None:

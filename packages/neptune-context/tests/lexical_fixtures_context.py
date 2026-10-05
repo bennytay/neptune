@@ -257,7 +257,7 @@ def world(*, head: int = 4, doc: GraphDocument | None = None, with_passages: boo
     corpus = LexicalCorpus()
     corpus.add_claims(doc.resolution.claims, through=doc.head)
     if with_passages:
-        corpus.add_passages(passages())
+        corpus.add_passages(passages(), through=ledger_tx(head))
     reader = ReferenceReader(doc)
     return World(corpus, LexicalChannel(corpus, reader), reader, head, doc.resolution.claims)
 

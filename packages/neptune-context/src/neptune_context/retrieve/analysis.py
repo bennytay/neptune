@@ -6,8 +6,11 @@ ROS topics (``/uav21/imu/data``), declared ids (``asset_tag:hx-02``), firmware v
 
 - Text is NFKC-normalised and case-folded, then cut into *words* (runs of letters, digits and
   combining marks). Words joined by a single ``- _ . / :`` between alphanumerics form a
-  *compound*; its parts keep consecutive positions, so a compound is found as an exact phrase of
-  its parts: ``SN-A4471-9`` matches ``sn a4471 9`` but never ``SN-A4471-7``.
+  *compound*; its parts keep consecutive positions and the compound's first and last part are
+  marked. An unquoted compound in a query is found only as one whole compound of the document:
+  ``SN-A4471-9`` matches neither ``SN-A4471-7`` nor ``SN-A4471-9-B``, and ``2.4.1`` not
+  ``2.4.1-rc3``. A quoted phrase is found as adjacent terms anywhere, so ``"SN-A4471"`` finds
+  the whole serial family.
 - ``Mode.PROSE`` additionally stems a word that stands alone and is made of letters only
   (``stalls`` and ``stalled`` meet at ``stall``). ``Mode.VERBATIM`` (declared ids) and every
   compound part are never stemmed. No stop words are removed: phrases keep their adjacency and
@@ -17,11 +20,13 @@ ROS topics (``/uav21/imu/data``), declared ids (``asset_tag:hx-02``), firmware v
   library versions. ``verbatim`` stems nothing. A tenant picks one by name (``analyzer_for``).
 
 No segmentation: scripts written without spaces (CJK) stay one word per run. Input is hostile:
-words are cut at ``MAX_WORD_CHARS`` and a document at ``MAX_DOCUMENT_TOKENS`` by the caller.
+a word longer than ``MAX_WORD_CHARS`` keeps its head and a digest of the whole, and ``tokens`` takes
+a limit so the caller can bound a document.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -29,7 +34,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 JOINERS: Final = frozenset("-_./:")
 MAX_WORD_CHARS: Final = 128
@@ -49,16 +54,23 @@ class Mode(StrEnum):
 @dataclass(frozen=True)
 class Clause:
     """Consecutive terms to find adjacent and in order. ``required`` clauses (quoted in the
-    query) must match for a document to be returned; the rest only raise its score."""
+    query) must match for a document to be returned; the rest only raise its score.
+    ``anchored`` (an unquoted compound of several parts) must also be one whole compound of the
+    document: ``2.4.1`` is not found in ``2.4.1-rc3``, but the quoted phrase ``"2.4.1"`` is."""
 
     terms: tuple[str, ...]
     required: bool = False
+    anchored: bool = False
 
 
 @dataclass(frozen=True)
 class Token:
+    """A term at a position; ``start`` and ``end`` mark the first and last part of a compound."""
+
     term: str
     position: int
+    start: bool = True
+    end: bool = True
 
 
 def _is_word_char(char: str) -> bool:
@@ -69,9 +81,17 @@ def _normalise(text: str) -> str:
     return unicodedata.normalize("NFKC", text).casefold()
 
 
-def _compounds(text: str) -> list[list[str]]:
-    """The compounds of normalised text, each a list of its words."""
-    compounds: list[list[str]] = []
+def _word(word: str) -> str:
+    """A word as a term. One longer than ``MAX_WORD_CHARS`` keeps its head and a digest of the
+    whole, so two long words that share a head stay distinct (``#`` is never a word character)."""
+    if len(word) <= MAX_WORD_CHARS:
+        return word
+    digest = hashlib.sha256(word.encode()).hexdigest()[:16]
+    return f"{word[: MAX_WORD_CHARS // 2]}#{digest}"
+
+
+def _compounds(text: str) -> Iterator[list[str]]:
+    """The compounds of normalised text, each a list of its words, lazily."""
     current: list[str] = []
     i, n = 0, len(text)
     while i < n:
@@ -81,14 +101,13 @@ def _compounds(text: str) -> list[list[str]]:
         j = i
         while j < n and _is_word_char(text[j]):
             j += 1
-        current.append(text[i : min(j, i + MAX_WORD_CHARS)])
+        current.append(_word(text[i:j]))
         i = j
         if i + 1 < n and text[i] in JOINERS and _is_word_char(text[i + 1]):
             i += 1
             continue
-        compounds.append(current)
+        yield current
         current = []
-    return compounds
 
 
 def _stem_english(word: str) -> str:
@@ -127,23 +146,28 @@ class Analyzer:
     name: str
     _stem: Callable[[str], str]
 
-    def _terms(self, text: str, mode: Mode) -> list[list[str]]:
-        out = []
+    def _terms(self, text: str, mode: Mode) -> Iterator[list[str]]:
         for parts in _compounds(_normalise(text)):
             if mode is Mode.PROSE and len(parts) == 1 and parts[0].isalpha():
                 parts = [self._stem(parts[0])]
-            out.append(parts)
-        return out
+            yield parts
 
-    def tokens(self, text: str, mode: Mode) -> tuple[Token, ...]:
-        """Every term of ``text`` with its position (consecutive across the whole text)."""
-        flat = [term for parts in self._terms(text, mode) for term in parts]
-        return tuple(Token(term, position) for position, term in enumerate(flat))
+    def tokens(self, text: str, mode: Mode, limit: int | None = None) -> tuple[Token, ...]:
+        """The terms of ``text`` with consecutive positions and compound boundaries; at most
+        ``limit`` of them (the analysis stops there, so a hostile text costs a bounded amount)."""
+        out: list[Token] = []
+        for parts in self._terms(text, mode):
+            for i, term in enumerate(parts):
+                out.append(Token(term, len(out), i == 0, i == len(parts) - 1))
+            if limit is not None and len(out) >= limit:
+                return tuple(out[:limit])
+        return tuple(out)
 
     def query(self, text: str, mode: Mode) -> tuple[tuple[Clause, ...], bool]:
         """The clauses of a query and whether any were dropped to stay within
         ``MAX_QUERY_CLAUSES``. A quoted segment is one required phrase; outside quotes each
-        compound is a phrase of its parts and optional. Unbalanced quotes are punctuation."""
+        compound is an optional phrase of its parts, anchored when it has several. Unbalanced
+        quotes are punctuation."""
         clauses: list[Clause] = []
         cursor = 0
         for quoted in _QUOTED.finditer(text):
@@ -157,7 +181,7 @@ class Analyzer:
         return tuple(unique[:MAX_QUERY_CLAUSES]), len(unique) > MAX_QUERY_CLAUSES
 
     def _loose(self, text: str, mode: Mode) -> list[Clause]:
-        return [Clause(tuple(parts)) for parts in self._terms(text, mode)]
+        return [Clause(tuple(p), anchored=len(p) > 1) for p in self._terms(text, mode)]
 
 
 ENGLISH: Final = Analyzer("english", _stem_english)

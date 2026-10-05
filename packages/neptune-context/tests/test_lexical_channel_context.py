@@ -6,6 +6,7 @@ and a term that appears only in an inferred summary (returned only when inferenc
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from neptune_memory.schema.claim import ValueType
@@ -41,7 +42,15 @@ from neptune_context.packets.model import (
     GapCode,
     Item,
 )
-from neptune_context.query.model import Budget, Query, Subject, TextChannel, TextField
+from neptune_context.query.model import (
+    Budget,
+    Query,
+    SiteScope,
+    Subject,
+    TextChannel,
+    TextClause,
+    TextField,
+)
 from neptune_context.retrieve.bm25 import Bm25Index, SearchRequest, TextSource
 from neptune_context.retrieve.channel import Retrieval, RetrievalChannel, Snapshot, answer
 from neptune_context.retrieve.fusion import fuse
@@ -71,8 +80,9 @@ def test_a_serial_number_is_found_exactly_in_records_and_claims() -> None:
     assert spans(reply.hits) == [REGISTER.document]  # SN-A4471-7 is another unit
     assert [c.subject.node_id for c in claims_of(reply.hits)] == ["event_log:estop-0031"]
     assert reply.gaps == ()
-    prefix = world().channel.retrieve(retrieval("SN-A4471"))
-    assert set(spans(prefix.hits)) == {REGISTER.document, REGISTER_OTHER.document}
+    assert world().channel.retrieve(retrieval("SN-A4471")).hits == ()  # not a whole serial
+    family = world().channel.retrieve(retrieval('"SN-A4471"'))  # a quoted phrase is a prefix
+    assert set(spans(family.hits)) == {REGISTER.document, REGISTER_OTHER.document}
 
 
 def test_a_topic_name_is_found_in_a_channel_record_and_in_a_claim() -> None:
@@ -302,7 +312,7 @@ def test_tenants_never_see_each_others_text() -> None:
     for corpus in (ours, theirs):
         corpus.add_claims(w.history, through=ledger_tx(4))
     secret = passage(D, "globex-sop", "Globex quench line shutdown procedure")
-    theirs.add_passages((secret,))
+    theirs.add_passages((secret,), through=4)
     acme, globex = LexicalChannel(ours, w.reader), LexicalChannel(theirs, w.reader)
     query = retrieval("quench shutdown", fields=only(D))
     assert acme.retrieve(query).hits == ()
@@ -361,6 +371,86 @@ def test_a_custom_backend_plugs_in_behind_the_index_protocol() -> None:
     w = world()
     corpus = LexicalCorpus(Recording())
     corpus.add_claims(w.history, through=ledger_tx(4))
-    corpus.add_passages((SOP,))
+    corpus.add_passages((SOP,), through=4)
     reply = LexicalChannel(corpus, w.reader).retrieve(retrieval("replaced"))
     assert reply.hits and Recording.calls == 2  # the search and the withheld-inference probe
+
+
+# --- Review findings: consistency, cuts, staleness and unapplied clauses ------------------------
+
+
+def test_a_conflicting_key_leaves_the_corpus_and_the_index_in_agreement() -> None:
+    w = world()
+    (version,) = [c for c in w.history if c.subject == HUMANOID]
+    ended = dataclasses.replace(version, superseded_at=ledger_tx(4))
+    findings = w.corpus.add_claims((ended,), through=ledger_tx(4))
+    assert [f.code.value for f in findings] == ["conflicting_key"] * 2  # claim_text, declared_id
+    still = w.channel.retrieve(retrieval("torque recalibration"))
+    assert [c.id for c in claims_of(still.hits)] == [version.id]
+    assert w.corpus.superseded({version.id}, 0, 4) == ([], [])  # the first version stands
+
+
+def test_text_matches_are_not_restricted_by_subjects_time_or_site_and_the_gap_says_so() -> None:
+    plain = world().channel.retrieve(retrieval("thruster"))
+    assert plain.gaps == ()
+    narrowed = Query(
+        include_inferred=True,
+        budget=Budget(items=10),
+        subjects=frozenset({Subject("machine", "asset_tag:hx-02")}),
+        site=SiteScope("site_registry:plant-7", frozenset()),
+        text=TextClause("thruster", only(CT), frozenset({TextChannel.LEXICAL})),
+    )
+    reply = world().channel.retrieve(Retrieval(narrowed, retrieval("x").snapshot))
+    (gap,) = reply.gaps
+    assert (gap.code, gap.at) == (GapCode.NOT_COVERED, "/text")
+    assert gap.detail == "text matches are not restricted by: subjects, site"
+    unrestricted = world().channel.retrieve(retrieval("thruster", fields=only(CT), inferred=True))
+    assert reply.hits == unrestricted.hits
+
+
+def test_matches_below_the_read_cap_are_a_gap_not_a_silent_cut() -> None:
+    w = world(with_passages=False)
+    many = [passage(D, f"sop-{i}", f"quench valve procedure {i}") for i in range(130)]
+    w.corpus.add_passages(many, through=4)
+    reply = w.channel.retrieve(retrieval("quench", fields=only(D), items=1))
+    (gap,) = reply.gaps
+    assert len(reply.hits) == 100 and (gap.code, gap.at) == (GapCode.NOT_COVERED, "/budget/items")
+    assert gap.detail.startswith("30 further match(es) below rank 100")
+
+
+def test_record_text_indexed_before_the_snapshot_is_unknown_not_complete() -> None:
+    w = world()
+    stale = LexicalChannel(w.corpus, w.reader)
+    w.corpus.passages_through = 2
+    reply = stale.retrieve(retrieval("lock out", fields=only(D)))
+    (gap,) = reply.gaps
+    assert gap.code is GapCode.UNKNOWN and "catalog transaction 2" in gap.detail
+    assert spans(reply.hits)  # what was indexed is still answered
+
+
+def test_a_supersession_whose_successor_is_not_held_is_reported_as_unknown() -> None:
+    w = world()
+    corpus = LexicalCorpus()
+    history = [c for c in w.history if not c.supersedes]  # the successors are not held
+    assert len(history) < len(w.history)
+    corpus.add_claims(history, through=ledger_tx(4))
+    at_three = Retrieval(
+        retrieval("worn", fields=only(CT)).query, Snapshot(ledger_tx(3), ledger_tx(4), ledger_tx(3))
+    )
+    reply = LexicalChannel(corpus, w.reader).retrieve(at_three)
+    (gap,) = reply.gaps
+    assert reply.superseded == () and gap.code is GapCode.UNKNOWN and gap.at == ""
+    assert len(gap.refs) == 1
+
+
+def test_withheld_inferred_matches_are_counted_beyond_the_named_refs() -> None:
+    w = world(with_passages=False)
+    extra = [
+        claim(FLEET, "has_summary", f"retrofit report {i}", tx=3, kind="inferred", label=f"s{i}")
+        for i in range(3)
+    ]
+    corpus = LexicalCorpus()
+    corpus.add_claims(extra, through=ledger_tx(4))
+    reply = LexicalChannel(corpus, w.reader).retrieve(retrieval("retrofit", fields=only(CT)))
+    (gap,) = reply.gaps
+    assert gap.code is GapCode.INFERRED_WITHHELD and gap.detail.startswith("3 inferred match(es)")

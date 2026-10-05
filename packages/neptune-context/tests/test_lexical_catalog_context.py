@@ -45,8 +45,11 @@ from neptune_context.retrieve.lexical import (
 
 TRANSFORM = "rec:sha256:" + "33" * 32
 PACKAGE = "sha256:" + "44" * 32
-TXKEY = Known(TransactionKey(1, "2026-10-06T00:00:00.000000Z"))
 ANCHOR = evidence("anchor", Page(1), Span(0, 40))
+
+
+def txkey(point: int) -> Known[TransactionKey]:
+    return Known(TransactionKey(point, "2026-10-06T00:00:00.000000Z"))
 
 
 def row(label: str, seq: int = 1, **changes: Any) -> QueryRow:
@@ -75,6 +78,7 @@ class CatalogFake:
         self.transform = transform
         self.findings = findings
         self.queries: list[QuerySpec] = []
+        self.head = 10
 
     def query(self, spec: QuerySpec) -> Any:
         self.queries.append(spec)
@@ -85,7 +89,8 @@ class CatalogFake:
             key = (spec.after.kind, spec.after.record_id, spec.after.package_id)
             rows = [r for r in rows if (r.kind, r.record_id, r.package_id) > key]
         rows = rows[: spec.limit]
-        return query_table(rows, QueryMeta(as_of=TXKEY, findings=self.findings))
+        point = spec.as_of or self.head
+        return query_table(rows, QueryMeta(as_of=txkey(point), findings=self.findings))
 
     def lineage(self, record_id: str, *, as_of: int | None = None) -> LineageGraph:
         info = TransformInfo("pdf-text", "1.4.2", CONFIG, {})
@@ -99,7 +104,7 @@ class CatalogFake:
             nodes=(node,),
             edges=(),
             siblings=(),
-            as_of=TXKEY,
+            as_of=txkey(self.head),
             findings=(),
         )
 

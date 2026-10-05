@@ -12,9 +12,10 @@ postings in memory:
 
 - A unit is one text in one field. It is *visible* to a request when its source has a snapshot
   in the request, ``visible_from <= snapshot < visible_until``, and the request's inference mode
-  admits it. Only visible units in the requested fields take part: corpus size, average length
-  and document frequency are computed over them, per analysis mode, so withheld inferred text
-  never changes the score of anything returned.
+  admits it. Only visible units in the requested fields take part: corpus size and average length
+  are computed over all of them (so identifier and prose fields score on one scale) and document
+  frequency over those of the clause's analysis mode, so withheld inferred text never changes the
+  score of anything returned.
 - A required clause (quoted in the query) must match; any other clause adds its BM25 term. A
   clause of several terms is an exact adjacent phrase, scored as one term with its own
   document frequency.
@@ -164,6 +165,8 @@ class _Doc:
     unit: IndexedText
     length: int
     mode: Mode
+    starts: frozenset[int]  # positions that begin a compound
+    ends: frozenset[int]  # positions that end one
 
 
 @dataclass
@@ -217,7 +220,7 @@ class Bm25Index:
                     )
                 continue
             mode = mode_of(unit.field)
-            tokens = analyzer.tokens(unit.text, mode)
+            tokens = analyzer.tokens(unit.text, mode, MAX_DOCUMENT_TOKENS + 1)
             if not tokens:
                 findings.append(
                     IndexFinding(IndexFindingCode.EMPTY_TEXT, unit.key, "no searchable terms")
@@ -233,7 +236,15 @@ class Bm25Index:
                     )
                 )
             docno = len(part.docs)
-            part.docs.append(_Doc(unit, len(tokens), mode))
+            part.docs.append(
+                _Doc(
+                    unit,
+                    len(tokens),
+                    mode,
+                    frozenset(t.position for t in tokens if t.start),
+                    frozenset(t.position for t in tokens if t.end),
+                )
+            )
             part.by_key[unit.key] = docno
             positions: dict[str, list[int]] = defaultdict(list)
             for token in tokens:
@@ -256,10 +267,17 @@ class Bm25Index:
         if part is None or count == 0 or not request.fields:
             return SearchResult(clauses=count, truncated=truncated)
         visible = [docno for docno, doc in enumerate(part.docs) if self._visible(doc.unit, request)]
+        if not visible:
+            return SearchResult(clauses=count, truncated=truncated)
+        # One corpus for the visible units of the requested fields, so scores of identifier
+        # and prose fields share a scale; a term's document frequency is per analysis mode,
+        # because a stemmed term and a verbatim one are not the same term.
+        size = len(visible)
+        average = sum(part.docs[d].length for d in visible) / size
         scored: list[Match] = []
         for mode in Mode:
-            docs = [d for d in visible if part.docs[d].mode is mode]
-            scored.extend(_score(part, docs, clauses_by_mode[mode]))
+            docs = {d for d in visible if part.docs[d].mode is mode}
+            scored.extend(_score(part, docs, clauses_by_mode[mode], size, average))
         scored.sort(key=lambda m: (-m.score, m.key))
         return SearchResult(tuple(scored[:limit]), len(scored), count, truncated)
 
@@ -279,40 +297,48 @@ class Bm25Index:
         return True
 
 
-def _phrase_counts(part: _Partition, terms: tuple[str, ...], docs: set[int]) -> dict[int, int]:
-    """For each document in ``docs`` holding ``terms`` adjacent and in order, how many times."""
+def _phrase_counts(part: _Partition, clause: Clause, docs: set[int]) -> dict[int, int]:
+    """For each document in ``docs`` holding the clause's terms adjacent and in order (and, when
+    anchored, as one whole compound), how many times."""
     lists = []
-    for term in terms:
+    for term in clause.terms:
         posting = part.postings.get(term)
         if not posting:
             return {}
         lists.append(posting)
     first, rest = lists[0], lists[1:]
+    last = len(clause.terms) - 1
     counts: dict[int, int] = {}
     for docno, starts in first.items():
         if docno not in docs or any(docno not in other for other in rest):
             continue
-        if not rest:
-            counts[docno] = len(starts)
-            continue
         followers = [set(other[docno]) for other in rest]
-        hits = sum(1 for s in starts if all(s + i + 1 in f for i, f in enumerate(followers)))
+        doc = part.docs[docno]
+        hits = 0
+        for s in starts:
+            if not all(s + i + 1 in f for i, f in enumerate(followers)):
+                continue
+            if clause.anchored and not (
+                s in doc.starts
+                and s + last in doc.ends
+                and not any(s + i in doc.starts for i in range(1, last + 1))
+            ):
+                continue
+            hits += 1
         if hits:
             counts[docno] = hits
     return counts
 
 
-def _score(part: _Partition, docs: list[int], clauses: tuple[Clause, ...]) -> list[Match]:
-    """BM25 over ``docs`` (visible documents of one analysis mode) for ``clauses``."""
+def _score(
+    part: _Partition, docs: set[int], clauses: tuple[Clause, ...], size: int, average: float
+) -> list[Match]:
+    """BM25 for ``clauses`` over ``docs`` (visible documents of one analysis mode), against a
+    corpus of ``size`` documents of ``average`` length."""
     if not docs:
         return []
-    members = set(docs)
-    total = sum(part.docs[d].length for d in docs)
-    average = total / len(docs)
-    matched: list[tuple[Clause, dict[int, int]]] = []
-    for clause in clauses:
-        matched.append((clause, _phrase_counts(part, clause.terms, members)))
-    eligible = set(members)
+    matched = [(clause, _phrase_counts(part, clause, docs)) for clause in clauses]
+    eligible = set(docs)
     for clause, counts in matched:
         if clause.required:
             eligible &= counts.keys()
@@ -321,7 +347,7 @@ def _score(part: _Partition, docs: list[int], clauses: tuple[Clause, ...]) -> li
         df = len(counts)
         if not df:
             continue
-        idf = math.log(1.0 + (len(docs) - df + 0.5) / (df + 0.5))
+        idf = math.log(1.0 + (size - df + 0.5) / (df + 0.5))
         for docno, tf in counts.items():
             if docno in eligible:
                 norm = K1 * (1.0 - B + B * part.docs[docno].length / average)

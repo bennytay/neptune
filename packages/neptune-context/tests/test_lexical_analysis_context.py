@@ -84,11 +84,29 @@ def test_scripts_without_spaces_stay_one_word_per_run() -> None:
     assert terms("机械臂 停止 now") == ["机械臂", "停止", "now"]
 
 
-def test_a_word_is_cut_at_the_bound_and_garbage_yields_no_terms() -> None:
-    (token,) = ENGLISH.tokens("x" * 10_000, Mode.VERBATIM)
-    assert len(token.term) == MAX_WORD_CHARS
-    assert terms("") == terms("   \n\t") == terms("!!! ??? ---") == terms("\x00\x01￾") == []
+def test_a_long_word_keeps_its_head_and_a_digest_so_long_words_stay_distinct() -> None:
+    first, second = "x" * 200 + "a", "x" * 200 + "b"
+    (a,), (b,) = ENGLISH.tokens(first, Mode.VERBATIM), ENGLISH.tokens(second, Mode.VERBATIM)
+    assert a.term != b.term and a.term.startswith("x" * (MAX_WORD_CHARS // 2) + "#")
+    assert len(a.term) < MAX_WORD_CHARS
+    assert [t.term for t in ENGLISH.tokens(first, Mode.VERBATIM)] == [a.term]  # deterministic
+    assert len(ENGLISH.tokens("w " * 100_000, Mode.VERBATIM, 50)) == 50
+
+
+def test_garbage_yields_no_terms() -> None:
+    assert terms("") == terms("   \n\t") == terms("!!! ??? ---") == terms("\x00\x01\ufffe") == []
     assert terms("\ud800 ok") == ["ok"]  # a lone surrogate is not a word character
+
+
+def test_compound_boundaries_are_marked() -> None:
+    tokens = ENGLISH.tokens("a-b c d.e", Mode.VERBATIM)
+    assert [(t.term, t.start, t.end) for t in tokens] == [
+        ("a", True, False),
+        ("b", False, True),
+        ("c", True, True),
+        ("d", True, False),
+        ("e", False, True),
+    ]
 
 
 def test_query_quotes_make_required_phrases_and_loose_compounds_optional_phrases() -> None:
@@ -97,7 +115,7 @@ def test_query_quotes_make_required_phrases_and_loose_compounds_optional_phrases
     assert clauses == (
         Clause(("lock",)),
         Clause(("tag", "out"), required=True),
-        Clause(("sn", "a4471", "9")),
+        Clause(("sn", "a4471", "9"), anchored=True),
     )
 
 
