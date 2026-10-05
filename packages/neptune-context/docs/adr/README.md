@@ -11,4 +11,5 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0002](0002-query-language.md) | The query language: subjects, time, space, graph, text, budget and explain, with as_of and during semantics | Accepted |
 | [0003](0003-the-context-packet.md) | The context packet: a typed, cited, content-addressed answer with budgets and an inference flag | Accepted |
 | [0004](0004-sdk-and-mcp-server.md) | The SDK and the MCP server: one engine seam, verified answers, four read-only tools | Accepted |
+| [0005](0005-natural-language-query-planner.md) | The natural-language query planner: a model that emits a typed Query and shows it, never an answer | Accepted |
 | [0006](0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) | C1 gate: query-packet 1.0.0, answer checks, and the amendments the personas forced | Accepted |

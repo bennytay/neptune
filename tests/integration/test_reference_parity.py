@@ -1,6 +1,7 @@
 """Validation and salvage check the same references, read from the model (ADR 0069 §2).
 
-Over every worked example (four platforms, two deployments, every record kind they hold): the
+Over every worked example (four platforms, two deployments, a fleet register, every record kind
+they hold): the
 references validation's ``dangling_reference`` checks are exactly those the runtime's salvage
 check reads (``model.references.named``), and removing any one referenced record from an example
 is reported by validation, naming that record.
@@ -44,7 +45,7 @@ def salvage_view(records: list[Any]) -> set[tuple[str, str, str]]:
 
 
 def test_the_examples_cover_the_kinds_that_reference() -> None:
-    assert len(EXAMPLES) == 6
+    assert len(EXAMPLES) == 7
     kinds = {r.kind for example in EXAMPLES for r in records_of(example)}
     referencing = {kind for kind, *_ in (k for e in EXAMPLES for k in salvage_view(records_of(e)))}
     assert len(kinds) >= 30 and len(referencing) >= 15

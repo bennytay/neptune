@@ -21,8 +21,16 @@ def test_graph_schema_v1_is_published_and_active() -> None:
     contract = tomllib.loads((REGISTRY / "contract.toml").read_text(encoding="utf-8"))
     assert contract["status"] == "active"
     assert contract["owner"]["version_constant"] == "neptune_memory.schema:GRAPH_SCHEMA_VERSION"
-    version = json.loads((REGISTRY / "v1.0.0" / "version.json").read_text(encoding="utf-8"))
-    assert (version["version"], version["owner_version"]) == ("1.0.0", pins.GRAPH_SCHEMA_VERSION)
+    # 1.1.0: has_name, stream and document (ADR 0008); 1.2.0: configuration lineage (ADR 0010);
+    # 1.3.0: run thread predicates (ADR 0009); 1.4.0: clocks and their mappings (ADR 0011).
+    for published in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"):
+        version = json.loads(
+            (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")
+        )
+        assert (version["version"], version["owner_version"]) == (
+            published,
+            pins.GRAPH_SCHEMA_VERSION,
+        )
 
 
 def test_catalog_pin_is_pending() -> None:

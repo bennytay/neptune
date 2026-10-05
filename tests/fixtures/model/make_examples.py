@@ -47,6 +47,8 @@ from neptune.model.alignment import (
     ClockMapping,
     FrameBinding,
     FrameBindingBasis,
+    IdentityLink,
+    LinkBasis,
     MappingMethod,
     MemberRole,
     RunAssembly,
@@ -1498,6 +1500,60 @@ def mobile_robot() -> Example:
     return ex
 
 
+# --- Fleet register: identity links the register states (ADR 0050 §4, §10) ----------------------
+
+
+def fleet_register() -> Example:
+    """A fleet register naming each robot by asset tag, and the drone also by the ``sys_uuid``
+    its flight controller declares. That row states one identity: a ``co_declared`` link, citing
+    the row, whose right side cites its cell. The register states no dates, so the link's
+    validity is ``NotCovered``. Rows that give no controller id state no link.
+    """
+    ex = Example("fleet_register", {source.path: source for source in EXAMPLES["fleet_register"]()})
+    register = "fleet.csv"
+    table_at = ex.cite("csv", register, ex.whole(register), kind=STATED)
+    cells = [row.split(",") for row in ex.sources[register].data.decode().splitlines()]
+    header = tuple(cells[0])
+    table = ex.add(
+        StructuredTable(
+            id=ex.id_of("structured_table", table_at),
+            provenance=table_at,
+            name=NotCovered(),
+            header=Known(header, ex.cite("csv", register, Row(0), kind=STATED)),
+        )
+    )
+    for index in range(1, len(cells)):
+        row_at = ex.cite("csv", register, Row(index), kind=STATED)
+        ex.add(
+            StructuredRecord(
+                id=ex.id_of("structured_record", row_at),
+                provenance=row_at,
+                table=table.id,
+                row=index,
+                cells=tuple(Known(text) if text else Unknown() for text in cells[index]),
+            )
+        )
+        tag, _, sys_uuid = cells[index]
+        if not sys_uuid:
+            continue
+        ex.add(
+            IdentityLink(
+                id=ex.id_of("identity_link", row_at),
+                provenance=row_at,
+                left=LogicalId("asset-tag", tag),
+                right=Known(
+                    LogicalId("px4.sys_uuid", sys_uuid),
+                    ex.cite("csv", register, RowCell(index, 2, header[2]), kind=STATED),
+                ),
+                basis=LinkBasis.CO_DECLARED,
+                identifier=NotApplicable(),
+                evidence=(),
+                validity=NotCovered(),
+            )
+        )
+    return ex
+
+
 EXAMPLE_BUILDERS: Final[dict[str, Callable[[], Example]]] = {
     "drone": drone,
     "quadruped": quadruped,
@@ -1505,6 +1561,7 @@ EXAMPLE_BUILDERS: Final[dict[str, Callable[[], Example]]] = {
     "mobile_robot": mobile_robot,
     "warehouse_amr": warehouse_amr,
     "manipulator_cell": manipulator_cell,
+    "fleet_register": fleet_register,
 }
 
 

@@ -1,17 +1,21 @@
 """The golden graph of graph-schema v1, from the compiler's four worked examples (ADR 0006 §10).
 
 Inputs: the record lines of the drone, manipulator, mobile-robot and quadruped worked examples
-(``tests/fixtures/model/``; the caller reads them), plus a *Ledger overlay* derived from them: two
-operator logs whose bytes are in this module, and the two Ledger threads the Ledger would declare
-for the identity assertion (ADR 0003 §1's record kinds, until MVL-85 defines them).
+and the fleet register (``tests/fixtures/model/``; the caller reads them), plus a *Ledger overlay*
+derived from them: two operator logs whose bytes are in this module, and the two Ledger threads
+the Ledger would declare for the drone's two ids (ADR 0003 §1's ``ledger_thread`` stand-in, until
+Memory reads the catalog API). The operator's identity statement is the compiler's ``assertion``
+kind (root ADR 0062) with its ``authored_at`` clock, as an assertions adapter would write it.
 
 The Ledger grows over five transactions, and the same plan is rebuilt at each one:
 
 - tx 1: drone and mobile robot. The fixture model guesses the mobile robot's recorder.
 - tx 2: quadruped. The model guesses its recorder (``QUAD-07``) and an inferred
   ``same_as_candidate`` pair ``QUAD-07`` / ``QUAD-03``.
-- tx 3: manipulator and operator log 1. The operator links the drone's ``px4`` id to an asset tag
-  (``same_as``), names the drone run's recorder by asset tag on civil time (a ``clock_mismatch``
+- tx 3: manipulator, the fleet register and operator log 1. The register's row co-declares the
+  drone's asset tag and ``px4`` id (an ``IdentityLink``: ``same_as``), and the operator states the
+  same identity (a ``same_identity`` assertion: a second ``same_as``, on civil time). The
+  operator names the drone run's recorder by asset tag on civil time (a ``clock_mismatch``
   with the log's boot-clock claim) and by ``px4`` id on the run's own clock (corroborating the
   log), corrects the quadruped guess (superseded), and names the manipulator's recorder before
   the model's guess arrives (``overridden_on_arrival``).
@@ -20,10 +24,11 @@ The Ledger grows over five transactions, and the same plan is rebuilt at each on
 - tx 5: a package nothing consolidates: a transaction with no claims, so ``head`` is 5.
 
 Plan, in order of priority (later arrives later within a transaction): ``golden.runs``
-(deterministic), ``golden.operator`` (stated), ``memory.identity`` (the real identity policy) and
-``golden.fixture_model`` (inferred; ``_fixture_model``, golden only). Same inputs give
-byte-identical canonical JSON. Every consolidation finding is a hard error: golden inputs are
-clean by construction, so a finding means the inputs drifted.
+(deterministic), ``golden.operator`` (stated), ``memory.identity`` (the real identity policy),
+``golden.fixture_model`` (inferred; ``_fixture_model``, golden only) and ``memory.time`` (the real
+time-domain registry: the drone's clocks, and the quadruped's stated ``starting_time`` to
+``log_time`` mapping). Same inputs give byte-identical canonical JSON. Every consolidation finding
+is a hard error: golden inputs are clean by construction, so a finding means the inputs drifted.
 """
 
 from __future__ import annotations
@@ -33,9 +38,12 @@ from typing import TYPE_CHECKING, Final
 
 from neptune.identity.hashing import content_id
 from neptune.identity.ids import record_id
+from neptune.identity.provenance import evidence_record_id, transform_record
+from neptune.model.assertion import Assertion, AssertionType
 from neptune.model.ids import LogicalId, RecordId, logical_id_from_json, parse_record_id
-from neptune.model.knowledge import AssertionKind
-from neptune.model.provenance import ByteRange, EvidenceRef, evidence_ref_from_json
+from neptune.model.knowledge import AssertionKind, Known, NotApplicable, NotCovered, Unknown
+from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, evidence_ref_from_json
+from neptune.model.reference import TimestampDomain
 from neptune.model.time import Epoch, Timescale, Timestamp, timestamp_from_json
 from neptune_memory.consolidate.base import (
     IDENTITY_CONSOLIDATOR_ID,
@@ -46,13 +54,14 @@ from neptune_memory.consolidate.base import (
     rebuild,
 )
 from neptune_memory.consolidate.identity import IdentityConsolidator
+from neptune_memory.consolidate.time import TIME_CONSOLIDATOR_ID, TimeDomainConsolidator
 from neptune_memory.contract._fixture_model import FIXTURE_MODEL, FIXTURE_MODEL_ID, _FixtureModel
 from neptune_memory.contract.worked_examples import machine_node, run_node, runs
 from neptune_memory.ledger import StubLedger
 from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.codec import GraphDocument
 from neptune_memory.schema.interval import CivilClock, ledger_tx
-from neptune_memory.schema.predicates import CORE_PREDICATES, SAME_AS
+from neptune_memory.schema.predicates import CORE_PREDICATES
 from neptune_memory.schema.supersede import resolve, resolver_config
 
 if TYPE_CHECKING:
@@ -64,7 +73,7 @@ if TYPE_CHECKING:
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim
 
-WORKED_EXAMPLES: Final = ("drone", "manipulator", "mobile_robot", "quadruped")
+WORKED_EXAMPLES: Final = ("drone", "fleet_register", "manipulator", "mobile_robot", "quadruped")
 OPERATOR_LOG_1: Final = "operator-log-1"
 OPERATOR_LOG_2: Final = "operator-log-2"
 QUIET: Final = "inspection-notes"  # lands at tx 5 with no record any consolidator reads
@@ -72,7 +81,7 @@ QUIET: Final = "inspection-notes"  # lands at tx 5 with no record any consolidat
 TRANSACTIONS: Final = (
     (1, ("drone", "mobile_robot")),
     (2, ("quadruped",)),
-    (3, ("manipulator", OPERATOR_LOG_1)),
+    (3, ("fleet_register", "manipulator", OPERATOR_LOG_1)),
     (4, (OPERATOR_LOG_2,)),
     (5, (QUIET,)),
 )
@@ -84,6 +93,7 @@ PRIORITIES: Final[Mapping[str, int]] = {
     OPERATOR_ID: 1,
     IDENTITY_CONSOLIDATOR_ID: 2,
     FIXTURE_MODEL_ID: 3,
+    TIME_CONSOLIDATOR_ID: 4,
 }
 MODEL_CONFIG: Final[Mapping[str, JsonValue]] = {
     "candidates": {
@@ -149,6 +159,7 @@ def _overlay_id(kind: str, inputs: Mapping[str, JsonValue]) -> RecordId:
 def _assertion(
     log: str, line: int, predicate: str, subject: LogicalId, obj: LogicalId, valid_from: Timestamp
 ) -> dict[str, object]:
+    """A ``recorded_by`` line, in the overlay's own shape for ``golden.operator``."""
     return {
         "evidence": [_line(log, line).to_json()],
         "id": _overlay_id("operator_assertion", {"line": LOG_LINES[log][line], "log": log}),
@@ -159,6 +170,46 @@ def _assertion(
         "subject": subject.to_json(),
         "valid_from": valid_from.to_json(),
     }
+
+
+# What an assertions adapter would record the operator log as (root ADR 0062): its transform, and
+# per line a clock for the line's own time column, POSIX seconds as the log declares.
+OPERATOR_TRANSFORM: Final = transform_record(
+    adapter_id="memory.golden.operator_log", adapter_version="1", config={}
+)
+
+
+def _same_identity(log: str, line: int, ids: tuple[LogicalId, ...]) -> list[dict[str, object]]:
+    """The operator's ``same_identity`` line as the compiler's ``assertion`` and its clock."""
+    cited = _line(log, line)
+    stated = Provenance(cited, OPERATOR_TRANSFORM.id, AssertionKind.STATED)
+    clock = TimestampDomain(
+        id=evidence_record_id("timestamp_domain", cited, OPERATOR_TRANSFORM),
+        provenance=Provenance(cited, OPERATOR_TRANSFORM.id, AssertionKind.OBSERVED),
+        field="authored_at",
+        scope=(),
+        role=Unknown(),
+        resolution=Known(Fraction(1)),
+        epoch=Known(Epoch.UNIX),
+        timescale=Known(Timescale.POSIX),
+        declared_monotonic=Unknown(),
+    )
+    said = Assertion(
+        id=evidence_record_id("assertion", cited, OPERATOR_TRANSFORM),
+        provenance=stated,
+        identifier=Known(LogicalId("operator-log", f"{log}:{line + 1}")),
+        assertion_type=Known(AssertionType.SAME_IDENTITY),
+        author=Known(LogicalId("badge", OPERATOR.removeprefix("badge:"))),
+        authored_at=Known(Timestamp(OPERATOR_LOG_TIME, clock.id)),
+        authored_zone=NotCovered(),
+        scope=Known(ids),
+        retracts=NotApplicable(),
+        payload=NotCovered(),
+        rationale=NotCovered(),
+        signature=NotCovered(),
+        ticket=NotCovered(),
+    )
+    return [dict(clock.to_json()), dict(said.to_json())]
 
 
 def _thread(node: LogicalId, evidence: EvidenceRef) -> dict[str, object]:
@@ -192,7 +243,7 @@ def ledger_overlay(
         log_1: [
             _thread(drone.machine, drone.machine_evidence),
             _thread(UAV_TAG, _line(log_1, 0)),
-            _assertion(log_1, 0, SAME_AS, drone.machine, UAV_TAG, civil),
+            *_same_identity(log_1, 0, (drone.machine, UAV_TAG)),
             _assertion(log_1, 1, "recorded_by", _run_id(drone), UAV_TAG, civil),
             _assertion(log_1, 2, "recorded_by", _run_id(drone), drone.machine, drone.first),
             _assertion(log_1, 3, "recorded_by", _run_id(quadruped), QUAD_TAG, quadruped.first),
@@ -301,6 +352,7 @@ def plan() -> list[tuple[Consolidator, Mapping[str, JsonValue]]]:
         (OperatorAssertions(), {}),
         (IdentityConsolidator(), {}),
         (_FixtureModel(), MODEL_CONFIG),
+        (TimeDomainConsolidator(), {}),
     ]
 
 

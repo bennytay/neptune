@@ -53,7 +53,8 @@ class Interval:
     """``[start, end)`` on ``start``'s clock; ``end`` is on the same clock, or ``OPEN``.
 
     Never empty: ``start < end``. Comparing with an interval or instant on another clock raises
-    ``DomainMismatchError``; relating clocks is a ``ClockAlignment`` record, never an operator.
+    ``DomainMismatchError``; relating clocks is a compiler ``ClockMapping`` record (root ADR 0050
+    §5), never an operator.
     """
 
     start: Timestamp

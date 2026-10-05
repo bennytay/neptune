@@ -9,7 +9,8 @@ claims are produced under ``derived/`` and merely carry ``assertion_kind = infer
 - ``predicates``: the registered vocabulary and claim validation.
 - ``supersede``: the deterministic superseding resolver, its findings and ``as_of``.
 - ``reader``: the ``MemoryReader`` read protocol and its typed results; ``reference``: the
-  in-memory reference reader built on ``resolve`` and ``as_of``.
+  in-memory reference reader built on ``resolve`` and ``as_of``; ``traverse``: following
+  ``same_as`` over any reader, never merging (ADR 0008 §5).
 - ``codec``: strict JSON parsing of claims, findings and graph documents.
 - ``export``: the JSON Schema published under ``contracts/graph-schema/``.
 

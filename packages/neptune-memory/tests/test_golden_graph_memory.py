@@ -12,10 +12,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from jsonschema import Draft202012Validator
 
-from memory_golden_fixtures import PUBLISHED, built, generator, published
+from memory_golden_fixtures import EARLIER, PUBLISHED, built, generator, published
 from neptune.identity import canonical_json
 from neptune_memory.contract._fixture_model import FIXTURE_MODEL
 from neptune_memory.contract.golden import TRANSACTIONS, build_golden
+from neptune_memory.contract.suite import CHECKS, load_golden
 from neptune_memory.schema.claim import is_inferred
 from neptune_memory.schema.export import graph_schema
 from neptune_memory.schema.interval import OPEN, ledger_tx
@@ -25,6 +26,8 @@ from neptune_memory.schema.reference import ReferenceReader
 from neptune_memory.schema.supersede import FindingCode, as_of, is_closure
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from neptune_memory.schema.claim import Claim
 
 
@@ -65,6 +68,15 @@ def test_schema_export_is_published_and_validates_every_golden() -> None:
     )
 
 
+@pytest.mark.parametrize("earlier", EARLIER, ids=lambda p: p.name)
+def test_every_earlier_published_golden_still_loads_and_passes_the_suite(earlier: Path) -> None:
+    """1.1.0 to 1.4.0 are minor releases: a consumer pinned to an earlier minor keeps
+    its golden and its answers."""
+    golden = load_golden(earlier / "golden" / "graph.json")
+    for check in CHECKS:
+        check(ReferenceReader, golden)
+
+
 def test_input_order_does_not_change_the_golden() -> None:
     examples = generator().worked_examples()
     shuffled = {name: list(reversed(lines)) for name, lines in reversed(examples.items())}
@@ -87,8 +99,12 @@ def test_the_golden_spans_embodiments_inference_identity_and_findings() -> None:
     assert len(runs) == 4  # drone, manipulator, mobile robot, quadruped
     inferred = [c for c in claims if is_inferred(c.assertion_kind)]
     assert all(c.provenance.model == FIXTURE_MODEL for c in inferred)
-    (same_as,) = [c for c in claims if c.predicate == SAME_AS]
-    assert same_as.assertion_kind == "stated" and same_as.provenance.records
+    # The drone's two ids: the fleet register's identity link and the operator's assertion.
+    identities = [c for c in claims if c.predicate == SAME_AS]
+    assert len(identities) == 2 and len({c.provenance.records for c in identities}) == 2
+    assert all(
+        c.assertion_kind == "stated" and c.object == identities[0].object for c in identities
+    )
     # Review of PR #60: everything the suite must be able to bite on is in the golden.
     candidates = [c for c in claims if c.predicate == SAME_AS_CANDIDATE]
     assert len(candidates) == 2 and all(is_inferred(c.assertion_kind) for c in candidates)
