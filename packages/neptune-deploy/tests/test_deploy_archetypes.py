@@ -62,6 +62,14 @@ def test_the_committed_sources_are_what_the_generator_writes() -> None:
     assert _tree(A.SOURCES) == BUILT
 
 
+def test_the_generator_ingests_with_no_plugins_and_in_process(tmp_path: Path) -> None:
+    """Deploy's own plugin must not be loaded for the base packages (ADR 0012 §4, ADR 0005 §8)."""
+    command = A.ingest_command(A.FLEET, tmp_path / "out", tmp_path / "work")
+    assert "--no-plugins" in command
+    assert command[command.index("--isolation") + 1] == "in_process"
+    assert command[command.index("--job") + 1] == "archetype"
+
+
 def test_generation_is_deterministic() -> None:
     assert A.build() == BUILT
 

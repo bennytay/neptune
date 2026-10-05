@@ -1,6 +1,42 @@
 {
   "predicates": [
     {
+      "cardinality": "one",
+      "description": "the site a run took place at, as declared",
+      "domain": [
+        "run"
+      ],
+      "name": "at_site",
+      "range": [
+        "site"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the evidence names several sites for the run; which is undecided",
+      "domain": [
+        "run"
+      ],
+      "name": "at_site_candidate",
+      "range": [
+        "site"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "an authorisation envelope approves this configuration at the site over the interval",
+      "domain": [
+        "site"
+      ],
+      "name": "authorised_configuration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "many",
       "description": "a maps_to's parameters as the evidence states them, or the chain it composes",
       "domain": [
@@ -9,6 +45,68 @@
       "name": "clock_map",
       "range": [
         "clock_map"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
+      "domain": [
+        "run"
+      ],
+      "name": "configuration_active_during",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the configuration in force could be this one; one claim per reading",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_candidate",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "no configuration is stated over the interval; the record leaves it open, never filled",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_unknown",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a later part of one recording: the next part of a run its assembly states",
+      "domain": [
+        "run"
+      ],
+      "name": "continues",
+      "range": [
+        "run"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: may be a later part of the same recording; the evidence does not order them",
+      "domain": [
+        "run"
+      ],
+      "name": "continues_candidate",
+      "range": [
+        "run"
       ],
       "version": 1
     },
@@ -81,6 +179,19 @@
     },
     {
       "cardinality": "many",
+      "description": "ambiguous: the evidence names several tasks; which is undecided",
+      "domain": [
+        "episode",
+        "run"
+      ],
+      "name": "executes_task_candidate",
+      "range": [
+        "task"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "an operating rule or control policy that applies",
       "domain": [
         "deployment",
@@ -129,6 +240,18 @@
       "name": "has_configuration",
       "range": [
         "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a source file the compiler's run assembly places in the run (its SourceRevision)",
+      "domain": [
+        "run"
+      ],
+      "name": "has_member",
+      "range": [
+        "record"
       ],
       "version": 1
     },
@@ -243,6 +366,18 @@
     },
     {
       "cardinality": "many",
+      "description": "observed: no authorisation envelope in the Ledger names the configuration then",
+      "domain": [
+        "run"
+      ],
+      "name": "not_covered_by_authorisation",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "a declared operator or supervisor",
       "domain": [
         "run"
@@ -285,6 +420,18 @@
         "run"
       ],
       "name": "recorded_by",
+      "range": [
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the evidence names several machines for the run; which is undecided",
+      "domain": [
+        "run"
+      ],
+      "name": "recorded_by_candidate",
       "range": [
         "machine"
       ],
@@ -410,6 +557,18 @@
         "zone"
       ],
       "version": 3
+    },
+    {
+      "cardinality": "many",
+      "description": "took over from the object on a machine's chain; valid while the subject is in force",
+      "domain": [
+        "configuration"
+      ],
+      "name": "succeeds",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
     },
     {
       "cardinality": "one",

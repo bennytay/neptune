@@ -1345,6 +1345,7 @@
           "$ref": "#/$defs/PredicateRegistry"
         },
         "vocabulary_version": {
+          "description": "the core vocabulary's version: 6 when this schema was exported (VOCABULARY_VERSION)",
           "minimum": 1,
           "type": "integer"
         }
