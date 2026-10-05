@@ -53,6 +53,13 @@ if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
 
 
+def pointer_segment(key: str) -> str:
+    """One RFC 6901 reference token for an untrusted member name: ``~`` as ``~0``, ``/`` as
+    ``~1``, and a lone surrogate (which no canonical JSON can carry) as the text ``\\udXXX``."""
+    text = key.encode("utf-8", "backslashreplace").decode("utf-8")
+    return text.replace("~", "~0").replace("/", "~1")
+
+
 def _is_unicode(text: str) -> bool:
     """JSON lets ``\\ud800`` through as a lone surrogate; canonical JSON (UTF-8) cannot carry it."""
     try:
@@ -82,7 +89,7 @@ class _Decoder:
         for key in missing:
             self.fail(f"{at}/{key}", "missing member")
         for key in extra:
-            self.fail(f"{at}/{key}", "unknown member")
+            self.fail(f"{at}/{pointer_segment(key)}", "unknown member")
         return None if missing or extra else value
 
     def string(self, value: Any, at: str) -> str | None:

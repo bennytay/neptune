@@ -10,6 +10,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from neptune.identity import canonical_json
 from neptune_context.query import FindingCode, Query, Refused, from_json, loads
 from neptune_context.query.model import MAX_DOCUMENT_BYTES
 
@@ -180,6 +181,24 @@ def test_an_overflowing_coordinate_is_a_region_finding() -> None:
     }
     text = json.dumps(_mutated(["regions"], [region])).replace("9]", "1e400]")
     assert _codes(loads(text)) == [("bad_region", "/regions/0/shape/max/2")]
+
+
+@pytest.mark.parametrize(
+    ("key", "pointer"),
+    [
+        ("a/b~", "/a~1b~0"),
+        ("~1", "/~01"),
+        ("\ud800", "/\\ud800"),
+        ("x\udfff/y", "/x\\udfff~1y"),
+    ],
+)
+def test_unknown_member_pointers_are_escaped_and_serialisable(key: str, pointer: str) -> None:
+    doc = _base()
+    doc[key] = 1
+    result = from_json(doc)
+    assert _codes(result) == [("shape", pointer)]
+    assert isinstance(result, Refused)
+    canonical_json.dumps(result.to_json())  # an SDK or MCP server can always report it
 
 
 def test_a_top_level_non_object_is_refused() -> None:

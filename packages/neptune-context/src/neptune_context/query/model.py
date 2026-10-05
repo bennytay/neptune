@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 if TYPE_CHECKING:
     from fractions import Fraction
 
-# The query document's wire version. Every query's JSON carries it as ``query_version`` and the
-# textual form's header line is ``query <QUERY_VERSION>``; a reader refuses any other value.
+# The query document's wire version. Every query's JSON carries it as ``query_version``; a reader
+# refuses any other value.
 # Raise it only for a change an older reader would misread (ADR 0002 §9).
 QUERY_VERSION: Final = 1
 
@@ -41,7 +41,7 @@ MAX_ITEMS: Final = 10_000
 MAX_TOKENS: Final = 1_000_000
 MAX_BYTES: Final = 64 * 1024 * 1024
 MAX_LATENCY_MS: Final = 600_000
-MAX_DOCUMENT_BYTES: Final = 64 * 1024  # a query's JSON or textual form
+MAX_DOCUMENT_BYTES: Final = 64 * 1024  # a query's JSON text
 INT64_MIN: Final = -(2**63)
 INT64_MAX: Final = 2**63 - 1
 
