@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from fractions import Fraction
+from typing import Any
 
 import pytest
 
@@ -218,7 +219,7 @@ REFUSALS: list[tuple[str, Query, list[tuple[str, str]]]] = [
         [("bad_region", "/regions/0/shape")],
     ),
     (
-        "bool-coordinate",
+        "bool-coordinate",  # a bool is an int to the type check; its value is refused
         replace(BASE, regions=frozenset({_region(MAP, shape=Sphere((True, 0, 0), 1))})),
         [("bad_region", "/regions/0/shape")],
     ),
@@ -474,6 +475,64 @@ def test_a_nan_coordinate_has_no_canonical_bytes_and_is_refused() -> None:
 def test_an_oversized_integer_coordinate_is_refused() -> None:
     query = replace(BASE, regions=frozenset({_region(MAP, shape=Sphere((10**400, 0, 0), 1))}))
     assert _codes(query) == [("shape", "/")]
+
+
+def _bad(value: object) -> Any:
+    """A value of the wrong type, as a caller without a type checker could pass."""
+    return value
+
+
+WRONG_TYPES: list[tuple[str, Query, list[tuple[str, str]]]] = [
+    (
+        "int-declared-id",
+        replace(BASE, subjects=frozenset({Subject("machine", _bad(5))})),
+        [("shape", "/subjects/0/declared_id")],
+    ),
+    ("int-text", replace(BASE, text=replace(TEXT, text=_bad(5))), [("shape", "/text/text")]),
+    (
+        "bool-depth",
+        replace(BASE, subjects=frozenset({replace(ARM, same_as_depth=_bad(True))})),
+        [("shape", "/subjects/0/same_as_depth")],
+    ),
+    ("str-items", replace(BASE, budget=Budget(items=_bad("10"))), [("shape", "/budget/items")]),
+    ("list-subjects", replace(BASE, subjects=_bad([ARM])), [("shape", "/subjects")]),
+    (
+        "str-direction",
+        replace(BASE, graph=GraphClause(None, 1, _bad("out"))),
+        [("shape", "/graph/direction")],
+    ),
+    (
+        "str-field",
+        replace(BASE, text=replace(TEXT, fields=_bad(frozenset({"record"})))),
+        [("shape", "/text/fields/0")],
+    ),
+    (
+        "float-ticks",
+        replace(BASE, during=During(DEVICE, _bad(0.5), None)),
+        [("shape", "/during/start")],
+    ),
+    (
+        "int-frame-id",
+        replace(BASE, regions=frozenset({_region(FrameRef(_bad(7), _rec(9)))})),
+        [("shape", "/regions/0/frame/frame_id")],
+    ),
+    # No canonical JSON at all: refused at "/" before the type walk.
+    ("str-explain", replace(BASE, explain=_bad(("why",))), [("shape", "/")]),
+    (
+        "str-include-inferred",
+        replace(BASE, include_inferred=_bad("no")),
+        [("shape", "/include_inferred")],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "query", "expected"), WRONG_TYPES, ids=[w[0] for w in WRONG_TYPES]
+)
+def test_a_wrong_python_type_is_a_finding_not_a_crash(
+    name: str, query: Query, expected: list[tuple[str, str]]
+) -> None:
+    assert _codes(query) == expected
 
 
 # --- Order and convention -----------------------------------------------------------------------

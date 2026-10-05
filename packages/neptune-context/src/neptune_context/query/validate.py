@@ -65,6 +65,7 @@ from neptune_context.query.model import (
     Subject,
     Why,
 )
+from neptune_context.query.shape import shape_findings
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -463,7 +464,9 @@ def validate(query: Query) -> tuple[QueryFinding, ...]:
     """Every reason ``query`` cannot be answered as written; empty when it can.
 
     A query built in Python may hold what JSON cannot (a lone surrogate, an integer too large for
-    a float coordinate); it is refused first, since it has no canonical bytes and so no id.
+    a float coordinate); it is refused first, since it has no canonical bytes and so no id. Then
+    each member of the wrong Python type is a ``shape`` finding at its pointer; only a well-typed
+    query reaches the value and meaning checks.
     """
     try:
         canonical_bytes(query)
@@ -476,4 +479,7 @@ def validate(query: Query) -> tuple[QueryFinding, ...]:
                 "non-finite or oversized number, or a member of the wrong type)",
             ),
         )
+    wrong_types = shape_findings(query)
+    if wrong_types:
+        return tuple(wrong_types)
     return tuple(_Validator(query).run())
