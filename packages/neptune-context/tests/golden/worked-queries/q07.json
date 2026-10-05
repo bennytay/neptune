@@ -1,0 +1,1 @@
+{"as_of":"head","budget":{"bytes":8000000,"items":500},"clock_bridges":[],"explain":[],"frame_bridges":[],"graph":{"direction":"in","hops":2,"predicates":["located_at","zone_of"]},"include_inferred":false,"query_version":1,"regions":[],"site":{"site":"site_registry:dock-3","zones":["zone_map:bay-a","zone_map:bay-b"]},"subjects":[{"kind":"asset","same_as_depth":0}]}
