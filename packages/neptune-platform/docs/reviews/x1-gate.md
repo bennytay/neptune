@@ -7,10 +7,11 @@
   compiler's package schema. Both runs are recorded below; the break is also an automated test.
 - Outcome: the compiler's packages now flow into the **real** Ledger catalog. Every catalog-api response is
   checked against the registry's schema, and the Ledger's package-schema lock is checked against every
-  package. A deliberate schema break turns the harness red in two independent places. One defect was fixed:
-  the package-schema owner tests did not cover the manifest.
+  package. A deliberate schema break turns the harness red in two independent places. The main defect fixed:
+  the package-schema owner tests did not cover the manifest (X1-1; X1-2 to X1-5 below).
   **Verdict: pass.** X2 may start once this is merged and `main` is tagged `x1-gate` (the coordinator tags).
-- Harness: **green at `6af707c`** (and at `f8b16e8`, before the fixes), full run with owner tests:
+- Harness: **green at `880b0c5`** (the branch with `main` at `399104c` merged; earlier also at `6af707c` and
+  `f8b16e8`), full run with owner tests:
   `harness green | contracts ok | compiler: real ok | ledger: real ok | memory: stub ok | context: stub ok`.
 
 ## Per stage
@@ -42,7 +43,7 @@ fallback whenever `resolve` refuses the real stage: an import failure, a version
 
 ## The schema break
 
-On a local branch `x1-schema-break-throwaway` (never pushed), `src/neptune/model/package.py` renames the
+On a local branch `x1-schema-break-throwaway` (never pushed, deleted after the runs), `src/neptune/model/package.py` renames the
 manifest key `tables` to `table_counts` in both `PackageManifest.to_json` and its reader. This is a compiler
 that changes its package format without a contract bump. Command:
 
@@ -63,7 +64,8 @@ compiler.problems:  drone: manifest.json breaks package-schema: <root>: Addition
                     (the same for manipulator, mobile_robot and quadruped)
 ```
 
-After the fix (exit 2):
+After the fix, re-run once `main` was merged (the break as `e9d5b6d` on top of `06bfbf2`, which has `main` at
+`399104c` merged; exit 2):
 
 ```
 harness RED | contracts FAILED | compiler: real failed | ledger: real skipped | memory: stub skipped | context: stub skipped
@@ -90,7 +92,14 @@ exits 1, the compiler stage fails and every later stage is skipped.
   the owner run.
 - **X1-2. The ledger stage was a stub** ("the harness has no real driver for neptune-ledger yet"), although
   catalog-api 1.6.0 and `PostgresCatalog` were both on `main`. It is now real (ADR 0006).
-- **X1-3. Stale docstrings.** The ledger and memory stubs said they served catalog-api 0.0.0 and that
+- **X1-3. A real ledger with no compiled cases read as green.** If the compiler stage resolved to a stub, the
+  ledger stage registered nothing and still reported `real ok`. It now fails with "the compiler stage compiled
+  no case to register" (`test_a_real_ledger_with_nothing_compiled_upstream_fails`). Found by self-review.
+- **X1-4. The workflow did not watch the code the real ledger stage runs.** Its `pull_request` paths covered
+  only contract modules, so a change to the Ledger's catalog or its `pgserver` pin skipped the harness. They
+  now include `packages/neptune-ledger/src/neptune_ledger/catalog/**` and the Ledger's `pyproject.toml`
+  (`test_the_code_the_real_ledger_stage_runs_is_inside_the_pull_request_paths`).
+- **X1-5. Stale docstrings.** The ledger and memory stubs said they served catalog-api 0.0.0 and that
   graph-schema had no version. Both serve their contract's latest goldens.
 
 ### Observations (no change)
@@ -105,8 +114,7 @@ exits 1, the compiler stage fails and every later stage is skipped.
 ### Follow-ups for the coordinator
 
 - **Package-schema 7.0.0 (PR #92).** It already raises `neptune-ledger`'s lock to 7.0.0, which keeps the
-  ledger stage real. It must also move the compiler stage's pinned `"6.0.0"` in
-  `test_harness_stages.py` (`test_today_the_compiler_and_the_ledger_resolve_to_real`, which predates this
-  gate). The new ledger tests read the lock from the registry, so they do not pin a version.
+  ledger stage real. No harness test pins a contract version any more (the old `"6.0.0"` and `"1.6.0"`
+  pins in `test_harness_stages.py` now read the registry), so #92 needs no harness edit.
 - Make the harness workflow a required status once Memory is real (ADR 0004, "Make it a required status
   now", deferred).
