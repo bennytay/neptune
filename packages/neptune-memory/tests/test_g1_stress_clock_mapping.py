@@ -1,27 +1,29 @@
 """G1 scenario 4: a clock mapping revised after claims were made on it (quadruped).
 
-Expected (ADR 0002 §3, ADR 0005 §2, ADR 0007 §4): a claim keeps the clock its record declares,
-and a boot-clock claim competing with a civil one is a ``clock_mismatch``, never a comparison. A
-claim re-timed through a mapping is a derivative that cites the mapping, and is withdrawn when the
-mapping is revised.
+Expected (ADR 0002 §3, ADR 0005 §2, ADR 0007 §4, ADR 0011): a claim keeps the clock its record
+declares, and a boot-clock claim competing with a civil one is a ``clock_mismatch``, never a
+comparison. Nothing is re-timed: a mapping is a claim about clocks with its own validity, and what
+rests on it (a chain, a conversion) cites it. When the mapping is revised, the old one and
+everything through it end at the revision.
 
-Verdict: the ``clock_mismatch`` refusal HOLDS. The revised-mapping handling is a GAP owned by
-MVL-130 + MVL-132. No consolidator reads ``clock_alignment`` records today, so nothing in the code
-can make a claim through a mapping. The ``Diagnostics`` consolidator below ignores the mapping as
-well, so its byte-identical rebuilds show only that a claim's id and valid time come from its own
-record, not that a revision is handled. The hostile case is the strict ``xfail`` at the end.
+Verdict: the ``clock_mismatch`` refusal HOLDS. The revision HOLDS for every build (MVL-130): the
+time-domain registry closes the old mapping at the revision, citing both records, and a conversion
+after the revision goes through the new one. What stays a GAP is MVL-132's: the version emitted
+open before the revision stays current beside the closed one until build withdrawal ends it
+(the strict ``xfail`` at the end).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from fractions import Fraction
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
 from memory_g1_harness import (
     MAR_02_2026,
-    Build,
+    SECONDS,
     Record,
     build,
     cite,
@@ -34,11 +36,16 @@ from memory_g1_harness import (
     source,
 )
 from neptune.identity import canonical_json
+from neptune.identity.provenance import transform_record
+from neptune.model.alignment import ClockAnchor, ClockMapping, MappingMethod, ValidityWindow
 from neptune.model.ids import parse_record_id
-from neptune.model.provenance import evidence_ref_from_json
-from neptune.model.time import Timestamp, timestamp_from_json
+from neptune.model.knowledge import AssertionKind, Known, KnownAbsent
+from neptune.model.provenance import Provenance, evidence_ref_from_json
+from neptune.model.time import Duration, Timestamp, timestamp_from_json
 from neptune_memory.consolidate.base import ConsolidatorOutput, ModelRef, rebuild
+from neptune_memory.consolidate.time import TimeDomainConsolidator, clock_node
 from neptune_memory.schema.claim import Claim, TypedLiteral, ValueType
+from neptune_memory.schema.clocks import convert
 from neptune_memory.schema.interval import OPEN, Interval, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.supersede import FindingCode
@@ -47,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from neptune.model.jsonvalue import JsonValue
+    from neptune_memory.consolidate.base import Consolidation, Consolidator
     from neptune_memory.ledger import LedgerReader
 
 SPOT = NodeRef(NodeType.MACHINE, "spot-serial:BD-0731")
@@ -55,15 +63,34 @@ OVERTEMP = TypedLiteral(ValueType.TEXT, "motor 2 overtemp")
 OPERATIONAL = TypedLiteral(ValueType.TEXT, "operational")
 
 
-def _alignment(name: str, offset: int) -> Record:
-    """A boot-clock-to-civil mapping as the compiler's alignment records carry one (MVL-36)."""
-    return {
-        "kind": "clock_alignment",
-        "id": rid("clock_alignment", name),
-        "source": BOOT,
-        "target": "posix",
-        "offset_seconds": offset,
-    }
+REVISION: Final = 4_000  # the boot tick of the re-sync
+SYNC_LOG: Final = transform_record(adapter_id="g1.sync_log", adapter_version="1", config={})
+V1, V2 = rid("clock_mapping", "v1"), rid("clock_mapping", "v2")
+
+
+def _alignment(name: str, offset: int, start: int = 0) -> Record:
+    """The compiler's ``ClockMapping`` from the boot clock onto civil seconds, valid from boot
+    tick ``start`` and stated open after: civil = ``offset`` + boot ticks (root ADR 0050 §5)."""
+    cited = cite(source(f"spot-0731-sync-{name}.log"))
+    return dict(
+        ClockMapping(
+            id=rid("clock_mapping", name),
+            provenance=Provenance(cited, SYNC_LOG.id, AssertionKind.STATED),
+            source=BOOT,
+            target=SECONDS.domain_id,
+            method=MappingMethod.STATED,
+            anchor=Known(ClockAnchor(Timestamp(start, BOOT), civil(offset + start))),
+            rate=Known(Fraction(1)),
+            residual_bound=Known(Duration(1, SECONDS.domain_id)),
+            validity=Known(
+                ValidityWindow(
+                    BOOT,
+                    Known(Timestamp(start, BOOT)),
+                    KnownAbsent(Provenance(cited, SYNC_LOG.id, AssertionKind.STATED)),
+                )
+            ),
+        ).to_json()
+    )
 
 
 OBSERVATIONS: list[Record] = [
@@ -111,22 +138,28 @@ class Diagnostics:
         return ConsolidatorOutput(tuple(drafts))
 
 
-def _builds() -> list[Claim]:
-    """tx 1: observations only. tx 2: a mapping arrives. tx 3: the mapping is revised."""
-    snapshots: dict[int, dict[str, list[Record]]] = {
-        1: {"obs": OBSERVATIONS},
-        2: {"obs": OBSERVATIONS, "align-1": [_alignment("v1", 1_772_404_000)]},
-        3: {
-            "obs": OBSERVATIONS,
-            "align-1": [_alignment("v1", 1_772_404_000)],
-            "align-2": [_alignment("v2", 1_772_404_030)],
-        },
-    }
-    claims: list[Claim] = []
-    for tx, packages in snapshots.items():
-        (build,) = rebuild(ledger(packages), [(Diagnostics(), {})], recorded_at=ledger_tx(tx))
-        claims.extend(build.claims)
-    return claims
+# tx 1: observations only. tx 2: a mapping arrives. tx 3: a re-sync revises it from REVISION.
+SNAPSHOTS: Final[dict[int, dict[str, list[Record]]]] = {
+    1: {"obs": OBSERVATIONS},
+    2: {"obs": OBSERVATIONS, "align-1": [_alignment("v1", 1_772_404_000)]},
+    3: {
+        "obs": OBSERVATIONS,
+        "align-1": [_alignment("v1", 1_772_404_000)],
+        "align-2": [_alignment("v2", 1_772_404_030, REVISION)],
+    },
+}
+
+
+def _runs(consolidator: Consolidator) -> list[tuple[int, Consolidation]]:
+    runs: list[tuple[int, Consolidation]] = []
+    for tx, packages in SNAPSHOTS.items():
+        (run,) = rebuild(ledger(packages), [(consolidator, {})], recorded_at=ledger_tx(tx))
+        runs.append((tx, run))
+    return runs
+
+
+def _builds(consolidator: Consolidator | None = None) -> list[Claim]:
+    return [c for _, run in _runs(consolidator or Diagnostics()) for c in run.claims]
 
 
 def test_a_claim_keeps_its_declared_clock_and_id_across_rebuilds() -> None:
@@ -154,52 +187,45 @@ def test_the_boot_clock_fact_competes_as_a_mismatch_never_as_a_comparison() -> N
     assert finding.code is FindingCode.CLOCK_MISMATCH and finding.recorded_at == 1
 
 
+def _mappings(claims: Sequence[Claim]) -> list[Claim]:
+    return sorted(
+        (c for c in claims if c.predicate == "clock_map" and c.subject == clock_node(BOOT)),
+        key=lambda c: (c.recorded_at, c.valid_from.ticks),
+    )
+
+
+def test_a_revision_ends_the_old_mapping_at_the_revision_in_every_later_build() -> None:
+    claims = _builds(TimeDomainConsolidator())
+    at_2 = [c for c in _mappings(claims) if c.recorded_at == 2]
+    at_3 = [c for c in _mappings(claims) if c.recorded_at == 3]
+    assert [(c.valid_from.ticks, c.valid_to) for c in at_2] == [(0, OPEN)]
+    assert [(c.valid_from.ticks, c.valid_to) for c in at_3] == [
+        (0, Timestamp(REVISION, BOOT)),
+        (REVISION, OPEN),
+    ]
+    closed, revised = at_3
+    assert closed.provenance.records == tuple(sorted({V1, V2}))  # closed by the revision
+    assert revised.provenance.records == (V2,)
+    # Converting the diagnostic's instant uses the mapping that holds then, in each build.
+    for tx, civil_ticks, cited in ((2, 1_772_409_000, V1), (3, 1_772_409_030, V2)):
+        graph = reader([c for c in claims if c.recorded_at == tx], {"memory.time": 0}, head=tx)
+        result = convert(graph, 5_000, BOOT, SECONDS.domain_id, ledger_tx(tx)).result
+        assert isinstance(result, Known) and result.value.ticks == civil_ticks
+        assert [c.provenance.records for c in result.value.path] == [(cited,)]
+
+
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="GAP MVL-130 + MVL-132: no mapping derivatives or build withdrawal yet (ADR 0007 §4-§5)",
+    reason="GAP MVL-132: no build withdrawal yet (ADR 0007 §5)",
 )
-def test_a_derivative_through_a_revised_mapping_is_withdrawn() -> None:
-    """A re-timing consolidator cites the mapping it used. When the mapping is revised, its claim
-    through the old mapping must stop being current; today it stays current beside the new one."""
-
-    def retimed(tx: int, offset: int, name: str) -> tuple[list[Claim], Build]:
-        (run,) = rebuild(
-            ledger({"obs": OBSERVATIONS}),
-            [(_Retimer(offset, name), {})],
-            recorded_at=ledger_tx(tx),
-        )
-        return list(run.claims), build(run, tx)
-
-    (old, old_build), (new, new_build) = (
-        retimed(2, 1_772_404_000, "v1"),
-        retimed(3, 1_772_404_030, "v2"),
-    )
-    graph = reader(old + new, {"test.retime": 0}, head=3, builds=[old_build, new_build])
-    current = graph.claims(SPOT, "maintenance_state", ledger_tx(3)).claims
-    assert all(rid("clock_alignment", "v1") not in c.provenance.records for c in current)
-
-
-@dataclass(frozen=True)
-class _Retimer:
-    offset: int
-    alignment: str
-    consolidator_id: str = "test.retime"
-    version: str = "1"
-    model: ModelRef | None = None
-
-    def consolidate(
-        self, ledger: LedgerReader, previous: Sequence[Claim], config: Mapping[str, JsonValue]
-    ) -> ConsolidatorOutput:
-        return ConsolidatorOutput(
-            (
-                draft(
-                    SPOT,
-                    "maintenance_state",
-                    OVERTEMP,
-                    civil(self.offset + 5_000),
-                    records=(rid("diagnostic", "overtemp"), rid("clock_alignment", self.alignment)),
-                    evidence=(cite(source("spot-0731.bag")),),
-                ),
-            )
-        )
+def test_after_a_revision_no_current_mapping_runs_open_through_the_old_one() -> None:
+    """At tx 3 the build states v1 closed at the revision; the version it emitted open at tx 2
+    must stop being current. Without withdrawal it stays current beside the closed one."""
+    runs = _runs(TimeDomainConsolidator())
+    claims = [c for _, run in runs for c in run.claims]
+    builds = [build(run, tx) for tx, run in runs]
+    graph = reader(claims, {"memory.time": 0}, head=3, builds=builds)
+    current = graph.claims(clock_node(BOOT), "clock_map", ledger_tx(3)).claims
+    through_v1 = [c for c in current if V1 in c.provenance.records]
+    assert [c.valid_to for c in through_v1] == [Timestamp(REVISION, BOOT)]

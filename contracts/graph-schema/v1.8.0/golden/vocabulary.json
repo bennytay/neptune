@@ -38,6 +38,18 @@
     },
     {
       "cardinality": "many",
+      "description": "a maps_to's parameters as the evidence states them, or the chain it composes",
+      "domain": [
+        "clock"
+      ],
+      "name": "clock_map",
+      "range": [
+        "clock_map"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
       "domain": [
         "run"
@@ -127,6 +139,7 @@
       "description": "a Ledger record about the node (Episode tier, by id)",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -149,7 +162,7 @@
       "range": [
         "record"
       ],
-      "version": 2
+      "version": 3
     },
     {
       "cardinality": "many",
@@ -218,6 +231,18 @@
     },
     {
       "cardinality": "many",
+      "description": "a clock the machine's records carry, over the interval they observe it",
+      "domain": [
+        "machine"
+      ],
+      "name": "has_clock",
+      "range": [
+        "clock"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "a parameter set, description file or other configuration in force",
       "domain": [
         "deployment",
@@ -247,6 +272,7 @@
       "description": "a declared display name, verbatim; never an identifier",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -269,7 +295,7 @@
       "range": [
         "text"
       ],
-      "version": 1
+      "version": 2
     },
     {
       "cardinality": "one",
@@ -323,6 +349,18 @@
       "name": "maintenance_state",
       "range": [
         "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a declared or estimated mapping, or a chain of them, takes its ticks to another clock's",
+      "domain": [
+        "clock"
+      ],
+      "name": "maps_to",
+      "range": [
+        "clock"
       ],
       "version": 1
     },
@@ -490,6 +528,7 @@
       "description": "the same real-world thing: declared identifier, configuration lineage or operator",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -511,6 +550,7 @@
       "name": "same_as",
       "range": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -529,13 +569,14 @@
         "task",
         "zone"
       ],
-      "version": 2
+      "version": 3
     },
     {
       "cardinality": "many",
       "description": "ambiguous: the evidence could mean either; whether they are one thing is undecided",
       "domain": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -557,6 +598,7 @@
       "name": "same_as_candidate",
       "range": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
         "document",
@@ -575,7 +617,7 @@
         "task",
         "zone"
       ],
-      "version": 2
+      "version": 3
     },
     {
       "cardinality": "many",

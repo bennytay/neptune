@@ -17,6 +17,14 @@ def render_json(report: dict[str, Any]) -> str:
     return json.dumps(report, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
 
+def _corpus_line(corpus: dict[str, Any]) -> str:
+    """The corpus a gate quotes: its name and version, and the tree id when it is generated."""
+    line = f"- Corpus: {corpus['name']} ({len(corpus['cases'])} cases)"
+    if "tree" in corpus:
+        line += f", tree `{corpus['tree']}`, {'locked' if corpus['locked'] else 'NOT LOCKED'}"
+    return line
+
+
 def render_markdown(report: dict[str, Any], link: str | None = None) -> str:
     """A short comment for a PR or a Linear gate issue."""
     contracts = report["contracts"]
@@ -27,7 +35,7 @@ def render_markdown(report: dict[str, Any], link: str | None = None) -> str:
         "",
         f"- Contracts: {'ok' if contracts['ok'] else 'FAILED'} (`check --all`, "
         f"exit {contracts['exit_code']})",
-        f"- Corpus: {report['corpus']['name']} ({len(report['corpus']['cases'])} cases)",
+        _corpus_line(report["corpus"]),
         "",
         "| Stage | Mode | Status | Contract | Why |",
         "|---|---|---|---|---|",
@@ -38,7 +46,9 @@ def render_markdown(report: dict[str, Any], link: str | None = None) -> str:
             f"{stage['contract']} {stage['contract_version'] or '-'} | {stage['reason']} |"
         )
     lines += ["", f"Smoke query: {'ok' if smoke['ok'] else 'FAILED'} ({smoke['packet_source']})"]
-    problems = list(contracts["problems"])
+    problems = list(contracts["problems"]) + [
+        f"corpus: {p}" for p in report["corpus"].get("problems", [])
+    ]
     for stage in report["stages"]:
         problems += [f"{stage['stage']}: {p}" for p in stage["problems"]]
     if problems:
