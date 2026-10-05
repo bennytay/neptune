@@ -16,6 +16,8 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
   adapters' own subpackages (``src/neptune/adapters/<format>/**``) runs the compiler and the
   platform (whose harness ingests) but does not reach the compiler's other dependents;
 * ``scripts/contracts.py`` is plumbing: every job runs it;
+* the acceptance corpus's imported generators (``CORPUS_INPUTS``) also run ``neptune-platform``,
+  whose lock test fails when their bytes change (platform ADR 0007 section 3);
 * the template smoke runs when ``packages/_template/**`` or ``scripts/new-package.sh`` changed.
 
 Writes ``compiler``, ``packages`` (a JSON list) and ``template`` to ``$GITHUB_OUTPUT`` when set, and
@@ -45,6 +47,17 @@ ADAPTER_DIR = re.compile(r"^src/neptune/adapters/[^/]+/")
 HARNESS_MEMBER = "neptune-platform"
 # Root directories whose tests live in a member package: changing them runs that member only.
 MEMBER_DIRS = {"harness/": "neptune-platform"}
+# Files the acceptance corpus (harness/acceptance/generate.py) imports to write its bytes: a change
+# to one changes the corpus, so the platform's lock test must run on it (platform ADR 0007 §3).
+CORPUS_INPUTS = frozenset(
+    {
+        "packages/neptune-deploy/tests/fixtures/archetypes/make_archetypes.py",
+        "packages/neptune-deploy/tests/fixtures/documents/make_document_fixtures.py",
+        "tests/fixtures/mcap/make_mcap.py",
+        "tests/fixtures/rosbag2/make_rosbag2.py",
+        "tests/fixtures/pdf/make_pdfs.py",
+    }
+)
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
@@ -128,6 +141,7 @@ def plan(
         or any(p.startswith(f"packages/{name}/") for p in changed)
         or any(MEMBER_DIRS.get(p.split("/", 1)[0] + "/") == name for p in changed)
         or (compiler and not core and name == HARNESS_MEMBER)
+        or (name == HARNESS_MEMBER and any(p in CORPUS_INPUTS for p in changed))
     }
     projects = {_normalise(name): name for name in members}
     grew = True

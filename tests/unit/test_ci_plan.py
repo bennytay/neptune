@@ -274,3 +274,17 @@ def test_adapter_contract_change_is_core() -> None:
 def test_contracts_tool_is_plumbing() -> None:
     result = ci_plan.plan(["scripts/contracts.py"], MEMBERS)
     assert result.packages == tuple(sorted(MEMBERS))
+
+
+@pytest.mark.parametrize("path", sorted(ci_plan.CORPUS_INPUTS))
+def test_an_acceptance_corpus_generator_runs_the_platform_lock_test(path: str) -> None:
+    members = {**MEMBERS, "neptune-deploy": frozenset()}
+    packages = ci_plan.plan([path], members).packages
+    assert "neptune-platform" in packages
+    if path.startswith("packages/neptune-deploy/"):
+        assert "neptune-deploy" in packages  # its own job still runs
+
+
+def test_the_corpus_inputs_exist() -> None:
+    root = Path(__file__).parents[2]
+    assert all((root / path).is_file() for path in ci_plan.CORPUS_INPUTS)
