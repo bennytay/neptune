@@ -8,5 +8,7 @@ the identity policy (``same_as`` only on declared grounds, everything else a can
 ``identity_records`` parses the Ledger records it reads (ADR 0008); ``runs`` holds run threads
 (nodes, membership, continuation, declared roles and intervals) and ``run_records`` parses its
 records (ADR 0009); ``time`` holds the time-domain registry (clocks per machine, declared clock
-mappings and chains of them, never estimated) and ``time_records`` parses what it reads (ADR 0011).
+mappings and chains of them, never estimated) and ``time_records`` parses what it reads (ADR 0011);
+``episodes`` holds episodes from stated task evidence, bounded by stated instants, with
+interventions and stops, and ``event_records`` parses the events it reads (ADR 0012).
 """

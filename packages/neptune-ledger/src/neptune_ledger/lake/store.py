@@ -7,7 +7,8 @@ here copies, caches or writes an object.
 
 Two stores exist: ``LocalObjectStore`` (a package directory, opened without following links) and
 ``S3ObjectStore`` (a bucket and prefix on any S3-compatible service). Platform X3 will own this
-interface; it is kept to what the lakehouse reads need today.
+interface; it is kept to what the Ledger's reads need today: ``read_range`` serves the media
+store's lazy, chunk-verified source reads (ADR 0014 §3).
 """
 
 import functools
@@ -105,6 +106,11 @@ class ObjectStore(Protocol):
         """The object's bytes, or None if it is missing, unreadable or larger than ``limit``."""
         ...
 
+    def read_range(self, key: str, offset: int, length: int) -> bytes | None:
+        """``length`` bytes from ``offset`` (ADR 0014 §3), or None if the object is missing,
+        unreadable or shorter than ``offset + length``."""
+        ...
+
 
 class LocalObjectStore:
     """A package directory on a local filesystem.
@@ -153,6 +159,24 @@ class LocalObjectStore:
         with os.fdopen(fd, "rb") as stream:
             data = stream.read(limit + 1)
         return None if len(data) > limit else data
+
+    def read_range(self, key: str, offset: int, length: int) -> bytes | None:
+        _check_range(offset, length)
+        fd = self._open(key)
+        if fd is None:
+            return None
+        try:
+            data = bytearray()
+            while len(data) < length:
+                got = os.pread(fd, length - len(data), offset + len(data))
+                if not got:
+                    return None
+                data += got
+            return bytes(data)
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
 
 
 class S3ObjectStore:
@@ -215,6 +239,21 @@ class S3ObjectStore:
         except (OSError, ValueError):
             return None
         return None if len(data) > limit else bytes(data)
+
+    def read_range(self, key: str, offset: int, length: int) -> bytes | None:
+        _check_range(offset, length)
+        try:
+            with self.filesystem().open_input_file(f"{self._bucket}/{self._key(key)}") as f:
+                data = f.read_at(length, offset) if length else b""
+        except (OSError, ValueError):
+            return None
+        return bytes(data) if len(data) == length else None
+
+
+def _check_range(offset: int, length: int) -> None:
+    for value in (offset, length):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise StoreError(f"a byte range is two non-negative ints: {offset!r}, {length!r}")
 
 
 @functools.lru_cache(maxsize=32)
