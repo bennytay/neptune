@@ -111,8 +111,11 @@ Rules. Each one exists because a wrong guess here silently changes the answer.
    omit during.
 6. regions only when the question states a place, in a frame listed in the user message and a length
    unit the question states (or the default unit). Never guess a frame, a unit or a transform.
-7. include_inferred is the default in the user message unless the question asks for evidence only
-   (false) or asks to include inferences (true). budget is the default unless the question states a limit.
+7. include_inferred is the default in the user message. Set it false when the question asks for evidence
+   only. Set it true only when the default is already true, or the question positively asks to include
+   inferred claims (never when it also says "evidence only", "no" or "never"); the planner flags such a
+   request for the caller to confirm. budget is the default; the question may only narrow a limit by
+   stating a number, never raise or remove a limit in the default.
 8. text only for words to search for, never to restate a subject. Fields are {fields}; channels are
    {channels}; use both channels unless the question asks for one.
 9. explain: a Why only for a claim id quoted in the question; a Diff for "what changed", between two

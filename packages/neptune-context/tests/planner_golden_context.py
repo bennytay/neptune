@@ -757,12 +757,37 @@ def build_cases() -> None:
     case(
         "Allow inferred claims: which fleet is AMR-08 in?",
         q(
-            inf=True,
+            inf=False,
             budget=Budget(32, 2048, None, 50),
             subjects=(AMR08,),
             graph=g("member_of_fleet"),
         ),
         profile="policy",
+        status="needs_input",
+        blocking=("include_inferred_widening_unconfirmed",),
+        output=q(
+            inf=True,
+            budget=Budget(32, 2048, None, 50),
+            subjects=(AMR08,),
+            graph=g("member_of_fleet"),
+        ),
+    )
+    case(
+        "Evidence only, never infer: which fleet is AMR-08 in?",
+        q(
+            inf=False,
+            budget=Budget(32, 2048, None, 50),
+            subjects=(AMR08,),
+            graph=g("member_of_fleet"),
+        ),
+        profile="policy",
+        info=("include_inferred_overridden",),
+        output=q(
+            inf=True,
+            budget=Budget(32, 2048, None, 50),
+            subjects=(AMR08,),
+            graph=g("member_of_fleet"),
+        ),
     )
     case(
         "Give me at most 20 items about the configuration of AMR-07.",
@@ -777,9 +802,9 @@ def build_cases() -> None:
         q(budget=Budget(10, latency_ms=50), subjects=(ARM,), graph=g("has_calibration")),
     )
     case(
-        "Limit 8000000 bytes and 300 items: which assets are in dock 1?",
+        "Limit 8000000 bytes and 80 items: which assets are in dock 1?",
         q(
-            budget=Budget(300, bytes=8_000_000),
+            budget=Budget(80, bytes=8_000_000),
             subjects=(Subject("asset"),),
             site=SiteScope(S007, frozenset({"zone_map:DOCK-1"})),
             graph=g("located_at", d=IN),

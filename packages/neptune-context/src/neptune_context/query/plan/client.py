@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject, JsonValue
 
 DEFAULT_MODEL: Final = "claude-sonnet-5-5"
-DEFAULT_MAX_TOKENS: Final = 4096
+DEFAULT_MAX_TOKENS: Final = 16000
 # Why generation stopped, as the planner needs it: a normal end, a cut, a refusal, or anything else.
 Stop = Literal["end", "max_tokens", "refusal", "other"]
 RECORDED_BY = ("live", "synthetic")
@@ -170,8 +170,10 @@ class RecordingClient:
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         response = self._inner.complete(request)
+        # Only the live API makes a recording live: anything else stays synthetic.
+        by: Literal["live", "synthetic"] = "live" if self.client_id == "anthropic" else "synthetic"
         self.recordings.append(
-            Recording(request.sha256, response.model, response.stop, response.text, "live")
+            Recording(request.sha256, response.model, response.stop, response.text, by)
         )
         return response
 
@@ -191,14 +193,16 @@ def anthropic_arguments(request: ModelRequest) -> dict[str, Any]:
     """The Messages API arguments for ``request``: the schema is the output contract.
 
     Sampling parameters are left out (the model rejects non-default values), thinking is adaptive
-    at ``medium`` effort, and no refusal fallback is configured: a refusal is a visible
-    ``MODEL_REFUSED`` failure and the lineage names the one model that answered.
+    (stated explicitly, the model's default) at ``medium`` effort, and no refusal fallback is
+    configured: a refusal is a visible ``MODEL_REFUSED`` failure and the lineage names the one
+    model that answered.
     """
     return {
         "model": request.model,
         "max_tokens": request.max_tokens,
         "system": request.system,
         "messages": [{"role": "user", "content": request.user}],
+        "thinking": {"type": "adaptive"},
         "output_config": {
             "effort": "medium",
             "format": {"type": "json_schema", "schema": request.schema},

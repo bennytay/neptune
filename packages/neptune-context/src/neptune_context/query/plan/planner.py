@@ -96,7 +96,15 @@ _RELATIVE_TIME: Final = re.compile(
     re.IGNORECASE,
 )
 _ANCHOR: Final = re.compile(r"\d{4}-\d{2}-\d{2}|\d{6,}")  # an explicit ISO date or a tick count
-_INFERENCE: Final = re.compile(r"infer|evidence only|observed only", re.IGNORECASE)
+_POSITIVE_INFERENCE: Final = re.compile(
+    r"\b(?:include|including|with|allow|allowing|use|using)\s+(?:the\s+)?(?:inferred|inferences?)\b",
+    re.IGNORECASE,
+)
+_NEGATION: Final = re.compile(
+    r"\b(?:no|not|never|without|don't|dont|exclude|excluding|except|only evidence|"
+    r"evidence only|observed only|only observed)\b",
+    re.IGNORECASE,
+)
 _TIMESCALES: Final = {"utc": "utc", "tai": "tai", "gps": "gps", "posix": "posix", "unix": "posix"}
 _OWN_CLOCK: Final = re.compile(
     r"\b(?:own|native|primary|source|device|vehicle|robot|machine|onboard|its)\s+clock\b",
@@ -135,6 +143,11 @@ def _unit_stated(text: str, unit: str) -> bool:
         re.search(rf"(?<![A-Za-z]){word}(?![A-Za-z])", text, re.IGNORECASE)
         for word in _UNIT_WORDS.get(unit, ())
     )
+
+
+def _widening_requested(text: str) -> bool:
+    """A positive, un-negated, word-bounded request to include inferred claims."""
+    return bool(_POSITIVE_INFERENCE.search(text)) and not _NEGATION.search(text)
 
 
 def _quoted(text: str, token: str) -> bool:
@@ -324,7 +337,6 @@ class _Review:
 
     def _review_defaults(self, query: Query) -> Query:
         out = query
-        defaults = self.defaults
         if query.as_of != self.as_of:
             stated = isinstance(query.as_of, int) and _quoted(self.text, str(query.as_of))
             if not stated:
@@ -345,39 +357,86 @@ class _Review:
                     "as_of is the reader's head; the packet records the transaction it resolved to",
                 )
             )
-        if out.include_inferred != defaults.include_inferred and not _INFERENCE.search(self.text):
+        out = self._review_inference(out)
+        out = self._review_budget(out)
+        return out
+
+    def _review_inference(self, query: Query) -> Query:
+        """A question may narrow ``include_inferred``; widening it needs a confirmed request."""
+        default = self.defaults.include_inferred
+        out = query
+        if query.include_inferred and not default:
+            if _widening_requested(self.text):
+                self.findings.append(
+                    _block(
+                        Code.INCLUDE_INFERRED_WIDENING_UNCONFIRMED,
+                        "/include_inferred",
+                        "the question asks to include inferred claims but the "
+                        f"{self.defaults.caller} default excludes them; the caller must confirm "
+                        "(the draft keeps false)",
+                    )
+                )
+            else:
+                self.findings.append(
+                    _info(
+                        Code.INCLUDE_INFERRED_OVERRIDDEN,
+                        "/include_inferred",
+                        "the model set include_inferred true but the question does not ask for "
+                        f"inference; used the {self.defaults.caller} default (false)",
+                    )
+                )
+            out = dataclasses.replace(out, include_inferred=default)
+        elif not query.include_inferred and default:
             self.findings.append(
                 _info(
-                    Code.INCLUDE_INFERRED_OVERRIDDEN,
+                    Code.INCLUDE_INFERRED_NARROWED,
                     "/include_inferred",
-                    f"the model set include_inferred {out.include_inferred} but the question does "
-                    f"not mention inference; used the {defaults.caller} default",
+                    f"include_inferred is false, narrower than the {self.defaults.caller} default",
                 )
             )
-            out = dataclasses.replace(out, include_inferred=defaults.include_inferred)
-        if out.include_inferred == defaults.include_inferred:
+        else:
             self.findings.append(
                 _info(
                     Code.INCLUDE_INFERRED_DEFAULT,
                     "/include_inferred",
-                    f"include_inferred is {out.include_inferred} ({defaults.caller} default)",
+                    f"include_inferred is {out.include_inferred} ({self.defaults.caller} default)",
                 )
             )
-        limits = [
-            v
-            for v in (out.budget.items, out.budget.tokens, out.budget.bytes, out.budget.latency_ms)
-            if v is not None
-        ]
-        if out.budget != defaults.budget and not all(_quoted(self.text, str(v)) for v in limits):
+        return out
+
+    def _review_budget(self, query: Query) -> Query:
+        """The caller's budget is a ceiling: a question may narrow a limit it states (the number
+        written in the question), never loosen or drop one the caller set."""
+        caller, model = self.defaults.budget, query.budget
+        bare = self.bare()
+        adjusted: list[str] = []
+        merged: dict[str, int | None] = {}
+        for name in ("items", "tokens", "bytes", "latency_ms"):
+            ceiling, asked = getattr(caller, name), getattr(model, name)
+            if (
+                asked is not None
+                and (ceiling is None or asked <= ceiling)
+                and (asked == ceiling or _quoted(bare, str(asked)))
+            ):
+                chosen = asked
+            else:
+                chosen = ceiling  # unstated, loosened or dropped: the caller's limit stands
+            if chosen != asked:
+                adjusted.append(name)
+            merged[name] = chosen
+        out = dataclasses.replace(query, budget=Budget(**merged))  # type: ignore[arg-type]
+        if adjusted:
             self.findings.append(
                 _info(
                     Code.BUDGET_OVERRIDDEN,
                     "/budget",
-                    "the model set a budget the question does not state; used the caller's default",
+                    "the model's budget differs from what the question states or the caller allows "
+                    "(a limit is a ceiling, never loosened): the caller's value stands for "
+                    + ", ".join(adjusted),
+                    *adjusted,
                 )
             )
-            out = dataclasses.replace(out, budget=defaults.budget)
-        if out.budget == defaults.budget:
+        if out.budget == caller:
             self.findings.append(
                 _info(
                     Code.BUDGET_DEFAULT,
@@ -386,6 +445,14 @@ class _Review:
                 )
             )
         return out
+
+    def bare(self) -> str:
+        """The question without the names that resolved to entities (their digits are not stated
+        limits, tick counts or dates)."""
+        bare = self.text
+        for mention in self.mentions:
+            bare = bare.replace(mention.text, " ")
+        return bare
 
     def _review_explain(self, query: Query) -> list[tuple[int, Explain]]:
         """Each explain item with its index in the model's tuple (pointers stay meaningful)."""
@@ -415,9 +482,7 @@ class _Review:
 
     def _unresolved_phrase(self) -> str | None:
         """A relative time phrase with no explicit date or tick count to anchor it, if any."""
-        bare = self.text
-        for mention in self.mentions:
-            bare = bare.replace(mention.text, " ")
+        bare = self.bare()
         match = _RELATIVE_TIME.search(bare)
         return match.group(0) if match and not _ANCHOR.search(bare) else None
 
@@ -671,14 +736,23 @@ def _finding_order(finding: PlanFinding) -> tuple[int, str, str, str]:
     )
 
 
-def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> PlannedQuery:
+def choose(
+    planned: PlannedQuery,
+    mention_text: str,
+    declared_id: str,
+    *,
+    resolver: EntityResolver,
+    defaults: Defaults,
+) -> PlannedQuery:
     """Settle one ambiguous mention with the user's choice, without asking the model again.
 
     Only a ``NEEDS_CHOICE`` plan can be settled. Every subject the draft carries for a candidate of
     that mention (in ``subjects`` and in a ``Diff``) becomes ``declared_id`` (which must be one of
-    the candidates), or the chosen subject is added when the draft had none; the ambiguity finding
-    gives way to an info finding that the user chose, and the status is recomputed. The lineage is
-    unchanged: the plan is still the model's, edited by a person.
+    the candidates), or the chosen subject is added when the draft had none. The whole review then
+    runs again for the chosen entity alone: a clock, frame or bridge that was declared for another
+    candidate is blocked and removed, exactly as if the model had named the chosen entity. Earlier
+    blockers about parts already removed stand. The lineage is unchanged: the plan is still the
+    model's, edited by a person.
     """
     if planned.status is not PlanStatus.NEEDS_CHOICE or planned.query is None:
         raise ValueError(f"only a needs_choice plan can be settled, not {planned.status}")
@@ -707,11 +781,17 @@ def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> Planne
     if chosen.declared_id not in named:
         subjects |= {Subject(chosen.kind, chosen.declared_id)}
     query = dataclasses.replace(query, subjects=subjects, explain=explain)
-    findings = [
+    mentions = tuple(Mention(m.text, (chosen,)) if m is mention else m for m in planned.mentions)
+    snapshot = None if query.as_of == HEAD else int(query.as_of)
+    review = _Review(planned.question, query.as_of, defaults, mentions, resolver, snapshot)
+    query = review.run(query)
+    earlier = [
         f
         for f in planned.findings
-        if not (f.code is Code.AMBIGUOUS_ENTITY and f.details == candidates)
+        if f.severity is Severity.BLOCKING and f.code is not Code.AMBIGUOUS_ENTITY
     ]
+    findings = list(review.findings)
+    findings += [f for f in earlier if f not in findings]
     findings.append(
         _info(
             Code.ENTITY_CHOSEN,
@@ -720,8 +800,8 @@ def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> Planne
             declared_id,
         )
     )
-    invalid = validate(query)
     result: Query | None = query
+    invalid = validate(query)
     if invalid:
         codes = ", ".join(sorted({str(f.code) for f in invalid}))
         findings.append(
@@ -729,7 +809,6 @@ def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> Planne
         )
         result = None
     findings.sort(key=_finding_order)
-    mentions = tuple(Mention(m.text, (chosen,)) if m is mention else m for m in planned.mentions)
     return dataclasses.replace(
         planned,
         status=_status(findings),

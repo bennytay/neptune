@@ -39,7 +39,7 @@ cannot know. Each of those is exactly what the layers below refuse.
 4. **One model call, behind a protocol.** `ModelClient.complete(ModelRequest) -> ModelResponse`; the request is
    (model, system, user, schema, max_tokens) and its SHA-256 identifies it. The default client is
    `AnthropicClient` (`claude-sonnet-5-5`, Messages API, `output_config.format` json_schema, adaptive thinking
-   at `medium` effort, no sampling parameters, no refusal fallback so the lineage names the one model that
+   (set explicitly) at `medium` effort, 16000 max tokens, no sampling parameters, no refusal fallback so the lineage names the one model that
    answered). The SDK is the optional extra `neptune-context[anthropic]`, imported only inside the client.
 5. **The query JSON Schema is the output contract**, reduced for constrained decoding (`output_schema()`:
    root inlined, `oneOf` as `anyOf`, constraints the API does not enforce removed). The decoder of ADR 0002
@@ -49,8 +49,10 @@ cannot know. Each of those is exactly what the layers below refuse.
    question and the resolver and states or blocks, as `PlanFinding`s (`info` or `blocking`):
    - *Entities*: every declared id must exist and have the stated kind; a name with several candidates is an
      `ambiguous_entity` blocker listing every candidate (the model is told to use the first as a placeholder;
-     `choose(plan, mention, declared_id)` settles a `NEEDS_CHOICE` plan without a second model call,
-     rewriting the draft's subjects and diff subjects to the chosen id). A name that resolves
+     `choose(plan, mention, declared_id, resolver=, defaults=)` settles a `NEEDS_CHOICE` plan without a
+     second model call: it rewrites the draft's subjects and diff subjects to the chosen id and re-runs
+     the whole review for that entity alone, so a clock, frame or bridge declared only for another
+     candidate is blocked and removed). A name that resolves
      to nothing is not given an id: the model selects by kind and puts the words in the text clause.
    - *Clocks*: `during` and diff instants may use only the caller's declared civil clock when the question
      names its timescale (a civil clock's epoch and tick length are never the model's to choose), an entity's
@@ -64,11 +66,16 @@ cannot know. Each of those is exactly what the layers below refuse.
      `unit_not_stated`, `bridge_not_declared`, and the region is removed.
    - *Claims*: a `Why` needs its claim id quoted in the question as a whole token (`claim_not_quoted`);
      finding pointers index the model's own `explain` tuple.
-   - *Defaults applied and overrides*: `as_of_default`, `include_inferred_default`, `budget_default`; and
-     where the model departs from the caller's value without the question saying so, the caller's value
-     wins and the departure is stated: `as_of_overridden` (no transaction stated), `include_inferred_overridden`
-     (the question does not mention inference), `budget_overridden` (a limit the question does not state).
-     A model cannot loosen a control policy's evidence-only default silently.
+   - *Defaults applied and overrides*: `as_of_default`, `include_inferred_default`, `budget_default`; where
+     the model departs from the caller's value without the question saying so, the caller's value wins and
+     the departure is stated: `as_of_overridden` (no transaction stated). The caller's `Budget` is a
+     ceiling: a question may narrow a limit by writing the number (names of entities do not count),
+     never loosen or drop one the caller set (`budget_overridden`, listing the fields restored).
+     `include_inferred` may be narrowed freely (`include_inferred_narrowed`); widening a policy
+     default needs a positive, word-bounded, un-negated request ("include inferred claims"; never
+     "evidence only", "no", "never", "without") and even then is a blocking
+     `include_inferred_widening_unconfirmed` (the draft keeps the default): question text is untrusted
+     input, so the caller confirms. A widening without such a request is `include_inferred_overridden`.
    - Parts removed for a blocker take their dependents with them (regions take frame bridges, a removed
      `during` or diff takes the clock bridges that related its clock), so the draft stays editable.
 7. **Status and execution.** `READY` (nothing blocks), `NEEDS_CHOICE` (only ambiguity blocks), `NEEDS_INPUT`
@@ -77,7 +84,7 @@ cannot know. Each of those is exactly what the layers below refuse.
    input). `executable` is true only for `READY`; no path answers without a typed `Query`. A failure is never
    re-planned: one request, one response, visible.
 8. **Golden set and replay.** `tests/golden/planner/` holds `world.json` (declared identifiers across every
-   embodiment, with clocks and frames, and caller profiles), `cases.jsonl` (100 questions with expected status,
+   embodiment, with clocks and frames, and caller profiles), `cases.jsonl` (101 questions with expected status,
    query, blocking and info finding codes) and `recordings.jsonl`. A recording is one JSON line keyed by
    `request_sha256` with `model`, `stop`, optional `text` and `recorded_by` (`live` or `synthetic`); replay of
    an unrecorded request is `model_unavailable`, never a guess, so any prompt, schema or vocabulary change

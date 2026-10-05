@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from fractions import Fraction
 from typing import Any
 
@@ -29,6 +30,13 @@ from planner_helpers_context import ScriptedModel, planned, world
 
 AMR07 = Subject("machine", "asset_tag:AMR-07")
 RUNS = GraphClause(frozenset({"recorded_by"}), 1, Direction.IN)
+
+
+def settle(
+    first: PlannedQuery, mention: str, declared_id: str, profile: str = "agent"
+) -> PlannedQuery:
+    index, profiles = world()
+    return choose(first, mention, declared_id, resolver=index, defaults=profiles[profile])
 
 
 def good() -> Query:
@@ -144,7 +152,7 @@ def test_choose_settles_an_ambiguity_without_asking_the_model_again() -> None:
         Query(True, Budget(100), frozenset({Subject("asset", "cmms_asset:AMR-09")}), graph=RUNS)
     )
     first = planned("Which runs does AMR-09 appear in?", model)
-    settled = choose(first, "AMR-09", "asset_tag:AMR-09")
+    settled = settle(first, "AMR-09", "asset_tag:AMR-09")
     assert len(model.requests) == 1
     assert settled.status is PlanStatus.READY and settled.executable
     assert settled.query is not None
@@ -152,9 +160,9 @@ def test_choose_settles_an_ambiguity_without_asking_the_model_again() -> None:
     assert "entity_chosen" in codes(settled) and not settled.blocking
     assert settled.lineage == first.lineage
     with pytest.raises(ValueError, match="not a candidate"):
-        choose(first, "AMR-09", "asset_tag:AMR-05")
+        settle(first, "AMR-09", "asset_tag:AMR-05")
     with pytest.raises(ValueError, match="only a needs_choice plan"):
-        choose(settled, "AMR-09", "asset_tag:AMR-09")
+        settle(settled, "AMR-09", "asset_tag:AMR-09")
 
 
 def test_a_primary_clock_default_is_stated() -> None:
@@ -278,7 +286,7 @@ def test_a_different_model_answer_is_a_different_lineage() -> None:
 def test_choose_refuses_failed_plans_and_rewrites_diff_subjects() -> None:
     failed = planned("Which runs does AMR-09 appear in?", ScriptedModel(None, fail="down"))
     with pytest.raises(ValueError, match="only a needs_choice plan"):
-        choose(failed, "AMR-09", "asset_tag:AMR-09")
+        settle(failed, "AMR-09", "asset_tag:AMR-09")
     other = Subject("machine", "asset_tag:AMR-09")
     query = Query(
         True,
@@ -287,7 +295,7 @@ def test_choose_refuses_failed_plans_and_rewrites_diff_subjects() -> None:
         explain=(Diff(Subject("asset", "cmms_asset:AMR-09"), 1, 2),),
     )
     first = planned("What changed about AMR-09 between transactions 1 and 2?", ScriptedModel(query))
-    settled = choose(first, "AMR-09", "asset_tag:AMR-09")
+    settled = settle(first, "AMR-09", "asset_tag:AMR-09")
     assert settled.query is not None
     assert settled.query.explain == (Diff(other, 1, 2),)
     assert settled.query.subjects == frozenset({other})
@@ -297,7 +305,7 @@ def test_choose_adds_the_chosen_entity_when_the_draft_named_none() -> None:
     query = Query(True, Budget(100), frozenset({Subject("run")}))
     first = planned("Which runs of AMR-09 are there?", ScriptedModel(query))
     assert first.status is PlanStatus.NEEDS_CHOICE
-    settled = choose(first, "AMR-09", "cmms_asset:AMR-09")
+    settled = settle(first, "AMR-09", "cmms_asset:AMR-09")
     assert settled.query is not None
     assert Subject("asset", "cmms_asset:AMR-09") in settled.query.subjects
 
@@ -389,24 +397,140 @@ def test_an_unrelated_number_does_not_anchor_a_relative_phrase() -> None:
     assert "time_phrase_unresolved" in codes(result, Severity.BLOCKING)
 
 
-def test_a_model_cannot_loosen_include_inferred_or_the_budget_silently() -> None:
-    query = Query(True, Budget(9000), frozenset({AMR07}), graph=RUNS)
-    result = planned("Which runs does AMR-07 appear in?", ScriptedModel(query), profile="policy")
-    assert result.query is not None
-    assert result.query.include_inferred is False and result.query.budget == Budget(
-        32, 2048, None, 50
+POLICY_BUDGET = Budget(32, 2048, None, 50)
+
+
+def policy_plan(question: str, **changes: Any) -> PlannedQuery:
+    base = Query(False, POLICY_BUDGET, frozenset({AMR07}), graph=RUNS)
+    return planned(question, ScriptedModel(replace(base, **changes)), profile="policy")
+
+
+def test_a_policy_caller_budget_is_a_ceiling_the_model_cannot_loosen() -> None:
+    result = policy_plan("Which runs does AMR-07 appear in?", budget=Budget(9000))
+    assert result.query is not None and result.query.budget == POLICY_BUDGET
+    assert "budget_overridden" in codes(result, Severity.INFO)
+
+
+def test_a_dropped_caller_limit_is_restored_with_a_finding() -> None:
+    # The question mentions 32, the model returns Budget(32) only: tokens and latency come back.
+    result = policy_plan("Which 32 runs does AMR-07 appear in?", budget=Budget(32))
+    assert result.query is not None and result.query.budget == POLICY_BUDGET
+    finding = next(f for f in result.findings if f.code.value == "budget_overridden")
+    assert finding.details == ("tokens", "latency_ms")
+
+
+def test_a_question_may_narrow_a_limit_by_stating_it() -> None:
+    result = policy_plan(
+        "At most 7 items: runs of AMR-07",
+        budget=Budget(7, 2048, None, 50),
     )
-    assert {"include_inferred_overridden", "budget_overridden"} <= codes(result, Severity.INFO)
+    assert result.query is not None and result.query.budget == Budget(7, 2048, None, 50)
+    assert "budget_overridden" not in codes(result)
 
 
-def test_a_stated_budget_and_inference_request_are_kept() -> None:
-    query = Query(True, Budget(7), frozenset({AMR07}), graph=RUNS)
-    result = planned(
-        "Include inferred claims: runs of AMR-07, at most 7 items",
+def test_a_number_inside_an_entity_name_is_not_a_stated_limit() -> None:
+    # "07" in AMR-07 must not make an invented limit of 7 look stated.
+    result = policy_plan("Which runs does AMR-07 appear in?", budget=Budget(7, 2048, None, 50))
+    assert result.query is not None and result.query.budget == POLICY_BUDGET
+
+
+def test_a_stated_limit_above_the_callers_ceiling_is_clamped() -> None:
+    result = policy_plan("Give me 500 items for AMR-07", budget=Budget(500, 2048, None, 50))
+    assert result.query is not None and result.query.budget == POLICY_BUDGET
+    assert "budget_overridden" in codes(result)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Show findings for AMR-07, evidence only, never infer",
+        "Show findings for AMR-07, no inferred claims",
+        "Show findings for AMR-07 without inferences",
+        "Is AMR-07 inferior to AMR-08?",
+        "Show findings for AMR-07",
+    ],
+)
+def test_include_inferred_is_not_widened_without_a_positive_request(question: str) -> None:
+    result = policy_plan(question, include_inferred=True)
+    assert result.query is not None and result.query.include_inferred is False
+    assert "include_inferred_overridden" in codes(result, Severity.INFO)
+    assert "include_inferred_widening_unconfirmed" not in codes(result)
+
+
+def test_a_positive_request_to_widen_a_policy_default_blocks_for_confirmation() -> None:
+    result = policy_plan("Include inferred claims for AMR-07", include_inferred=True)
+    assert result.status is PlanStatus.NEEDS_INPUT and not result.executable
+    assert "include_inferred_widening_unconfirmed" in codes(result, Severity.BLOCKING)
+    assert result.query is not None and result.query.include_inferred is False
+
+
+def test_narrowing_include_inferred_is_allowed_and_stated() -> None:
+    query = Query(False, Budget(100), frozenset({AMR07}), graph=RUNS)
+    result = planned("Which runs does AMR-07 appear in?", ScriptedModel(query))
+    assert result.executable and result.query is not None
+    assert result.query.include_inferred is False
+    assert "include_inferred_narrowed" in codes(result, Severity.INFO)
+
+
+def test_choose_reviews_the_clock_for_the_chosen_entity() -> None:
+    # AMR-09's tag declares a UTC primary clock; the CMMS asset of the same name declares none.
+    index, _ = world()
+    tag = index.lookup("asset_tag:AMR-09", as_of=None)
+    assert tag is not None and tag.primary_clock is not None
+    query = Query(
+        True,
+        Budget(100),
+        frozenset({Subject("machine", "asset_tag:AMR-09")}),
+        during=During(tag.primary_clock, 1_700_000_000_000_000_000, 1_700_000_100_000_000_000),
+        graph=RUNS,
+    )
+    first = planned(
+        "What did AMR-09 do between 1700000000000000000 and 1700000100000000000?",
         ScriptedModel(query),
-        profile="policy",
     )
-    assert result.query == query and "budget_overridden" not in codes(result)
+    assert first.status is PlanStatus.NEEDS_CHOICE
+    kept = settle(first, "AMR-09", "asset_tag:AMR-09")  # its own clock: defaulted, stated
+    assert kept.status is PlanStatus.READY and kept.query is not None
+    assert kept.query.during is not None
+    guessed = settle(first, "AMR-09", "cmms_asset:AMR-09")  # no clock declared for this one
+    assert guessed.status is PlanStatus.NEEDS_INPUT and not guessed.executable
+    assert guessed.query is not None and guessed.query.during is None
+    assert {"clock_not_stated"} <= codes(guessed, Severity.BLOCKING)
+    stale = [f for f in guessed.findings if f.code.value == "clock_defaulted_to_primary"]
+    assert stale == []
+
+
+def test_choose_does_not_pool_frames_across_candidates() -> None:
+    from neptune_context.query.model import Caller
+
+    # Two entities share a name; only one declares the frame the model used.
+    from neptune_context.query.plan import DeclaredIdentifierIndex, Defaults, Entity, plan
+    from planner_golden_context import ARM_GRAPH
+
+    frame = FrameRef("base_link", ARM_GRAPH)
+    with_frame = Entity("machine", "asset_tag:twin", frames=(frame,))
+    without = Entity("asset", "cmms_asset:twin")
+    index = DeclaredIdentifierIndex([with_frame, without])
+    region = FrameRegion(frame, "m", Box((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)))
+    query = Query(
+        True,
+        Budget(100),
+        frozenset({Subject("asset", "cmms_asset:twin")}),
+        regions=frozenset({region}),
+    )
+    defaults = Defaults(Caller.AGENT)
+    first = plan(
+        "twin within a 1 m box in base_link",
+        "head",
+        defaults,
+        resolver=index,
+        client=ScriptedModel(query),
+    )
+    # Ambiguous, and the frame is pooled across both candidates before a choice: still a draft.
+    assert first.status is PlanStatus.NEEDS_CHOICE
+    settled = choose(first, "twin", "cmms_asset:twin", resolver=index, defaults=defaults)
+    assert "frame_not_declared" in codes(settled, Severity.BLOCKING)
+    assert settled.query is not None and not settled.query.regions
 
 
 def test_a_claim_id_must_be_quoted_as_a_whole_token() -> None:

@@ -28,9 +28,9 @@ def test_the_committed_files_are_what_the_generator_builds() -> None:
         )
 
 
-def test_there_are_one_hundred_cases(report: pg.Report) -> None:
-    assert report.total == 100
-    assert len({o.case.id for o in report.outcomes}) == 100
+def test_there_are_one_hundred_and_one_cases(report: pg.Report) -> None:
+    assert report.total == 101
+    assert len({o.case.id for o in report.outcomes}) == 101
 
 
 def test_every_case_passes_and_the_rate_is_reported(report: pg.Report) -> None:
@@ -38,13 +38,13 @@ def test_every_case_passes_and_the_rate_is_reported(report: pg.Report) -> None:
     assert failures == []
     assert report.pass_rate == 1.0
     summary = report.summary()
-    assert "100/100" in summary
+    assert "101/101" in summary
     assert f"{report.live} live, {report.synthetic} synthetic" in summary
 
 
 def test_the_recordings_are_honestly_labelled(report: pg.Report) -> None:
     recordings = load_recordings(GOLDEN / "recordings.jsonl")
-    assert report.live + report.synthetic == len(recordings) == 99  # one case is unrecorded
+    assert report.live + report.synthetic == len(recordings) == 100  # one case is unrecorded
     assert {r.recorded_by for r in recordings.values()} <= {"live", "synthetic"}
 
 

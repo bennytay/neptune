@@ -126,7 +126,7 @@ def test_a_request_recorded_twice_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_golden_recordings_load() -> None:
-    assert len(load_recordings(GOLDEN / "recordings.jsonl")) == 99
+    assert len(load_recordings(GOLDEN / "recordings.jsonl")) == 100
 
 
 def test_recording_client_keeps_what_the_live_client_returned() -> None:
@@ -136,7 +136,15 @@ def test_recording_client_keeps_what_the_live_client_returned() -> None:
     wrapped.complete(req)
     assert wrapped.client_id == "scripted"
     (kept,) = list(wrapped)
-    assert (kept.request_sha256, kept.text, kept.recorded_by) == (req.sha256, "{}", "live")
+    # A stand-in client is never labelled live: only the Anthropic client makes a live recording.
+    assert (kept.request_sha256, kept.text, kept.recorded_by) == (req.sha256, "{}", "synthetic")
+
+
+def test_only_the_anthropic_client_makes_live_recordings() -> None:
+    inner = ScriptedModel("{}", client_id="anthropic")
+    wrapped = RecordingClient(inner)
+    wrapped.complete(request())
+    assert [r.recorded_by for r in wrapped] == ["live"]
 
 
 def test_the_live_request_is_schema_constrained_and_sets_no_sampling() -> None:
@@ -145,6 +153,7 @@ def test_the_live_request_is_schema_constrained_and_sets_no_sampling() -> None:
     assert args["output_config"]["format"] == {"type": "json_schema", "schema": {"type": "object"}}
     assert not {"temperature", "top_p", "top_k", "tools", "tool_choice"} & set(args)
     assert args["messages"] == [{"role": "user", "content": "q"}]
+    assert args["thinking"] == {"type": "adaptive"}
 
 
 def test_the_live_client_reads_text_and_maps_stop_reasons() -> None:

@@ -48,6 +48,7 @@ class PlanFindingCode(StrEnum):
     CLOCK_DEFAULTED_TO_CALLER = "clock_defaulted_to_caller"
     ENTITY_CHOSEN = "entity_chosen"
     INCLUDE_INFERRED_OVERRIDDEN = "include_inferred_overridden"
+    INCLUDE_INFERRED_NARROWED = "include_inferred_narrowed"
     BUDGET_OVERRIDDEN = "budget_overridden"
     UNIT_DEFAULTED_TO_CALLER = "unit_defaulted_to_caller"
     FRAME_DEFAULTED_TO_CALLER = "frame_defaulted_to_caller"
@@ -62,6 +63,7 @@ class PlanFindingCode(StrEnum):
     UNIT_NOT_STATED = "unit_not_stated"
     BRIDGE_NOT_DECLARED = "bridge_not_declared"
     CLAIM_NOT_QUOTED = "claim_not_quoted"
+    INCLUDE_INFERRED_WIDENING_UNCONFIRMED = "include_inferred_widening_unconfirmed"
     DRAFT_WITHDRAWN = "draft_withdrawn"
     # No usable output (blocking).
     BAD_INPUT = "bad_input"
