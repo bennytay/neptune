@@ -33,8 +33,10 @@ if TYPE_CHECKING:
 # predicates joined (ADR 0010 §6). 5: the run thread predicates joined (ADR 0009 §6). 6: the
 # time-domain registry's ``has_clock``, ``maps_to`` and ``clock_map`` joined, and the predicates
 # that hold for every node type widened to ``clock`` (ADR 0011 §1). 7: the episode predicates
-# joined (ADR 0012 §5). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 7
+# joined (ADR 0012 §5). 8: the event predicates joined, ``at_site`` widened to events, and the
+# predicates that hold for every node type widened to ``event`` (ADR 0013 §6). The vocabulary is
+# part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 8
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
@@ -64,12 +66,45 @@ AT_SITE: Final = "at_site"
 EXECUTES_TASK: Final = "executes_task"
 HAS_MEMBER: Final = "has_member"
 CONTINUES: Final = "continues"
+# Events (ADR 0013). ``co_occurs_within`` is pairwise, one claim each way, and its valid interval
+# is the window it names: a co-occurrence is never a cause.
+EVENT_KIND: Final = "event_kind"
+DECLARED_KIND: Final = "declared_kind"
+STATED_SEVERITY: Final = "stated_severity"
+HAS_DESCRIPTION: Final = "has_description"
+INVOLVES: Final = "involves"
+IN_ZONE: Final = "in_zone"
+CO_OCCURS_WITHIN: Final = "co_occurs_within"
 CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
     {
         RECORDED_BY: "recorded_by_candidate",
         AT_SITE: "at_site_candidate",
         EXECUTES_TASK: "executes_task_candidate",
         CONTINUES: "continues_candidate",
+        INVOLVES: "involves_candidate",
+        IN_ZONE: "in_zone_candidate",
+    }
+)
+
+# The registered event kinds (ADR 0013 §3): the only objects of ``event_kind``. A source's own
+# kinds (a status level, a PLC alarm code, an intervention's mode) reach one only through a vendor
+# mapping declared in the event consolidator's config; an unmapped kind stays ``declared_kind``.
+# Adding a kind is a vocabulary change; a kind is never renamed or removed within a major.
+EVENT_KINDS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "collision": "contact with a person, an object or another machine, as stated",
+        "emergency_stop": "an emergency stop was triggered (a button, a remote or a controller)",
+        "failsafe": "a failsafe or fallback behaviour engaged (link loss, geofence, low battery)",
+        "fault": "a fault or error state a controller or diagnostic declares",
+        "incident": "an incident a record reports",
+        "intervention": "a human intervention: a remote assist or an on-site action",
+        "mode_change": "a declared change of operating mode",
+        "near_miss": "a near miss a record reports",
+        "protective_stop": "a protective (safeguard) stop a safety function triggered",
+        "reset": "a fault, stop or alarm was reset or acknowledged",
+        "safety_field_violation": "a safety field, light curtain or zone boundary was breached",
+        "stale": "a monitored value stopped updating",
+        "warning": "a warning a controller or diagnostic declares",
     }
 )
 
@@ -405,13 +440,21 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         _MANY,
         "ambiguous: the evidence names several tasks; which is undecided",
     ),
-    _p("at_site", {_N.RUN}, {_N.SITE}, _ONE, "the site a run took place at, as declared"),
+    _p(
+        "at_site",
+        {_N.RUN, _N.EVENT},
+        {_N.SITE},
+        _ONE,
+        "the site a run or event took place at, as declared",
+        version=2,  # 2: events (ADR 0013)
+    ),
     _p(
         "at_site_candidate",
-        {_N.RUN},
+        {_N.RUN, _N.EVENT},
         {_N.SITE},
         _MANY,
-        "ambiguous: the evidence names several sites for the run; which is undecided",
+        "ambiguous: the evidence names several sites; which is undecided",
+        version=2,  # 2: events (ADR 0013)
     ),
     _p(
         "has_member",
@@ -433,6 +476,64 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_N.RUN},
         _MANY,
         "ambiguous: may be a later part of the same recording; the evidence does not order them",
+    ),
+    _p(
+        EVENT_KIND,
+        {_N.EVENT},
+        {_V.TEXT},
+        _ONE,
+        "a registered event kind (EVENT_KINDS), through a vendor mapping the config declares",
+    ),
+    _p(
+        DECLARED_KIND,
+        {_N.EVENT},
+        {_V.TEXT, _V.INTEGER},
+        _ONE,
+        "the event's kind exactly as its source declares it: a level, a code, a mode",
+    ),
+    _p(
+        STATED_SEVERITY,
+        {_N.EVENT},
+        {_V.TEXT, _V.INTEGER},
+        _ONE,
+        "the severity a record states, verbatim; never ranked or compared",
+    ),
+    _p(
+        HAS_DESCRIPTION,
+        {_N.EVENT},
+        {_V.TEXT},
+        _ONE,
+        "what the record says happened, verbatim: a message, a description, a reason",
+    ),
+    _p(
+        INVOLVES,
+        {_N.EVENT},
+        {_N.MACHINE, _N.ASSET},
+        _MANY,
+        "a machine or asset the record names as involved, or the machine whose log it is",
+    ),
+    _p(
+        "involves_candidate",
+        {_N.EVENT},
+        {_N.MACHINE, _N.ASSET},
+        _MANY,
+        "ambiguous: the record names several possible machines or assets; which is undecided",
+    ),
+    _p(IN_ZONE, {_N.EVENT}, {_N.ZONE}, _ONE, "the zone an event took place in, as declared"),
+    _p(
+        "in_zone_candidate",
+        {_N.EVENT},
+        {_N.ZONE},
+        _MANY,
+        "ambiguous: the record names several zones; which is undecided",
+    ),
+    _p(
+        CO_OCCURS_WITHIN,
+        {_N.EVENT},
+        {_N.EVENT},
+        _MANY,
+        "both events began inside the claim's valid interval, which is the configured window on"
+        " that clock; from different sources; co-occurrence, never a cause",
     ),
     _p("operated_by", {_N.RUN}, {_N.PERSON}, _MANY, "a declared operator or supervisor"),
     _p("episode_of", {_N.EPISODE}, {_N.RUN}, _ONE, "the run an episode segments"),
@@ -493,7 +594,7 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.RECORD},
         _MANY,
         "a Ledger record about the node (Episode tier, by id)",
-        version=3,  # 2: every node type includes stream and document; 3: and clock
+        version=4,  # 2: every node type includes stream and document; 3: clock; 4: event
     ),
     _p(
         "has_name",
@@ -501,7 +602,7 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.TEXT},
         _ONE,
         "a declared display name, verbatim; never an identifier",
-        version=2,  # 2: every node type includes clock
+        version=3,  # 2: every node type includes clock; 3: and event
     ),
     _p(
         SAME_AS,
@@ -509,7 +610,7 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         set(NodeType),
         _MANY,
         "the same real-world thing: declared identifier, configuration lineage or operator",
-        version=3,  # 2: every node type includes stream and document; 3: and clock
+        version=4,  # 2: every node type includes stream and document; 3: clock; 4: event
     ),
     _p(
         SAME_AS_CANDIDATE,
@@ -517,7 +618,7 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         set(NodeType),
         _MANY,
         "ambiguous: the evidence could mean either; whether they are one thing is undecided",
-        version=3,  # 2: stream and document, ambiguous identity links; 3: every type incl. clock
+        version=4,  # 2: stream and document, ambiguous identity links; 3: clock; 4: event
     ),
     _p(
         HAS_CLOCK,
