@@ -7,18 +7,22 @@ at what it held when it started plus ``memory`` bytes, and which is killed after
 reads the bytes through the caller, which serves them from its verified reader, so a chunk is
 still hashed before any byte of it is decoded.
 
-A **worker** (``python -m neptune_ledger.lake.capped``, a clean interpreter that has imported the
-decoders) forks one capped child per call, so a call costs a fork, not an interpreter start, and
-no memory or state is carried from one call to the next. A call takes an idle worker or starts
-one; a worker whose call ran past its time is killed (the caller's own child, by its handle), and
-its capped child dies with it (``PR_SET_PDEATHSIG``). Linux only: elsewhere ``run`` refuses.
+A **worker** (``python -I capped.py``, a clean interpreter that has imported the decoders, with
+a minimal environment and no descriptor but its socket) forks one capped child per call, so a
+call costs a fork, not an interpreter start, and no memory or state is carried from one call to
+the next. A call takes an idle worker or starts one; a worker is returned only after a call that
+ended cleanly, and any other is killed (the caller's own child, by its handle), its capped child
+with it (``PR_SET_PDEATHSIG``). A worker exits by itself when the caller's process goes. Linux
+only: elsewhere ``run`` refuses.
 """
 
 import atexit
+import contextlib
 import ctypes
 import io
 import os
 import pickle
+import select
 import signal
 import socket
 import subprocess
@@ -28,7 +32,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from pathlib import Path
-from typing import Any, BinaryIO, Final, Literal
+from typing import Any, BinaryIO, Final, Literal, NoReturn
 
 # What a worker imports before it forks any child.
 _PRELOAD: Final = ("neptune_ledger.lake.decode",)
@@ -70,9 +74,10 @@ class Remote:
 
     def __init__(self, conn: Connection, size: int) -> None:
         self._conn, self.size = conn, size
+        self.replies = 0  # the caller's replies read in full, so none is left in the socket
 
     def file(self) -> io.BufferedReader:
-        return io.BufferedReader(_RemoteFile(self._conn, self.size), buffer_size=1 << 20)
+        return io.BufferedReader(_RemoteFile(self), buffer_size=1 << 20)
 
     def head(self, n: int) -> bytes:
         with self.file() as f:
@@ -85,8 +90,8 @@ class Remote:
 
 
 class _RemoteFile(io.RawIOBase):
-    def __init__(self, conn: Connection, size: int) -> None:
-        self._conn, self._size, self._at = conn, size, 0
+    def __init__(self, remote: Remote) -> None:
+        self._remote, self._size, self._at = remote, remote.size, 0
 
     def readable(self) -> bool:
         return True
@@ -109,8 +114,9 @@ class _RemoteFile(io.RawIOBase):
         n = max(0, min(len(view), self._size - self._at))
         if n == 0:
             return 0
-        self._conn.send(("read", self._at, n))
-        data = self._conn.recv_bytes()
+        self._remote._conn.send(("read", self._at, n))
+        data = self._remote._conn.recv_bytes()
+        self._remote.replies += 1
         view[: len(data)] = data
         self._at += len(data)
         return len(data)
@@ -122,25 +128,41 @@ class _RemoteFile(io.RawIOBase):
 class _Worker:
     def __init__(self) -> None:
         ours, theirs = socket.socketpair()
-        self.process = subprocess.Popen(
-            [sys.executable, "-m", "neptune_ledger.lake.capped", str(theirs.fileno())],
-            pass_fds=(theirs.fileno(),),
-            stdin=subprocess.DEVNULL,
-            # The modules this process imports, wherever it found them.
-            env={
-                **os.environ,
-                **_SINGLE_THREADED,
-                "PYTHONPATH": os.pathsep.join(filter(None, sys.path)),
-            },
-        )
-        theirs.close()
+        try:
+            self.process = subprocess.Popen(
+                # Isolated (``-I``): no ``PYTHON*`` variable, user site or script directory.
+                [sys.executable, "-I", __file__, str(theirs.fileno()), str(os.getpid())],
+                pass_fds=(theirs.fileno(),),  # every other descriptor is closed
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=_environment(),
+            )
+        except BaseException:
+            ours.close()
+            raise
+        finally:
+            theirs.close()
         self.conn = Connection(ours.detach())
+        # The modules this process imports, wherever it found them, sent rather than inherited.
+        # A worker gone already is found by the call, as the end of its socket.
+        with contextlib.suppress(OSError):
+            self.conn.send([entry for entry in sys.path if entry])
 
     def close(self) -> None:
         self.conn.close()
         if self.process.poll() is None:
             self.process.kill()  # the worker this module started, by its own handle
         self.process.wait()
+
+
+def _environment() -> dict[str, str]:
+    """All a worker inherits: where programs are, a locale, and few glibc arenas."""
+    return {
+        "PATH": os.environ.get("PATH", os.defpath),
+        "LANG": "C.UTF-8",
+        "MALLOC_ARENA_MAX": "2",
+    }
 
 
 _idle: list[_Worker] = []
@@ -198,7 +220,10 @@ def _call(
     worker: _Worker, request: tuple[Any, ...], source: BinaryIO, memory: int, seconds: float
 ) -> tuple[Any, bool]:
     """Serve one call's reads until the worker says how its child ended. A watchdog kills the
-    worker at the deadline, so a read of the connection never blocks past it."""
+    worker at the deadline, so a read of the connection never blocks past it.
+
+    The worker is reusable only when its child sent a result having read every reply, then
+    exited cleanly, and nothing is left in the socket; after anything else it is discarded."""
     conn = worker.conn
     late = threading.Event()
 
@@ -209,28 +234,38 @@ def _call(
     watchdog = threading.Timer(seconds, overdue)
     watchdog.daemon = True
     watchdog.start()
+    finished: tuple[Any, ...] | None = None
     outcome: Any = None
+    replies = 0
     try:
         conn.send(request)
         while True:
             message = conn.recv()
-            if message[0] == "read":
+            kind = _kind(message)
+            if kind == "read" and finished is None:
                 source.seek(message[1])
                 conn.send_bytes(source.read(message[2]))
-            elif message[0] == "done":
-                outcome = message[1]
-            elif message[0] == "memory":
+                replies += 1
+            elif kind == "done" and finished is None:
+                finished, outcome = message, message[1]
+            elif kind == "memory" and finished is None:
+                finished = message
                 outcome = Exceeded("memory", f"decoding needed more than its {memory}-byte cap")
-            elif message[0] == "refused":
+            elif kind == "refused" and finished is None:
+                finished = message
                 outcome = Exceeded("unsupported", f"no memory cap could be set: {message[1]}")
-            elif outcome is None:  # "exit": the child ended without a result
+            elif kind == "exit" and finished is None:  # the child ended without a result
                 detail = (
                     f"the decoding process ended ({message[1]}) without a result, under its"
                     f" {memory}-byte memory cap"
                 )
-                return Exceeded("died", detail), True
+                return Exceeded("died", detail), False
+            elif kind == "exit" and finished is not None:
+                clean = finished[0] == "done" and finished[2] == replies and message[2] is True
+                return outcome, clean
             else:
-                return outcome, True
+                detail = f"the decoding worker broke its protocol, under its {memory}-byte cap"
+                return Exceeded("died", detail), False
     except (EOFError, OSError, pickle.UnpicklingError):
         if late.is_set():
             return Exceeded("time", f"decoding ran past its {seconds:g}-second limit"), False
@@ -240,41 +275,113 @@ def _call(
         watchdog.cancel()
 
 
+# Each message a worker or its child sends: its kind and the types of what follows it.
+_MESSAGES: Final[dict[str, tuple[type, ...]]] = {
+    "read": (int, int),
+    "done": (object, int),
+    "memory": (int,),
+    "refused": (str,),
+    "exit": (str, bool),
+}
+
+
+def _kind(message: object) -> str | None:
+    """The kind of a well-formed message, or None."""
+    if not isinstance(message, tuple) or not message or not isinstance(message[0], str):
+        return None
+    shape = _MESSAGES.get(message[0])
+    if shape is None or len(message) != 1 + len(shape):
+        return None
+    if not all(isinstance(field, kind) for field, kind in zip(message[1:], shape, strict=True)):
+        return None
+    return message[0]
+
+
 # --- The worker and its capped children --------------------------------------------------------
+
+# How often a waiting worker checks that the process that started it still runs.
+_PARENT_CHECK: Final = 0.5
 
 
 def _die_with_parent() -> None:
+    """For the capped child only: SIGKILL when the worker's (single) thread exits. Never for
+    the worker itself, whose parent thread may be any short-lived thread of the caller's."""
     libc = ctypes.CDLL(None, use_errno=True)
     libc.prctl(_PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
 
 
-def _serve(fd: int) -> None:
-    """The worker: one capped child per request; it tells the caller how each child ended."""
-    _die_with_parent()
-    parent = os.getppid()
-    if parent == 1:
+def _serve(conn: Connection, parent: int) -> None:
+    """The worker: one capped child per request; it tells the caller how each child ended.
+
+    It exits when the caller's process does (end of file on the socket, or its parent PID
+    changing), and after any child that did not end cleanly or left a reply unread."""
+    if os.getppid() != parent:
         return
+    os.environ.update(_SINGLE_THREADED)
     for name in _PRELOAD:
         __import__(name)
-    conn = Connection(fd)
-    while True:
+    while _parent_waits(conn, parent):
         try:
             function, args, size, memory = conn.recv()
-        except EOFError:
+        except Exception:  # end of file, or a request this worker cannot read
             return
         child = os.fork()
         if child == 0:
-            try:
-                _die_with_parent()
-                _capped(conn, function, args, size, memory)
-            finally:
-                os._exit(0)
-        _, status = os.waitpid(child, 0)
-        if os.WIFSIGNALED(status):
-            ended = f"signal {signal.Signals(os.WTERMSIG(status)).name}"
-        else:
-            ended = f"exit {os.waitstatus_to_exitcode(status)}"
-        conn.send(("exit", ended))
+            _child(conn, function, args, size, memory)
+        ended, clean = _reap(child, parent)
+        if ended is None:
+            return
+        try:
+            clean = clean and not conn.poll(0)
+            conn.send(("exit", ended, clean))
+        except OSError:
+            return
+        if not clean:
+            return
+
+
+def _parent_waits(conn: Connection, parent: int) -> bool:
+    """Wait for a request (or end of file); False once the caller's process has gone."""
+    while not conn.poll(_PARENT_CHECK):
+        if os.getppid() != parent:
+            return False
+    return True
+
+
+def _reap(child: int, parent: int) -> tuple[str | None, bool]:
+    """How ``child`` ended and whether cleanly; ``None`` if the caller's process went first,
+    in which case the child is killed (by its PID, which is this worker's to reap)."""
+    try:
+        ended = os.pidfd_open(child)
+    except OSError:  # a kernel before 5.3: wait without watching the parent
+        ended = -1
+    try:
+        while ended >= 0 and not select.select([ended], [], [], _PARENT_CHECK)[0]:
+            if os.getppid() != parent:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
+                return None, False
+    finally:
+        if ended >= 0:
+            os.close(ended)
+    _, status = os.waitpid(child, 0)
+    if os.WIFSIGNALED(status):
+        return f"signal {signal.Signals(os.WTERMSIG(status)).name}", False
+    code = os.waitstatus_to_exitcode(status)
+    return f"exit {code}", code == 0
+
+
+def _child(
+    conn: Connection, function: Callable[..., Any], args: tuple[Any, ...], size: int, memory: int
+) -> NoReturn:
+    """A capped child: exit 0 only once its last message is sent."""
+    code = 1
+    try:
+        _die_with_parent()
+        _capped(conn, function, args, size, memory)
+        code = 0
+    finally:
+        os._exit(code)
 
 
 def _capped(
@@ -289,12 +396,13 @@ def _capped(
     except (OSError, ValueError) as exc:
         conn.send(("refused", f"{type(exc).__name__}: {exc}"))
         return
+    remote = Remote(conn, size)
     exceeded = False
     try:
-        result = function(Remote(conn, size), *args)
+        result = function(remote, *args)
     except MemoryError:
         exceeded = True  # sent once the handler has dropped the frames that held the memory
-    conn.send(("memory",) if exceeded else ("done", result))
+    conn.send(("memory", remote.replies) if exceeded else ("done", result, remote.replies))
 
 
 def _data_bytes() -> int:
@@ -306,5 +414,20 @@ def _data_bytes() -> int:
     raise OSError("no VmData in /proc/self/status")
 
 
+def _main(fd: int, parent: int) -> None:
+    """Run as a script (``-I``, so the import path is empty of the caller's): take the
+    caller's import path, then serve as ``neptune_ledger.lake.capped``, the module requests
+    name."""
+    conn = Connection(fd)
+    try:
+        path = conn.recv()
+    except Exception:
+        return
+    sys.path[:] = [entry for entry in path if isinstance(entry, str)]
+    from neptune_ledger.lake import capped
+
+    capped._serve(conn, parent)
+
+
 if __name__ == "__main__":
-    _serve(int(sys.argv[1]))
+    _main(int(sys.argv[1]), int(sys.argv[2]))

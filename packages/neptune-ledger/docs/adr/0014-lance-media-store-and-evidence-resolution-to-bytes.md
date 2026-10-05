@@ -182,8 +182,12 @@ that no package records (root ADR 0010).
      never an uncapped decode. The footer sizing and running sum above are only the fast path
      that refuses most files before a page is read. The child reads through the parent's
      verified reader. A persistent worker (`lake/capped.py`, a clean single-threaded
-     interpreter with the decoders imported) forks one capped child per call, and is
-     replaced after a time kill. A hydration costs about 14 ms more (20 ms against 6 ms for a
+     interpreter with the decoders imported) forks one capped child per call; it is reused
+     only after a call whose child sent its result and exited cleanly, and any other call
+     discards it. It starts with only `PATH`, `LANG` and `MALLOC_ARENA_MAX` in its environment
+     and no descriptor but its socket, and exits when its parent process does (end of file on
+     the socket, or a changed parent PID); only the capped child uses `PR_SET_PDEATHSIG`,
+     which fires when the thread that started a process exits. A hydration costs about 14 ms more (20 ms against 6 ms for a
      row of a 100k-row file) plus about 0.25 s once per worker start; the reviewer's two
      forged files now peak at 58 MiB and 56 MiB in the child. MVL-98 (PR #126) adds a similar
      capped child for SQL passthrough; factor out one helper once both have merged.

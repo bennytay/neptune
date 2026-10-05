@@ -11,6 +11,9 @@ source is a finding, never an exception.
 import gzip
 import io
 import json
+import os
+import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -22,6 +25,7 @@ from typing import Any, BinaryIO
 import pytest
 from PIL import Image
 
+import ledger_capped_probes as probes
 from ledger_media_fixtures import (
     EXTRINSICS,
     HEAD_SIZE,
@@ -1464,3 +1468,146 @@ def test_parquet_rows_resolve_only_in_a_capped_child_process(
     made = fresh_media().hydrate(ref, "row").read()
     assert [f.code for f in made.findings] == ["no_decoder"]
     assert "memory cap" in made.findings[0].detail
+
+
+# --- The capped worker's life: threads, unclean calls, its parent's death ----------------------
+
+
+def _capped_call(function: Any, *args: Any) -> Any:
+    from neptune_ledger.lake import capped
+
+    return capped.run(function, args, io.BytesIO(bytes(64)), 64, memory=1 << 26, seconds=30)
+
+
+def test_a_capped_worker_outlives_the_thread_that_started_it(lake: Lake) -> None:
+    from neptune_ledger.lake import capped
+
+    sites = fixture("sites.parquet")
+    lake.package("mobile", {"sites.parquet": sites}, materialise=frozenset({"sites.parquet"}))
+    ref = anchor(sites, {"kind": "row", "row": 1})
+    stores = iter(range(5))
+
+    def fresh_media() -> MediaLake:  # a new media store, so each call decodes
+        return MediaLake(lake.resolver, MediaStore(lake.tmp / f"media-{next(stores)}", "acme"))
+
+    first = lake.artefact(ref, "row").read()
+    # A short-lived thread starts the worker and ends; the worker lives on and serves the row.
+    capped._close_idle()
+    made: list[Any] = []
+    thread = threading.Thread(target=lambda: made.append(fresh_media().hydrate(ref, "row").read()))
+    thread.start()
+    thread.join()
+    time.sleep(0.2)
+    assert [w.process.poll() for w in capped._idle] == [None]
+    started = capped._idle[0].process.pid
+    assert isinstance(made[0].value, Artefact), made[0].findings
+    assert made[0].value.read() == first
+    again = fresh_media().hydrate(ref, "row").read()
+    assert isinstance(again.value, Artefact), again.findings
+    assert again.value.read() == first
+    assert [w.process.pid for w in capped._idle] == [started]
+    # The thread that started the worker ends while another thread's call runs on it.
+    capped._close_idle()
+    go = threading.Event()
+    pids: list[Any] = []
+
+    def short_lived() -> None:
+        pids.append(_capped_call(probes.worker_pid, 0.0))
+        go.wait(10)
+
+    thread = threading.Thread(target=short_lived)
+    thread.start()
+    deadline = time.monotonic() + 30
+    while not pids and time.monotonic() < deadline:
+        time.sleep(0.01)
+    threading.Timer(0.2, go.set).start()
+    assert _capped_call(probes.worker_pid, 1.0) == pids[0]
+    thread.join()
+
+
+def test_a_capped_worker_is_never_reused_after_an_unclean_call() -> None:
+    from neptune_ledger.lake import capped
+
+    capped._close_idle()
+    worker = _capped_call(probes.worker_pid, 0.0)
+    assert isinstance(worker, int)
+    # A child asks for bytes and dies before reading them: the reply is left in the socket.
+    died = _capped_call(probes.abandon_read, 16)
+    assert isinstance(died, capped.Exceeded) and died.reason == "died", died
+    assert capped._idle == []
+    after = _capped_call(probes.worker_pid, 0.0)
+    assert isinstance(after, int) and after != worker
+    # A child that ignores a reply and returns: its result stands, its worker is discarded.
+    assert _capped_call(probes.ignore_read, 16) == after
+    assert capped._idle == []
+    last = _capped_call(probes.worker_pid, 0.0)
+    assert isinstance(last, int) and last not in (worker, after)
+    # A call past its time: its worker is killed and the next call has a new one.
+    timed = capped.run(probes.worker_pid, (5.0,), io.BytesIO(b""), 0, memory=1 << 26, seconds=0.5)
+    assert isinstance(timed, capped.Exceeded) and timed.reason == "time", timed
+    assert capped._idle == []
+    assert _capped_call(probes.worker_pid, 0.0) not in (worker, after, last)
+
+
+def test_a_capped_child_sees_a_minimal_environment_and_only_its_socket() -> None:
+    seen = _capped_call(probes.surroundings)
+    assert isinstance(seen, dict), seen
+    assert seen["environment"] == sorted(
+        {"LANG", "MALLOC_ARENA_MAX", "PATH"}
+        | {"ARROW_DEFAULT_MEMORY_POOL", "JE_ARROW_MALLOC_CONF", "OMP_NUM_THREADS"}
+        | {"OPENBLAS_NUM_THREADS"}
+    )
+    descriptors = seen["descriptors"]
+    assert [descriptors[fd] for fd in (0, 1, 2)] == ["/dev/null"] * 3
+    others = [target for fd, target in descriptors.items() if fd > 2]
+    assert len(others) == 1 and others[0].startswith("socket:"), descriptors
+    assert seen["pool"] == "system" and seen["threads"] == 1
+
+
+_ORPHANING_PARENT = """
+import io, os, sys, threading, time
+from pathlib import Path
+from neptune_ledger.lake import capped
+import ledger_capped_probes as probes
+
+mode, path = sys.argv[1], Path(sys.argv[2])
+def call(function, *args):
+    return capped.run(function, args, io.BytesIO(b""), 0, memory=1 << 26, seconds=600)
+if mode == "idle":
+    pids = [call(probes.worker_pid, 0.0)]
+else:
+    announced = path.with_suffix(".announced")
+    hang = (probes.announce_and_hang, str(announced))
+    threading.Thread(target=call, args=hang, daemon=True).start()
+    while not announced.exists() or not announced.read_text():
+        time.sleep(0.01)
+    pids = [int(pid) for pid in announced.read_text().split()]
+stat = lambda pid: Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+path.write_text(" ".join(f"{pid}:{stat(pid)}" for pid in pids))
+os._exit(0)  # no atexit: the parent vanishes as if it crashed
+"""
+
+
+def _running(pid: int, start: str) -> bool:
+    """Whether the process recorded as ``pid`` with start time ``start`` still runs."""
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except FileNotFoundError:
+        return False
+    return fields[19] == start and fields[0] != "Z"
+
+
+@pytest.mark.parametrize("mode", ["idle", "hang"])
+def test_a_capped_worker_exits_when_its_parent_dies(mode: str, tmp_path: Path) -> None:
+    out = tmp_path / "pids"
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, sys.path))}
+    done = subprocess.run(
+        [sys.executable, "-c", _ORPHANING_PARENT, mode, str(out)], env=env, timeout=60
+    )
+    assert done.returncode == 0
+    recorded = [entry.split(":") for entry in out.read_text().split()]
+    assert len(recorded) == (1 if mode == "idle" else 2)
+    deadline = time.monotonic() + 20
+    while any(_running(int(pid), start) for pid, start in recorded):
+        assert time.monotonic() < deadline, f"still running: {recorded}"
+        time.sleep(0.05)
