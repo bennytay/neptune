@@ -39,20 +39,30 @@ record in two packages is one record. `consolidate/events.py` decides.
 - **One node per statement.** An `event` node (a new entity node type) is `record:<rec id>`. A timeline entry is
   `record:<rec id>/timeline/<i>`. Two records about one incident (a CMMS row and a PDF report) are two events.
   Relating them is identity's job: a declared incident id is not merged here.
-- **Time as declared.** An instant `t` is `[t, t + 1 tick)` on its record's clock. An intervention is
-  `[start, end)`; `end == start` is an instant. If its end is on another clock, the end is open
-  (`events.end_on_other_clock`). An end before the start places nothing (`events.inverted_interval`). An
-  `Ambiguous` time is `events.ambiguous_time` and a missing one is `events.untimed_event`: no claim is made, and no
-  reading is chosen.
+- **Time as declared.** An instant `t` is `[t, t + 1 tick)` on its record's clock. Only records that have no end
+  are instants: an incident's `occurred`, a timeline entry, and a row of a table declared without `end`. An
+  intervention is `[start, end)`; `end == start` is an instant, and `NotApplicable` (an instantaneous
+  intervention) is an instant.
+- **Ends that are declared but not stated stay open.** An intervention's end, or a declared `end` column, that is
+  `Unknown` or `NotCovered`, a blank cell, or an unreadable cell leaves the end **open**. The event may still have
+  been going on, so it is never an instant. These give `events.end_unstated` and `events.end_unread`. An
+  `Ambiguous` end is also left open (`events.end_ambiguous`), with its readings in the finding's details; no
+  reading is chosen. `KnownAbsent` (stated as not ended) is open with no finding. If its end is on another clock,
+  the end is open (`events.end_on_other_clock`). An end before the start places nothing
+  (`events.inverted_interval`). An `Ambiguous` start is `events.ambiguous_time` and a missing one is
+  `events.untimed_event`: no claim is made, and no reading is chosen.
 - **Table times** are integer ticks, or integer seconds plus nanoseconds (a ROS `stamp`) scaled exactly by the
   clock's stated resolution. A stamp finer than the resolution, a clock with no stated resolution, or a time
   written as text is `events.untimed_event`. Text is never parsed into a time.
 - **Placements.** Every claim about an event is emitted on its own clock. A domain that declares itself civil is
   that `CivilClock` (ADR 0002 §3). Every claim is emitted again on each clock that a stated `clock_mapping` from
   the event's clock reaches directly, citing the mapping and its target. The mapping math is exact (`Fraction`);
-  the result is rounded out to whole ticks and widened by the residual bound where one is stated. An unstated
-  bound widens nothing, and the claim cites the mapping. A mapping whose validity window does not cover the
-  event is not used. Chains wait for MVL-130.
+  the result is rounded out to whole ticks and widened by the residual bound; an `Ambiguous` bound widens by its
+  largest reading. **An unstated bound is unknown, never zero** (non-negotiable 4). The event is still placed
+  through the mapping, unwidened and citing it, but the placement is *unbounded*: nothing is decided by
+  comparing it (§4), and the mapping gets one `events.bound_unstated` finding. A mapping whose validity window
+  does not cover the event is not used for that event; an ambiguous window counts only where every reading
+  agrees (`events.ambiguous_window`, as runs read it). Chains wait for MVL-130.
 
 ### 3. Claims and the event vocabulary
 
@@ -63,8 +73,10 @@ record in two packages is one record. `consolidate/events.py` decides.
   source's own kind reaches one only through a vendor mapping declared in config. For an `incident_record` the
   mapping is keyed by the stated severity (`"near miss" → near_miss`), and otherwise the kind is `incident`. For an
   `intervention` the mapping is keyed by the stated mode, and otherwise the kind is `intervention`. A table row is
-  keyed by its kind cell; an unmapped kind gives no `event_kind` claim (`Unknown`, `events.kind_unmapped` with a
-  count). The reserved target `not_an_event` declares a row not to be an event (an OK status, an info line).
+  keyed by its kind cell. A mapping is keyed by the declared **type and value**: `{"text": {...}, "integer":
+  {...}}`. The level `2` and the text `"2"` are different kinds, and neither is coerced into the other.
+  Lifecycle mappings are text only. An unmapped kind gives no `event_kind` claim (`Unknown`,
+  `events.kind_unmapped` with its type and a count). The reserved target `not_an_event` declares a row not to be an event (an OK status, an info line).
   Canonical JSON has no null.
 - `declared_kind` and `stated_severity` (`one`, text or integer as declared) and `has_description` (`one`,
   text) are verbatim, and a severity is never ranked.
@@ -81,19 +93,23 @@ record in two packages is one record. `consolidate/events.py` decides.
 
 - **Which events are compared.** Events from different sources are compared (the evidence `source` of their
   record). Entries of one log or one report are never paired.
-- **Which clock.** A pair is compared on the clock both are placed on with the fewest mappings, ties broken by
-  the clock's id. A clock reached through a mapping gives an onset range `[lo, hi)`.
+- **Which clock.** A pair is compared on a clock both are placed on. Clocks where both placements are bounded come
+  first, then the clock with the fewest mappings, with ties broken by the clock's id. A clock reached through a mapping gives an onset range `[lo, hi)`.
 - **When a claim is made.** With the configured window `W` in ticks (`window_seconds` / the clock's resolution,
   rounded down), the events co-occur when every reading of both onsets fits in `[min lo, min lo + W)`. For exact
   instants that means `|a − b| < W`. Then `co_occurs_within` is claimed, one claim each way, `observed` (the
   records' times show it). **The claim's valid interval is that window**: its length is `W`, its clock is the
   clock compared on, and it cites both events, their placements and any mapping used.
 - **When it is not.** If some readings fit and others do not, no claim is made. There is one
-  `events.co_occurrence_undecided` finding per clock, with a count. A clock with no stated resolution cannot
+  `events.co_occurrence_undecided` finding per clock, with a count. A pair whose only shared clock is reached
+  through a mapping with no stated bound is never decided: if the mapping's own reading puts the pair near each
+  other, the clock gets one `events.co_occurrence_unbounded` finding, with a count. A clock with no stated resolution cannot
   measure the window (`events.window_unscaled`), and neither can a window shorter than one of its ticks
   (`events.window_below_resolution`). Two event clocks that no mapping relates, directly or through a shared
-  target, are `events.clocks_unrelated`: Unknown, never compared. Clocks that reach the same clocks are checked
-  together. The first 16 pairs are named, and one more finding says that others exist.
+  target, are `events.clocks_unrelated`: Unknown, never compared. A mapping's window can cover some events on a
+  clock and not others. The uncovered events are not skipped silently: the finding counts them, with
+  `partial: true`. Events with the same clock and the same reach are checked together. The first 16 clock pairs
+  are named, and one more finding says that others exist.
 - **Limits.** The scan visits onsets in order and stops where a later onset can no longer share a window. It
   skips a run of the event's own source in one step and takes at most `max_partners` (default 64) later
   partners per event, so the work is bounded by events times `max_partners`, never by events squared. The
@@ -104,7 +120,8 @@ record in two packages is one record. `consolidate/events.py` decides.
 ### 5. Consolidator and config
 
 `memory.events` version `1`, deterministic, reads no previous claims. Its config, resolved by `resolve_config`, is
-`{co_occurrence: {window_seconds: "5", max_partners: 64}, vendors: {}, tables: []}`. `window_seconds` is an
+`{co_occurrence: {window_seconds: "5", max_partners: 64}, vendors: {}, tables: []}`. A vendor is
+`{"text": {declared: kind}, "integer": {"<integer>": kind}}`. `window_seconds` is an
 integer or plain decimal text with at most nine decimals, at most one day (86,400 s). It is resolved to one
 spelling (`5`, `"5"` and `"5.0"` hash alike), and `max_partners` is at most 4,096. A table is declared by its
 declared name: `vendor`, `kind`, `at` (`{ticks}` or `{seconds, nanoseconds}`), `clock` (`{column}`, a companion
@@ -135,6 +152,10 @@ MVL-133 (7). graph-schema **1.6.0** is a minor release; earlier goldens still lo
   readable from the claim. A config hash cannot be read back.
 - **A `co_occurs_within_candidate` for undecided pairs**: its window could not be stated honestly when the onsets
   are uncertain. A finding says so without a claim.
+- **Treat an unstated residual bound as zero**, as ADR 0009 projects runs: a co-occurrence decided that way would
+  be a definite claim resting on an assumed exact mapping. Placing the event through the mapping (cited, with a
+  finding) keeps it findable, and deciding nothing keeps it honest.
+- **An instant for an end that is declared but blank**: it would turn a blank into the fact "it lasted one tick".
 - **Compare across clocks by assuming they agree** (both "local time"): this is exactly the 96.7 s trap.
 - **Read bag topics or flight-log messages directly**: Memory never re-parses raw evidence (AGENTS.md).
 

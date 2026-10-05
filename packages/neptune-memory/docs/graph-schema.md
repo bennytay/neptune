@@ -198,8 +198,9 @@ def test_graph_schema_contract(check):
     claim about an event holds over its time as declared (an instant is `[t, t + 1 tick)`), and again on each
     clock a stated `clock_mapping` reaches directly, citing that mapping. `event_kind` is set only through a
     declared vendor mapping. `co_occurs_within` links two events from different sources, one claim each way, and
-    its valid interval is the window. Events on clocks no mapping relates are never compared, and a mapping
-    too coarse to decide gives a finding, never a claim.
+    its valid interval is the window. Events on clocks no mapping relates are never compared. A mapping that is
+    too coarse to decide, or that states no residual bound, gives a finding, never a claim. An end that is
+    declared but not stated (blank or ambiguous) leaves the event open and is never an instant.
 
 ## Caveat: a resolver configuration is a store generation
 

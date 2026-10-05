@@ -125,11 +125,11 @@ def warehouse(*, mapped: bool = True) -> tuple[dict[str, list[Record]], dict[str
     )
     records: list[Record] = [cmms_clock, sys_clock, boot_clock, report, *estop, *syslog]
     if mapped:
-        records.append(mapping("amr-07 ntp log", boot, cmms, anchor=(B0, T0)))
+        records.append(mapping("amr-07 ntp log", boot, cmms, anchor=(B0, T0), bound=SECOND // 100))
     config: dict[str, Any] = {
         "vendors": {
-            "ros.estop": {"ESTOP_PRESSED": "emergency_stop", "ESTOP_RELEASED": "reset"},
-            "syslog": {"err": "fault", "warning": "warning", "info": "not_an_event"},
+            "ros.estop": {"text": {"ESTOP_PRESSED": "emergency_stop", "ESTOP_RELEASED": "reset"}},
+            "syslog": {"text": {"err": "fault", "warning": "warning", "info": "not_an_event"}},
         },
         "tables": [
             {
@@ -187,7 +187,7 @@ def test_warehouse_incident_is_reconstructed_from_three_sources() -> None:
     assert {c.object for c in kinds} == {text("emergency_stop")}
     assert {c.valid_from.domain_id for c in kinds} == {built["boot"], CIVIL.domain_id}
     (on_civil,) = [c for c in kinds if c.valid_from.domain_id == CIVIL.domain_id]
-    assert on_civil.valid_from == CIVIL.at(T0 + SECOND // 2)
+    assert on_civil.valid_from == CIVIL.at(T0 + SECOND // 2 - SECOND // 100)
     assert any(r for r in on_civil.provenance.records if r not in built["estop"])  # the mapping
     assert [c.object for c in of(result, "declared_kind", pressed)] == [text("ESTOP_PRESSED")] * 2
     assert {c.object for c in of(result, "event_kind", released)} == {text("reset")}
@@ -214,7 +214,9 @@ def test_warehouse_incident_is_reconstructed_from_three_sources() -> None:
         assert claim.valid_to.ticks - claim.valid_from.ticks == WINDOW
         assert claim.assertion_kind == "observed"
     (estop_report,) = of(result, "co_occurs_within", pressed)[:1]
-    assert estop_report.valid_from == CIVIL.at(T0 + SECOND // 2)  # the earlier onset opens it
+    assert estop_report.valid_from == CIVIL.at(
+        T0 + SECOND // 2 - SECOND // 100
+    )  # the earlier onset, widened by the bound, opens it
 
 
 def test_warehouse_without_the_mapping_compares_only_civil_sources() -> None:
@@ -285,12 +287,14 @@ def arm_cell(*, mapped: bool) -> tuple[dict[str, list[Record]], dict[str, Any]]:
     config: dict[str, Any] = {
         "vendors": {
             "deploy.ros2_diagnostics": {
-                "diagnostic.ok": "not_an_event",
-                "diagnostic.warn": "warning",
-                "diagnostic.error": "fault",
-                "diagnostic.stale": "stale",
-                "safety.estop": "emergency_stop",
-                "safety.protective_stop": "protective_stop",
+                "text": {
+                    "diagnostic.ok": "not_an_event",
+                    "diagnostic.warn": "warning",
+                    "diagnostic.error": "fault",
+                    "diagnostic.stale": "stale",
+                    "safety.estop": "emergency_stop",
+                    "safety.protective_stop": "protective_stop",
+                }
             },
         },
         "tables": [
@@ -382,7 +386,7 @@ def test_near_miss_from_an_operator_note_states_only_what_the_note_states() -> N
         machines=None,  # left blank: which robot is not stated
         site=LogicalId("site", "WH-SOUTH"),
     )
-    config = {"vendors": {"incident_record": {"near miss": "near_miss"}}}
+    config = {"vendors": {"incident_record": {"text": {"near miss": "near_miss"}}}}
     result = consolidate({"notes": [clock, note]}, config)
     contract_holds(result)
     event = event_node(note_id)
@@ -401,7 +405,8 @@ def test_an_unmapped_severity_keeps_the_record_kind() -> None:
     clock, utc = domain("site log", civil=True)
     note, note_id = incident("form 7", occurred=Timestamp(T0, utc), severity="near-miss (B)")
     result = consolidate(
-        {"forms": [clock, note]}, {"vendors": {"incident_record": {"near miss": "near_miss"}}}
+        {"forms": [clock, note]},
+        {"vendors": {"incident_record": {"text": {"near miss": "near_miss"}}}},
     )
     assert [c.object for c in of(result, "event_kind", event_node(note_id))] == [text("incident")]
 
@@ -410,7 +415,7 @@ def test_an_unmapped_severity_keeps_the_record_kind() -> None:
 
 
 def two_clocks(
-    *, anchor: bool, bound: int | None = None, apart: int = SECOND
+    *, anchor: bool, bound: int | None = 0, apart: int = SECOND
 ) -> tuple[Consolidation, NodeRef, NodeRef, RecordId, RecordId]:
     """An intervention on a robot's boot clock and an incident on a controller's clock."""
     a_clock, a = domain("robot boot", civil=False)
@@ -474,7 +479,7 @@ def test_the_window_is_configured_in_seconds_and_scaled_by_each_clock() -> None:
     b_clock, b = domain("other ms clock", civil=False, resolution=NS * 10**6)
     one, one_id = incident("one", occurred=Timestamp(1000, a))
     two, two_id = incident("two", occurred=Timestamp(1400, b))
-    sync = mapping("sync", a, b, anchor=(0, 0))
+    sync = mapping("sync", a, b, anchor=(0, 0), bound=0)
     config = {"co_occurrence": {"window_seconds": "0.5"}}
     result = consolidate({"p": [a_clock, b_clock, one, two, sync]}, config)
     (claim,) = of(result, "co_occurs_within", event_node(one_id))

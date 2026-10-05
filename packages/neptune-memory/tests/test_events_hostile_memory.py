@@ -65,7 +65,7 @@ def at(ticks: int) -> Timestamp:
 
 
 EVENTS: Final = {
-    "vendors": {"plc": {"E-STOP": "emergency_stop", "OK": "not_an_event"}},
+    "vendors": {"plc": {"text": {"E-STOP": "emergency_stop", "OK": "not_an_event"}}},
     "tables": [
         {
             "name": "plc alarms",
@@ -174,7 +174,7 @@ def test_a_mapping_whose_window_does_not_cover_the_event_is_not_used() -> None:
 def test_an_ambiguous_mapping_window_counts_only_where_its_readings_agree() -> None:
     one, _ = incident("one", occurred=Timestamp(10 * SECOND, OTHER_ID))
     two, _ = incident("two", occurred=at(10 * SECOND))
-    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0))
+    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0), bound=0)
     readings = ambiguous(
         "sync",
         ValidityWindow(
@@ -281,8 +281,11 @@ def test_an_ambiguous_place_is_candidates_never_a_definite_one() -> None:
         ({"co_occurrence": {"window_seconds": 86_401}}, "at most"),
         ({"co_occurrence": {"window_seconds": 0}}, "positive"),
         ({"co_occurrence": {"max_partners": 0}}, "max_partners"),
-        ({"vendors": {"x": {"A": "explosion"}}}, "not a registered event kind"),
-        ({"vendors": {"incident_record": {"S1": "not_an_event"}}}, "always an event"),
+        ({"vendors": {"x": {"text": {"A": "explosion"}}}}, "not a registered event kind"),
+        ({"vendors": {"incident_record": {"text": {"S1": "not_an_event"}}}}, "always an event"),
+        ({"vendors": {"incident_record": {"integer": {"2": "incident"}}}}, "unexpected keys"),
+        ({"vendors": {"x": {"integer": {"02": "fault"}}}}, "written canonically"),
+        ({"vendors": {"x": {"A": "fault"}}}, "unexpected keys"),
         ({"vendors": [1]}, "vendors must be an object"),
         ({"tables": {"name": "x"}}, "tables must be a list"),
         ({"tables": [{"name": "x"}]}, "missing"),
@@ -349,7 +352,7 @@ def test_co_occurrence_is_capped_nearest_first() -> None:
     """One panel alarm and four PLC rows (one export, so never paired with each other)."""
     rows, ids = plc(*((i * SECOND // 10, "E-STOP", "CELL-3", "Z1", 1) for i in range(1, 5)))
     alarm, alarm_id = incident("alarm panel", occurred=Timestamp(0, OTHER_ID))
-    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0))
+    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0), bound=0)
     config = {**EVENTS, "co_occurrence": {"max_partners": 2}}
     result = consolidate({"p": [CLOCK, OTHER, sync, alarm, *rows]}, config)  # type: ignore[arg-type]
     partners = {
@@ -398,7 +401,7 @@ def _scenario() -> dict[str, list[Record]]:
     report, _ = incident(
         "report", occurred=Timestamp(150, OTHER_ID), machines=[LogicalId("cmms", "C3")]
     )
-    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0))
+    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0), bound=0)
     assist, _ = intervention("assist", start=at(120), end=at(400), mode="on-site")
     return {"a": [CLOCK, *records], "b": [OTHER, report, sync], "c": [assist]}
 
@@ -418,3 +421,88 @@ def test_output_is_byte_identical_whatever_the_order() -> None:
         again = consolidate(shuffled, EVENTS)  # type: ignore[arg-type]
         assert canonical_json.dumps(again.to_json()) == first
     assert any(c.predicate == "co_occurs_within" for c in consolidate(packages, EVENTS).claims)  # type: ignore[arg-type]
+
+
+# --- Ends, bounds, partial coverage and typed kinds (review of #125) -----------------------------
+
+
+def test_an_unstated_intervention_end_leaves_it_open_never_an_instant() -> None:
+    record, rid = intervention("takeover", start=at(100 * SECOND), end=None, mode="teleop")
+    result = consolidate({"p": [CLOCK, record]})
+    assert {c.valid_to for c in result.claims if c.subject == event_node(rid)} == {OPEN}
+    (finding,) = [f for f in result.findings if f.code == "events.end_unstated"]
+    assert finding.details["event"] == event_node(rid).node_id
+
+
+def test_an_ambiguous_intervention_end_keeps_its_readings_and_stays_open() -> None:
+    record, rid = intervention("takeover", start=at(100 * SECOND), mode="teleop")
+    record["end"] = to_json(
+        ambiguous("takeover", at(400 * SECOND), at(900 * SECOND)), Timestamp.to_json
+    )
+    result = consolidate({"p": [CLOCK, record]})
+    assert {c.valid_to for c in result.claims if c.subject == event_node(rid)} == {OPEN}
+    (finding,) = [f for f in result.findings if f.code == "events.end_ambiguous"]
+    assert finding.details["readings"] == [at(400 * SECOND).to_json(), at(900 * SECOND).to_json()]
+    assert "events.value_ambiguous" not in codes(result)  # no claim of "no reading" that is false
+
+
+def test_a_blank_end_cell_leaves_the_row_open() -> None:
+    spec = {**EVENTS["tables"][0], "end": {"ticks": "t_end"}}  # type: ignore[index]
+    records, _, ids = table(
+        "plc alarms",
+        ("t", "t_end", "code", "cell", "zone", "prio"),
+        [
+            (100 * SECOND, None, "E-STOP", "C3", "Z1", 1),
+            (100 * SECOND, 160 * SECOND, "E-STOP", "C3", "Z1", 1),
+        ],
+    )
+    result = consolidate({"p": [CLOCK, *records]}, {**EVENTS, "tables": [spec]})  # type: ignore[dict-item]
+    blank, stated = (event_node(r) for r in ids)
+    assert {c.valid_to for c in result.claims if c.subject == blank} == {OPEN}
+    assert {c.valid_to for c in result.claims if c.subject == stated} == {at(160 * SECOND)}
+    assert codes(result).count("events.end_unstated") == 1
+
+
+def test_a_mapping_that_states_no_bound_decides_no_co_occurrence() -> None:
+    one, one_id = incident("one", occurred=Timestamp(10 * SECOND, OTHER_ID))
+    two, _ = incident("two", occurred=at(10 * SECOND))
+    sync = mapping("sync without bound", OTHER_ID, CLOCK_ID, anchor=(0, 0))
+    result = consolidate({"p": [CLOCK, OTHER, one, two, sync]})
+    assert not [c for c in result.claims if c.predicate == "co_occurs_within"]
+    found = codes(result)
+    assert "events.co_occurrence_unbounded" in found and "events.bound_unstated" in found
+    # The event is still placed on the mapped clock, citing the mapping.
+    clocks = {c.valid_from.domain_id for c in result.claims if c.subject == event_node(one_id)}
+    assert clocks == {OTHER_ID, CLOCK_ID}
+
+
+def test_events_a_mapping_window_does_not_cover_are_named_not_skipped() -> None:
+    rows, ids = plc((50 * SECOND, "E-STOP", "C3", "Z1", 1), (200 * SECOND, "E-STOP", "C3", "Z1", 1))
+    early, _ = incident("early", occurred=Timestamp(50 * SECOND, OTHER_ID))
+    late, _ = incident("late", occurred=Timestamp(200 * SECOND, OTHER_ID))
+    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0), bound=0, window=(0, 100 * SECOND))
+    result = consolidate({"p": [CLOCK, OTHER, sync, early, late, *rows]}, EVENTS)  # type: ignore[arg-type]
+    pairs = {(c.subject, c.object) for c in result.claims if c.predicate == "co_occurs_within"}
+    assert any(event_node(ids[0]) in pair for pair in pairs)
+    assert not any(event_node(ids[1]) in pair for pair in pairs)
+    (partial,) = [f for f in result.findings if f.code == "events.clocks_unrelated"]
+    assert partial.details["partial"] is True
+    assert partial.details["events"] in ([1, 2], [2, 1])  # the late incident; both PLC rows
+
+
+def test_an_integer_kind_and_a_text_kind_are_never_one_key() -> None:
+    rows, ids = plc((100, 2, "C3", "Z1", 1), (200, "2", "C3", "Z1", 1))
+    config = {
+        **EVENTS,
+        "vendors": {"plc": {"integer": {"2": "fault"}, "text": {"2": "warning"}}},
+    }
+    result = consolidate({"p": [CLOCK, *rows]}, config)  # type: ignore[arg-type]
+    kinds = {c.subject: c.object for c in result.claims if c.predicate == "event_kind"}
+    assert kinds[event_node(ids[0])].value == "fault"  # type: ignore[union-attr]
+    assert kinds[event_node(ids[1])].value == "warning"  # type: ignore[union-attr]
+    only_integer = {**EVENTS, "vendors": {"plc": {"integer": {"2": "fault"}}}}
+    result = consolidate({"p": [CLOCK, *rows]}, only_integer)  # type: ignore[arg-type]
+    kinds = {c.subject: c.object for c in result.claims if c.predicate == "event_kind"}
+    assert event_node(ids[1]) not in kinds  # the text "2" is not coerced to the level 2
+    (unmapped,) = [f for f in result.findings if f.code == "events.kind_unmapped"]
+    assert unmapped.details["declared_type"] == "text"

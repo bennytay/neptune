@@ -206,7 +206,7 @@ class EventConfig:
 
     window: Fraction | None
     max_partners: int
-    vendors: Mapping[str, Mapping[str, str | None]]
+    vendors: Mapping[str, Mapping[Key, str | None]]
     tables: tuple[TableSpec, ...]
     problems: tuple[str, ...] = field(default=())
 
@@ -353,22 +353,39 @@ def _table(value: object, index: int, vendors: Mapping[str, object]) -> TableSpe
     )
 
 
-def _vendor(name: str, value: object) -> dict[str, str | None]:
+# A declared kind is keyed by its type and its value, so the integer level 2 and the text "2" are
+# different kinds and neither is coerced into the other.
+TEXT: Final = "text"
+INTEGER: Final = "integer"
+_INTEGER: Final = re.compile(r"-?(0|[1-9][0-9]*)")
+Key = tuple[str, str]  # (TEXT or INTEGER, the declared value as written in the config)
+
+
+def _vendor(name: str, value: object) -> dict[Key, str | None]:
+    """``{"text": {kind: target}, "integer": {"2": target}}``; a lifecycle record's mapping is
+    keyed by text only (its severity or mode)."""
     where = f"vendors.{name}"
-    if not isinstance(value, dict):
-        raise _Bad(f"{where} must be an object of declared kind -> event kind")
-    out: dict[str, str | None] = {}
-    for declared, target in sorted(value.items()):
-        if not isinstance(declared, str) or not declared:
-            raise _Bad(f"{where} has an empty declared kind")
-        if target == NOT_AN_EVENT:
-            if name in LIFECYCLE_DEFAULT_KIND:
-                raise _Bad(f"{where}.{declared}: a {name} is always an event; map it to a kind")
-            out[declared] = None
-            continue
-        if not isinstance(target, str) or target not in EVENT_KINDS:
-            raise _Bad(f"{where}.{declared}: {target!r} is not a registered event kind")
-        out[declared] = target
+    sections = frozenset({TEXT}) if name in LIFECYCLE_DEFAULT_KIND else frozenset({TEXT, INTEGER})
+    spec = _keys(value, sections, where)
+    out: dict[Key, str | None] = {}
+    for section, entries in sorted(spec.items()):
+        if not isinstance(entries, dict):
+            raise _Bad(f"{where}.{section} must be an object of declared kind -> event kind")
+        for declared, target in sorted(entries.items()):
+            if not isinstance(declared, str) or not declared:
+                raise _Bad(f"{where}.{section} has an empty declared kind")
+            if section == INTEGER and not _INTEGER.fullmatch(declared):
+                raise _Bad(f"{where}.integer.{declared}: not an integer written canonically")
+            if target == NOT_AN_EVENT:
+                if name in LIFECYCLE_DEFAULT_KIND:
+                    raise _Bad(f"{where}.{declared}: a {name} is always an event; map it to a kind")
+                out[(section, declared)] = None
+                continue
+            if not isinstance(target, str) or target not in EVENT_KINDS:
+                raise _Bad(
+                    f"{where}.{section}.{declared}: {target!r} is not a registered event kind"
+                )
+            out[(section, declared)] = target
     return out
 
 
@@ -394,7 +411,7 @@ def parse_config(config: Mapping[str, JsonValue]) -> EventConfig:
     except _Bad as exc:
         window = None
         problems.append(f"{exc}; no co-occurrence is claimed")
-    vendors: dict[str, dict[str, str | None]] = {}
+    vendors: dict[str, dict[Key, str | None]] = {}
     raw_vendors = config.get("vendors", {})
     if not isinstance(raw_vendors, dict):
         problems.append("vendors must be an object; no vendor mapping is used")
