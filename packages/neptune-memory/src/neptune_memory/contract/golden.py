@@ -24,9 +24,10 @@ The Ledger grows over five transactions, and the same plan is rebuilt at each on
 - tx 5: a package nothing consolidates: a transaction with no claims, so ``head`` is 5.
 
 Plan, in order of priority (later arrives later within a transaction): ``golden.runs``
-(deterministic), ``golden.operator`` (stated), ``memory.identity`` (the real identity policy) and
-``golden.fixture_model`` (inferred; ``_fixture_model``, golden only). Same inputs give
-byte-identical canonical JSON. Every consolidation finding is a hard error: golden inputs are
+(deterministic), ``golden.operator`` (stated), ``memory.identity`` (the real identity policy),
+``golden.fixture_model`` (inferred; ``_fixture_model``, golden only) and ``memory.time`` (the real
+time-domain registry: the drone's clocks, and the quadruped's stated ``starting_time`` to
+``log_time`` mapping). Same inputs give byte-identical canonical JSON. Every consolidation finding is a hard error: golden inputs are
 clean by construction, so a finding means the inputs drifted.
 """
 
@@ -53,6 +54,7 @@ from neptune_memory.consolidate.base import (
     rebuild,
 )
 from neptune_memory.consolidate.identity import IdentityConsolidator
+from neptune_memory.consolidate.time import TIME_CONSOLIDATOR_ID, TimeDomainConsolidator
 from neptune_memory.contract._fixture_model import FIXTURE_MODEL, FIXTURE_MODEL_ID, _FixtureModel
 from neptune_memory.contract.worked_examples import machine_node, run_node, runs
 from neptune_memory.ledger import StubLedger
@@ -91,6 +93,7 @@ PRIORITIES: Final[Mapping[str, int]] = {
     OPERATOR_ID: 1,
     IDENTITY_CONSOLIDATOR_ID: 2,
     FIXTURE_MODEL_ID: 3,
+    TIME_CONSOLIDATOR_ID: 4,
 }
 MODEL_CONFIG: Final[Mapping[str, JsonValue]] = {
     "candidates": {
@@ -349,6 +352,7 @@ def plan() -> list[tuple[Consolidator, Mapping[str, JsonValue]]]:
         (OperatorAssertions(), {}),
         (IdentityConsolidator(), {}),
         (_FixtureModel(), MODEL_CONFIG),
+        (TimeDomainConsolidator(), {}),
     ]
 
 
