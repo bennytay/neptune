@@ -194,7 +194,30 @@ def compiler_real(ctx: Context) -> Outcome:
             )
             row[field_name] = not errors
             problems.extend(f"{case.id}: {document} breaks package-schema: {e}" for e in errors[:3])
+        if case.gold is not None:
+            gold = resolve_gold(destination, case.gold)
+            row["gold"] = gold
+            problems.extend(
+                f"{case.id}: gold evidence {key} resolves to nothing"
+                + (f" ({gold['reasons'][key]})" if key in gold["reasons"] else "")
+                for key in gold["missing"]
+            )
+            problems.extend(f"{case.id}: {problem}" for problem in gold["problems"])
     return Outcome({"cases": cases}, tuple(problems))
+
+
+def resolve_gold(package: Path, gold_path: Path) -> Json:
+    """The case's gold answers checked, and their evidence resolved against its package
+    (ADR 0007): counts, the evidence that resolved to nothing, and the gold file's own problems."""
+    from harness.acceptance import resolve
+
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    return {
+        **resolve.summary(resolve.resolve(package, gold)),
+        "corpus_version": gold.get("corpus_version"),
+        "problems": resolve.check_gold(gold),
+        "questions": len(gold.get("questions", [])),
+    }
 
 
 # --- Ledger (real) ---------------------------------------------------------------------------
@@ -401,12 +424,25 @@ def memory_stub(ctx: Context) -> Outcome:
     return _golden_stub("graph-schema", "ledger")(ctx)
 
 
+def _gold_query(ctx: Context) -> str | None:
+    """The first gold question of the first case that has gold answers (the acceptance corpus's
+    "why did the incident happen"), so the smoke query is the demo's question."""
+    for case in ctx.cases:
+        if case.gold is not None and case.gold.is_file():
+            questions = json.loads(case.gold.read_text(encoding="utf-8")).get("questions", [])
+            if questions:
+                return str(questions[0]["question"])
+    return None
+
+
 def context_stub(ctx: Context) -> Outcome:
     """The context stage's stub also answers the smoke query: a golden packet when query-packet
     has one, else a minimal canned packet naming the packages that flowed in."""
     base = _golden_stub("query-packet", "memory")(ctx).output
     cases = [case.id for case in ctx.cases]
-    query = f"what hardware and calibration does {cases[0] if cases else 'the robot'} carry?"
+    query = _gold_query(ctx) or (
+        f"what hardware and calibration does {cases[0] if cases else 'the robot'} carry?"
+    )
     packet: Json
     if base["served"] == "goldens":
         version = ctx.registry.latest("query-packet")

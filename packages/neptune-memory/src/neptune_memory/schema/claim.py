@@ -44,6 +44,7 @@ from neptune.model.provenance import EvidenceRef
 from neptune.model.scalars import NonFinite, real_to_json
 from neptune.model.time import Timestamp
 from neptune.model.units import Unit
+from neptune_memory.schema.clock_map import ClockMap
 from neptune_memory.schema.interval import OPEN, Interval, LedgerTx, Open, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 
@@ -90,9 +91,10 @@ class ValueType(StrEnum):
     QUANTITY = "quantity"  # a number with its unit as declared (Known, Unknown or Ambiguous)
     INSTANT = "instant"  # a compiler Timestamp, on its own clock
     RECORD = "record"  # a Ledger record by id (LedgerRecordRef)
+    CLOCK_MAP = "clock_map"  # a clock mapping's parameters or chain (``clock_map.ClockMap``)
 
 
-LiteralValue: TypeAlias = str | int | bool | float | NonFinite | Timestamp
+LiteralValue: TypeAlias = str | int | bool | float | NonFinite | Timestamp | ClockMap
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,7 @@ class TypedLiteral:
             ValueType.BOOLEAN: lambda: isinstance(value, bool),
             ValueType.QUANTITY: lambda: _is_int(value) or _is_real(value),
             ValueType.INSTANT: lambda: isinstance(value, Timestamp),
+            ValueType.CLOCK_MAP: lambda: isinstance(value, ClockMap),
         }[datatype]()
         if not ok:
             raise TypeError(f"{value!r} is not a {datatype} value")
@@ -151,7 +154,7 @@ class TypedLiteral:
     def to_json(self) -> JsonObject:
         value = self.value
         encoded: JsonValue
-        if isinstance(value, Timestamp):
+        if isinstance(value, Timestamp | ClockMap):
             encoded = value.to_json()
         elif isinstance(value, float | NonFinite):
             encoded = real_to_json(value)
