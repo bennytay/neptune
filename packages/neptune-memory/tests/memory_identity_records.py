@@ -172,19 +172,26 @@ def assertion(
     assertion_type: AssertionType | None,
     scope: Sequence[ScopeRef] | None,
     *,
-    identifier: LogicalId | None = None,
-    retracts: LogicalId | None = None,
+    identifier: LogicalId | Ambiguous[LogicalId] | None = None,
+    retracts: LogicalId | Ambiguous[LogicalId] | None = None,
     authored_at: Timestamp | Knowledge[Timestamp] | None = None,
 ) -> Record:
     """A person's ``Assertion`` (root ADR 0062) entered as ``name`` in an assertions file.
 
     ``identifier`` defaults to ``ops-console:<name>``; ``None`` for the type or scope is
-    ``Unknown`` (the adapter could not read it); ``authored_at`` may be any ``Knowledge``.
+    ``Unknown`` (the adapter could not read it); ``authored_at`` may be any ``Knowledge``, and
+    ``identifier`` and ``retracts`` ``Ambiguous``.
     """
     declared = provenance(cite(f"assertions/{name}"), STATED)
     absent = KnownAbsent(declared)
     if assertion_type is AssertionType.RETRACT:
-        retracts_k: Knowledge[LogicalId] = Known(retracts) if retracts else Unknown()
+        retracts_k: Knowledge[LogicalId] = (
+            retracts
+            if isinstance(retracts, Ambiguous)
+            else Known(retracts)
+            if retracts
+            else Unknown()
+        )
     elif assertion_type is None:
         retracts_k = Unknown()
     else:
@@ -192,7 +199,11 @@ def assertion(
     return Assertion(
         id=rid("assertion", declared.evidence),
         provenance=declared,
-        identifier=Known(identifier or LogicalId("ops-console", name)),
+        identifier=(
+            identifier
+            if isinstance(identifier, Ambiguous)
+            else Known(identifier or LogicalId("ops-console", name))
+        ),
         assertion_type=Known(assertion_type) if assertion_type is not None else Unknown(),
         author=Known(LogicalId("staff", "ana")),
         authored_at=(

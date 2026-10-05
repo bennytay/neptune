@@ -171,6 +171,13 @@ def test_graph_schema_contract(check):
     than 64 readings: `identity.untimeable_window`, no claim). A statement that states no start holds from its
     subject's first thread record, and the claim lists that thread in `provenance.records`, so a conventional
     start is told from a stated one.
+    A `retract` whose `retracts` is `Ambiguous`, or that names one candidate of a target's `Ambiguous` `identifier`,
+    only possibly names that target. Retraction is labelled over certain and possible retractions together: an
+    assertion is retracted only by a certain retract that stands, and effective only when every retract that may
+    name it is retracted. One that certain retractions alone would settle but a possible one leaves open is
+    reported as `identity.retraction_ambiguous`. A `same_identity` of that kind becomes `same_as_candidate` pairs
+    that cite the retracts leaving it in doubt, and a `distinct_identity` of that kind suppresses nothing. A
+    `same_identity` whose own `identifier` is `Ambiguous` is always candidates, never `same_as`.
 12. **No clock mapping is invented.** `maps_to` and `clock_map` rest only on a compiler `ClockMapping` (declared:
     `observed` or `stated`, from `memory.time`) or a compiler estimate (`inferred`, from `memory.time_estimates`),
     or on a chain of them; Memory never estimates an offset, never assumes an unstated validity open, and never

@@ -1,0 +1,633 @@
+{
+  "$defs": {
+    "Box": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "box"
+        },
+        "max": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "min": {
+          "$ref": "#/$defs/Vec3"
+        }
+      },
+      "required": [
+        "kind",
+        "max",
+        "min"
+      ],
+      "type": "object"
+    },
+    "Budget": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "maximum": 67108864,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "items": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "latency_ms": {
+          "maximum": 600000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "tokens": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "CivilClock": {
+      "additionalProperties": false,
+      "properties": {
+        "epoch": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "civil"
+        },
+        "resolution": {
+          "$ref": "#/$defs/Resolution"
+        },
+        "timescale": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "epoch",
+        "kind",
+        "resolution",
+        "timescale"
+      ],
+      "type": "object"
+    },
+    "ClaimId": {
+      "pattern": "^claim:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Clock": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DomainClock"
+        },
+        {
+          "$ref": "#/$defs/CivilClock"
+        }
+      ]
+    },
+    "ClockBridge": {
+      "additionalProperties": false,
+      "properties": {
+        "mapping_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "source": {
+          "$ref": "#/$defs/Clock"
+        },
+        "target": {
+          "$ref": "#/$defs/Clock"
+        }
+      },
+      "required": [
+        "mapping_id",
+        "source",
+        "target"
+      ],
+      "type": "object"
+    },
+    "DeclaredId": {
+      "pattern": "^[a-z][a-z0-9_.\\-]*:[\\s\\S]+$",
+      "type": "string"
+    },
+    "Diff": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/DiffPoint"
+        },
+        "before": {
+          "$ref": "#/$defs/DiffPoint"
+        },
+        "kind": {
+          "const": "diff"
+        },
+        "subject": {
+          "$ref": "#/$defs/Subject"
+        }
+      },
+      "required": [
+        "after",
+        "before",
+        "kind",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "DiffPoint": {
+      "oneOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "$ref": "#/$defs/Instant"
+        }
+      ]
+    },
+    "DomainClock": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "domain"
+        }
+      },
+      "required": [
+        "domain_id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "During": {
+      "additionalProperties": false,
+      "properties": {
+        "clock": {
+          "$ref": "#/$defs/Clock"
+        },
+        "end": {
+          "oneOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
+            },
+            {
+              "const": "open"
+            }
+          ]
+        },
+        "start": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clock",
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "Explain": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Why"
+        },
+        {
+          "$ref": "#/$defs/Diff"
+        }
+      ]
+    },
+    "FrameBridge": {
+      "additionalProperties": false,
+      "properties": {
+        "child": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "parent": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "transform_id": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "child",
+        "parent",
+        "transform_id"
+      ],
+      "type": "object"
+    },
+    "FrameRef": {
+      "additionalProperties": false,
+      "properties": {
+        "frame_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "graph_id": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "frame_id",
+        "graph_id"
+      ],
+      "type": "object"
+    },
+    "Graph": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "enum": [
+            "both",
+            "in",
+            "out"
+          ],
+          "type": "string"
+        },
+        "hops": {
+          "maximum": 4,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "predicates": {
+          "oneOf": [
+            {
+              "const": "any"
+            },
+            {
+              "items": {
+                "enum": [
+                  "deployed_at",
+                  "episode_of",
+                  "evidenced_by",
+                  "executes_task",
+                  "governed_by",
+                  "has_calibration",
+                  "has_configuration",
+                  "has_name",
+                  "has_summary",
+                  "located_at",
+                  "maintenance_state",
+                  "member_of_fleet",
+                  "mounted_on",
+                  "operated_by",
+                  "part_of_programme",
+                  "rated_payload",
+                  "recorded_by",
+                  "runs_model",
+                  "runs_software",
+                  "same_as",
+                  "same_as_candidate",
+                  "zone_of"
+                ],
+                "type": "string"
+              },
+              "maxItems": 22,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          ]
+        }
+      },
+      "required": [
+        "direction",
+        "hops",
+        "predicates"
+      ],
+      "type": "object"
+    },
+    "Instant": {
+      "additionalProperties": false,
+      "properties": {
+        "clock": {
+          "$ref": "#/$defs/Clock"
+        },
+        "ticks": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clock",
+        "ticks"
+      ],
+      "type": "object"
+    },
+    "Query": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "oneOf": [
+            {
+              "const": "head"
+            },
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ]
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "clock_bridges": {
+          "items": {
+            "$ref": "#/$defs/ClockBridge"
+          },
+          "maxItems": 16,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "during": {
+          "$ref": "#/$defs/During"
+        },
+        "explain": {
+          "items": {
+            "$ref": "#/$defs/Explain"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
+        "frame_bridges": {
+          "items": {
+            "$ref": "#/$defs/FrameBridge"
+          },
+          "maxItems": 16,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "graph": {
+          "$ref": "#/$defs/Graph"
+        },
+        "include_inferred": {
+          "type": "boolean"
+        },
+        "query_version": {
+          "const": 1
+        },
+        "regions": {
+          "items": {
+            "$ref": "#/$defs/Region"
+          },
+          "maxItems": 16,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        },
+        "subjects": {
+          "items": {
+            "$ref": "#/$defs/Subject"
+          },
+          "maxItems": 64,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "text": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "as_of",
+        "budget",
+        "clock_bridges",
+        "explain",
+        "frame_bridges",
+        "include_inferred",
+        "query_version",
+        "regions",
+        "subjects"
+      ],
+      "type": "object"
+    },
+    "QueryId": {
+      "pattern": "^query:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "RecordId": {
+      "pattern": "^rec:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Region": {
+      "additionalProperties": false,
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "shape": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Box"
+            },
+            {
+              "$ref": "#/$defs/Sphere"
+            }
+          ]
+        },
+        "unit": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame",
+        "shape",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "Resolution": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "numerator": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "type": "object"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "$ref": "#/$defs/DeclaredId"
+        },
+        "zones": {
+          "items": {
+            "$ref": "#/$defs/DeclaredId"
+          },
+          "maxItems": 64,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "site",
+        "zones"
+      ],
+      "type": "object"
+    },
+    "Sphere": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "kind": {
+          "const": "sphere"
+        },
+        "radius": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "center",
+        "kind",
+        "radius"
+      ],
+      "type": "object"
+    },
+    "Subject": {
+      "additionalProperties": false,
+      "properties": {
+        "declared_id": {
+          "$ref": "#/$defs/DeclaredId"
+        },
+        "kind": {
+          "enum": [
+            "asset",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "type": "string"
+        },
+        "same_as_depth": {
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "same_as_depth"
+      ],
+      "type": "object"
+    },
+    "Text": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "items": {
+            "enum": [
+              "lexical",
+              "vector"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fields": {
+          "items": {
+            "enum": [
+              "claim_text",
+              "declared_id",
+              "document",
+              "finding",
+              "record"
+            ],
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "text": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "channels",
+        "fields",
+        "text"
+      ],
+      "type": "object"
+    },
+    "Vec3": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    },
+    "Why": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "$ref": "#/$defs/ClaimId"
+        },
+        "kind": {
+          "const": "why"
+        }
+      },
+      "required": [
+        "claim_id",
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:neptune:schema:query:1",
+  "$ref": "#/$defs/Query",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Neptune context query, query_version 1"
+}
