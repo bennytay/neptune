@@ -179,10 +179,10 @@ def test_amr_work_orders_keep_parts_serials_and_firmware_as_declared() -> None:
     assert [a.value for a in event.actions.value] == ["Replace drive wheel", "Clean lidar window"]
     assert event.actions.value[1].provenance.evidence.locator[-1] == Span(21, 39)
     assert [m.value.value for m in event.machines.value] == ["AMR-07"]
-    # A work order with no part swapped lists none, and says so.
+    # A work order whose part cells are blank states no list: Unknown, citing the row.
     twins = _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0313")
     (flash,) = [t for t in twins if t.machines.value[0].value.value == "AMR-07"]
-    assert flash.parts.value == ()
+    assert isinstance(flash.parts, Unknown)
     assert "item_blank" in _codes(package)
     assert [r.value.value for r in flash.related.value] == ["CHG-0042", "INC-0007"]
 
@@ -332,8 +332,8 @@ def test_legged_robot_maximo_export_maps_with_the_vendor_preset() -> None:
     (event,) = _by_id(package, "maintenance_event", "maximo.wonum", "WO1043")
     assert [i.value.value for i in event.parts.value[0].installed.value] == ["KA3-00577"]
     (calibration,) = _by_id(package, "maintenance_event", "maximo.wonum", "WO1044")
-    assert calibration.parts.value == ()
-    assert calibration.related.value == ()
+    assert isinstance(calibration.parts, Unknown)
+    assert isinstance(calibration.related, Unknown)
 
 
 # --- Lineage and determinism ---------------------------------------------------------------------
@@ -391,8 +391,8 @@ def test_map_package_writes_a_readable_package_and_leaves_the_base_untouched(
     assert _tree(root) == before
     written = read_package(tmp_path / "out")
     assert written.id == package_id
-    # Known lists keep the lifecycle kinds' version 4 bytes (root ADR 0061 §5).
-    assert written.manifest.version == LIFECYCLE_SINCE <= PACKAGE_SCHEMA_VERSION
+    # The mapped clocks' zones and the blank lists are version 6 records (root ADR 0061 §6).
+    assert written.manifest.version == PACKAGE_SCHEMA_VERSION > LIFECYCLE_SINCE
 
 
 # --- Rules, tables and the command line ----------------------------------------------------------

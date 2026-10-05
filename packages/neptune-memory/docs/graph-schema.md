@@ -3,7 +3,8 @@
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
 `contracts/graph-schema/v1.3.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
-([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.3.0 (minor) adds the
+([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
+configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
 run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
@@ -47,6 +48,10 @@ major version (ADR 0002 §5).
 |---|---|---|---|---|
 | `at_site` | run | site | one | the site a run took place at, as declared |
 | `at_site_candidate` | run | site | many | ambiguous: the evidence names several sites for the run |
+| `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
+| `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
+| `configuration_candidate` | machine, run | configuration | many | ambiguous: the configuration in force could be this one; one claim per reading |
+| `configuration_unknown` | machine, run | record | many | no configuration is stated over the interval; the record leaves it open, never filled |
 | `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
@@ -64,6 +69,7 @@ major version (ADR 0002 §5).
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
 | `member_of_fleet` | machine | fleet | one | the fleet a machine belongs to |
 | `mounted_on` | sensor | asset, machine | one | what a sensor is attached to |
+| `not_covered_by_authorisation` | run | configuration | many | observed: no authorisation envelope in the Ledger names the configuration then |
 | `operated_by` | run | person | many | a declared operator or supervisor |
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
@@ -73,6 +79,7 @@ major version (ADR 0002 §5).
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
+| `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
@@ -167,7 +174,14 @@ def test_graph_schema_contract(check):
     reported as `identity.retraction_ambiguous`. A `same_identity` of that kind becomes `same_as_candidate` pairs
     that cite the retracts leaving it in doubt, and a `distinct_identity` of that kind suppresses nothing. A
     `same_identity` whose own `identifier` is `Ambiguous` is always candidates, never `same_as`.
-12. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run
+12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
+    places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
+    the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
+    nearest configuration in time; where records disagree, every reading is a `configuration_candidate`. No
+    `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
+    made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
+    envelope end is never read as open.
+13. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run
     node is a compiler `Run`'s declared logical id, else `record:<run record id>`. Every claim about a run holds over
     its stated `[first, last]` on its own clock, and again on a civil clock only where a `timestamp_domain` or a
     stated `clock_mapping` puts it there. `continues` links the parts of one run its `RunAssembly` states, in time
