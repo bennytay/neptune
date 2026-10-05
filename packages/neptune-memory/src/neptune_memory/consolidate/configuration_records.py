@@ -42,7 +42,7 @@ from neptune.model.machine import (
 )
 from neptune.model.provenance import Provenance
 from neptune.model.run import run_from_json
-from neptune_memory.consolidate.identity_records import Malformed, declared
+from neptune_memory.consolidate.identity_records import Inferred, Malformed, declared
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -77,10 +77,6 @@ SNAPSHOT_KINDS: Final[Mapping[str, Callable[[JsonValue], object]]] = {
 # - ``unknown``: the record could state it and does not (``Unknown``, ``NotCovered``);
 # - ``absent``: the record states there is none (``KnownAbsent``, ``NotApplicable``).
 Outcome = Literal["known", "ambiguous", "unknown", "absent"]
-
-
-class Inferred(ValueError):
-    """A record with inferred provenance: a ``derived/`` record, never a ground (ADR 0010 §1)."""
 
 
 def _strict(parse: Callable[[JsonValue], _T], record: Mapping[str, object]) -> _T:
@@ -269,15 +265,14 @@ def snapshot(kind: str, record: Mapping[str, object]) -> Snapshot:
 class Binding:
     """A ``SnapshotBinding``: run ``run`` ran with ``snapshot`` over a window of the run.
 
-    ``windowed`` is ``False`` when the validity is not ``Known`` (the binding states no window, so
-    it holds for the run); ``start`` and ``end`` are the window's ``Known`` bounds, else ``None``.
+    ``start`` and ``end`` are the window's ``Known`` bounds, else ``None``: a bound the binding
+    does not state, or no window at all, is the run's own (ADR 0010 §3).
     """
 
     record: RecordId
     run: RecordId
     snapshot: RecordId
     snapshot_kind: str
-    windowed: bool
     start: Timestamp | None
     end: Timestamp | None
     assertion_kind: AssertionKind
@@ -292,7 +287,6 @@ def binding(record: Mapping[str, object]) -> Binding:
         run=parsed.run,
         snapshot=parsed.snapshot,
         snapshot_kind=str(parsed.snapshot_kind),
-        windowed=window is not None,
         start=None if window is None else _known(window.start),
         end=None if window is None else _known(window.end),
         assertion_kind=parsed.provenance.assertion_kind,

@@ -223,6 +223,27 @@ def test_bindings_that_cannot_be_followed_are_findings_and_unknown_windows() -> 
     assert unknown == {LedgerRecordRef(rid(missing_snapshot)), LedgerRecordRef(rid(unthreaded))}
 
 
+def test_a_binding_outside_its_run_or_a_run_ending_before_it_starts_is_a_finding() -> None:
+    records, shift = cell()
+    late = binding("late", shift, hardware(URDF_A), start=on_run(5000), clock=RUN_CLOCK_ID)
+    result = consolidate([*records, late])
+    assert codes(result) == ["configuration.untimeable_window"]
+    assert of(result, "configuration_active_during") == []
+    backwards, _ = cell(first=3599, last=0)
+    result = consolidate(backwards)
+    assert codes(result) == ["configuration.untimeable_window"]
+    (unknown,) = of(result, "configuration_unknown")
+    assert (unknown.valid_from, unknown.valid_to) == (placed(3599), OPEN)
+
+
+def test_a_binding_naming_a_snapshot_under_another_kind_says_so() -> None:
+    records, shift = cell()
+    wrong = {**binding("wrong kind", shift, hardware(URDF_A)), "snapshot_kind": "calibration"}
+    (finding,) = consolidate([*records, wrong]).findings
+    assert finding.code == "configuration.dangling_binding"
+    assert finding.details["held_as"] == "hardware_configuration"
+
+
 def test_a_snapshot_two_configuration_threads_cite_gives_both_readings() -> None:
     records, shift = cell(
         configuration_thread(LogicalId("plant.configuration", "CELL3-CFG-A'"), URDF_A)
@@ -334,13 +355,25 @@ def test_an_ambiguous_envelope_leaves_coverage_undecided() -> None:
     ]
 
 
-def test_an_open_run_past_an_envelope_end_is_undecided_from_there() -> None:
-    result = covered(authorised(-86400, 1800), last=None)
-    assert of(result, "not_covered_by_authorisation") == []
-    assert codes(result) == ["configuration.authorisation_undecided"]
-    # A run that starts after the envelope ends is not covered from its start, whenever it ends.
+def test_an_open_run_partly_covered_is_undecided() -> None:
+    # It may end before the envelope does, or run past it: neither is stated.
+    for window in ((-86400, 1800), (1800, 86400)):
+        result = covered(authorised(*window), last=None)
+        assert of(result, "not_covered_by_authorisation") == []
+        assert codes(result) == ["configuration.authorisation_undecided"]
+    # A run that starts after the envelope ends is not covered at any instant, whenever it ends.
     later = covered(authorised(-86400, -10), last=None)
     assert not_covered(later) == [(0, None)]
+
+
+def test_an_envelope_naming_no_configuration_leaves_what_it_may_cover_undecided() -> None:
+    overlapping = covered(authorised(-10, 1800, Unknown()))
+    assert of(overlapping, "not_covered_by_authorisation") == []
+    assert "configuration.authorisation_undecided" in codes(overlapping)
+    # One whose window misses the run on the same clock decides nothing either way.
+    elsewhere = covered(authorised(86400, 2 * 86400, Unknown()))
+    assert not_covered(elsewhere) == [(0, 3600)]
+    assert "configuration.authorisation_undecided" not in codes(elsewhere)
 
 
 def test_envelopes_that_cannot_be_placed_are_findings() -> None:

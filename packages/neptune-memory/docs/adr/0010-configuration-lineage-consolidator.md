@@ -73,7 +73,8 @@ configuration)` over the bound window: the binding's `Known` bounds, else the ru
 over overlapping windows are `configuration.binding_overlap`, and each becomes a `configuration_candidate`. A
 binding naming a run or snapshot the Ledger does not hold is `configuration.dangling_binding`; a snapshot with no
 configuration thread leaves the window `configuration_unknown(run → binding record)`. A window whose end is not
-after its start on one clock is `configuration.untimeable_window`. A run no binding names is
+after its start on one clock (a binding starting after its run ends, a run whose `last` precedes its `first`) is
+`configuration.untimeable_window`; for such a run, the end is not placed (`open`). A run no binding names is
 `configuration_unknown(run → run record)`, `observed`, over the run: never the nearest configuration in time.
 
 ### 4. Missingness is the predicate
@@ -90,10 +91,13 @@ as a validity window's is). What it cannot place is `configuration.envelope_unpl
 
 For each `configuration_active_during`, the parts of the bound window that no envelope naming its configuration
 covers are `not_covered_by_authorisation(run → configuration)`, `observed`: a fact about the envelopes in the
-Ledger, not a judgement of the run. It is decided only on one clock. If an envelope naming the configuration cannot
-be compared (another clock, no `valid_from`, an `Ambiguous` configuration that includes it), or an `open` run window
-runs past an envelope's end (the run may have ended before), it is `configuration.authorisation_undecided` and no
-claim. Coverage is by configuration and time; site and machine scope wait for MVL-131's run placement.
+Ledger, not a judgement of the run. It is decided only on one clock, and never from a blank. It is
+`configuration.authorisation_undecided`, with no claim, when an envelope naming the configuration cannot be
+compared (another clock, no `valid_from`); when an envelope that might name it (an `Ambiguous` one including it, or
+one whose configuration is not `Known`) cannot be compared or overlaps an uncovered part; or when an `open` run
+window is only partly covered (the run may end before or after the envelope does, so only a run uncovered over all
+of its window is surely uncovered). Coverage is by configuration and time; site and machine scope wait for MVL-131's
+run placement.
 
 ### 6. Vocabulary and contract
 
