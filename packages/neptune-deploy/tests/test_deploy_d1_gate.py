@@ -44,6 +44,7 @@ OUTPUT_KINDS: Final = {
     "source_artifact",
     "source_revision",
     "timestamp_domain",
+    "civil_time_zone",
     "transform_record",
 } | {kind.kind for kind in LIFECYCLE_KINDS}
 
@@ -87,6 +88,11 @@ State = Known[Any] | Unknown | NotCovered | KnownAbsent
 
 def _of(package: IngestPackage, kind: str) -> list[Any]:
     return [r for r in package.records if r.kind == kind]
+
+
+def _items(state: Any) -> tuple[Any, ...]:
+    """A list field's items: none for a list that is Unknown or NotCovered (it states no item)."""
+    return state.value if isinstance(state, Known) else ()
 
 
 def _ids(states: Any) -> set[str]:
@@ -227,14 +233,13 @@ def test_every_unread_field_of_every_record_is_named_by_a_finding(name: str) -> 
             if isinstance(state, NotCovered) and path.count("/") == 1:
                 assert path[1:] in explained.get(record.id, set()), (record.kind, path)
         for field_name in ("machines", "related"):
-            if getattr(record, field_name) == () and field_name in explained.get(record.id, ()):
-                continue
-            if getattr(record, field_name) == ():
-                # An empty list that is read is a blank cell: list_cell_blank names the record.
-                blanks = [
-                    f for f in _findings(package, "list_cell_blank") if record.id in f.records
-                ]
-                assert blanks, (record.kind, field_name)
+            # A list no rule reads is NotCovered and named; one that is read and blank is Unknown
+            # and cites its cell; Known(()) is a list the cells stated empty (ADR 0012 §1).
+            state = getattr(record, field_name)
+            if isinstance(state, NotCovered):
+                assert field_name in explained.get(record.id, ()), (record.kind, field_name)
+            elif isinstance(state, Unknown):
+                assert isinstance(state.provenance, Provenance), (record.kind, field_name)
 
 
 # --- Lineage: a new package that cites, never copies or re-parses --------------------------------
@@ -370,8 +375,8 @@ def test_q1_cell_there_is_no_authorisation_record_and_the_configuration_is_state
     near_miss = _named(package, "incident_record", "INC-C3-0004")
     assert _seconds(package, near_miss.occurred.value)[2]  # an instant: the ticket states -04:00
     assert not _of(package, "authorisation_envelope")  # nothing the cell declared states one
-    # The ticket names no machine: an empty list the receipt marks as not read, not as "none".
-    assert near_miss.machines.value == ()
+    # The ticket names no machine: a list the rule does not read is NotCovered, not "none".
+    assert isinstance(near_miss.machines, NotCovered)
     assert "machines" in _about(package, "fields_not_covered", near_miss).details["not_covered"]
     baseline = _named(package, "commissioning_baseline", "CR-C3-2026-02")
     assert baseline.configuration.value.value == "cfg-c3-1.4"
@@ -422,7 +427,7 @@ def test_q2_cell_every_change_since_commissioning_is_a_cited_record_ordered_by_t
     swapped = {
         p.part.value
         for r in since["maintenance_event"]
-        for p in r.parts.value
+        for p in _items(r.parts)
         if isinstance(p.part, Known)
     }
     assert {"Joint 4 drive unit", "Finger set PG-80", "Retaining screw set"} <= swapped
@@ -605,7 +610,9 @@ def test_attack_an_sop_revision_with_no_change_record_is_cited_and_no_change_is_
     assert {r.id for r in _of(attacked, "change_record")} == {
         r.id for r in _of(clean, "change_record")
     }
-    assert not any("SOP-CELL-014" in _ids(r.related.value) for r in _of(attacked, "change_record"))
+    assert not any(
+        "SOP-CELL-014" in _ids(_items(r.related)) for r in _of(attacked, "change_record")
+    )
     assert len(_of(attacked, "ingest_finding")) == len(_of(clean, "ingest_finding"))
 
 
