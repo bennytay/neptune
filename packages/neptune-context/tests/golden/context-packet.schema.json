@@ -2512,6 +2512,7 @@
         "deployment",
         "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",

@@ -40,42 +40,6 @@
     },
     {
       "cardinality": "many",
-      "description": "the maintenance or requalification record that states the calibration resulted from it",
-      "domain": [
-        "configuration"
-      ],
-      "name": "calibrated_by",
-      "range": [
-        "record"
-      ],
-      "version": 1
-    },
-    {
-      "cardinality": "many",
-      "description": "a calibration of the sensor, from its valid_from to its stated end or the next one",
-      "domain": [
-        "sensor"
-      ],
-      "name": "calibrated_with",
-      "range": [
-        "configuration"
-      ],
-      "version": 1
-    },
-    {
-      "cardinality": "many",
-      "description": "ambiguous: the calibration could be the sensor's over the interval; one claim per reading",
-      "domain": [
-        "sensor"
-      ],
-      "name": "calibration_candidate",
-      "range": [
-        "configuration"
-      ],
-      "version": 1
-    },
-    {
-      "cardinality": "many",
       "description": "a maps_to's parameters as the evidence states them, or the chain it composes",
       "domain": [
         "clock"
@@ -182,18 +146,6 @@
       "name": "deployed_at",
       "range": [
         "site"
-      ],
-      "version": 1
-    },
-    {
-      "cardinality": "many",
-      "description": "observed: two consecutive calibrations' declared values differ by the delta; no judgement",
-      "domain": [
-        "sensor"
-      ],
-      "name": "drift",
-      "range": [
-        "delta"
       ],
       "version": 1
     },

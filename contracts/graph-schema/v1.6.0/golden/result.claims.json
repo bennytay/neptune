@@ -56,7 +56,7 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
-      "id": "claim:sha256:b6a260c7fb00c9b650ef57da61816e9c82c082ca9403fdc3d7452273351ec7dc",
+      "id": "claim:sha256:fd55042bced2fbd206821103ce0637d0a6b664c6bfc0ed9af0648d34397e70a3",
       "object": {
         "kind": "node",
         "node_id": "asset-tag:ARM-05",
@@ -64,7 +64,7 @@
       },
       "predicate": "recorded_by",
       "provenance": {
-        "config_hash": "sha256:933b4f046e868cdb830fd467f54b724b6681c52fc3d24d03143600c740ac010c",
+        "config_hash": "sha256:e8f9d7fe72dba47bd66b49753da426b86964188d361fc42d6d6c1e03b6c324b4",
         "consolidator_id": "memory.supersede",
         "consolidator_version": "2",
         "evidence": [
@@ -120,12 +120,12 @@
     {
       "claim": "claim:sha256:3851e105c8c27785e837ea268680a14f1a468ee8e37c2d32c8059f8cc7c6e28b",
       "code": "overridden_on_arrival",
-      "id": "finding:sha256:e526168e9cd8f0ab2e153570a4d58fef5f3d51cbe44b2bea076ebf102e0dc04a",
+      "id": "finding:sha256:26f0d993217085fda94fb9e07779d8d9427e6f10176b12a5763fd4da14d92615",
       "others": [
         "claim:sha256:8f2e29da5ab992ba0529e5b162e024e2781d475a2d89d699adc0fac799c39125"
       ],
       "provenance": {
-        "config_hash": "sha256:8d71e6447c87b7c7eaaa9cab7741ec0c0575167293ad143c0925b5368ac088a0",
+        "config_hash": "sha256:22b001c12004e0f395e98b5fb52ead9a00d11d7e8e053fc3283baa271a1c777d",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
