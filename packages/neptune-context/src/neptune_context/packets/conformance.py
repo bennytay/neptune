@@ -47,10 +47,13 @@ def _citations(packet: ContextPacket, _: bytes) -> str | None:
 
 
 def _inference_marked(packet: ContextPacket, _: bytes) -> str | None:
-    lines = render_text(packet).splitlines()
-    for item in packet.items:
-        (line,) = (line for line in lines if f" {item.id} (" in line)
-        if item.is_inferred != (f" {item.id} (INFERRED" in line):
+    lines = render_text(packet).split("\n")
+    for number, item in enumerate(packet.items, start=1):
+        head = f"{number}. {item.kind} {item.id} ("
+        found = [line for line in lines if line.startswith(head)]
+        if len(found) != 1:
+            return f"{item.id}: rendered {len(found)} times, not once"
+        if item.is_inferred != found[0].startswith(head + "INFERRED"):
             return f"{item.id}: the rendered text does not mark inference as the packet does"
     return None
 

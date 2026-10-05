@@ -40,10 +40,11 @@ def test_every_identifier_in_the_text_is_in_the_packet(stem: str) -> None:
 @pytest.mark.parametrize("stem", NAMES_FOR_TESTS)
 def test_every_item_is_rendered_once_and_inference_is_marked(stem: str) -> None:
     packet = golden(stem)
-    lines = render_text(packet).splitlines()
-    for item in packet.items:
-        (line,) = [line for line in lines if f" {item.id} (" in line]
-        assert ("(INFERRED" in line) == item.is_inferred
+    lines = render_text(packet).split("\n")
+    for number, item in enumerate(packet.items, start=1):
+        head = f"{number}. {item.kind} {item.id} ("
+        (line,) = [line for line in lines if line.startswith(head)]
+        assert line.startswith(head + "INFERRED") == item.is_inferred
         assert line.endswith("]"), "an item line ends with its citations"
 
 

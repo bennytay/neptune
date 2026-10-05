@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 
@@ -102,3 +103,11 @@ def test_the_schema_rejects_a_packet_with_an_extra_member() -> None:
     document = json.loads((PACKETS / f"{NAMES[0]}.json").read_bytes())
     document["items"][0]["note"] = "an opinion"
     assert not validator.is_valid(document)
+
+
+def test_conformance_survives_packet_text_that_mentions_item_ids() -> None:
+    packet = decode((PACKETS / f"{NAMES[3]}.json").read_bytes())
+    assert isinstance(packet, ContextPacket) and packet.gaps
+    gap = dataclasses.replace(packet.gaps[0], detail=f"see {packet.items[0].id} (dup)")
+    tricky = dataclasses.replace(packet, gaps=(gap, *packet.gaps[1:]))
+    assert check(canonical_bytes(tricky)) == ()

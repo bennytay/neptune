@@ -17,7 +17,9 @@ from neptune_memory.schema.interval import LedgerTx
 from context_packet_helpers import golden, rescored, with_items
 from neptune.model.ids import ContentId
 from neptune.model.knowledge import (
+    Ambiguous,
     AssertionKind,
+    Candidate,
     Known,
     KnownAbsent,
     NotApplicable,
@@ -40,6 +42,7 @@ from neptune_context.packets.model import (
     During,
     EvidenceItem,
     EvidenceStatus,
+    FrameItem,
     Gap,
     GapCode,
     ItemProvenance,
@@ -365,6 +368,7 @@ def test_superseded_since_names_carried_claims_inside_the_window() -> None:
             lambda moved=moved: dataclasses.replace(packet, superseded_since=(moved,)),
         )
     refuses(Code.BAD_VALUE, lambda: Superseded(entry.claim, entry.superseded_at, (entry.claim,)))
+    refuses(Code.BAD_VALUE, lambda: Superseded(entry.claim, entry.superseded_at, ()))
 
 
 def test_findings_must_be_active_at_the_snapshot_and_name_a_carried_claim() -> None:
@@ -420,3 +424,15 @@ def test_an_item_needs_typed_provenance_and_relevance() -> None:
     refuses(Code.SHAPE, lambda: dataclasses.replace(item, relevance=0.5))  # type: ignore[arg-type]
     assert isinstance(item.provenance, ItemProvenance)
     assert isinstance(NotApplicable(), NotApplicable)
+
+
+def test_a_frame_encoding_is_non_empty_text() -> None:
+    item = next(i for i in golden("q08").items if isinstance(i, FrameItem))
+    refuses(Code.BAD_VALUE, lambda: dataclasses.replace(item, encoding=Known("")))
+    refuses(Code.BAD_VALUE, lambda: dataclasses.replace(item, encoding=Known("\ud800")))
+
+
+def test_an_item_value_without_a_canonical_form_is_refused_at_construction() -> None:
+    item = next(i for i in golden("q08").items if isinstance(i, FrameItem))
+    ambiguous = Ambiguous((Candidate("png"), Candidate("\ud800")))
+    refuses(Code.BAD_VALUE, lambda: dataclasses.replace(item, encoding=ambiguous))

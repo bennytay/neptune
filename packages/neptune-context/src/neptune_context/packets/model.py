@@ -125,6 +125,16 @@ def _ticks(value: int, what: str) -> int:
     return value
 
 
+def _text(value: str, what: str) -> str:
+    """Non-empty text with a canonical form (valid Unicode)."""
+    try:
+        if not isinstance(value, str):
+            raise TypeError(f"must be a string, got {type(value).__name__}")
+        return check_text(what, value)
+    except (TypeError, ValueError) as exc:
+        raise _fail(Code.BAD_VALUE, f"{what}: {exc}") from exc
+
+
 def _score(value: float, what: str) -> float:
     # A float, never an int: canonical JSON writes 1 and 1.0 differently, and a score is real.
     if type(value) is not float or not math.isfinite(value) or value < 0.0:
@@ -357,6 +367,14 @@ class _Item:
         if not isinstance(self.relevance, Relevance):
             raise _fail(Code.SHAPE, f"relevance must be a Relevance: {self.relevance!r}")
         _check_epistemics(self.assertion_kind, self.confidence, self.provenance)
+        self._check_body()
+        try:  # every value must have a canonical form (a lone surrogate has none)
+            dumps(self.content_json())
+        except ValueError as exc:
+            raise _fail(Code.BAD_VALUE, f"{self.kind} item: {exc}") from exc
+
+    def _check_body(self) -> None:
+        """Each kind's own rules, run after the envelope's."""
 
     def body_json(self) -> dict[str, JsonValue]:
         raise NotImplementedError
@@ -435,8 +453,7 @@ class ClaimItem(_Item):
     kind: ClassVar[str] = "claim"
     claim: Claim
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def _check_body(self) -> None:
         if not isinstance(self.claim, Claim):
             raise _fail(Code.SHAPE, f"claim must be a Claim, got {self.claim!r}")
         if (
@@ -485,8 +502,7 @@ class EvidenceItem(_Item):
     status: EvidenceStatus
     size: Knowledge[int]
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def _check_body(self) -> None:
         _cites(self, self.evidence, "evidence")
         if self.is_inferred:
             raise _fail(Code.ASSERTION_MISMATCH, "source bytes are never inferred")
@@ -538,8 +554,7 @@ class SeriesWindowItem(_Item):
     end: int
     arrow: ArrowHandle
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def _check_body(self) -> None:
         _record(self.stream, "stream")
         _record(self.clock, "clock")
         _ticks(self.start, "start")
@@ -574,13 +589,14 @@ class FrameItem(_Item):
     encoding: Knowledge[str]
     frame: Knowledge[FrameRef]
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def _check_body(self) -> None:
         _cites(self, self.evidence, "evidence")
         for name in ("stream", "at", "encoding", "frame"):
             _check_inherited(getattr(self, name), name)
         if isinstance(self.stream, Known):
             _record(self.stream.value, "stream")
+        if isinstance(self.encoding, Known):
+            _text(self.encoding.value, "encoding")
         if isinstance(self.at, Known) and not isinstance(self.at.value, Timestamp):
             raise _fail(Code.SHAPE, "at must be a Timestamp")
         if isinstance(self.frame, Known) and not isinstance(self.frame.value, FrameRef):
@@ -605,8 +621,7 @@ class DocumentSpanItem(_Item):
     evidence: EvidenceRef
     text: Knowledge[str]
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def _check_body(self) -> None:
         _record(self.document, "document")
         _cites(self, self.evidence, "evidence")
         _check_inherited(self.text, "text")  # type: ignore[arg-type]
@@ -636,8 +651,7 @@ class SceneItem(_Item):
     claims: tuple[ClaimId, ...]
     records: tuple[RecordId, ...]
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def _check_body(self) -> None:
         if not isinstance(self.frame, FrameRef):
             raise _fail(Code.SHAPE, f"frame must be a FrameRef: {self.frame!r}")
         _check_inherited(self.site, "site")  # type: ignore[arg-type]
@@ -676,8 +690,7 @@ class ConfigurationItem(_Item):
     subject: Knowledge[NodeRef]
     claims: tuple[ClaimId, ...]
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def _check_body(self) -> None:
         _record(self.record, "record")
         try:
             check_token("record_kind", self.record_kind)
@@ -933,6 +946,8 @@ class Superseded:
         _claim_ids((self.claim,), "superseded claim")
         _tx(self.superseded_at, "superseded_at")
         _claim_ids(self.by, "superseded_by")
+        if not self.by:
+            raise _fail(Code.BAD_VALUE, "a superseded claim names the versions that superseded it")
         if self.claim in self.by:
             raise _fail(Code.BAD_VALUE, "a claim does not supersede itself")
 
@@ -974,8 +989,11 @@ class Gap:
             raise _fail(Code.BAD_VALUE, "at is a JSON pointer: empty or starting with '/'")
         if self.channel is not None and not isinstance(self.channel, Channel):
             raise _fail(Code.BAD_VALUE, f"channel must be a Channel or None: {self.channel!r}")
-        if not isinstance(self.refs, tuple) or not all(isinstance(r, str) and r for r in self.refs):
-            raise _fail(Code.SHAPE, "refs must be a tuple of non-empty strings")
+        _text(self.at or "/", "at")
+        if not isinstance(self.refs, tuple) or not all(isinstance(r, str) for r in self.refs):
+            raise _fail(Code.SHAPE, "refs must be a tuple of strings")
+        for ref in self.refs:
+            _text(ref, "a gap ref")
         _ids(self.refs, "gap refs")
         try:
             check_text("detail", self.detail)

@@ -299,9 +299,9 @@ def _item(value: JsonValue, at: str) -> Item:
         "relevance": relevance,
     }
     item = _upstream(at, lambda: _build(kind, obj, at, envelope))
-    stated = _str(obj["id"], f"{at}/id")
-    if stated != item.id:
-        raise _Bad(Code.ID_MISMATCH, f"{at}/id", f"item id does not match its content ({item.id})")
+    stated, actual = _str(obj["id"], f"{at}/id"), _upstream(at, lambda: item.id)
+    if stated != actual:
+        raise _Bad(Code.ID_MISMATCH, f"{at}/id", f"item id does not match its content ({actual})")
     return item
 
 
@@ -528,9 +528,9 @@ def _packet(value: JsonValue) -> ContextPacket:
             **header, items=items, superseded_since=superseded, findings=findings, gaps=gaps
         ),
     )
-    stated = _str(obj["id"], "/id")
-    if stated != packet.id:
-        raise _Bad(Code.ID_MISMATCH, "/id", f"packet id does not match its content ({packet.id})")
+    stated, actual = _str(obj["id"], "/id"), _upstream("", lambda: packet.id)
+    if stated != actual:
+        raise _Bad(Code.ID_MISMATCH, "/id", f"packet id does not match its content ({actual})")
     return packet
 
 
@@ -559,7 +559,10 @@ def _no_constants(token: str) -> NoReturn:
 
 def decode(document: bytes | str) -> ContextPacket | PacketRefused:
     """Read a packet document (any JSON text of it; canonical form is not required)."""
-    size = len(document.encode("utf-8") if isinstance(document, str) else document)
+    try:
+        size = len(document.encode("utf-8") if isinstance(document, str) else document)
+    except UnicodeEncodeError as exc:
+        return PacketRefused((PacketFinding(Code.SYNTAX, "", f"not valid Unicode text: {exc}"),))
     if size > MAX_PACKET_BYTES:
         return PacketRefused(
             (PacketFinding(Code.TOO_LARGE, "", f"{size} bytes is over {MAX_PACKET_BYTES}"),)

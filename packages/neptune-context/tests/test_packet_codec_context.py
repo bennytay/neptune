@@ -221,3 +221,24 @@ def test_no_single_mutation_makes_the_reader_raise_or_accept_silently(stem: str)
             assert isinstance(result, PacketRefused | ContextPacket)
             if isinstance(result, ContextPacket):
                 assert result == original, f"{path} -> {new!r} changed the packet silently"
+
+
+def test_a_str_document_that_is_not_valid_unicode_is_a_syntax_finding() -> None:
+    assert refused('"\ud800"') == (Code.SYNTAX, "")
+
+
+def test_a_lone_surrogate_in_a_frame_encoding_is_refused_not_raised() -> None:
+    doc = document("q08")
+    (index,) = [i for i, item in enumerate(doc["items"]) if item["kind"] == "frame"]
+    doc["items"][index]["encoding"]["value"] = "\ud800"
+    text = json.dumps(doc)  # ensure_ascii writes the escape, as a hostile producer would
+    assert refused(text) == (Code.BAD_VALUE, f"/items/{index}")
+
+
+def test_a_lone_surrogate_in_a_gap_is_refused_not_raised() -> None:
+    doc = document("q04")
+    doc["gaps"][0]["refs"] = ["\ud800"]
+    assert refused(json.dumps(doc)) == (Code.BAD_VALUE, "/gaps/0")
+    doc = document("q04")
+    doc["gaps"][0]["at"] = "/\ud800"
+    assert refused(json.dumps(doc)) == (Code.BAD_VALUE, "/gaps/0")
