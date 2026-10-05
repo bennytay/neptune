@@ -22,7 +22,7 @@ flowchart LR
   SCH --> SPA & EPI
   SCH --> RD --> OUT
   CON --> CT --> RD
-  CT --> REG[("contracts/graph-schema v1.3.0")]
+  CT --> REG[("contracts/graph-schema v1.4.0")]
   STO --> OUT
   CLI --> STO
   STO --> PG
@@ -40,8 +40,8 @@ flowchart LR
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1 built
   class K2 partial
-  class DER,SPA,EPI,CLI,K3 todo
-  class CON,SCH,STO partial
+  class SPA,EPI,CLI,K3 todo
+  class CON,DER,SCH,STO partial
   class SEAM,RD,CT built
   class LED,OUT,PG,REG ext
   style M fill:#8b949e0f,stroke:#8b949e

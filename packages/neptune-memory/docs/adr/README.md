@@ -17,3 +17,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0008](0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) | The identity consolidator on compiler identity links and assertions | Accepted |
 | [0009](0009-run-threads-and-cross-package-continuation.md) | Run threads and cross-package continuation from RunAssembly records | Accepted |
 | [0010](0010-configuration-lineage-consolidator.md) | The configuration lineage consolidator | Accepted |
+| [0011](0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md) | The time-domain registry: clocks, mappings and chains, never estimated | Accepted |
