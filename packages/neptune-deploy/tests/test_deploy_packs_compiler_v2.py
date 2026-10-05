@@ -86,6 +86,12 @@ def test_fifty_thousand_spans_compile_in_seconds() -> None:
     entries = _grouped([Statement(c, "known") for c in claims], ONE)
     assert time.perf_counter() - began < 10
     assert all(e.knowledge == "conflict" for e in entries)
+    # Every span open and stating its own object: each overlaps all the others.
+    distinct = [_claim(i, i, None, f"cfg:{i}") for i in range(50_000)]
+    began = time.perf_counter()
+    entries = _grouped([Statement(c, "known") for c in distinct], ONE)
+    assert time.perf_counter() - began < 10
+    assert all(e.knowledge == "conflict" for e in entries)
     calm = [_claim(i, i * 10, i * 10 + 10, "cfg:same") for i in range(50_000)]
     assert {e.knowledge for e in _grouped([Statement(c, "known") for c in calm], ONE)} == {"known"}
 

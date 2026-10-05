@@ -543,8 +543,14 @@ def _overlap_conflicts(entries: Sequence[Entry], cardinality: Mapping[str, str])
                 active[gone_obj] -= 1
                 if not active[gone_obj]:
                     del active[gone_obj]
-                unmarked[gone_obj].discard(gone)
-            if any(other != obj for other in active):
+                waiting = unmarked.get(gone_obj)
+                if waiting is not None:
+                    waiting.discard(gone)
+                    if not waiting:
+                        del unmarked[gone_obj]
+            # Another object is active iff the active objects are not just this one; both
+            # checks and the marking below are amortised O(1) per statement.
+            if len(active) > (1 if obj in active else 0):
                 conflicted.add(index)
                 for other in [o for o in unmarked if o != obj]:
                     conflicted.update(unmarked.pop(other))
