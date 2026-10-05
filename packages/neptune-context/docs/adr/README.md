@@ -10,3 +10,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0001](0001-place-in-the-programme-and-contract-pins.md) | Context's place in the programme, declared contract versions, and the read-only seam | Accepted |
 | [0002](0002-query-language.md) | The query language: subjects, time, space, graph, text, budget and explain, with as_of and during semantics | Accepted |
 | [0003](0003-the-context-packet.md) | The context packet: a typed, cited, content-addressed answer with budgets and an inference flag | Accepted |
+| [0004](0004-sdk-and-mcp-server.md) | The SDK and the MCP server: one engine seam, verified answers, four read-only tools | Accepted |
