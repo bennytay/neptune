@@ -165,7 +165,10 @@ def test_a_tampered_package_is_refused_by_the_real_ledger(tmp_path: Path) -> Non
     rows = {row["case"]: row for row in entry["output"]["cases"]}
     assert rows["drone"]["registration"] == "refused"
     assert rows["drone"]["responses_valid"] is True  # a refusal is still a valid catalog answer
+    # One problem: a refused package is not re-registered, verified or checked against the lock.
+    assert len(entry["problems"]) == 1
     assert entry["problems"][0].startswith("drone: register was refused (")
+    assert "verify" not in rows["drone"] and "reregistration" not in rows["drone"]
     assert {rows[c]["registration"] for c in ("manipulator", "mobile_robot", "quadruped")} == {
         "registered"
     }  # partial success: one tampered package does not stop the others
@@ -174,13 +177,11 @@ def test_a_tampered_package_is_refused_by_the_real_ledger(tmp_path: Path) -> Non
 def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Path) -> None:
     copy = tmp_path / "contracts"
     shutil.copytree(REPO / "contracts", copy)
-    lock = (copy / "lock.toml").read_text(encoding="utf-8")
-    pinned = '[neptune-ledger]\npackage-schema = "6.0.0"'
-    assert pinned in lock
-    (copy / "lock.toml").write_text(
-        lock.replace(pinned, '[neptune-ledger]\npackage-schema = "1.0.0"'), encoding="utf-8"
-    )
-    ctx = _compiled(tmp_path / "work", contracts.registry(copy))
+    registry = contracts.registry(copy)
+    lock = registry.lock()
+    lock["neptune-ledger"]["package-schema"] = "1.0.0"
+    registry.write_lock(lock)
+    ctx = _compiled(tmp_path / "work", registry)
     assert LEDGER.real is not None
     outcome = LEDGER.real(ctx)  # resolve() would make it a stub: a lock a major behind
     # The manipulator and quadruped packages need package-schema 2 (compiler ADR 0037).
@@ -188,3 +189,20 @@ def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Pa
         "manipulator: the package needs package-schema 2, neptune-ledger locks 1.0.0",
         "quadruped: the package needs package-schema 2, neptune-ledger locks 1.0.0",
     )
+
+
+def test_a_ledger_a_major_behind_falls_back_to_the_catalog_api_goldens(tmp_path: Path) -> None:
+    copy = tmp_path / "contracts"
+    shutil.copytree(REPO / "contracts", copy)
+    registry = contracts.registry(copy)
+    lock = registry.lock()
+    lock["neptune-ledger"]["package-schema"] = "1.0.0"
+    registry.write_lock(lock)
+    entry = run_stage(
+        LEDGER, _context(tmp_path / "work", registry), services_up=False, upstream_ok=True
+    )
+    assert entry["mode"] == "stub" and entry["status"] == "ok"
+    assert entry["reason"] == "neptune-ledger locks package-schema 1.0.0, a major behind"
+    served = registry.latest("catalog-api")
+    assert entry["output"]["served"] == "goldens"
+    assert len(entry["output"]["goldens"]) == len(served.goldens)

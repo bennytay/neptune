@@ -31,7 +31,9 @@ def test_today_the_compiler_and_the_ledger_are_real_and_the_rest_are_stubs(
         "memory",
         "context",
     ]
-    assert report["stages"][1]["contract_version"] == "1.6.0"
+    catalog = contracts.registry().latest("catalog-api", stable=True)
+    assert catalog is not None
+    assert report["stages"][1]["contract_version"] == ".".join(map(str, catalog.version))
     assert report["smoke"]["ok"] is True
     assert report["smoke"]["packet_source"].startswith("canned: query-packet")
     assert report["corpus"] == {"name": "worked-examples", "cases": list(corpus.EXAMPLE_NAMES)}
@@ -40,7 +42,8 @@ def test_today_the_compiler_and_the_ledger_are_real_and_the_rest_are_stubs(
 def test_the_ledger_stage_registers_and_verifies_every_compiled_package(tmp_path: Path) -> None:
     report, _ = run(tmp_path / "run", owner_tests=False)
     ledger = report["stages"][1]["output"]
-    assert ledger["locked_package_schema"] == "6.0.0" and ledger["tenant"] == "harness"
+    locked = contracts.registry().lock()["neptune-ledger"]["package-schema"]
+    assert ledger["locked_package_schema"] == locked and ledger["tenant"] == "harness"
     rows = ledger["cases"]
     assert [row["case"] for row in rows] == list(corpus.EXAMPLE_NAMES)
     for seq, row in enumerate(rows, start=1):
@@ -48,7 +51,7 @@ def test_the_ledger_stage_registers_and_verifies_every_compiled_package(tmp_path
         assert row["reregistration"] == "already_registered"  # idempotent registration
         assert row["verify"] == "intact" and row["files_checked"] > 0
         assert row["responses_valid"] is True  # against the registry's catalog-api schema
-        assert row["tx_seq"] == seq and 1 <= row["schema_version"] <= 6
+        assert row["tx_seq"] == seq and 1 <= row["schema_version"] <= int(locked.split(".")[0])
         assert row["records"] > 0
 
 
