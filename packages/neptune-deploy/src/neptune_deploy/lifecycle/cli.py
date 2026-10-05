@@ -1,4 +1,5 @@
-"""``python -m neptune_deploy map <package> --mapping <file>... --out <dir>`` (ADR 0002 §8)."""
+"""``python -m neptune_deploy map <package> --mapping <file>... --out <dir>`` (ADR 0002 §8), and
+``python -m neptune_deploy pack ...`` (``packs.cli``, ADR 0013 §10)."""
 
 import argparse
 import sys
@@ -14,12 +15,16 @@ from neptune_deploy.lifecycle import (
     map_package,
     preset,
 )
+from neptune_deploy.packs import cli as pack_cli
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m neptune_deploy",
-        description="Neptune Deploy: deployment lifecycle records from compiler packages.",
+        description=(
+            "Neptune Deploy: deployment lifecycle records from compiler packages, and evidence"
+            " packs from Memory snapshots."
+        ),
     )
     commands = parser.add_subparsers(dest="command", required=True, metavar="<command>")
     mapper = commands.add_parser(
@@ -58,11 +63,14 @@ def _parser() -> argparse.ArgumentParser:
         help="a document template file, or a directory of them (repeatable)",
     )
     mapper.add_argument("-o", "--out", type=Path, required=True, help="where to write the package")
+    pack_cli.add_parser(commands)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "pack":
+        return pack_cli.run(args)
     try:
         mappings = [load_mapping(path) for path in args.mapping]
         mappings += [preset(name) for name in args.preset]

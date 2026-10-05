@@ -1,0 +1,50 @@
+{
+  "schema": "neptune-deploy.pack-template/1",
+  "id": "event-timeline",
+  "version": 1,
+  "title": "Event timeline",
+  "description": "Events involving the subject, or at it, placed on the pack interval's clock as Memory's event index states them (Memory ADR 0013). An event placed at several times on that clock is a conflict, shown with every placement; co-occurrence is shown separately and never as cause.",
+  "subject_types": ["deployment", "machine", "site"],
+  "sections": [
+    {
+      "id": "events",
+      "title": "Events on the pack clock",
+      "description": "Each event's placement on the pack's clock, with its stated kind, severity, description, machines and place. Records cited only by one placement (the clock mapping it was placed through) are named with it.",
+      "kind": "timeline",
+      "about": [
+        [{"predicate": "involves", "direction": "in"}],
+        [{"predicate": "involves_candidate", "direction": "in"}],
+        [{"predicate": "at_site", "direction": "in"}],
+        [{"predicate": "located_at", "direction": "in"}, {"predicate": "involves", "direction": "in"}],
+        [{"predicate": "deployed_at", "direction": "out"}, {"predicate": "at_site", "direction": "in"}]
+      ],
+      "predicates": {
+        "event_kind": "known",
+        "declared_kind": "known",
+        "stated_severity": "known",
+        "has_description": "known",
+        "involves": "known",
+        "involves_candidate": "ambiguous",
+        "at_site": "known",
+        "at_site_candidate": "ambiguous",
+        "in_zone": "known",
+        "in_zone_candidate": "ambiguous",
+        "evidenced_by": "known"
+      }
+    },
+    {
+      "id": "co-occurrence",
+      "title": "Co-occurrence (never cause)",
+      "description": "Pairs of events from different sources whose onsets fall within the configured window on one clock. Co-occurrence is not causation.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "involves", "direction": "in"}],
+        [{"predicate": "involves_candidate", "direction": "in"}],
+        [{"predicate": "at_site", "direction": "in"}],
+        [{"predicate": "located_at", "direction": "in"}, {"predicate": "involves", "direction": "in"}],
+        [{"predicate": "deployed_at", "direction": "out"}, {"predicate": "at_site", "direction": "in"}]
+      ],
+      "predicates": {"co_occurs_within": "known"}
+    }
+  ]
+}
