@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from neptune_ledger.api import CatalogApi, Resolution
+    from neptune_memory.schema.codec import GraphDocument
     from neptune_memory.schema.reader import MemoryReader
 
     from neptune.model.jsonvalue import JsonObject
@@ -213,16 +214,23 @@ def _no_constant(token: str) -> object:
 
 
 def read_graph(path: Path) -> ReferenceReader:
-    """A Memory graph document at ``path``, read strictly (bounded size, no duplicate keys, no NaN)
-    and decoded by Memory's codec (ids, order, generation all checked) into Memory's reference
+    """A Memory graph document at ``path`` (``read_graph_document``) in Memory's reference
     reader. Raises ``ValueError`` or ``OSError``; nothing else."""
+    return ReferenceReader(read_graph_document(path))
+
+
+def read_graph_document(path: Path) -> GraphDocument:
+    """A Memory graph document at ``path``, read strictly (bounded size, no duplicate keys, no
+    NaN) and decoded by Memory's codec (ids, order, generation all checked). Raises
+    ``ValueError`` or ``OSError``; nothing else. Hosts that index the document itself (the
+    planner's declared identities, a lexical channel) read it once here."""
     with path.open("rb") as handle:
         data = handle.read(MAX_GRAPH_BYTES + 1)
     if len(data) > MAX_GRAPH_BYTES:
         raise ValueError(f"{path.name} is larger than {MAX_GRAPH_BYTES} bytes")
     try:
         document = json.loads(data, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
-        return ReferenceReader(graph_from_json(document))
+        return graph_from_json(document)
     except RecursionError as exc:
         raise ValueError(f"{path.name} is nested too deeply") from exc
     except (TypeError, KeyError) as exc:

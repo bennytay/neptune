@@ -29,6 +29,7 @@ from neptune_context.mcp.__main__ import main
 from neptune_context.packets.codec import canonical_bytes
 from neptune_context.packets.model import ClaimItem, GapCode
 from neptune_context.query import Budget, Direction, GraphClause, Query, Subject, to_json
+from neptune_context.render.agent import render_answer
 from neptune_context.render.citations import parse_citations, render_text
 from neptune_context.sdk import AsyncClient, Client
 
@@ -134,7 +135,7 @@ def test_claude_code_asks_over_mcp_and_gets_cited_text() -> None:
     assert not result.isError
     first = result.content[0]
     assert isinstance(first, types.TextContent)
-    assert first.text == render_text(ask(WHY_THE_ARM_CELL))
+    assert first.text == render_answer(ask(WHY_THE_ARM_CELL))
     assert any(isinstance(block, types.ResourceLink) for block in result.content)
 
 

@@ -9,6 +9,12 @@ there is no second request type. ``hydrate`` resolves one evidence ref through t
 call is a read, so a transient failure (``unavailable``, ``timeout``) is retried under the
 ``RetryPolicy``; nothing else is.
 
+With a ``Planner`` (ADR 0005, ADR 0009 §4), ``plan`` turns English into a ``PlannedQuery`` (shown,
+never an answer), ``choose`` settles an ambiguous name, ``ask`` returns the plan beside the packet
+of its query (run only when the plan is ``ready``), and ``entities`` / ``find`` list or match the
+declared identities the planner's resolver holds. No planner means those calls are
+``unavailable``; the query calls never depend on one.
+
 ``include_inferred`` has no default anywhere (ADR 0002 §5): the caller chooses on every call.
 A local client is ``Client(engine)``; a remote one ``Client("https://...", token=...)``. Local
 mode has an implicit tenant and takes no token.
@@ -32,6 +38,7 @@ from neptune_context.query.model import HEAD, AsOf, Budget, Diff, Instant, Query
 from neptune_context.sdk.engine import AsyncEngine, Engine, to_async
 from neptune_context.sdk.errors import ErrorCode, SdkError
 from neptune_context.sdk.http import DEFAULT_TIMEOUT_S, HttpEngine
+from neptune_context.sdk.planning import Asked, Planner
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -39,6 +46,7 @@ if TYPE_CHECKING:
     from neptune_ledger.api import Resolution
 
     from neptune_context.packets.model import ContextPacket
+    from neptune_context.query.plan import Entity, Mention, PlannedQuery
 
 T = TypeVar("T")
 
@@ -191,6 +199,39 @@ def _split_target(
     return target
 
 
+def _planner(planner: Planner | None) -> Planner:
+    if planner is None:
+        raise SdkError(
+            ErrorCode.UNAVAILABLE,
+            "this client has no planner; write the typed query and call query",
+        )
+    return planner
+
+
+def _checked_planner(planner: object) -> Planner | None:
+    if planner is not None and not isinstance(planner, Planner):
+        raise SdkError(
+            ErrorCode.INVALID_ARGUMENT, f"planner must be a Planner, got {type(planner)}"
+        )
+    return planner
+
+
+def _question(question: object) -> str:
+    if not isinstance(question, str):
+        raise SdkError(ErrorCode.INVALID_ARGUMENT, "the question is a string")
+    return question
+
+
+def _planned(call: Callable[[], T]) -> T:
+    """A planner call: ``SdkError`` passes, anything else is the planner's defect."""
+    try:
+        return call()
+    except SdkError:
+        raise
+    except Exception as error:
+        raise _engine_error(error) from error
+
+
 # --- Sync ---------------------------------------------------------------------------------------
 
 
@@ -206,8 +247,10 @@ class Client:
         retry: RetryPolicy | None = None,
         timeout: float = DEFAULT_TIMEOUT_S,
         sleep: Callable[[float], None] = time.sleep,
+        planner: Planner | None = None,
     ) -> None:
         resolved = _split_target(target, token)
+        self._planner = _checked_planner(planner)
         self._engine: Engine = (
             HttpEngine(resolved, token=token, timeout=timeout)
             if isinstance(resolved, str)
@@ -281,6 +324,34 @@ class Client:
         ref, tx = _evidence(evidence), _transaction(as_of)
         return self._call(lambda: _resolved(ref, self._engine.hydrate(ref, as_of=tx)))
 
+    def plan(self, question: str, *, as_of: AsOf = HEAD) -> PlannedQuery:
+        """The planner's typed query for ``question``: inference, shown, never an answer."""
+        planner, text = _planner(self._planner), _question(question)
+        return _planned(lambda: planner.plan(text, as_of))
+
+    def choose(self, planned: PlannedQuery, mention: str, declared_id: str) -> PlannedQuery:
+        """``planned`` with one ambiguous name settled by the caller's choice (no model call)."""
+        planner = _planner(self._planner)
+        return _planned(lambda: planner.choose(planned, mention, declared_id))
+
+    def ask(self, question: str, *, as_of: AsOf = HEAD) -> Asked:
+        """Plan ``question``; when the plan is ready, run its query. The plan comes back
+        either way, beside the packet (``None`` when the plan needs a choice or input)."""
+        planned = self.plan(question, as_of=as_of)
+        if not planned.executable or planned.query is None:
+            return Asked(planned, None)
+        return Asked(planned, self.query(planned.query))
+
+    def entities(self, kind: str | None = None) -> tuple[Entity, ...]:
+        """The declared identities the planner's resolver lists, optionally of one kind."""
+        planner = _planner(self._planner)
+        return _planned(lambda: planner.entities(kind))
+
+    def find(self, text: str) -> tuple[Mention, ...]:
+        """The declared names in ``text`` with every candidate (never a choice)."""
+        planner, words = _planner(self._planner), _question(text)
+        return _planned(lambda: planner.find(words))
+
     def __repr__(self) -> str:
         return f"Client({self._engine!r})"
 
@@ -306,8 +377,10 @@ class AsyncClient:
         retry: RetryPolicy | None = None,
         timeout: float = DEFAULT_TIMEOUT_S,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        planner: Planner | None = None,
     ) -> None:
         resolved = _split_target(target, token)
+        self._planner = _checked_planner(planner)
         if isinstance(resolved, str):
             self._engine: AsyncEngine = to_async(HttpEngine(resolved, token=token, timeout=timeout))
         elif inspect.iscoroutinefunction(getattr(resolved, "query", None)):
@@ -386,6 +459,29 @@ class AsyncClient:
             return _resolved(ref, await self._engine.hydrate(ref, as_of=tx))
 
         return await self._call(resolve)
+
+    async def plan(self, question: str, *, as_of: AsOf = HEAD) -> PlannedQuery:
+        """The planner's typed query; the model call runs in a worker thread."""
+        planner, text = _planner(self._planner), _question(question)
+        return await asyncio.to_thread(_planned, lambda: planner.plan(text, as_of))
+
+    async def choose(self, planned: PlannedQuery, mention: str, declared_id: str) -> PlannedQuery:
+        planner = _planner(self._planner)
+        return _planned(lambda: planner.choose(planned, mention, declared_id))
+
+    async def ask(self, question: str, *, as_of: AsOf = HEAD) -> Asked:
+        planned = await self.plan(question, as_of=as_of)
+        if not planned.executable or planned.query is None:
+            return Asked(planned, None)
+        return Asked(planned, await self.query(planned.query))
+
+    async def entities(self, kind: str | None = None) -> tuple[Entity, ...]:
+        planner = _planner(self._planner)
+        return _planned(lambda: planner.entities(kind))
+
+    async def find(self, text: str) -> tuple[Mention, ...]:
+        planner, words = _planner(self._planner), _question(text)
+        return _planned(lambda: planner.find(words))
 
     def __repr__(self) -> str:
         return f"AsyncClient({self._engine!r})"
