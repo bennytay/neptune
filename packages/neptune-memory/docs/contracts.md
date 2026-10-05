@@ -27,6 +27,28 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   `MemorySnapshot` per Ledger snapshot and `memory dump` writes claims as canonical JSON Lines; their shapes and
   the determinism they promise are in [`guarantees.md`](guarantees.md) and
   [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
+- Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
+  quickstart (MVL-191). Use it instead of a hand-made graph:
+  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
+    (`graph_schema_version: 1`, with `builds`), head 1, written by Memory's codec. It is what `memory rebuild`
+    makes of the MVL-181 acceptance corpus 1.0.0: the corpus is compiled by the SDK into one package, exported as
+    the records the Ledger catalogs (no `derived/`), registered at tx 1, and run through the default
+    consolidators. Copy it byte for byte; do not edit it.
+  - Regenerate it from the repository root with
+    `uv run --all-packages python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
+    `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
+    `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
+    makes it stale.
+  - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
+    exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
+    canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
+  - What it holds today: 12 runs from both sites, with `evidenced_by` and `has_member`, and 67 `integrity_finding`
+    claims on runs and streams. One of them is the `error` on LEG-01's truncated patrol of 2026-09-14. It holds no
+    events, `co_occurs_within`, configuration lineage, `authorisation_undecided`, calibration `drift`, `clock_map`
+    or `same_as`. The compiler does not yet emit the records those need for this corpus. Incidents, work orders,
+    changes and requalifications are generic CSV and PDF tables. Runs name no machine. The cell PC's clock offsets
+    are only `derived/` estimates. Those claims appear when the compiler emits the records; this file is then
+    regenerated, not edited.
 
 ## Consumes
 
