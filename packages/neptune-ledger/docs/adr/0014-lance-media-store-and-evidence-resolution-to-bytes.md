@@ -113,7 +113,8 @@ that no package records (root ADR 0010).
      table. A Parquet row has one cell per leaf column, named by its dotted path, as the
      compiler's header lists them. A date, time, timestamp or duration is its stored integer
      (its unit and zone are in `type`), a decimal its exact text, and a leaf inside a list or
-     map is `"decoded": false`, as in the compiler.
+     map is never read: its cell is its declared type and `"decoded": false`, as in the
+     compiler.
    - **Pointers.** The node is returned verbatim, from its first character to its last: no
      reader's typing of a scalar is assumed (YAML `yes` or `0x10`, a float's digits). The
      document is walked as a stream (JSON tokens; PyYAML's pure-Python parser events, as the
@@ -153,8 +154,8 @@ that no package records (root ADR 0010).
      16 MiB that fits the file (an encrypted one is `no_decoder`), at most 16 384 leaf columns,
      row-group counts that are not negative and add up, and every column chunk read lying
      before the footer and decoding, as stated, to at most `max_decoded_bytes` in all. Only
-     the cited leaves' top-level columns of the cited row group are read (earlier groups are
-     skipped undecoded), in even batches of up to 1 024 rows (more where that reaches the
+     the cited leaves outside any list or map, each by its own index, of the cited row group
+     are read (earlier groups are skipped undecoded), in even batches of up to 1 024 rows (more where that reaches the
      cited row in at most 16), ending at or just past it. Byte arrays are read as
      dictionaries, so a value a dictionary repeats over a batch is held once and only the
      cited row is decoded. pyarrow reads no DELTA page that way, so a chunk with
@@ -162,7 +163,7 @@ that no package records (root ADR 0010).
      decodes is bounded as the footer states it, before a page is read: a value per row of a
      flat leaf (a fixed-length byte array at its declared width; a byte array read as it is
      whose values may repeat earlier bytes, through shared DELTA prefixes or a dictionary, at
-     its chunk's whole decoded size) and every stated value of a repeated leaf. Batches
+     its chunk's whole decoded size). Batches
      shrink, down to one row, to stay within `max_decoded_bytes`; past it at one row is
      `unsafe_entry`. What all the batches up to the cited row decode (each batch's Arrow
      size, a dictionary counted in every batch since pyarrow copies it) is summed as they are
@@ -170,9 +171,22 @@ that no package records (root ADR 0010).
      not per batch, so a few-KiB file whose DELTA value repeats over many rows is refused after
      the limit's worth of decoding. No footer-based refusal precedes it, so honest DELTA
      files (1M Spark-style ids decode in 0.04 s) still read. A cell's `type` is the one
-     the file declares, not the one it is read as. A footer and page headers that both
-     understate are bounded in memory only by the batch: the decoding subprocess (§ Consequences)
-     bounds the rest.
+     the file declares, not the one it is read as.
+   - **The Parquet bound is the OS cap, not the footer.** pyarrow checks neither a chunk's
+     stated decoded size nor its value count against its pages, so one forged footer field
+     made a 76 KB file decode 6.5 GB at a 16 MiB limit. So a Parquet row is decoded in a child
+     process whose private writable memory the kernel caps (`RLIMIT_DATA`) at what it held
+     when forked plus `2 × max_decoded_bytes + 64 MiB` (Arrow's builders grow by doubling),
+     and which is killed after `max_decode_seconds` (60 s). Hitting the cap, dying or running
+     late is `unsafe_entry`; a platform without the cap (anything but Linux) gets `no_decoder`,
+     never an uncapped decode. The footer sizing and running sum above are only the fast path
+     that refuses most files before a page is read. The child reads through the parent's
+     verified reader. A persistent worker (`lake/capped.py`, a clean single-threaded
+     interpreter with the decoders imported) forks one capped child per call, and is
+     replaced after a time kill. A hydration costs about 14 ms more (20 ms against 6 ms for a
+     row of a 100k-row file) plus about 0.25 s once per worker start; the reviewer's two
+     forged files now peak at 58 MiB and 56 MiB in the child. MVL-98 (PR #126) adds a similar
+     capped child for SQL passthrough; factor out one helper once both have merged.
    - PDFium is not thread-safe, so every call into it holds one process-wide lock.
 6. **Findings.** `MediaFinding(code, subject, detail)`, never an exception. The codes shared
    with the catalog API (`as_of_out_of_range`, `file_digest_mismatch`, `file_missing`,
@@ -232,7 +246,8 @@ that no package records (root ADR 0010).
    - every message the compiler's own package cites (zstd and lz4 chunks) hydrates as a frame
      and as its Message record's bytes;
    - archive members inside bzip2 and xz streams, the document limit with its peak memory,
-     and forged, lying and encrypted Parquet footers;
+     and forged, lying and encrypted Parquet footers, including a forged decoded size and a
+     forged value count that only the capped child bounds;
    - pages and page regions of a drone report, an image region of the mobile robot's photo,
      Parquet and CSV rows and cells, a span of a drone mission note, and archive members (plain
      and gzip) of a quadruped calibration tar;
@@ -275,7 +290,7 @@ that no package records (root ADR 0010).
   `mcap-ros2-support`, `lz4`, `zstandard`, `pillow` and `pypdfium2`, all pinned. A bump to any
   decoder library is a new extraction lineage. numpy is pinned to 2.3.5: 2.4's stubs use 3.12 syntax that every
   member's 3.11 mypy check would fail to parse.
-- Decoders run in the Ledger's process. `guarded` turns a Python exception into a finding, but
+- Decoders other than Parquet's run in the Ledger's process. `guarded` turns a Python exception into a finding, but
   a native crash in PDFium, Pillow or a decompressor on hostile bytes would end the process.
   The sources were already ingested by the compiler in its sandbox. Revisit with a decoding
   subprocess before `access/` (MVL-99) lets untrusted callers trigger hydrations.

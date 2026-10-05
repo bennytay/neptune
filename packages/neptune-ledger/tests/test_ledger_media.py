@@ -1174,9 +1174,9 @@ def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
     nested = written(
         pa.table({"leg": pa.StructArray.from_arrays([repeated(note, 200_000)], ["calibration"])})
     )
-    # A fixed-width value repeated by a dictionary, and one row holding a run-length list of
-    # 1M values: what a batch decodes is bounded as the footer states it, before any page, by
-    # reading fewer rows a batch, or, past one row, by refusing.
+    # A fixed-width value repeated by a dictionary: what a batch decodes is bounded as the footer
+    # states it, before any page, by reading fewer rows a batch. One row holding a run-length
+    # list of 1M values: a leaf inside a list is never read, so its cell is its declared type.
     serial = b"s" * 8192
     serials = written(pa.table({"serial": repeated(serial, 1024, pa.binary(8192))}))
     ticks = written(pa.table({"ticks": pa.array([[7] * 1_000_000], pa.list_(pa.int64()))}))
@@ -1209,8 +1209,12 @@ def test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch(
     assert [f.code for f in made.findings] == ["unsafe_entry"]
     assert "up to row 1000" in made.findings[0].detail
     made = tight.hydrate(anchor(ticks, {"kind": "row", "row": 0}), "row").read()
-    assert [f.code for f in made.findings] == ["unsafe_entry"]
-    assert "a batch" in made.findings[0].detail and "footer states" in made.findings[0].detail
+    assert isinstance(made.value, Artefact), made.findings
+    value = canonical_json.loads(made.value.read())
+    kind = str(pq.read_schema(io.BytesIO(ticks)).field("ticks").type)
+    assert isinstance(value, dict) and value["cells"] == [
+        {"column": 0, "decoded": False, "name": "ticks.list.element", "type": kind}
+    ]
 
 
 def test_parquet_delta_pages_decode_and_their_shared_prefixes_stay_bounded(lake: Lake) -> None:
@@ -1342,3 +1346,121 @@ def test_parquet_rows_before_the_cited_one_decode_within_the_limit_in_all(lake: 
     ]
     again = tight.hydrate(anchor(picks, {"kind": "row", "row": 199_999}), "row").read()
     assert isinstance(again.value, Artefact) and again.value.read() == first
+
+
+def _zigzag(n: int) -> bytes:
+    """A thrift compact i64: zigzag, then a varint."""
+    n, out = (n << 1) ^ (n >> 63), bytearray()
+    while n > 0x7F:
+        out.append(n & 0x7F | 0x80)
+        n >>= 7
+    return bytes(out + bytes([n]))
+
+
+def _forged_footer(data: bytes, *, num_values: int | None = None, size: int | None = None) -> bytes:
+    """The file with its one column chunk's footer ``num_values`` or ``total_uncompressed_size``
+    replaced; the pages, and the page headers pyarrow checks, are left as they are."""
+    import pyarrow.parquet as pq
+
+    chunk = pq.ParquetFile(io.BytesIO(data)).metadata.row_group(0).column(0)
+    at = len(data) - 8 - int.from_bytes(data[-8:-4], "little")
+    footer = data[at:-8]
+
+    def fields(values: int, uncompressed: int) -> bytes:  # ColumnMetaData fields 5 and 6
+        return b"\x16" + _zigzag(values) + b"\x16" + _zigzag(uncompressed)
+
+    honest = fields(chunk.num_values, chunk.total_uncompressed_size)
+    assert footer.count(honest) == 1
+    lie = fields(
+        chunk.num_values if num_values is None else num_values,
+        chunk.total_uncompressed_size if size is None else size,
+    )
+    footer = footer.replace(honest, lie)
+    return data[:at] + footer + len(footer).to_bytes(4, "little") + b"PAR1"
+
+
+def test_parquet_forged_footers_are_bounded_by_the_decoding_process_cap(lake: Lake) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    # A fleet's 128 distinct 1 MiB map tiles, plain BYTE_ARRAY: the file is a few KiB. Its footer
+    # says the chunk decodes to 1 000 bytes; the page headers are honest. The footer guards pass
+    # it, so pyarrow would decode all 128 MiB in one batch: the OS cap on the child stops it.
+    width, count = 1 << 20, 128
+    tiles = bytearray(b"t" * (width * count))
+    for i in range(count):
+        tiles[i * width : i * width + 8] = i.to_bytes(8, "little")
+    offsets = pa.array([i * width for i in range(count + 1)], pa.int32()).buffers()[1]
+    column = pa.BinaryArray.from_buffers(pa.binary(), count, [None, offsets, pa.py_buffer(tiles)])
+    out = io.BytesIO()
+    pq.write_table(pa.table({"tile": column}), out, use_dictionary=False, compression="zstd")
+    del tiles, column
+    honest = out.getvalue()
+    tiles_forged = _forged_footer(honest, size=1000)
+    # A legged robot's contact log: one row holding a list of 50M nulls, a few hundred bytes,
+    # with the chunk's num_values forged to 1. A leaf inside a list is never read.
+    contacts = 50_000_000
+    lists = pa.ListArray.from_arrays(pa.array([0, contacts], pa.int32()), pa.nulls(contacts))
+    out = io.BytesIO()
+    pq.write_table(pa.table({"contacts": lists}), out)
+    contacts_forged = _forged_footer(out.getvalue(), num_values=1)
+    files = {"tiles.parquet": tiles_forged, "honest.parquet": honest}
+    files |= {"contacts.parquet": contacts_forged}
+    lake.package("fleet", files, materialise=frozenset(files))
+    assert len(tiles_forged) < 64 * 1024 and len(contacts_forged) < 1024
+    small = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=1 << 20))
+    started = time.perf_counter()
+    made = small.hydrate(anchor(tiles_forged, {"kind": "row", "row": count - 1}), "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
+    assert "cap" in made.findings[0].detail, made.findings
+    assert time.perf_counter() - started < 10
+    # The honest footer is refused before any page is read.
+    made = small.hydrate(anchor(honest, {"kind": "row", "row": count - 1}), "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
+    assert "as the footer states" in made.findings[0].detail
+    # The forged list: its declared type, not decoded, and no list is built.
+    started = time.perf_counter()
+    made = lake.media.hydrate(anchor(contacts_forged, {"kind": "row", "row": 0}), "row").read()
+    assert time.perf_counter() - started < 10
+    assert isinstance(made.value, Artefact), made.findings
+    value = canonical_json.loads(made.value.read())
+    assert isinstance(value, dict) and value["cells"] == [
+        {
+            "column": 0,
+            "decoded": False,
+            "name": "contacts.list.element",
+            "type": "list<element: null>",
+        }
+    ]
+
+
+def test_parquet_rows_resolve_only_in_a_capped_child_process(
+    lake: Lake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from neptune_ledger.lake import capped
+
+    sites = fixture("sites.parquet")
+    lake.package("mobile", {"sites.parquet": sites}, materialise=frozenset({"sites.parquet"}))
+    ref = anchor(sites, {"kind": "row", "row": 1})
+    stores = iter(range(5))
+
+    def fresh_media(**limits: Any) -> MediaLake:  # a new media store, so each call decodes
+        store = MediaStore(lake.tmp / f"media-{next(stores)}", "acme")
+        return MediaLake(lake.resolver, store, limits=Limits(**limits))
+
+    first = lake.artefact(ref, "row").read()
+    # A fresh child per call, and a fresh worker: the same bytes again.
+    capped._close_idle()
+    again = fresh_media().hydrate(ref, "row").read()
+    assert isinstance(again.value, Artefact) and again.value.read() == first
+    # Past its time the worker is killed and the row is refused; the next call starts another.
+    made = fresh_media(max_decode_seconds=1e-6).hydrate(ref, "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
+    assert "second" in made.findings[0].detail
+    made = fresh_media().hydrate(ref, "row").read()
+    assert isinstance(made.value, Artefact) and made.value.read() == first
+    # Where no OS memory cap exists, a Parquet row is refused, never decoded uncapped.
+    monkeypatch.setattr(capped, "supported", lambda: False)
+    made = fresh_media().hydrate(ref, "row").read()
+    assert [f.code for f in made.findings] == ["no_decoder"]
+    assert "memory cap" in made.findings[0].detail

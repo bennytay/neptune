@@ -57,6 +57,7 @@ from neptune.model.provenance import (
     RowCell,
     Span,
 )
+from neptune_ledger.lake import capped
 from neptune_ledger.lake.evidence import MediaFinding, MediaFindingCode, ReadFailure, SourceReader
 
 Variant: TypeAlias = Literal["bytes", "frame", "image_region", "page", "row", "value"]
@@ -115,6 +116,8 @@ class Limits:
     # more events than this is refused rather than walked for over ~10 s. JSON's walk of a
     # whole 8 MiB document takes under 4 s, so it needs no budget.
     max_yaml_events: int = 1_000_000
+    # A Parquet row is decoded in a child process (``capped``), killed after this long.
+    max_decode_seconds: float = 60.0
 
 
 DEFAULT_LIMITS: Final = Limits()
@@ -533,10 +536,12 @@ def guarded(subject: str, what: str, call: Callable[[], Any]) -> Any:
     except (DecodeFailure, ReadFailure):
         raise
     except Exception as exc:
-        detail = (
-            f"{what}: {type(exc).__name__}: {str(exc).splitlines()[0][:200] if str(exc) else ''}"
-        )
-        raise DecodeFailure("undecodable", subject, detail) from exc
+        raise _undecodable(subject, what, exc) from exc
+
+
+def _undecodable(subject: str, what: str, exc: Exception) -> DecodeFailure:
+    detail = f"{what}: {type(exc).__name__}: {str(exc).splitlines()[0][:200] if str(exc) else ''}"
+    return DecodeFailure("undecodable", subject, detail)
 
 
 # --- Images ------------------------------------------------------------------------------------
@@ -993,16 +998,14 @@ def _csv_sniff(data: bytes) -> tuple[str, str]:
 
 def _row(scope: _Scope, step: Row | RowCell, subject: str, limits: Limits) -> Decoded:
     if scope.size >= 12 and scope.head(4) == b"PAR1" and scope.tail(4) in (b"PAR1", b"PARE"):
-        made = guarded(
-            subject,
-            "not a readable Parquet file",
-            lambda: _parquet_row(scope, step, subject, limits),
-        )
+        made = _capped_parquet_row(scope, step, subject, limits)
     else:
         made = _csv_row(scope.whole(subject, "a table"), step, subject)
     if isinstance(made, MediaFinding):
         raise DecodeFailure(made.code, made.subject, made.detail)
-    facts = {k: made[k] for k in ("delimiter", "delimiter_rule", "format") if k in made}
+    facts: dict[str, Any] = {
+        k: made[k] for k in ("delimiter", "delimiter_rule", "format") if k in made
+    }
     return Decoded("application/json", canonical_json.dumps(made), facts)
 
 
@@ -1066,6 +1069,51 @@ def _csv_row(data: bytes, step: Row | RowCell, subject: str) -> dict[str, Any] |
     return MediaFinding("invalid_request", subject, f"the table has no row {step.row}")
 
 
+# Pyarrow checks a footer's sizes and counts against neither the pages nor the memory it takes, so
+# a forged footer can make it decode far past any limit (ADR 0014 §5). A Parquet row is decoded in
+# a child process whose memory the OS caps: what the batches of the cited row hold (at most
+# ``max_decoded_bytes``) twice over, as Arrow's builders grow a buffer by doubling it, plus this
+# for pages and the reader. The footer-based guards below refuse most hostile files before any
+# page is read; the cap is what bounds the rest.
+_PARQUET_HEADROOM: Final = 64 * 1024 * 1024
+
+
+def _capped_parquet_row(
+    scope: _Scope, step: Row | RowCell, subject: str, limits: Limits
+) -> dict[str, Any] | MediaFinding:
+    memory = 2 * limits.max_decoded_bytes + _PARQUET_HEADROOM
+    with scope.file() as source:
+        made = capped.run(
+            _parquet_child,
+            (step, subject, limits),
+            source,  # type: ignore[arg-type]
+            scope.size,
+            memory=memory,
+            seconds=limits.max_decode_seconds,
+        )
+    if not isinstance(made, capped.Exceeded):
+        return made  # type: ignore[no-any-return]
+    if made.reason == "unsupported":
+        detail = f"a Parquet row is decoded only under an OS memory cap: {made.detail}"
+        return MediaFinding("no_decoder", subject, detail)
+    return MediaFinding("unsafe_entry", subject, made.detail)
+
+
+def _parquet_child(
+    source: capped.Remote, step: Row | RowCell, subject: str, limits: Limits
+) -> dict[str, Any] | MediaFinding:
+    """``_parquet_row`` in the capped child: every failure a finding, which pickles; a
+    ``MemoryError`` is the cap, and ``capped`` reports it."""
+    try:
+        return _parquet_row(source, step, subject, limits)
+    except DecodeFailure as failed:
+        return failed.finding
+    except MemoryError:
+        raise
+    except Exception as exc:
+        return _undecodable(subject, "not a readable Parquet file", exc).finding
+
+
 # The compiler's Parquet guards (root ADR 0042), mirrored: a footer is bounded and every column
 # chunk read must lie before it and decode to at most ``max_decoded_bytes`` as the footer states.
 _PARQUET_MAGIC: Final = b"PAR1"
@@ -1081,13 +1129,17 @@ _PARQUET_MAX_BATCHES: Final = 16
 
 
 def _parquet_row(
-    scope: _Scope, step: Row | RowCell, subject: str, limits: Limits
+    source: capped.Remote, step: Row | RowCell, subject: str, limits: Limits
 ) -> dict[str, Any] | MediaFinding:
-    """A row (one cell per leaf column, as the compiler's header lists them) or one cell."""
+    """A row (one cell per leaf column, as the compiler's header lists them) or one cell.
+
+    Only leaves outside any list or map are read, each by its own index; a leaf inside one is
+    never decoded (as in the compiler), so its cell states the type the file declares and
+    ``decoded: false``, read from the footer alone."""
     import pyarrow.parquet as pq
 
-    size = scope.size
-    tail = scope.tail(8)
+    size = source.size
+    tail = source.tail(8)
     declared = int.from_bytes(tail[:4], "little")
     if tail[4:] == _PARQUET_ENCRYPTED:
         return MediaFinding("no_decoder", subject, "an encrypted Parquet footer is not read")
@@ -1098,7 +1150,7 @@ def _parquet_row(
         detail = f"the footer declares {declared} bytes, over {_MAX_FOOTER_BYTES}"
         return MediaFinding("unsafe_entry", subject, detail)
     footer_start = size - 8 - declared
-    with scope.file() as f:
+    with source.file() as f:
         parquet = pq.ParquetFile(
             f,
             pre_buffer=False,
@@ -1130,42 +1182,50 @@ def _parquet_row(
             detail = f"the footer states {meta.num_rows} rows; its row groups hold {first}"
             return MediaFinding("undecodable", subject, detail)
         columns = [step.column] if isinstance(step, RowCell) else list(range(len(leaves)))
-        tops = {str(leaves[c]).split(".")[0] for c in columns}
-        read = [i for i, leaf in enumerate(leaves) if str(leaf).split(".")[0] in tops]
-        problem = _check_group(meta.row_group(group), group, read, footer_start, subject, limits)
-        if problem is not None:
-            return problem
-        # Byte arrays stay dictionary-encoded, so a value repeated over many rows is held once,
-        # never once per row of a batch; only the cited row is decoded. pyarrow reads no DELTA
-        # page that way, so such a chunk is read as it is, bounded by the batch size and by what
-        # all batches up to the cited row decode.
-        plain = {
-            i for i in read if _PARQUET_DELTA & set(meta.row_group(group).column(i).encodings or ())
+        declared_schema = parquet.schema_arrow
+        read = [c for c in columns if meta.schema.column(c).max_repetition_level == 0]
+        cells: dict[int, dict[str, Any]] = {
+            c: _unread_cell(declared_schema, c, str(leaves[c])) for c in columns if c not in read
         }
-        at = _At(group, rows, step.row - first, 0)
-        batch = _batch_rows(meta, at, read, plain, subject, limits)
-        if isinstance(batch, MediaFinding):
-            return batch
-        dictionary = [
-            str(leaves[i])
-            for i in read
-            if meta.schema.column(i).physical_type == "BYTE_ARRAY" and i not in plain
-        ]
-        declared = parquet.schema_arrow
-        parquet = pq.ParquetFile(
-            f,
-            metadata=meta,
-            read_dictionary=dictionary or None,
-            pre_buffer=False,
-            buffer_size=1 << 20,
-            thrift_string_size_limit=_MAX_FOOTER_BYTES,
-            arrow_extensions_enabled=False,
-        )
-        at = _At(group, rows, at.index, batch)
-        record = _parquet_record(parquet, declared, at, columns, leaves, subject, limits)
-        if isinstance(record, MediaFinding):
-            return record
-    return {"cells": record, "format": "parquet", "row": step.row}
+        if read:
+            problem = _check_group(
+                meta.row_group(group), group, read, footer_start, subject, limits
+            )
+            if problem is not None:
+                return problem
+            # Byte arrays stay dictionary-encoded, so a value repeated over many rows is held
+            # once, never once per row of a batch; only the cited row is decoded. pyarrow reads
+            # no DELTA page that way, so such a chunk is read as it is, bounded by the batch size
+            # and by what all batches up to the cited row decode.
+            plain = {
+                i
+                for i in read
+                if _PARQUET_DELTA & set(meta.row_group(group).column(i).encodings or ())
+            }
+            at = _At(group, rows, step.row - first, 0)
+            batch = _batch_rows(meta, at, read, plain, subject, limits)
+            if isinstance(batch, MediaFinding):
+                return batch
+            dictionary = [
+                str(leaves[i])
+                for i in read
+                if meta.schema.column(i).physical_type == "BYTE_ARRAY" and i not in plain
+            ]
+            parquet = pq.ParquetFile(
+                f,
+                metadata=meta,
+                read_dictionary=dictionary or None,
+                pre_buffer=False,
+                buffer_size=1 << 20,
+                thrift_string_size_limit=_MAX_FOOTER_BYTES,
+                arrow_extensions_enabled=False,
+            )
+            at = _At(group, rows, at.index, batch)
+            record = _parquet_record(parquet, declared_schema, at, read, leaves, subject, limits)
+            if isinstance(record, MediaFinding):
+                return record
+            cells |= record
+    return {"cells": [cells[c] for c in columns], "format": "parquet", "row": step.row}
 
 
 def _check_group(
@@ -1218,40 +1278,34 @@ _PARQUET_WIDTH: Final = {
 def _batch_rows(
     meta: Any, at: "_At", columns: list[int], plain: set[int], subject: str, limits: Limits
 ) -> int | MediaFinding:
-    """How many rows a batch of the cited columns holds, so that it decodes, as the footer
-    states it and before a page is read, to at most ``max_decoded_bytes``, and the batches
-    end at or just past the cited row (``at.index``).
+    """How many rows a batch of the cited (non-repeated) leaves holds, so that it decodes, as
+    the footer states it and before a page is read, to at most ``max_decoded_bytes``, and the
+    batches end at or just past the cited row (``at.index``).
 
-    A dictionary or run-length page states many values in few bytes. A flat leaf holds one
-    value a row; a repeated leaf at most all of its chunk's values. A byte array read as it is
-    (DELTA pages) whose values may repeat earlier bytes holds, a value, at most its chunk's
-    decoded size, so its batches shrink, down to one row.
+    A dictionary or run-length page states many values in few bytes; each leaf holds one value
+    a row. A byte array read as it is (DELTA pages) whose values may repeat earlier bytes holds,
+    a value, at most its chunk's decoded size, so its batches shrink, down to one row. The
+    footer can understate all of this; the OS cap on the decoding process bounds what it does.
     """
     group, rows = at.group, at.rows
-    fixed = per_row = 0
+    per_row = 0
     for column in columns:
         leaf, chunk = meta.schema.column(column), meta.row_group(group).column(column)
         kind = leaf.physical_type
         if kind == "FIXED_LEN_BYTE_ARRAY":
-            width = max(0, leaf.length or 0)
+            per_row += max(0, leaf.length or 0)
         elif column in plain and _PARQUET_REPEATING & set(chunk.encodings or ()):
-            width = max(0, chunk.total_uncompressed_size)
+            per_row += max(0, chunk.total_uncompressed_size)
         else:
-            width = _PARQUET_WIDTH.get(kind, 8)
-        if leaf.max_repetition_level == 0:
-            per_row += width
-        else:
-            fixed += max(0, chunk.num_values) * width
-    room = limits.max_decoded_bytes - fixed
-    if room < per_row:
+            per_row += _PARQUET_WIDTH.get(kind, 8)
+    if per_row > limits.max_decoded_bytes:
         detail = (
-            f"a batch of one row of row group {group}'s cited columns decodes to"
-            f" {fixed + per_row} bytes as the footer states, over the"
-            f" {limits.max_decoded_bytes}-byte limit"
+            f"a batch of one row of row group {group}'s cited columns decodes to {per_row}"
+            f" bytes as the footer states, over the {limits.max_decoded_bytes}-byte limit"
         )
         return MediaFinding("unsafe_entry", subject, detail)
     wanted = at.index + 1
-    fit = room // per_row if per_row else rows
+    fit = limits.max_decoded_bytes // per_row if per_row else rows
     cap = max(1, min(max(_PARQUET_BATCH_ROWS, -(-wanted // _PARQUET_MAX_BATCHES)), rows, fit))
     # As few batches as ``cap`` allows, of even size, so the last ends at or just past the row.
     return -(-wanted // -(-wanted // cap))
@@ -1275,19 +1329,18 @@ def _parquet_record(
     leaves: list[str | None],
     subject: str,
     limits: Limits,
-) -> list[dict[str, Any]] | MediaFinding:
-    """The cited cells of row ``at.index`` of a row group, decoded a batch at a time (each
-    cited leaf's top-level column, whose every leaf ``_check_group`` has bounded); each cell's
-    type is the one the file declares (``declared``), not the one it was read as.
+) -> dict[int, dict[str, Any]] | MediaFinding:
+    """The cells of the cited leaves ``columns`` (none inside a list or map; ``_check_group``
+    has bounded each) in row ``at.index`` of a row group, decoded a batch at a time; each
+    cell's type is the one the file declares (``declared``), not the one it was read as.
 
     What the batches decode is summed, so that all of them up to the cited row decode to at
     most ``max_decoded_bytes``: a footer can understate it (a DELTA value sharing an earlier
     one's bytes, a dictionary that every batch holds), and rows can be many."""
     group, rows, index = at.group, at.rows, at.index
-    tops = sorted({str(leaves[c]).split(".")[0] for c in columns})
     seen = decoded = 0
-    for batch in parquet.iter_batches(
-        batch_size=at.batch, row_groups=[group], columns=tops, use_threads=False
+    for batch in parquet.reader.iter_batches(
+        at.batch, row_groups=[group], column_indices=columns, use_threads=False
     ):
         decoded += batch.nbytes
         if decoded > limits.max_decoded_bytes:
@@ -1299,7 +1352,7 @@ def _parquet_record(
             return MediaFinding("unsafe_entry", subject, detail)
         if seen + batch.num_rows > index:
             row = batch.slice(index - seen, 1)
-            return [_parquet_cell(row, declared, c, str(leaves[c])) for c in columns]
+            return {c: _parquet_cell(row, declared, c, str(leaves[c])) for c in columns}
         seen += batch.num_rows
         if seen > rows:
             break
@@ -1307,22 +1360,40 @@ def _parquet_record(
     return MediaFinding("undecodable", subject, detail)
 
 
+def _declared_type(declared: Any, path: str) -> tuple[Any, bool]:
+    """The type the file declares for a leaf, followed through structs, and whether the path
+    reaches it; when a list or map is on the way, that list's or map's type and False."""
+    import pyarrow.types as pt
+
+    parts = path.split(".")
+    stated = declared.field(parts[0]).type
+    for part in parts[1:]:
+        if not pt.is_struct(stated) or stated.get_field_index(part) < 0:
+            return stated, False
+        stated = stated.field(part).type
+    return stated, True
+
+
+def _unread_cell(declared: Any, column: int, path: str) -> dict[str, Any]:
+    """A leaf inside a list or map: never read, so its cell is its declared type, undecoded."""
+    stated, _ = _declared_type(declared, path)
+    return {"column": column, "decoded": False, "name": path, "type": str(stated)}
+
+
 def _parquet_cell(row: Any, declared: Any, column: int, path: str) -> dict[str, Any]:
     """One leaf's value in a one-row batch: a struct path is followed to the leaf; the stored
     integer of a date, time, timestamp or duration (its unit and zone are in ``type``); a
-    decimal's exact text. A leaf inside a list or map is not decoded, as in the compiler.
-    ``type`` is the file's own (``declared``): a dictionary's value type."""
+    decimal's exact text. ``type`` is the file's own (``declared``): a dictionary's value type."""
     import pyarrow as pa
     import pyarrow.types as pt
 
     parts = path.split(".")
     array = row.column(row.schema.get_field_index(parts[0]))
-    stated = declared.field(parts[0]).type
     for part in parts[1:]:
         if not pt.is_struct(array.type) or array.type.get_field_index(part) < 0:
-            return {"column": column, "decoded": False, "name": path, "type": str(stated)}
+            return _unread_cell(declared, column, path)
         array = array.field(part)
-        stated = stated.field(part).type
+    stated, reached = _declared_type(declared, path)
     kind = array.type
     if pt.is_dictionary(kind):
         array = array.dictionary_decode()
@@ -1331,8 +1402,8 @@ def _parquet_cell(row: Any, declared: Any, column: int, path: str) -> dict[str, 
         stated = stated.value_type
     if pt.is_timestamp(kind) or pt.is_date(kind) or pt.is_time(kind) or pt.is_duration(kind):
         array = array.view(pa.int64() if kind.bit_width == 64 else pa.int32())
-    if pt.is_list(kind) or pt.is_large_list(kind) or pt.is_map(kind):
-        return {"column": column, "decoded": False, "name": path, "type": str(stated)}
+    if not reached or pt.is_list(kind) or pt.is_large_list(kind) or pt.is_map(kind):
+        return _unread_cell(declared, column, path)
     value = array.to_pylist()[0]
     cell: dict[str, Any] = {"column": column, "name": path, "type": str(stated)}
     return cell | ({"null": True} if value is None else {"value": _json_value(value)})

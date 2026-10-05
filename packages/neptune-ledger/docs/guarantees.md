@@ -128,7 +128,8 @@ image regions, pages, rows and values are extracted on request into the tenant's
 table, each row naming its evidence reference and its transform (decoder, decoder version,
 library versions). Two hydrations of one reference give equal rows and byte-identical
 artefacts, and a pinned media snapshot returns what it returned before. Hostile input (links,
-escaping paths, truncation, decompression and pixel bombs, aliases) is a finding
+escaping paths, truncation, decompression and pixel bombs, aliases, forged Parquet footers) is a
+finding; a Parquet row is decoded only in a child process under an OS memory cap
 ([ADR 0014](adr/0014-lance-media-store-and-evidence-resolution-to-bytes.md)).
 
 **Held by.** `tests/test_ledger_media.py`:
@@ -141,6 +142,8 @@ worked examples to its exact bytes and hydrates their pointers and rows;
 `test_parquet_guards_hold_before_any_page_is_decoded`,
 `test_parquet_dictionary_and_run_length_values_decode_one_row_not_one_batch`,
 `test_parquet_delta_pages_decode_and_their_shared_prefixes_stay_bounded`,
+`test_parquet_forged_footers_are_bounded_by_the_decoding_process_cap`,
+`test_parquet_rows_resolve_only_in_a_capped_child_process`,
 `test_two_hydrations_are_byte_identical`, `test_a_snapshot_pins_what_a_hydration_returns`,
 `test_hydration_is_lazy_and_video_bytes_slice_by_range`,
 `test_a_moved_source_resolves_to_a_finding_not_a_crash`, `test_a_changed_source_is_never_served`
