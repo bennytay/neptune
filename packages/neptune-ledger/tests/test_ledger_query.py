@@ -755,7 +755,7 @@ HOSTILE_MEMORY = [
 ]
 
 
-@pytest.mark.skipif(not can_cap_memory(), reason="needs an OS memory cap (Linux RLIMIT_AS)")
+@pytest.mark.skipif(not can_cap_memory(), reason="needs an OS memory cap (Linux 4.7+ RLIMIT_DATA)")
 def test_sql_memory_is_capped_outside_this_process(
     pg_uri: str, catalog: PostgresCatalog, mobile_twice: dict[str, Any]
 ) -> None:
@@ -775,7 +775,7 @@ def test_sql_memory_is_capped_outside_this_process(
     assert grown < 64 * 2**20, f"this process grew by {grown} bytes"
 
 
-@pytest.mark.skipif(not can_cap_memory(), reason="needs an OS memory cap (Linux RLIMIT_AS)")
+@pytest.mark.skipif(not can_cap_memory(), reason="needs an OS memory cap (Linux 4.7+ RLIMIT_DATA)")
 def test_sql_cuts_an_honest_large_answer_at_its_byte_limit_early(
     catalog: PostgresCatalog, mobile_twice: dict[str, Any]
 ) -> None:
@@ -789,6 +789,22 @@ def test_sql_cuts_an_honest_large_answer_at_its_byte_limit_early(
     assert 0 < table.num_rows < 100
     assert table.column("n").to_pylist() == list(range(table.num_rows)), "a prefix"
     assert table.nbytes <= 100_000
+
+
+@pytest.mark.skipif(not can_cap_memory(), reason="needs an OS memory cap (Linux 4.7+ RLIMIT_DATA)")
+def test_sql_answer_of_exactly_the_byte_limit_is_whole_and_uncut(
+    catalog: PostgresCatalog, mobile_twice: dict[str, Any]
+) -> None:
+    # 1 000 int64 rows are 8 000 bytes as held here (no validity bitmap where nothing is null).
+    statement = "SELECT range AS n FROM range(1000)"
+    whole = catalog.sql(statement, QuerySpec(kinds=("stream",)), QueryBudget(max_bytes=8000))
+    assert codes(whole) == []
+    assert whole.column("n").to_pylist() == list(range(1000))
+    meta = meta_of(whole)
+    assert meta.budget is not None and (meta.budget.rows, meta.budget.bytes) == (1000, 8000)
+    short = catalog.sql(statement, QuerySpec(kinds=("stream",)), QueryBudget(max_bytes=7999))
+    assert codes(short) == [("budget_exceeded", "bytes")]
+    assert short.num_rows == 999
 
 
 def test_sql_is_refused_where_memory_cannot_be_capped(

@@ -29,8 +29,8 @@ class QueryLimits:
     ``batch_rows`` is how many record rows one catalog statement returns when the scan can stop
     between batches (a lineage filter or a time limit); ``max_streams`` bounds the streams a
     series join reads; ``sql_millis`` bounds an SQL passthrough call (its scope's load and its
-    statement) and ``sql_memory`` is the address space, in bytes, its child process may map
-    beyond the engine and views it has loaded (ADR 0016 §7).
+    statement) and ``sql_memory`` is the private writable memory, in bytes, its child process
+    may hold beyond the engine and views it has loaded (ADR 0016 §7).
     """
 
     max_rows: int = 1_000_000

@@ -236,7 +236,10 @@ class QueryEngine:
         table, findings = run_sql(statement, views, out, self.limits.sql_memory)
         if table is None:
             return _rejected(meta.as_of, (*_of_scope(meta.findings), *findings))
-        table = out.cut(table)
+        # The child already cut its batches to the limits, counting bytes batch by batch as
+        # they are held here; recombining them would count fewer, so they stay as sent.
+        if table.num_rows > out.max_rows or table.nbytes > out.max_bytes:
+            table = out.cut(table)
         report = out.report(table)
         # A statement over a cut scope answers over a prefix of it: the report lists the limits
         # that cut either, the findings say which (``scope.*``), and the answer is no more

@@ -5,9 +5,11 @@ The statement is hostile input. Before it runs:
 - DuckDB's own parser must find exactly one statement, of type ``SELECT``; anything else
   (DDL, DML, ``SET``, ``PRAGMA`` writes, ``ATTACH``, ``COPY``, ``INSTALL``, ``LOAD``, ``CALL``,
   ``EXPORT``, ``EXPLAIN``, a second statement) is refused;
-- the statement runs in a child process (``sql_child.py``) whose address space is capped by the
-  operating system (``RLIMIT_AS``): whatever the statement allocates, it cannot grow this
-  process, and at the cap the child fails or dies while this process keeps the rows it has;
+- the statement runs in a child process (``sql_child.py``) whose private writable memory is
+  capped by the operating system (``RLIMIT_DATA``): whatever the statement allocates, it cannot
+  grow this process, and at the cap the child fails or dies while this process keeps the rows
+  it has. The child gets a minimal environment (no secret this process holds), no file
+  descriptor but its pipes, its own deadline, and dies with this process;
 - in the child, a new in-memory database is opened with external access off (no file, glob,
   attach, copy or HTTP), extension install and autoload off, unsigned and community extensions
   refused, Python replacement scans off, one thread, a memory limit, no spilling to disk, and its
@@ -16,12 +18,16 @@ The statement is hostile input. Before it runs:
 
 The child fetches small batches and cuts them to the row and byte limits itself, so an honest
 statement stops early and this process never holds more than the byte limit of rows. A
-watchdog kills the child at the budget's deadline. Engine errors are findings. Where the
-operating system cannot cap a process's memory, the statement is refused.
+watchdog kills the child at the budget's deadline, and the child ends itself just after it.
+Engine errors are findings. Where the operating system cannot cap a process's memory, the
+statement is refused.
 """
 
 import contextlib
 import json
+import os
+import platform
+import signal
 import struct
 import subprocess
 import sys
@@ -41,17 +47,34 @@ CHILD: Final = Path(__file__).with_name("sql_child.py")
 # A frame larger than the byte limit by more than this is not one the child writes.
 FRAME_SLACK: Final = 1 << 20
 EXIT_WAIT: Final = 5.0
+# How the child ends itself at its own deadline (``sql_child.arm_deadline``).
+DEADLINE_SIGNALS: Final = frozenset({-signal.SIGALRM, -signal.SIGXCPU})
 
 
 def can_cap_memory() -> bool:
-    """Whether the operating system enforces the child's address-space cap: Linux only."""
+    """Whether the operating system enforces the child's memory cap: Linux 4.7 or later, where
+    ``RLIMIT_DATA`` counts every private writable mapping."""
     if not sys.platform.startswith("linux"):
         return False
     try:
         import resource
     except ImportError:  # pragma: no cover - every Linux Python has it
         return False
-    return hasattr(resource, "RLIMIT_AS") and Path("/proc/self/status").is_file()
+    try:
+        major, minor = (int(part) for part in platform.release().split(".")[:2])
+    except ValueError:
+        return False
+    return (
+        (major, minor) >= (4, 7)
+        and hasattr(resource, "RLIMIT_DATA")
+        and Path("/proc/self/status").is_file()
+    )
+
+
+def child_environment() -> dict[str, str]:
+    """The child's whole environment: a search path, a locale and at most two glibc malloc
+    arenas. Nothing else of this process's environment (keys, home, extension paths) passes."""
+    return {"PATH": os.environ.get("PATH", os.defpath), "LANG": "C.UTF-8", "MALLOC_ARENA_MAX": "2"}
 
 
 def _refused(detail: str) -> tuple[None, list[CatalogFinding]]:
@@ -74,7 +97,7 @@ def run_sql(
     if not can_cap_memory():
         detail = (
             "SQL passthrough runs only where the operating system caps the statement's memory"
-            f" (RLIMIT_AS on Linux); this platform is {sys.platform}"
+            f" (RLIMIT_DATA on Linux 4.7+); this platform is {sys.platform} {platform.release()}"
         )
         return None, [CatalogFinding("invalid_request", "platform", detail)]
     left = budget.remaining()
@@ -113,13 +136,24 @@ class _Child:
         self.timed_out = threading.Event()
         self.schema: Any = None
         self.batches: list[Any] = []
+        self.held = 0
 
     def run(self, left: float | None) -> tuple[Any | None, list[CatalogFinding]]:
+        # This thread waits for the child below, so it outlives it: the child's parent-death
+        # signal fires when this thread ends, which is only after the child has.
         proc = subprocess.Popen(
-            [sys.executable, "-I", str(CHILD)],
+            [
+                sys.executable,
+                "-I",
+                str(CHILD),
+                str(os.getpid()),
+                "-" if left is None else repr(left),
+            ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            env=child_environment(),
+            close_fds=True,
         )
         watchdog = None if left is None else threading.Timer(left, self._expire, (proc,))
         try:
@@ -144,7 +178,7 @@ class _Child:
                 self.budget.exceeded.add("rows")
             if "bytes" in cut:
                 self.budget.exceeded.add("bytes")
-        elif self.timed_out.is_set():
+        elif self.timed_out.is_set() or proc.returncode in DEADLINE_SIGNALS:
             self.budget.time_ran_out()
         else:
             # It ended without saying how: it died at its memory cap, in an allocation its
@@ -180,18 +214,17 @@ class _Child:
             stdin.close()
         except (BrokenPipeError, OSError, pa.ArrowException):
             return "eof"  # the child is gone: what it wrote, if anything, says why
-        received = 0
         while True:
             head = stdout.read(1 + LENGTH.size)
             if len(head) < 1 + LENGTH.size:
                 return "eof"
             tag, (size,) = head[:1], LENGTH.unpack(head[1:])
-            if size > self.budget.max_bytes + FRAME_SLACK - received:
+            # Each batch fits the bytes left, so its frame does with an IPC header's slack.
+            if size > self.budget.max_bytes - self.held + FRAME_SLACK:
                 return None
             payload = stdout.read(size)
             if len(payload) < size:
                 return "eof"
-            received += size
             try:
                 if tag == b"E":
                     end: dict[str, Any] = json.loads(payload)
@@ -199,7 +232,11 @@ class _Child:
                 if tag == b"S" and self.schema is None:
                     self.schema = pa.ipc.read_schema(pa.py_buffer(payload))
                 elif tag == b"B" and self.schema is not None:
-                    self.batches.extend(pa.ipc.open_stream(payload).read_all().to_batches())
+                    batches = pa.ipc.open_stream(payload).read_all().to_batches()
+                    self.held += sum(batch.nbytes for batch in batches)
+                    if self.held > self.budget.max_bytes:
+                        return None
+                    self.batches.extend(batches)
                 else:
                     return None
             except (ValueError, pa.ArrowException):

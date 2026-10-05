@@ -175,18 +175,35 @@ Four things break if this is wrong:
      `python -I`), never in the Ledger's own. DuckDB's `memory_limit` bounds only its buffer
      manager: result chunks and the Arrow conversion sit outside it, so in-process a single
      statement could grow the Ledger without bound (a 820 MB result took it from 155 MB to
-     1.7 GB). The parent sends the views as Arrow IPC on the child's stdin. The child loads
-     them, seals the engine, and then lowers its own `RLIMIT_AS`, soft and hard, to the address
-     space it has mapped plus `QueryLimits.sql_memory` (1 GiB by default). Only then does it
-     run the statement. An allocation past the cap fails inside the child. If the child can
+     1.7 GB). The child starts with a minimal, explicit environment (`PATH`,
+     `LANG=C.UTF-8`, `MALLOC_ARENA_MAX=2` and nothing else: no API key, no `HOME`-derived
+     secret, no DuckDB extension path) and with every inherited file descriptor closed but its
+     two pipes. Its first act is `PR_SET_PDEATHSIG` (`SIGKILL`), checked against the parent's
+     pid so a parent already gone ends it at once. The signal fires when the parent thread
+     that started it ends, and that thread waits for the child, so it outlives it. Then it
+     arms its own deadline, the call's time left plus 1 s: `SIGALRM` with its default action,
+     and `RLIMIT_CPU` behind it in case the alarm is blocked. An orphan therefore never runs
+     on, and a child the parent's watchdog misses ends itself; either signal is a `time` cut.
+     The parent sends the views as Arrow IPC on the child's stdin. The child loads them, seals
+     the engine, and then lowers its own `RLIMIT_DATA`, soft and hard, to the private writable
+     memory it holds (`VmData`, measured then) plus `QueryLimits.sql_memory` (1 GiB by
+     default). Only then does it run the statement. `RLIMIT_DATA` (Linux 4.7+) counts every
+     private writable mapping, so an allocator's `mmap` past it fails, but not `PROT_NONE`
+     reservations. An address-space cap (`RLIMIT_AS`) was tried first and killed honest
+     statements at random: `import duckdb` starts a thread per core, glibc reserves a 64 MiB
+     arena for each one's first allocation, and those reservations spent the 1 GiB headroom
+     while the child's resident memory stayed near 110 MB (`SELECT sum(range) FROM
+     range(1500000000)` was cut for `memory` in 7 runs of 12; now 0 of 54).
+     `MALLOC_ARENA_MAX=2` keeps those reservations few as well. An allocation past the cap
+     fails inside the child. If the child can
      report it, it does, and otherwise it dies. Either way the Ledger keeps the rows it
      already has, a prefix, and adds a `budget_exceeded` finding with subject `memory`. The
      limit `memory` is in `BudgetReport.exceeded` and makes the answer `reproducible: false`,
      because where an allocator fails is the platform's, not the spec's. Measured on the
-     repro: the Ledger stays at about 110 MB, and the child stops at about 0.9 GB. The cap
+     repro: the Ledger stays at about 110 MB, and the child stops at its cap. The cap
      stays at 1 GiB: it is twice the default byte budget, room for DuckDB's read-ahead of a
-     few 2 048-row vectors. Where the operating system cannot enforce the cap (not Linux, no
-     `RLIMIT_AS`, no `/proc`), passthrough is refused with `invalid_request` (subject
+     few 2 048-row vectors. Where the operating system cannot enforce the cap (not Linux,
+     Linux before 4.7, no `RLIMIT_DATA`, no `/proc`), passthrough is refused with `invalid_request` (subject
      `platform`) and never runs uncapped. Parsing runs nothing, so the statement is classified
      in the parent first, and a refused statement starts no process.
    - **Engine.** A new in-memory DuckDB per call in the child, configured before any user text
@@ -209,10 +226,15 @@ Four things break if this is wrong:
      call: the scope loads under the smaller of its own time limit and the call's, and the
      statement gets the time left. The child fetches batches of 1 024 rows, cuts each to the
      rows and bytes left, and stops at the first cut. So an honest large answer stops after
-     its first batches, and the Ledger never holds more than the byte limit of rows. Batches
-     are counted one by one, which can stop a byte cut a few rows short of the longest prefix
-     of the whole table. It is still a deterministic, flagged prefix. A watchdog kills the
-     child at the deadline. That gives a `budget_exceeded` finding for `time` and
+     its first batches, and the Ledger never holds more than the byte limit of rows. The
+     child counts a batch's bytes as the Ledger will hold them: on the batch read back from
+     its IPC stream, which has no validity bitmap where nothing is null. It cuts the last
+     batch by bisection on that count, so the answer is the longest prefix that fits. The
+     Ledger keeps the batches as sent (recombining them would count fewer bytes), so
+     `BudgetReport.bytes` is the same count: 1 000 `int64` rows are exactly 8 000 bytes. It
+     refuses a frame larger than the bytes left plus 1 MiB of IPC headers, and rows past the
+     byte limit, as a broken protocol. A
+     watchdog kills the child at the deadline. That gives a `budget_exceeded` finding for `time` and
      `reproducible: false`. Engine errors (parser, binder, permission) are `invalid_request`
      findings with DuckDB's first message line, never exceptions.
    - **Determinism.** Output order is the statement's. With one thread and insertion order
