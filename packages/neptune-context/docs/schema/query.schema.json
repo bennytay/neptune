@@ -272,6 +272,7 @@
                   "governed_by",
                   "has_calibration",
                   "has_configuration",
+                  "has_name",
                   "has_summary",
                   "located_at",
                   "maintenance_state",
@@ -289,7 +290,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 21,
+              "maxItems": 22,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true

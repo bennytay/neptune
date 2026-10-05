@@ -243,7 +243,7 @@ def test_clock_mismatch_findings_follow_the_versions_they_name() -> None:
 
 def test_closure_config_hash_covers_priorities_and_vocabulary() -> None:
     base = resolver_config_hash(CORE_PREDICATES, PRIORITIES)
-    assert resolver_config(CORE_PREDICATES, PRIORITIES)["vocabulary_version"] == 2
+    assert resolver_config(CORE_PREDICATES, PRIORITIES)["vocabulary_version"] == 3
     assert resolver_config_hash(CORE_PREDICATES, {**PRIORITIES, "memory.a": 3}) != base
     wider = CORE_PREDICATES.extend(
         replace(CORE_PREDICATES.spec("located_at"), version=2, domain=frozenset(NodeType))

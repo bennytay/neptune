@@ -1084,19 +1084,25 @@ PIPELINES: Final = {
 }
 
 
+def ingest_command(name: str, out: Path, workspace: Path) -> list[str]:
+    """The ``neptune ingest`` command line for ``sources/<name>`` (see ``ingest``)."""
+    command = [str(Path(sys.executable).parent / "neptune"), "ingest", str(SOURCES / name)]
+    flags = ["--isolation", "in_process", "--job", "archetype", "--no-plugins"]
+    return [*command, "--out", str(out), "-w", str(workspace), *flags]
+
+
 def ingest(name: str, out: Path) -> None:
     """``neptune ingest`` over ``sources/<name>`` into ``out``, without ``volatile/``.
 
     The command line, as a subprocess: it applies the folder's ``neptune.yaml``, and ``in_process``
     keeps the receipt independent of the host's sandbox level (the compiler's own golden packages
-    do the same). The job is named ``archetype`` so its envelope is stable.
+    do the same). The job is named ``archetype`` so its envelope is stable. ``--no-plugins`` keeps
+    the compiler's own adapters only: with Deploy's plugin loaded, every source's probe would list
+    its decline in a ``neptune.probe.unsupported`` finding and the base package would hold Deploy's
+    presence (ADR 0005 §8, ADR 0012 §4).
     """
-    command = [str(Path(sys.executable).parent / "neptune"), "ingest", str(SOURCES / name)]
-    flags = ["--isolation", "in_process", "--job", "archetype"]
     with tempfile.TemporaryDirectory() as workspace:
-        subprocess.run(
-            [*command, "--out", str(out), "-w", workspace, *flags], check=True, capture_output=True
-        )
+        subprocess.run(ingest_command(name, out, Path(workspace)), check=True, capture_output=True)
     shutil.rmtree(out / "volatile", ignore_errors=True)
 
 

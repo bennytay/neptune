@@ -94,11 +94,9 @@ def thread(
 def link(
     kind: str, name: str, left: LogicalId, right: LogicalId, when: int, **extra: object
 ) -> Record:
-    sides = {
-        "identity_link": ("left", "right"),
-        "configuration_lineage": ("predecessor", "successor"),
-        "operator_assertion": ("subject", "object"),
-    }[kind]
+    """A ``configuration_lineage`` stand-in (ADR 0003 §1); identity links and assertions are the
+    compiler's kinds (``memory_identity_records``)."""
+    sides = {"configuration_lineage": ("predecessor", "successor")}[kind]
     return {
         "kind": kind,
         "id": rid(kind, name),
