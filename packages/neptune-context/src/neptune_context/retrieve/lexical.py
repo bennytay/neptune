@@ -55,11 +55,18 @@ from neptune_context.packets.model import (
 )
 from neptune_context.pinned import claim_beyond_pin, finding_beyond_pin
 from neptune_context.query.model import TextChannel, TextField
+from neptune_context.retrieve.analysis import (
+    MAX_PHRASE_TERMS,
+    MAX_QUERY_CHARS,
+    MAX_QUERY_CLAUSES,
+    SEPARATOR,
+)
 from neptune_context.retrieve.bm25 import (
     DEFAULT_TENANT,
     Bm25Index,
     IndexedText,
     IndexFinding,
+    IndexFindingCode,
     Inference,
     SearchRequest,
     TextIndex,
@@ -82,6 +89,7 @@ if TYPE_CHECKING:
 PASSAGE_FIELDS: Final = frozenset({TextField.RECORD, TextField.DOCUMENT, TextField.FINDING})
 CLAIM_FIELDS: Final = frozenset({TextField.CLAIM_TEXT, TextField.DECLARED_ID})
 MAX_PASSAGE_CHARS: Final = 16_000
+MAX_CLAIM_TEXT_CHARS: Final = 16_000
 MAX_GAP_REFS: Final = 100
 OVERFETCH: Final = 10  # hits read per requested item: some are dropped when read back
 MIN_READ: Final = 100
@@ -285,7 +293,10 @@ class _ClaimRef:
     subject: NodeRef
     predicate: str
     claim: ClaimId
+    field: TextField
+    recorded_at: LedgerTx
     superseded_at: LedgerTx | None
+    inferred: bool
 
 
 def _claim_texts(claim: Claim) -> list[tuple[TextField, str]]:
@@ -296,7 +307,7 @@ def _claim_texts(claim: Claim) -> list[tuple[TextField, str]]:
     ids = [claim.subject.node_id]
     if isinstance(obj, NodeRef):
         ids.append(obj.node_id)
-    out.append((TextField.DECLARED_ID, " ".join(ids)))
+    out.append((TextField.DECLARED_ID, SEPARATOR.join(ids)))
     return out
 
 
@@ -315,26 +326,75 @@ class LexicalCorpus:
         self._claims: dict[str, _ClaimRef] = {}
         self._passages: dict[str, Passage] = {}
         self._superseders: dict[ClaimId, list[tuple[int, ClaimId]]] = {}
+        # unit key -> (what limited it, its field, the claim or record it concerns)
+        self.limited: dict[str, tuple[IndexFindingCode, TextField, str]] = {}
         self._digest: str | None = None
 
     def digest(self) -> str:
-        """A content id of what is indexed (every unit key names its claim or passage content),
-        the coverage points and the skipped records: what the engine's config hash needs."""
+        """A content id of everything that can change an answer: every claim unit (claim, field,
+        subject, predicate, ``recorded_at``, ``superseded_at``, inferred, cut), every passage's
+        item content and registration, the supersessions, the coverage points, the records skipped
+        and the units refused or cut. What the engine's config hash needs."""
         if self._digest is None:
             self._digest = content_id(
                 dumps(
                     {
-                        "claims": sorted(self._claims),
+                        "claims": [
+                            [
+                                key,
+                                r.claim,
+                                str(r.field),
+                                str(r.subject.node_type),
+                                r.subject.node_id,
+                                r.predicate,
+                                r.recorded_at,
+                                -1 if r.superseded_at is None else r.superseded_at,
+                                r.inferred,
+                            ]
+                            for key, r in sorted(self._claims.items())
+                        ],
                         "claims_through": self.claims_through or 0,
-                        "passages": sorted(self._passages),
+                        "limited": [
+                            [key, str(code), str(field), ref]
+                            for key, (code, field, ref) in sorted(self.limited.items())
+                        ],
+                        "passages": [
+                            [
+                                key,
+                                str(p.field),
+                                p.registered_at,
+                                p.item(_placeholder()).content_json(),
+                            ]
+                            for key, p in sorted(self._passages.items())
+                        ],
                         "passages_through": self.passages_through or 0,
                         "skipped": sorted(
                             [s.record_id, str(s.field), s.reason] for s in self.skipped
                         ),
+                        "superseders": [
+                            [claim, sorted(by)] for claim, by in sorted(self._superseders.items())
+                        ],
                     }
                 )
             )
         return self._digest
+
+    def _note(self, findings: Iterable[IndexFinding]) -> tuple[IndexFinding, ...]:
+        """Remember what the index refused or cut; drop the maps of what it refused."""
+        out = tuple(findings)
+        for f in out:
+            if f.code not in (IndexFindingCode.INDEX_FULL, IndexFindingCode.TRUNCATED):
+                continue
+            ref = self._claims.get(f.key)
+            passage = self._passages.get(f.key)
+            if ref is not None:
+                self.limited[f.key] = (f.code, ref.field, ref.claim)
+            elif passage is not None:
+                self.limited[f.key] = (f.code, passage.field, passage.document)
+            if f.code is IndexFindingCode.INDEX_FULL:
+                self._claims.pop(f.key, None)
+                self._passages.pop(f.key, None)
+        return out
 
     def add_claims(self, claims: Iterable[Claim], *, through: LedgerTx) -> tuple[IndexFinding, ...]:
         """Index every version of every claim recorded up to ``through`` (a graph document's
@@ -342,15 +402,29 @@ class LexicalCorpus:
         keep their ``recorded_at`` and ``superseded_at``, so any earlier ``as_of`` is searchable."""
         self._digest = None
         units: list[IndexedText] = []
+        cut: list[IndexFinding] = []
         for claim in claims:
             for claimed in claim.supersedes:
                 self._superseders.setdefault(claimed, []).append((claim.recorded_at, claim.id))
             until = None if isinstance(claim.superseded_at, Open) else claim.superseded_at
             for text_field, text in _claim_texts(claim):
                 key = f"claim:{claim.id}:{text_field}:{claim.recorded_at}"
+                if len(text) > MAX_CLAIM_TEXT_CHARS:
+                    text = text[:MAX_CLAIM_TEXT_CHARS]
+                    detail = f"indexed the first {MAX_CLAIM_TEXT_CHARS} characters only"
+                    cut.append(IndexFinding(IndexFindingCode.TRUNCATED, key, detail))
                 # first wins, as in the index: a key held with other content is refused there
                 self._claims.setdefault(
-                    key, _ClaimRef(claim.subject, claim.predicate, claim.id, until)
+                    key,
+                    _ClaimRef(
+                        claim.subject,
+                        claim.predicate,
+                        claim.id,
+                        text_field,
+                        claim.recorded_at,
+                        until,
+                        is_inferred(claim.assertion_kind),
+                    ),
                 )
                 units.append(
                     IndexedText(
@@ -365,7 +439,7 @@ class LexicalCorpus:
                 )
                 self.fields.add(text_field)
         self.claims_through = max(self.claims_through or 0, through)
-        return self.index.add(self.tenant, units)
+        return self._note([*cut, *self.index.add(self.tenant, units)])
 
     def add_passages(
         self, passages: Iterable[Passage], *, through: int
@@ -387,7 +461,7 @@ class LexicalCorpus:
                 )
             )
         self.passages_through = max(self.passages_through or 0, through)
-        return self.index.add(self.tenant, units)
+        return self._note(self.index.add(self.tenant, units))
 
     def add_batch(self, batch: PassageBatch) -> tuple[IndexFinding, ...]:
         """Passages from ``passages_from_catalog``; its skipped records are remembered so the
@@ -489,7 +563,14 @@ class LexicalChannel:
         if result.clauses == 0:
             gaps.append(_gap(GapCode.NOT_COVERED, _TEXT_AT, "the text has no searchable terms"))
         if result.truncated:
-            gaps.append(_gap(GapCode.NOT_COVERED, _TEXT_AT, "clauses beyond the first 64 ignored"))
+            gaps.append(
+                _gap(
+                    GapCode.NOT_COVERED,
+                    _TEXT_AT,
+                    f"query text beyond the bounds was ignored ({MAX_QUERY_CHARS} characters, "
+                    f"{MAX_QUERY_CLAUSES} clauses, {MAX_PHRASE_TERMS} terms to a phrase)",
+                )
+            )
         if result.total > len(result.matches):
             gaps.append(
                 _gap(
@@ -565,6 +646,20 @@ class LexicalChannel:
                     f"the snapshot reads the catalog at {snapshot.as_of}",
                 )
             )
+        for code, what in (
+            (IndexFindingCode.INDEX_FULL, "were not indexed: the index is full"),
+            (IndexFindingCode.TRUNCATED, "were indexed in part: the text is too long"),
+        ):
+            refs = sorted({r for c, f, r in corpus.limited.values() if c is code and f in fields})
+            if refs:
+                gaps.append(
+                    _gap(
+                        GapCode.NOT_COVERED,
+                        _FIELDS_AT,
+                        f"{len(refs)} claim(s) or record(s) {what}",
+                        tuple(refs[:MAX_GAP_REFS]),
+                    )
+                )
         unread = sorted({s.record_id for s in corpus.skipped if s.field in fields})
         if unread:
             gaps.append(

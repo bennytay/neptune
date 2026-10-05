@@ -97,7 +97,17 @@ facts decide it differently:
    analyser, stemmer, k1, b, bounds), the tenant, the read caps and a digest of the indexed content
    and coverage points, so it enters `LocalEngine`'s `produced_by` hash and two engines that may
    answer differently never share one. It is passed as `LocalEngine(memory, channels=[...])`.
-11. **A corpus is rebuilt, not edited.** Adding an existing key with different content is refused
+11. **Hostile text is bounded.** Analysis cuts a text at 1M characters and splits a compound at 32
+   parts; an index unit is cut at 200 000 characters, 20 000 terms; claim text at 16 000 characters;
+   a partition refuses units beyond 500 000 units or 20M terms (`index_full`); a query is cut at 8192
+   characters, 64 clauses and 32 terms to a phrase. Phrase matching binary-searches the postings and
+   copies nothing per document. Every cut, refusal and truncation is a `not_covered` gap naming the
+   claims or records concerned. The ids of a claim join with a separator no phrase matches across
+   (a position is skipped), so a phrase never spans subject and object. `settings` also names the
+   Unicode database version, since case folding and word classes follow it, and the corpus digest
+   covers `recorded_at`, `superseded_at`, `inferred`, registration, assertion kind and provenance.
+   There is no per-query stemming opt-out: a tenant that wants none picks the `verbatim` analyser.
+12. **A corpus is rebuilt, not edited.** Adding an existing key with different content is refused
    (`conflicting_key`, first wins); new Memory transactions or a new parser lineage mean a new corpus.
 
 ## Alternatives considered

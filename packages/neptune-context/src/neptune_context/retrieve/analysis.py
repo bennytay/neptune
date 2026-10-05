@@ -39,6 +39,11 @@ if TYPE_CHECKING:
 JOINERS: Final = frozenset("-_./:")
 MAX_WORD_CHARS: Final = 128
 MAX_QUERY_CLAUSES: Final = 64
+MAX_PHRASE_TERMS: Final = 32  # terms in one phrase clause; a longer phrase is cut and reported
+MAX_QUERY_CHARS: Final = 8192  # characters of query text analysed
+MAX_TEXT_CHARS: Final = 1_000_000  # characters of one text analysed (indexes cap lower and say so)
+MAX_COMPOUND_PARTS: Final = MAX_PHRASE_TERMS  # a longer compound is split into compounds this long
+SEPARATOR: Final = "\x1f"  # a phrase never matches across it (positions skip one)
 
 _QUOTED = re.compile(r'"([^"]*)"')
 _VOWELS = frozenset("aeiouy")
@@ -103,7 +108,12 @@ def _compounds(text: str) -> Iterator[list[str]]:
             j += 1
         current.append(_word(text[i:j]))
         i = j
-        if i + 1 < n and text[i] in JOINERS and _is_word_char(text[i + 1]):
+        if (
+            len(current) < MAX_COMPOUND_PARTS
+            and i + 1 < n
+            and text[i] in JOINERS
+            and _is_word_char(text[i + 1])
+        ):
             i += 1
             continue
         yield current
@@ -153,32 +163,44 @@ class Analyzer:
             yield parts
 
     def tokens(self, text: str, mode: Mode, limit: int | None = None) -> tuple[Token, ...]:
-        """The terms of ``text`` with consecutive positions and compound boundaries; at most
-        ``limit`` of them (the analysis stops there, so a hostile text costs a bounded amount)."""
+        """The terms of ``text`` with positions and compound boundaries; at most ``limit`` of them
+        and from at most ``MAX_TEXT_CHARS`` characters (the analysis stops there, so a hostile
+        text costs a bounded amount). Positions are consecutive except across ``SEPARATOR``,
+        which leaves one position unused so no phrase matches over it."""
         out: list[Token] = []
-        for parts in self._terms(text, mode):
-            for i, term in enumerate(parts):
-                out.append(Token(term, len(out), i == 0, i == len(parts) - 1))
-            if limit is not None and len(out) >= limit:
-                return tuple(out[:limit])
+        position = 0
+        for segment in text[:MAX_TEXT_CHARS].split(SEPARATOR):
+            before = len(out)
+            for parts in self._terms(segment, mode):
+                for i, term in enumerate(parts):
+                    out.append(Token(term, position, i == 0, i == len(parts) - 1))
+                    position += 1
+                if limit is not None and len(out) >= limit:
+                    return tuple(out[:limit])
+            if len(out) > before:
+                position += 1
         return tuple(out)
 
     def query(self, text: str, mode: Mode) -> tuple[tuple[Clause, ...], bool]:
-        """The clauses of a query and whether any were dropped to stay within
-        ``MAX_QUERY_CLAUSES``. A quoted segment is one required phrase; outside quotes each
-        compound is an optional phrase of its parts, anchored when it has several. Unbalanced
-        quotes are punctuation."""
+        """The clauses of a query and whether anything was dropped to stay within the bounds
+        (``MAX_QUERY_CHARS`` characters, ``MAX_QUERY_CLAUSES`` clauses, ``MAX_PHRASE_TERMS`` terms
+        a phrase). A quoted segment is one required phrase; outside quotes each compound is an
+        optional phrase of its parts, anchored when it has several. Unbalanced quotes are
+        punctuation."""
+        cut = len(text) > MAX_QUERY_CHARS
+        text = text[:MAX_QUERY_CHARS]
         clauses: list[Clause] = []
         cursor = 0
         for quoted in _QUOTED.finditer(text):
             clauses.extend(self._loose(text[cursor : quoted.start()], mode))
             terms = tuple(t for parts in self._terms(quoted.group(1), mode) for t in parts)
             if terms:
-                clauses.append(Clause(terms, required=True))
+                cut = cut or len(terms) > MAX_PHRASE_TERMS
+                clauses.append(Clause(terms[:MAX_PHRASE_TERMS], required=True))
             cursor = quoted.end()
         clauses.extend(self._loose(text[cursor:], mode))
         unique = list(dict.fromkeys(clauses))
-        return tuple(unique[:MAX_QUERY_CLAUSES]), len(unique) > MAX_QUERY_CLAUSES
+        return tuple(unique[:MAX_QUERY_CLAUSES]), cut or len(unique) > MAX_QUERY_CLAUSES
 
     def _loose(self, text: str, mode: Mode) -> list[Clause]:
         return [Clause(tuple(p), anchored=len(p) > 1) for p in self._terms(text, mode)]

@@ -26,6 +26,8 @@ postings in memory:
 from __future__ import annotations
 
 import math
+import unicodedata
+from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -35,6 +37,8 @@ from neptune_context.query.model import TextField
 from neptune_context.retrieve.analysis import (
     ENGLISH,
     JOINERS,
+    MAX_PHRASE_TERMS,
+    MAX_QUERY_CHARS,
     MAX_QUERY_CLAUSES,
     MAX_WORD_CHARS,
     Analyzer,
@@ -54,6 +58,9 @@ SCORE_DECIMALS: Final = 9
 MAX_KEY_CHARS: Final = 512
 MAX_TENANT_CHARS: Final = 128
 MAX_DOCUMENT_TOKENS: Final = 20_000
+MAX_UNIT_CHARS: Final = 200_000
+MAX_PARTITION_UNITS: Final = 500_000
+MAX_PARTITION_TOKENS: Final = 20_000_000
 MAX_LIMIT: Final = 10_000
 DEFAULT_TENANT: Final = "default"
 # Identifier fields are matched verbatim; every other field is prose.
@@ -78,7 +85,8 @@ class Inference(StrEnum):
 class IndexFindingCode(StrEnum):
     CONFLICTING_KEY = "conflicting_key"  # the key is held with different content; first wins
     EMPTY_TEXT = "empty_text"  # nothing searchable in the text; not indexed
-    TRUNCATED = "truncated"  # indexed up to MAX_DOCUMENT_TOKENS terms
+    TRUNCATED = "truncated"  # indexed in part: MAX_UNIT_CHARS characters, MAX_DOCUMENT_TOKENS terms
+    INDEX_FULL = "index_full"  # the partition is at its unit or token cap; not indexed
 
 
 @dataclass(frozen=True)
@@ -192,6 +200,7 @@ class _Partition:
     postings: dict[str, dict[int, tuple[int, ...]]] = field(
         default_factory=lambda: defaultdict(dict)
     )
+    tokens: int = 0
 
 
 def mode_of(field_: TextField) -> Mode:
@@ -207,7 +216,11 @@ class Bm25Index:
         analyzers: Mapping[str, str] | None = None,
         *,
         default_analyzer: str = ENGLISH.name,
+        max_units: int = MAX_PARTITION_UNITS,
+        max_tokens: int = MAX_PARTITION_TOKENS,
     ) -> None:
+        self._max_units = max_units
+        self._max_tokens = max_tokens
         self._default = analyzer_for(default_analyzer)
         self._analyzers = {check_tenant(t): analyzer_for(n) for t, n in (analyzers or {}).items()}
         self._partitions: dict[str, _Partition] = {}
@@ -224,9 +237,15 @@ class Bm25Index:
             "joiners": "".join(sorted(JOINERS)),
             "k1": K1,
             "max_document_tokens": MAX_DOCUMENT_TOKENS,
+            "max_partition_tokens": self._max_tokens,
+            "max_partition_units": self._max_units,
+            "max_phrase_terms": MAX_PHRASE_TERMS,
+            "max_query_chars": MAX_QUERY_CHARS,
+            "max_text_chars": MAX_UNIT_CHARS,
             "max_query_clauses": MAX_QUERY_CLAUSES,
             "max_word_chars": MAX_WORD_CHARS,
             "score_decimals": SCORE_DECIMALS,
+            "unicode": unicodedata.unidata_version,
             "stemmer": "english-light/1" if self.analyzer(tenant).name == "english" else "none",
             "verbatim_fields": sorted(str(f) for f in VERBATIM_FIELDS),
         }
@@ -251,8 +270,28 @@ class Bm25Index:
                         )
                     )
                 continue
+            if len(part.docs) >= self._max_units or part.tokens >= self._max_tokens:
+                findings.append(
+                    IndexFinding(
+                        IndexFindingCode.INDEX_FULL,
+                        unit.key,
+                        f"the partition holds {len(part.docs)} unit(s) and {part.tokens} term(s):"
+                        " at its cap",
+                    )
+                )
+                continue
             mode = mode_of(unit.field)
-            tokens = analyzer.tokens(unit.text, mode, MAX_DOCUMENT_TOKENS + 1)
+            text = unit.text
+            if len(text) > MAX_UNIT_CHARS:
+                text = text[:MAX_UNIT_CHARS]
+                findings.append(
+                    IndexFinding(
+                        IndexFindingCode.TRUNCATED,
+                        unit.key,
+                        f"indexed the first {MAX_UNIT_CHARS} characters only",
+                    )
+                )
+            tokens = analyzer.tokens(text, mode, MAX_DOCUMENT_TOKENS + 1)
             if not tokens:
                 findings.append(
                     IndexFinding(IndexFindingCode.EMPTY_TEXT, unit.key, "no searchable terms")
@@ -267,6 +306,7 @@ class Bm25Index:
                         f"indexed the first {MAX_DOCUMENT_TOKENS} terms only",
                     )
                 )
+            part.tokens += len(tokens)
             docno = len(part.docs)
             part.docs.append(
                 _Doc(
@@ -329,9 +369,16 @@ class Bm25Index:
         return True
 
 
+def _holds(positions: tuple[int, ...], at: int) -> bool:
+    """Whether the sorted ``positions`` contain ``at``."""
+    i = bisect_left(positions, at)
+    return i < len(positions) and positions[i] == at
+
+
 def _phrase_counts(part: _Partition, clause: Clause, docs: set[int]) -> dict[int, int]:
     """For each document in ``docs`` holding the clause's terms adjacent and in order (and, when
-    anchored, as one whole compound), how many times."""
+    anchored, as one whole compound), how many times. Binary searches over the postings; nothing
+    is copied per document, so a long phrase costs time but not memory."""
     lists = []
     for term in clause.terms:
         posting = part.postings.get(term)
@@ -344,11 +391,11 @@ def _phrase_counts(part: _Partition, clause: Clause, docs: set[int]) -> dict[int
     for docno, starts in first.items():
         if docno not in docs or any(docno not in other for other in rest):
             continue
-        followers = [set(other[docno]) for other in rest]
+        followers = [other[docno] for other in rest]
         doc = part.docs[docno]
         hits = 0
         for s in starts:
-            if not all(s + i + 1 in f for i, f in enumerate(followers)):
+            if not all(_holds(f, s + i + 1) for i, f in enumerate(followers)):
                 continue
             if clause.anchored and not (
                 s in doc.starts

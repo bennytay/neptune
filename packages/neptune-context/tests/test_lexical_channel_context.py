@@ -340,7 +340,7 @@ def test_a_huge_query_and_unicode_text_are_answered() -> None:
     channel = world().channel
     huge = " ".join(f"term{i}" for i in range(2000)) + " thruster"
     reply = channel.retrieve(retrieval(huge[:1990]))
-    assert reply.gaps and reply.gaps[0].detail.startswith("clauses beyond")
+    assert reply.gaps and reply.gaps[0].detail.startswith("query text beyond the bounds")
     fullwidth = "\uff33\uff34\uff21\uff2c\uff2c\uff25\uff24"
     assert channel.retrieve(retrieval(f"Thrusters {fullwidth}")).hits != ()
     assert channel.retrieve(retrieval("\U0001f916 机械臂")).hits == ()
