@@ -109,6 +109,12 @@ class Limits:
     # A JSON or YAML document a pointer is resolved in: the compiler's own limit for parsed
     # documents (its config and calibration adapters' ``max_bytes``).
     max_document_bytes: int = 8 * 1024 * 1024
+    # It nests at most as deep as the compiler's config adapter reads (``max_depth``).
+    max_document_depth: int = 200
+    # PyYAML's pure-Python parser yields about 120 000 events a second, so a YAML document of
+    # more events than this is refused rather than walked for over ~10 s. JSON's walk of a
+    # whole 8 MiB document takes under 4 s, so it needs no budget.
+    max_yaml_events: int = 1_000_000
 
 
 DEFAULT_LIMITS: Final = Limits()
@@ -1126,7 +1132,23 @@ def _parquet_row(
         problem = _check_group(meta.row_group(group), group, read, footer_start, subject, limits)
         if problem is not None:
             return problem
-        record = _parquet_record(parquet, group, rows, step.row - first, columns, leaves, subject)
+        # Byte arrays stay dictionary-encoded, so a value repeated over many rows is held once,
+        # never once per row of a batch; only the cited row is decoded.
+        dictionary = [
+            str(leaves[i]) for i in read if meta.schema.column(i).physical_type == "BYTE_ARRAY"
+        ]
+        parquet = pq.ParquetFile(
+            f,
+            metadata=meta,
+            read_dictionary=dictionary or None,
+            pre_buffer=False,
+            buffer_size=1 << 20,
+            thrift_string_size_limit=_MAX_FOOTER_BYTES,
+            arrow_extensions_enabled=False,
+        )
+        record = _parquet_record(
+            parquet, group, rows, step.row - first, columns, leaves, subject, limits
+        )
         if isinstance(record, MediaFinding):
             return record
     return {"cells": record, "format": "parquet", "row": step.row}
@@ -1170,6 +1192,7 @@ def _parquet_record(
     columns: list[int],
     leaves: list[str | None],
     subject: str,
+    limits: Limits,
 ) -> list[dict[str, Any]] | MediaFinding:
     """The cited cells of row ``index`` of a row group, decoded a batch at a time (each cited
     leaf's top-level column, whose every leaf ``_check_group`` has bounded)."""
@@ -1178,6 +1201,12 @@ def _parquet_record(
     for batch in parquet.iter_batches(
         batch_size=_PARQUET_BATCH_ROWS, row_groups=[group], columns=tops, use_threads=False
     ):
+        if batch.nbytes > limits.max_decoded_bytes:
+            detail = (
+                f"a batch of row group {group} decodes to {batch.nbytes} bytes, over the"
+                f" {limits.max_decoded_bytes}-byte limit"
+            )
+            return MediaFinding("unsafe_entry", subject, detail)
         if seen + batch.num_rows > index:
             row = batch.slice(index - seen, 1)
             return [_parquet_cell(row, c, str(leaves[c])) for c in columns]
@@ -1265,9 +1294,10 @@ def _pointer(scope: _Scope, step: JsonPointer, subject: str, limits: Limits) -> 
 
     The document is at most ``max_document_bytes`` (the compiler's own limit), and it is
     walked as a stream of tokens or events: nothing is built from it, so memory is the
-    document's text plus its nesting, whatever its shape. The node is returned verbatim, so no
-    reader's typing of a scalar (YAML 1.1 or 1.2, a float's precision) is assumed. Keys are
-    matched by their text, as the compiler cites them; a key held twice on the path is
+    document's text plus its nesting, which is at most ``max_document_depth``. A YAML document
+    of more than ``max_yaml_events`` parser events is refused. The node is returned verbatim,
+    so no reader's typing of a scalar (YAML 1.1 or 1.2, a float's precision) is assumed. Keys
+    are matched by their text, as the compiler cites them; a key held twice on the path is
     ambiguous.
     """
     data = scope.whole(subject, "a JSON or YAML document", limits.max_document_bytes)
@@ -1275,9 +1305,9 @@ def _pointer(scope: _Scope, step: JsonPointer, subject: str, limits: Limits) -> 
     del data
     tokens = tuple(t.replace("~1", "/").replace("~0", "~") for t in step.pointer.split("/")[1:])
     try:
-        found, kind = _json_node(text, tokens, step.pointer, subject), "json"
+        found, kind = _json_node(text, tokens, step.pointer, subject, limits), "json"
     except _NotJson:
-        found, kind = _yaml_node(text, tokens, step.pointer, subject), "yaml"
+        found, kind = _yaml_node(text, tokens, step.pointer, subject, limits), "yaml"
     if found is None:
         detail = f"{step.pointer} does not resolve in the {kind} document"
         raise DecodeFailure("invalid_request", subject, detail)
@@ -1317,10 +1347,28 @@ class _Tracker:
     next token twice makes the pointer ambiguous (``invalid_request``).
     """
 
-    def __init__(self, tokens: tuple[str, ...], pointer: str, subject: str) -> None:
-        self.tokens, self.pointer, self.subject = tokens, pointer, subject
+    def __init__(self, tokens: tuple[str, ...], pointer: str, subject: str, limits: Limits) -> None:
+        self.tokens, self.pointer, self.subject, self.limits = tokens, pointer, subject, limits
         self.stack: list[_Open] = []
         self.found: tuple[int, int] | None = None
+        self.in_key = 0  # open collections used as keys: inside one, nothing is on the path
+        self.events = 0
+
+    def tick(self) -> None:
+        """Count one YAML parser event against the budget (``max_yaml_events``)."""
+        self.events += 1
+        if self.events > self.limits.max_yaml_events:
+            budget = self.limits.max_yaml_events
+            detail = f"the YAML document holds over {budget} events; it is not walked"
+            raise DecodeFailure("unsafe_entry", self.subject, detail)
+
+    def _push(self, frame: _Open) -> None:
+        if len(self.stack) >= self.limits.max_document_depth:
+            depth = self.limits.max_document_depth
+            detail = f"the document nests deeper than {depth}; it is not walked"
+            raise DecodeFailure("unsafe_entry", self.subject, detail)
+        self.stack.append(frame)
+        self.in_key += frame.as_key
 
     def _place(self) -> tuple[bool, bool]:
         """Is the value starting now on the pointer's path, and is it the target?"""
@@ -1342,12 +1390,12 @@ class _Tracker:
         on, target = self._place()
         matched = on and len(self.stack) < len(self.tokens)
         frame = _Open(mapping, start, matched, target)
-        self.stack.append(frame)
+        self._push(frame)
         if not mapping:
             frame.leads = self._child(frame, "0")
 
     def open_key(self, mapping: bool, start: int) -> None:
-        self.stack.append(_Open(mapping, start, False, False, as_key=True))
+        self._push(_Open(mapping, start, False, False, as_key=True))
 
     def key(self, name: str) -> None:
         frame = self.stack[-1]
@@ -1361,6 +1409,7 @@ class _Tracker:
 
     def close(self, end: int) -> None:
         frame = self.stack.pop()
+        self.in_key -= frame.as_key
         if frame.as_key:
             parent = self.stack[-1]
             parent.expect_key, parent.leads = False, False
@@ -1390,11 +1439,11 @@ _SCALAR: Final = re.compile(
 
 
 def _json_node(
-    text: str, tokens: tuple[str, ...], pointer: str, subject: str
+    text: str, tokens: tuple[str, ...], pointer: str, subject: str, limits: Limits
 ) -> tuple[int, int] | None:
     """The span of the value ``tokens`` names (RFC 8259), walked without building any value;
     ``_NotJson`` when the text is not exactly one JSON value."""
-    track = _Tracker(tokens, pointer, subject)
+    track = _Tracker(tokens, pointer, subject, limits)
 
     def ws(at: int) -> int:
         return _WS.match(text, at).end()  # type: ignore[union-attr]
@@ -1445,18 +1494,19 @@ def _json_node(
 
 
 def _yaml_node(
-    text: str, tokens: tuple[str, ...], pointer: str, subject: str
+    text: str, tokens: tuple[str, ...], pointer: str, subject: str, limits: Limits
 ) -> tuple[int, int] | None:
     """The span of the node ``tokens`` names in a single YAML document, walked as parser events
     (PyYAML's pure-Python parser, as the compiler reads YAML): nothing is composed or
     constructed, and an alias is refused."""
     import yaml
 
-    track = _Tracker(tokens, pointer, subject)
+    track = _Tracker(tokens, pointer, subject, limits)
 
     def walk() -> tuple[int, int] | None:
         documents = 0
         for event in yaml.parse(text, Loader=yaml.SafeLoader):
+            track.tick()
             if isinstance(event, yaml.DocumentStartEvent):
                 documents += 1
                 if documents > 1:
@@ -1481,7 +1531,7 @@ def _yaml_node(
             mapping = isinstance(event, yaml.MappingStartEvent)
             if parent is not None and parent.mapping and parent.expect_key:
                 if isinstance(event, yaml.ScalarEvent):
-                    if parent.as_key or any(frame.as_key for frame in track.stack):
+                    if track.in_key:
                         parent.expect_key = False
                     else:
                         track.key(event.value)
