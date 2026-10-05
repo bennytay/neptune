@@ -32,7 +32,9 @@ from neptune_context.query import (
     TextClause,
     TextField,
     Why,
+    accept,
     default_include_inferred,
+    query_id,
     validate,
 )
 from neptune_context.query.model import (
@@ -497,14 +499,30 @@ WRONG_TYPES: list[tuple[str, Query, list[tuple[str, str]]]] = [
     ("str-items", replace(BASE, budget=Budget(items=_bad("10"))), [("shape", "/budget/items")]),
     ("list-subjects", replace(BASE, subjects=_bad([ARM])), [("shape", "/subjects")]),
     (
-        "str-direction",
-        replace(BASE, graph=GraphClause(None, 1, _bad("out"))),
+        "unknown-direction",
+        replace(BASE, graph=GraphClause(None, 1, _bad("sideways"))),
         [("shape", "/graph/direction")],
     ),
     (
-        "str-field",
-        replace(BASE, text=replace(TEXT, fields=_bad(frozenset({"record"})))),
+        "unknown-field",
+        replace(BASE, text=replace(TEXT, fields=_bad(frozenset({"records"})))),
         [("shape", "/text/fields/0")],
+    ),
+    (
+        # The culprit's index is its place in the canonical JSON: claim_text, then zzz.
+        "mixed-field-set",
+        replace(BASE, text=replace(TEXT, fields=_bad(frozenset({TextField.CLAIM_TEXT, "zzz"})))),
+        [("shape", "/text/fields/1")],
+    ),
+    (
+        "mixed-channel-set",
+        replace(BASE, text=replace(TEXT, channels=_bad(frozenset({TextChannel.VECTOR, "bm25"})))),
+        [("shape", "/text/channels/0")],
+    ),
+    (
+        "int-predicates",
+        replace(BASE, graph=GraphClause(_bad(frozenset({10, 9})), 1, Direction.OUT)),
+        [("shape", "/graph/predicates/0"), ("shape", "/graph/predicates/1")],
     ),
     (
         "float-ticks",
@@ -533,6 +551,37 @@ def test_a_wrong_python_type_is_a_finding_not_a_crash(
     name: str, query: Query, expected: list[tuple[str, str]]
 ) -> None:
     assert _codes(query) == expected
+
+
+def test_a_plain_string_equal_to_an_enum_member_is_that_member() -> None:
+    # C1 gate (ADR 0006 §5): equal queries share a query_id, so they share a verdict.
+    typed = replace(
+        BASE,
+        graph=GraphClause(None, 1, Direction.OUT),
+        text=TextClause(
+            "gripper slip",
+            frozenset({TextField.RECORD, TextField.CLAIM_TEXT}),
+            frozenset({TextChannel.LEXICAL}),
+        ),
+    )
+    plain = replace(
+        typed,
+        graph=GraphClause(None, 1, _bad("out")),
+        text=TextClause(
+            "gripper slip",
+            _bad(frozenset({"record", TextField.CLAIM_TEXT})),
+            _bad(frozenset({"lexical"})),
+        ),
+    )
+    assert plain == typed and query_id(plain) == query_id(typed)
+    assert validate(plain) == validate(typed) == ()
+    accepted = accept(plain)
+    assert accepted == typed and query_id(accepted) == query_id(typed)
+    assert isinstance(accepted, Query) and accepted.graph is not None and accepted.text is not None
+    assert type(accepted.graph.direction) is Direction
+    assert all(type(f) is TextField for f in accepted.text.fields)
+    assert all(type(c) is TextChannel for c in accepted.text.channels)
+    assert accept(typed) is typed
 
 
 # --- Order and convention -----------------------------------------------------------------------
