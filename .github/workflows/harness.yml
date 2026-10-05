@@ -25,8 +25,9 @@ on:
       - "harness/**"
       - "scripts/contracts.py"
       - ".github/workflows/harness.yml"
-      # package-schema, alignment-records, lifecycle-records: the compiler's model
-      - "src/neptune/model/**"
+      # the compiler: package-schema, alignment-records and lifecycle-records live in its model, and
+      # the compiler stage runs the SDK and the store over the corpus
+      - "src/neptune/**"
       # each member's exported schemas: catalog-api (api), graph-schema (schema), query-packet
       # (contract), dataset-manifest (manifest); a module or a package of that name
       - "packages/*/src/*/api.py"
@@ -37,10 +38,19 @@ on:
       - "packages/*/src/*/contract/**"
       - "packages/*/src/*/manifest.py"
       - "packages/*/src/*/manifest/**"
-      # the code a real stage runs beyond its contract module: the ledger stage drives the catalog
-      # (registry, migrations) and pgserver/psycopg from the Ledger's dependencies (platform ADR 0006)
-      - "packages/neptune-ledger/src/neptune_ledger/catalog/**"
+      # the code a real stage runs beyond its contract module: register drives the Ledger's catalog,
+      # lake, threads and lineage, with pgserver/psycopg from its dependencies (platform ADR 0006)
+      - "packages/neptune-ledger/src/**"
       - "packages/neptune-ledger/pyproject.toml"
+      # every contract's owner tests (`contract_tests` in contracts/*/contract.toml), which
+      # `check --all` runs; a unit test fails until a new one is listed here
+      - "tests/unit/model/test_schema.py"
+      - "tests/integration/test_worked_examples.py"
+      - "tests/unit/store/test_ingest_package.py"
+      - "packages/neptune-ledger/tests/contract/**"
+      - "packages/neptune-ledger/tests/test_ledger_api_contract.py"
+      - "packages/neptune-memory/tests/test_reader_contract_memory.py"
+      - "packages/neptune-memory/tests/test_golden_graph_memory.py"
 
 permissions:
   contents: read

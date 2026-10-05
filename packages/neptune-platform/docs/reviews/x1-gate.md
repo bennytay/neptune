@@ -8,7 +8,7 @@
 - Outcome: the compiler's packages now flow into the **real** Ledger catalog. Every catalog-api response is
   checked against the registry's schema, and the Ledger's package-schema lock is checked against every
   package. A deliberate schema break turns the harness red in two independent places. The main defect fixed:
-  the package-schema owner tests did not cover the manifest (X1-1; X1-2 to X1-5 below).
+  the package-schema owner tests did not cover the manifest (X1-1; X1-2 to X1-6 below).
   **Verdict: pass.** X2 may start once this is merged and `main` is tagged `x1-gate` (the coordinator tags).
 - Harness: **green at `880b0c5`** (the branch with `main` at `399104c` merged; earlier also at `6af707c` and
   `f8b16e8`), full run with owner tests:
@@ -95,10 +95,15 @@ exits 1, the compiler stage fails and every later stage is skipped.
 - **X1-3. A real ledger with no compiled cases read as green.** If the compiler stage resolved to a stub, the
   ledger stage registered nothing and still reported `real ok`. It now fails with "the compiler stage compiled
   no case to register" (`test_a_real_ledger_with_nothing_compiled_upstream_fails`). Found by self-review.
-- **X1-4. The workflow did not watch the code the real ledger stage runs.** Its `pull_request` paths covered
-  only contract modules, so a change to the Ledger's catalog or its `pgserver` pin skipped the harness. They
-  now include `packages/neptune-ledger/src/neptune_ledger/catalog/**` and the Ledger's `pyproject.toml`
-  (`test_the_code_the_real_ledger_stage_runs_is_inside_the_pull_request_paths`).
+- **X1-4. The workflow did not watch the code the real stages run.** Its `pull_request` paths covered only
+  contract modules (`src/neptune/model/**` for the compiler), so a change to the SDK or store, to the
+  Ledger's catalog, lake, threads or lineage, to its `pgserver` pin, or to an owner test skipped the harness.
+  They now cover `src/neptune/**`, `packages/neptune-ledger/src/**`, the Ledger's `pyproject.toml` and every
+  contract's `contract_tests` (`test_the_code_the_real_stages_run_is_inside_the_pull_request_paths`,
+  `test_every_contracts_owner_tests_are_inside_the_pull_request_paths`). Widened after review.
+- **X1-6. A missing Ledger lock entry skipped the run-time lock check silently.** With no `neptune-ledger`
+  package-schema entry the stage now fails with "neptune-ledger has no package-schema entry in
+  contracts/lock.toml" (`test_a_ledger_without_a_package_schema_lock_fails_the_real_ledger`). Found in review.
 - **X1-5. Stale docstrings.** The ledger and memory stubs said they served catalog-api 0.0.0 and that
   graph-schema had no version. Both serve their contract's latest goldens.
 

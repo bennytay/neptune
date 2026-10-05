@@ -222,3 +222,20 @@ def test_a_real_ledger_with_nothing_compiled_upstream_fails(tmp_path: Path) -> N
     outcome = LEDGER.real(_context(tmp_path))
     assert outcome.problems == ("the compiler stage compiled no case to register",)
     assert outcome.output["cases"] == []
+
+
+def test_a_ledger_without_a_package_schema_lock_fails_the_real_ledger(tmp_path: Path) -> None:
+    copy = tmp_path / "contracts"
+    shutil.copytree(REPO / "contracts", copy)
+    registry = contracts.registry(copy)
+    lock = registry.lock()
+    del lock["neptune-ledger"]["package-schema"]
+    registry.write_lock(lock)
+    ctx = _compiled(tmp_path / "work", registry)
+    assert LEDGER.real is not None
+    outcome = LEDGER.real(ctx)  # the run-time lock check has nothing to honour: never silent
+    assert outcome.problems == (
+        "neptune-ledger has no package-schema entry in contracts/lock.toml",
+    )
+    assert outcome.output["locked_package_schema"] is None
+    assert {row["registration"] for row in outcome.output["cases"]} == {"registered"}

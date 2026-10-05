@@ -261,6 +261,8 @@ def ledger_real(ctx: Context) -> Outcome:
         locked=locked,
         locked_major=tool.parse_semver(locked)[0] if locked else None,
     )
+    if locked is None:  # the lock cannot be honoured, so the stage cannot be green
+        check.problems.append("neptune-ledger has no package-schema entry in contracts/lock.toml")
     compiled = ctx.upstream.get("compiler", {}).get("cases") or []
     if not compiled:  # e.g. a stub compiler: a real ledger that registered nothing is not green
         return Outcome(
