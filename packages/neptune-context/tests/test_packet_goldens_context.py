@@ -15,6 +15,8 @@ from neptune_context.packets.codec import canonical_bytes, decode
 from neptune_context.packets.conformance import check
 from neptune_context.packets.model import ITEM_KINDS, ContextPacket
 from neptune_context.packets.schema import packet_schema
+from neptune_context.query import Query, loads, query_id
+from neptune_context.query import canonical_bytes as query_canonical_bytes
 from neptune_context.render.citations import parse_citations, render_text
 
 NAMES = [w.name for w in build()]
@@ -74,6 +76,21 @@ def test_golden_names_its_query_by_the_hash_of_the_query_document(name: str) -> 
     assert isinstance(packet, ContextPacket)
     query = json.loads((QUERIES / f"{name}.json").read_bytes())
     assert packet.query_id == "query:sha256:" + hashlib.sha256(dumps(query)).hexdigest()
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_golden_query_decodes_with_the_query_reader_and_hashes_to_the_packets_query_id(
+    name: str,
+) -> None:
+    # The C1 gate's cross-test (ADR 0003 §9, Consequences): the query documents the packets were
+    # built for are queries of ADR 0002, read by its strict reader, re-encoded byte for byte.
+    text = (QUERIES / f"{name}.json").read_bytes()
+    query = loads(text)
+    assert isinstance(query, Query), query
+    assert query_canonical_bytes(query) == dumps(json.loads(text))
+    packet = decode((PACKETS / f"{name}.json").read_bytes())
+    assert isinstance(packet, ContextPacket)
+    assert packet.query_id == query_id(query)
 
 
 @pytest.mark.parametrize("name", NAMES)
