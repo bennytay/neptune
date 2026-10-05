@@ -44,6 +44,7 @@ class NodeType(StrEnum):
     STREAM = "stream"  # one recorded stream of a run: a topic, a channel, a log message type
     DOCUMENT = "document"  # a declared document: a manual, an SOP, a datasheet, a register
     EPISODE = "episode"  # an entity: a bounded segment of a run, not the Episode tier
+    EVENT = "event"  # something one record states happened: an e-stop, a fault, an incident
     # Context tier
     DEPLOYMENT = "deployment"
     FLEET = "fleet"
