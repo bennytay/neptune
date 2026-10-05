@@ -11,6 +11,11 @@ authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # change also runs this job. The pins are contracts/lock.toml and neptune_context.pins.
 dependencies = ["neptune", "neptune-ledger", "neptune-memory"]
 
+# The live planner model client (ADR 0005 §4). Optional: the planner, its replay client and CI never need
+# it; install it (`uv sync --extra anthropic`) to plan against, or re-record the golden set from, the API.
+[project.optional-dependencies]
+anthropic = ["anthropic>=1.0"]
+
 [tool.uv.sources]
 neptune = { workspace = true }
 neptune-ledger = { workspace = true }
@@ -37,6 +42,11 @@ strict = true
 warn_unreachable = true
 files = ["src", "tests"]
 mypy_path = "src"
+
+# `anthropic` is an optional extra, imported only inside AnthropicClient; CI does not install it.
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
