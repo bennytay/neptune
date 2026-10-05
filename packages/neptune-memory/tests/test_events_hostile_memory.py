@@ -17,8 +17,9 @@ from memory_event_records import SECOND, incident, intervention, table
 from memory_identity_records import Record, ambiguous, ledger
 from memory_run_records import domain, mapping
 from neptune.identity import canonical_json
+from neptune.model.alignment import ValidityWindow
 from neptune.model.ids import LogicalId, RecordId
-from neptune.model.knowledge import Ambiguous, to_json
+from neptune.model.knowledge import Ambiguous, Known, to_json
 from neptune.model.time import INT64_MAX, Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
 from neptune_memory.consolidate.event_records import (
@@ -168,6 +169,25 @@ def test_a_mapping_whose_window_does_not_cover_the_event_is_not_used() -> None:
     result = consolidate({"p": [CLOCK, OTHER, one, two, stale]})
     assert not [c for c in result.claims if c.predicate == "co_occurs_within"]
     assert "events.clocks_unrelated" in codes(result)
+
+
+def test_an_ambiguous_mapping_window_counts_only_where_its_readings_agree() -> None:
+    one, _ = incident("one", occurred=Timestamp(10 * SECOND, OTHER_ID))
+    two, _ = incident("two", occurred=at(10 * SECOND))
+    sync = mapping("sync", OTHER_ID, CLOCK_ID, anchor=(0, 0))
+    readings = ambiguous(
+        "sync",
+        ValidityWindow(
+            OTHER_ID, Known(Timestamp(0, OTHER_ID)), Known(Timestamp(60 * SECOND, OTHER_ID))
+        ),
+        ValidityWindow(
+            OTHER_ID, Known(Timestamp(0, OTHER_ID)), Known(Timestamp(5 * SECOND, OTHER_ID))
+        ),
+    )
+    sync["validity"] = to_json(readings, ValidityWindow.to_json)
+    result = consolidate({"p": [CLOCK, OTHER, one, two, sync]})
+    assert not [c for c in result.claims if c.predicate == "co_occurs_within"]  # not all agree
+    assert "events.ambiguous_window" in codes(result)
 
 
 # --- Event tables ---------------------------------------------------------------------------------

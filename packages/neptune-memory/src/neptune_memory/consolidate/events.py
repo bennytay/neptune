@@ -45,7 +45,7 @@ from neptune_memory.consolidate import event_records as parse
 from neptune_memory.consolidate.base import ClaimDraft, ConsolidationFinding, ConsolidatorOutput
 from neptune_memory.consolidate.identity import node_ref
 from neptune_memory.consolidate.identity_records import declared
-from neptune_memory.consolidate.runs import EVIDENCED_BY, _within
+from neptune_memory.consolidate.runs import EVIDENCED_BY, _covers, _definite
 from neptune_memory.consolidate.runs import Placement as RunPlacement
 from neptune_memory.schema.claim import LedgerRecordRef, TypedLiteral, ValueType
 from neptune_memory.schema.interval import OPEN, CivilClock, Open
@@ -863,14 +863,33 @@ def _projections(view: _View, event: _Event, primary: Placement) -> list[Placeme
         anchor, rate = mapping.anchor, mapping.rate
         if not isinstance(anchor, Known) or not isinstance(rate, Known):
             continue
-        if not _within(mapping, span):  # a window that does not cover the event: not used
+        # A window that does not cover the event: not used. An ambiguous window counts only
+        # where every reading agrees (ADR 0009 §2, as runs read it).
+        window = _definite(mapping.validity)
+        if window is not None and window.ambiguous:
+            view.findings.append(
+                _finding(
+                    "ambiguous_window",
+                    "the clock mapping states its window ambiguously; only the part every reading"
+                    " agrees on is used",
+                    (*event.records[:1], mapping.id),
+                    Severity.INFO,
+                )
+            )
+        if window is not None and not _covers(window, span):
             continue
         civil = view.civil(mapping.target)
         target = mapping.target if civil is None else civil.domain_id
         if target == primary.start.domain_id:
             continue
+        # An ambiguous bound widens by its largest reading: every reading stays inside.
+        residual = mapping.residual_bound
         bound = (
-            mapping.residual_bound.value.ticks if isinstance(mapping.residual_bound, Known) else 0
+            residual.value.ticks
+            if isinstance(residual, Known)
+            else max(c.value.ticks for c in residual.candidates)
+            if isinstance(residual, Ambiguous)
+            else 0
         )
         origin, offset, slope = anchor.value.source.ticks, anchor.value.target.ticks, rate.value
 
