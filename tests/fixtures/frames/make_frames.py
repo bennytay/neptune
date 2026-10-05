@@ -112,7 +112,7 @@ def _store() -> Any:
 
 class Build:
     def __init__(self) -> None:
-        import numpy  # type: ignore[import-not-found]
+        import numpy  # type: ignore[import-not-found, unused-ignore]
 
         self.np = numpy
         self.ts = _store()
@@ -601,7 +601,7 @@ def _schema_text(data: bytes, kind: str) -> str:
 def _mcap_messages(path: Path) -> Iterator[tuple[str, str, bytes]]:
     """(topic, type, payload) of the MCAP fixture's ``ros2msg`` channels, by log time then
     sequence (the order of their series rows), read with the ``mcap`` package's reader."""
-    from mcap.reader import make_reader  # type: ignore[import-not-found]
+    from mcap.reader import make_reader  # type: ignore[import-not-found, unused-ignore]
 
     with path.open("rb") as stream:
         reader = make_reader(stream)
