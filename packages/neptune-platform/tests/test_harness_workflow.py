@@ -89,6 +89,40 @@ def test_every_contracts_exported_module_is_inside_the_pull_request_paths() -> N
     assert not _covered("docs/architecture.md")
 
 
+def test_the_code_the_real_stages_run_is_inside_the_pull_request_paths() -> None:
+    # The compiler stage runs the SDK and the store, not only the model.
+    for path in (
+        "src/neptune/sdk/__init__.py",
+        "src/neptune/store/package.py",
+        "src/neptune/model/x.py",
+    ):
+        assert _covered(path), path
+    # register drives the catalog and its migrations, the lake, threads and lineage.
+    ledger = "packages/neptune-ledger/src/neptune_ledger"
+    for part in (
+        "catalog/registry.py",
+        "catalog/migrations/0001_catalog.sql",
+        "lake/indexes.py",
+        "threads/merge.py",
+        "lineage/x.py",
+    ):
+        assert _covered(f"{ledger}/{part}"), part
+    assert _covered("packages/neptune-ledger/pyproject.toml")  # pins pgserver
+    assert not _covered("packages/neptune-ledger/tests/test_ledger_registration.py")
+
+
+def test_every_contracts_owner_tests_are_inside_the_pull_request_paths() -> None:
+    registry = contracts.registry()
+    checked = 0
+    for contract_id in registry.contract_ids():
+        for target in registry.contract(contract_id).owner.contract_tests:
+            path = REPO / target
+            probe = f"{target}/test_probe.py" if path.is_dir() else target
+            assert path.exists() and _covered(probe), f"{contract_id}: {target} is not watched"
+            checked += 1
+    assert checked >= 7  # package-schema 3, catalog-api 2, graph-schema 2
+
+
 def test_the_compose_stack_has_postgres_and_minio_pinned() -> None:
     compose = (HARNESS / "compose.yaml").read_text(encoding="utf-8")
     assert re.search(r"^  postgres:", compose, re.MULTILINE)
