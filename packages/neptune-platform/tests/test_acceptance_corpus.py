@@ -2,14 +2,17 @@
 ingredients in the bytes, and the gold document's shape (Platform ADR 0007)."""
 
 import copy
+import importlib.util
 import json
 import struct
+import sys
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 import yaml
 from harness import acceptance, corpus
+from harness.acceptance import __main__ as acceptance_cli
 from harness.acceptance import generate, resolve
 
 REQUIRED_QUESTIONS: Final = {
@@ -237,6 +240,15 @@ def test_the_harness_workflow_runs_when_an_imported_generator_changes() -> None:
     )
     for path in writers:
         assert f'- "{path.relative_to(corpus.REPO).as_posix()}"' in workflow, path
+    # ...and the required check's plan runs this package's job (and so the lock test) on them.
+    spec = importlib.util.spec_from_file_location(
+        "acceptance_ci_plan", corpus.REPO / ".github" / "scripts" / "ci_plan.py"
+    )
+    assert spec is not None and spec.loader is not None
+    ci_plan = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = ci_plan
+    spec.loader.exec_module(ci_plan)
+    assert {p.relative_to(corpus.REPO).as_posix() for p in writers} == ci_plan.CORPUS_INPUTS
 
 
 def test_the_resolver_escapes_pointers_scales_ticks_and_says_why_a_source_is_missing(
@@ -290,3 +302,61 @@ def test_the_resolver_escapes_pointers_scales_ticks_and_says_why_a_source_is_mis
     assert resolve.resolve_one(package, clocks)["records"] == ["us-to-ns"]  # 3 s - 1 s
     resolved = {"gone": resolve.resolve_one(package, {"kind": "source", "path": "b.csv"})}
     assert resolve.summary(resolved)["reasons"] == {"gone": "the package holds no source at b.csv"}
+
+
+def test_build_refuses_a_directory_that_is_not_an_earlier_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checkout = tmp_path / "checkout"
+    (checkout / "src").mkdir(parents=True)
+    (checkout / "src" / "keep.py").write_text("precious\n", encoding="utf-8")
+    monkeypatch.chdir(checkout)
+    assert acceptance_cli.main(["build", "."]) == 2
+    assert "refusing to replace it" in capsys.readouterr().err
+    assert (checkout / "src" / "keep.py").read_text(encoding="utf-8") == "precious\n"
+    link = tmp_path / "link"
+    link.symlink_to(checkout)
+    with pytest.raises(acceptance.CorpusError, match="not a directory"):
+        acceptance.materialise(link)
+    built = tmp_path / "built"
+    acceptance.materialise(built)
+    (built / "planted").symlink_to(checkout / "src" / "keep.py")
+    with pytest.raises(acceptance.CorpusError, match="first: planted"):
+        acceptance.materialise(built)
+
+
+def test_a_stream_alone_never_supports_a_message_but_a_row_does() -> None:
+    item = {
+        "kind": "message",
+        "records": ["rec:stream"],
+        "citations": [
+            {
+                "locator": {"log_time": 7, "topic": "/diagnostics"},
+                "path": "bag.mcap",
+                "record": "rec:stream",
+                "seq": 3,
+            }
+        ],
+    }
+    assert not resolve.supports(item, {"record": "rec:stream"})
+    assert not resolve.supports(item, {"record": "rec:stream", "seq": 4})
+    assert resolve.supports(item, {"record": "rec:stream", "seq": 3})
+    by_path = {"path": "bag.mcap", "locator": {"log_time": 7, "topic": "/diagnostics"}}
+    assert resolve.supports(item, by_path)
+    assert not resolve.supports(
+        item, {**by_path, "locator": {"log_time": 8, "topic": "/diagnostics"}}
+    )
+
+
+def test_a_package_without_base_records_scores_by_path_and_locator() -> None:
+    """Deploy D3's lifecycle records cite a source and a row: matched against the base package."""
+    row = {
+        "kind": "table_row",
+        "citations": [{"locator": {"row": 6}, "path": "w.csv", "record": "r"}],
+    }
+    assert resolve.supports(row, {"path": "w.csv", "locator": {"row": 6}})
+    assert not resolve.supports(row, {"path": "w.csv", "locator": {"row": 5}})
+    assert not resolve.supports(row, {"path": "other.csv", "locator": {"row": 6}})
+    gap = {"kind": "no_table_row", "citations": [{"locator": None, "path": "c.csv", "record": "t"}]}
+    assert not resolve.supports(gap, {"path": "c.csv", "locator": None})
+    assert resolve.supports(gap, {"record": "t"})

@@ -50,7 +50,9 @@ The managed export `cell_config.yaml` (2026-09-01) still holds the old tool and 
 configuration was active, Q4 what is unknown, Q5 the timeline and the clocks, Q6 the S-007 AMR incident), each a
 reference answer plus claims that cite evidence ids; `traps` list what an answer must not misread. Evidence is a
 corpus path and a selector, resolved per package by `harness.acceptance.resolve` (the selectors are documented
-there). Scoring: ADR 0007 §6.
+there). Each resolved item lists citations (record id, path, locator); `resolve.supports` is the scoring rule, and
+a message is met only by a row. Deploy D3 resolves against the base package and matches on path and locator.
+Scoring: ADR 0007 §6.
 
 ## Change it
 

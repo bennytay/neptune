@@ -30,7 +30,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("resolve").add_argument("package", type=Path)
     args = parser.parse_args(argv)
     if args.command == "build":
-        acceptance.materialise(args.dir)
+        try:
+            acceptance.materialise(args.dir)
+        except acceptance.CorpusError as error:
+            sys.stderr.write(f"harness.acceptance: {error}\n")
+            return 2
         sys.stdout.write(f"wrote {acceptance.NAME} {acceptance.VERSION} to {args.dir}\n")
     elif args.command == "lock":
         acceptance.LOCK.write_text(acceptance.render_lock(acceptance.build()), encoding="utf-8")

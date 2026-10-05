@@ -152,3 +152,28 @@ def test_the_prompt_injection_is_held_as_text_only(package: resolve.Package) -> 
     assert set(kinds) == {
         "observed"
     }  # a document's text is observed text, never a statement of fact
+
+
+def test_every_item_lists_citations_that_support_it(
+    package: resolve.Package, gold: dict[str, Any]
+) -> None:
+    resolved = resolve.resolve(package.root, gold)
+    for key, item in resolved.items():
+        assert item["citations"], key
+        for citation in item["citations"]:
+            assert citation["path"] == gold["evidence"][key]["select"]["path"]
+            assert resolve.supports(item, citation), key
+    # One /diagnostics stream holds the warnings, the collision and the E-stop: citing it alone
+    # supports none of them, and the collision's row does not support the E-stop.
+    collision, estop = resolved["bag0914.collision"], resolved["bag0914.estop"]
+    assert collision["records"] == estop["records"]
+    stream = {"record": collision["records"][0]}
+    assert not resolve.supports(collision, stream) and not resolve.supports(estop, stream)
+    assert not resolve.supports(estop, collision["citations"][0])
+    # The base package's locators are what Deploy D3 matches its own records on.
+    wo = resolved["cmms.WO-26-0911"]["citations"][0]
+    assert wo["locator"] == {"row": 6}
+    page = resolved["inc.timeline.estop"]["citations"][0]["locator"]
+    assert page == {"page": 1}
+    log_time = generate.local_ns(2026, 9, 14, 14, 32, 41) + generate.IPC_AHEAD_2026_09_14
+    assert estop["citations"][0]["locator"] == {"log_time": log_time, "topic": "/diagnostics"}

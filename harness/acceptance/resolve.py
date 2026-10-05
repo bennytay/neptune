@@ -1,10 +1,17 @@
 """Resolve the gold answers' evidence against a compiled package (Platform ADR 0007 section 5).
 
 A gold evidence item names a corpus path and a selector; this finds the records of the package
-that hold it. The result is what a consumer scores against: an answer cites an evidence item when
-it cites one of its records (or, for ``message``, one of its rows). The selectors read the
-package as package-schema publishes it (``records/*.jsonl``, ``derived/*.jsonl``,
-``series/*.parquet``), never the corpus's raw bytes.
+that hold it. The selectors read the package as package-schema publishes it (``records/*.jsonl``,
+``derived/*.jsonl``, ``series/*.parquet``), never the corpus's raw bytes.
+
+Each result lists ``citations``: per record (per row for ``message``) its ``record`` id, the gold
+``path`` and a ``locator`` (``row``, ``page``, ``pointer``, ``topic`` and ``log_time``,
+``parameter`` or ``code``; ``None`` where only the record id identifies it). ``supports`` is the
+shared scoring rule (ADR 0007 section 6): a citation supports an item when it names one of its
+records, or its path and an equal locator. A ``message`` item is met only by a row (the stream's
+record with the row's ``seq``, or path, topic and log time): citing the stream alone never counts.
+A consumer whose package holds no compiler base records (Deploy D3) resolves against the base
+package of the same corpus version and matches on path and locator.
 
 Selectors (``select.kind``):
 
@@ -241,7 +248,65 @@ def resolve_one(package: Package, select: Json) -> Json:
             if low <= offset <= high:
                 found.append(mapping)
     out["records"] = _ids(found)
+    if kind == "message":
+        out["citations"] = [
+            {
+                "locator": {"log_time": row["time/0"], "topic": select["topic"]},
+                "path": path,
+                "record": row["stream"],
+                "seq": row["seq"],
+            }
+            for row in out["rows"]
+        ]
+    else:
+        out["citations"] = sorted(
+            (
+                {"locator": _locator(kind, record, select), "path": path, "record": record["id"]}
+                for record in {r["id"]: r for r in found}.values()
+            ),
+            key=lambda c: str(c["record"]),
+        )
     return out
+
+
+def _locator(kind: str, record: Json, select: Json) -> Json | None:
+    """Where a record sits in its source, in terms a package without base records can match."""
+    if kind == "table_row":
+        return {"row": record["row"]}
+    if kind == "document_text":
+        locator = record["provenance"]["evidence"]["locator"]
+        index = next((part["index"] for part in locator if part.get("kind") == "page"), None)
+        return {"page": index + 1} if index is not None else None
+    if kind == "config_value":
+        return {"pointer": select["pointer"]}
+    if kind == "calibration":
+        return {"parameter": select["parameter"]}
+    if kind == "stream":
+        return {"topic": select["topic"]}
+    if kind == "finding":
+        return {"code": select["code"]}
+    if kind == "source":
+        return {}  # the whole file
+    return None  # no_table_row, clock_mapping: only the record id identifies them
+
+
+def supports(item: Json, citation: Json) -> bool:
+    """Whether one citation an answer gives supports a resolved evidence item (ADR 0007 section 6).
+
+    ``citation`` is ``{"record": id[, "seq": n]}`` or ``{"path": ..., "locator": {...}}``.
+    """
+    for known in item.get("citations", []):
+        by_path = (
+            known["locator"] is not None
+            and citation.get("path") == known["path"]
+            and citation.get("locator") == known["locator"]
+        )
+        by_record = citation.get("record") == known["record"] and (
+            item["kind"] != "message" or citation.get("seq") == known["seq"]
+        )
+        if by_path or by_record:
+            return True
+    return False
 
 
 def check_gold(gold: Json) -> list[str]:

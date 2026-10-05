@@ -71,11 +71,39 @@ def label() -> str:
     return f"{lock['corpus']} {lock['version']} (tree {lock['tree']})"
 
 
+class CorpusError(ValueError):
+    """The corpus cannot be written where it was asked to go."""
+
+
+def _strays(root: Path, known: set[str]) -> list[str]:
+    """What under ``root`` is not a file of the corpus: other files, and any symlink."""
+    out = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink() or (not path.is_dir() and relative not in known):
+            out.append(relative)
+    return out
+
+
 def materialise(root: Path) -> Path:
-    """Write the corpus under ``root`` (replacing what is there) and return ``root``."""
+    """Write the corpus under ``root`` and return ``root``.
+
+    An existing ``root`` is replaced only when it is a directory holding nothing but corpus files
+    (an earlier build); anything else is refused, so ``build .`` cannot delete a checkout. No
+    marker file is written: the folder is ingested whole, and a marker would be one more source.
+    """
+    files = build()
+    if root.is_symlink() or (root.exists() and not root.is_dir()):
+        raise CorpusError(f"{root} is not a directory")
     if root.exists():
-        shutil.rmtree(root)  # only a directory the caller names for the generated corpus
-    for relative, data in build().items():
+        strays = _strays(root, set(files))
+        if strays:
+            raise CorpusError(
+                f"{root} holds {len(strays)} path(s) that are not the acceptance corpus "
+                f"(first: {strays[0]}); refusing to replace it"
+            )
+        shutil.rmtree(root)  # only an earlier build of the corpus
+    for relative, data in files.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)

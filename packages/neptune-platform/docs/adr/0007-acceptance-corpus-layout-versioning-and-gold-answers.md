@@ -45,7 +45,9 @@ active, what is unknown"). Forces:
    sha256 and size, and a tree id (sha256 of the sorted `path NUL digest LF` lines). A test fails
    when a fresh build differs from the lock, when the lock's version is not `VERSION`, or when a file
    passes 512 KB; `python -m harness.acceptance lock` rewrites the lock after the bump. A change to
-   the imported writers changes the corpus the same way, so `harness.yml` runs on their paths too.
+   the imported writers changes the corpus the same way, so `.github/scripts/ci_plan.py` runs the
+   `neptune-platform` job (part of the required `check`) on their paths (`CORPUS_INPUTS`), and
+   `harness.yml` runs on them too.
 4. **Gates quote it.** The harness's default corpus is the acceptance corpus. Its report carries
    `corpus: {name: "acceptance <version>", version, tree, locked, problems}`, and a run whose build
    does not match its lock is red. A gate states "harness green at <sha>, corpus acceptance
@@ -64,10 +66,23 @@ active, what is unknown"). Forces:
 6. **Resolution and scoring.** `harness.acceptance.resolve` maps every evidence item to the records
    of a compiled package (and, for `message`, the series rows) by reading package-schema's files;
    the harness's compiler stage resolves them on every run and fails on any that resolve to
-   nothing. Consumers score against the resolution of the package they read: a claim is supported
-   when the answer cites at least one record (or row) of one of its evidence items; an answer fails
-   a question when it cites a `must_not_cite` item as support or asserts a trap's wrong reading.
-   Each consumer owns its scorer; this is the rule they share.
+   nothing. Each resolved item lists **citations**: per record (per row for `message`) the record
+   id, the gold path and a locator: `row` (table rows), `page` (document text, from 1), `pointer`
+   (configuration), `topic` and `log_time` (messages), `topic` (streams), `parameter`
+   (calibration), `code` (findings), `{}` (a whole source), or none (an absence, a clock mapping:
+   their record id only). The shared rule is `resolve.supports(item, citation)`:
+   - a claim is supported when the answer gives, for at least one of its evidence items, a
+     citation naming one of the item's record ids, or the item's path and an equal locator;
+   - a `message` item is met only by a row: the stream's record id with the row's `seq`, or path,
+     topic and log time. Citing the stream alone never supports a message claim (one stream holds
+     the warnings, the collision and the E-stop);
+   - a consumer whose package holds no compiler base records (Deploy D3's lifecycle packages, whose
+     records cite `source` and a row cell) resolves the gold against the **base compiler package of
+     the same corpus version** and matches its own records by (source path, locator): row, page or
+     message log time;
+   - an answer fails a question when it cites a `must_not_cite` item as support or asserts a
+     trap's wrong reading.
+   Each consumer owns its scorer and calls this rule.
 
 ## Alternatives considered
 
@@ -90,8 +105,9 @@ active, what is unknown"). Forces:
 
 - The harness ingests about 50 sources by default (about 25 s); `--corpus-name worked-examples`
   is the quick path. The platform tests ingest it once per session (`test_acceptance_ingest.py`).
-- A Deploy change to `make_archetypes.py` or a compiler change to its fixture writers fails
-  Platform's lock test until a Platform PR bumps the version; `harness.yml` runs on those paths.
+- A Deploy change to `make_archetypes.py` or a compiler change to its fixture writers that moves
+  a byte fails Platform's lock test in that PR's required `check` (the plan runs the platform job
+  on `CORPUS_INPUTS`), so the same PR bumps the corpus version and the lock (§3).
 - A compiler change that stops producing cited evidence (a finding renamed, a field no longer
   decoded) fails the harness with the evidence id; the fix is in the compiler or a new corpus
   version, never a silent gold edit.
