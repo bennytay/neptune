@@ -38,11 +38,19 @@ def test_the_stage_order_and_service_flags() -> None:
 def test_today_the_compiler_and_the_ledger_resolve_to_real() -> None:
     registry = contracts.registry()
     resolved = {stage.id: resolve(stage, registry) for stage in STAGES}
+
+    def latest(contract_id: str) -> str:
+        # Read from the registry, not pinned: a contract bump must not have to edit this test.
+        version = registry.latest(contract_id, stable=True)
+        assert version is not None
+        return ".".join(map(str, version.version))
+
     assert resolved["compiler"].mode == "real"
-    assert resolved["compiler"].contract_version == "6.0.0"
+    assert resolved["compiler"].contract_version == latest("package-schema")
     assert resolved["ledger"].mode == "real"
-    assert resolved["ledger"].reason == "neptune_ledger.api is importable and matches 1.6.0"
-    assert resolved["ledger"].contract_version == "1.6.0"
+    catalog = latest("catalog-api")
+    assert resolved["ledger"].reason == f"neptune_ledger.api is importable and matches {catalog}"
+    assert resolved["ledger"].contract_version == catalog
     assert resolved["context"].mode == "stub"
     assert resolved["memory"].mode == "stub"  # graph-schema 1.0.0 is published; no driver yet
     assert resolved["memory"].contract_version == "1.0.0"
@@ -206,3 +214,11 @@ def test_a_ledger_a_major_behind_falls_back_to_the_catalog_api_goldens(tmp_path:
     served = registry.latest("catalog-api")
     assert entry["output"]["served"] == "goldens"
     assert len(entry["output"]["goldens"]) == len(served.goldens)
+
+
+def test_a_real_ledger_with_nothing_compiled_upstream_fails(tmp_path: Path) -> None:
+    # A stub compiler serves goldens, not cases: registering nothing must not read as green.
+    assert LEDGER.real is not None
+    outcome = LEDGER.real(_context(tmp_path))
+    assert outcome.problems == ("the compiler stage compiled no case to register",)
+    assert outcome.output["cases"] == []

@@ -89,6 +89,13 @@ def test_every_contracts_exported_module_is_inside_the_pull_request_paths() -> N
     assert not _covered("docs/architecture.md")
 
 
+def test_the_code_the_real_ledger_stage_runs_is_inside_the_pull_request_paths() -> None:
+    # The stage drives PostgresCatalog and its migrations, not only the catalog-api module.
+    catalog = "packages/neptune-ledger/src/neptune_ledger/catalog"
+    assert _covered(f"{catalog}/registry.py") and _covered(f"{catalog}/migrations/0001_catalog.sql")
+    assert _covered("packages/neptune-ledger/pyproject.toml")  # pins pgserver
+
+
 def test_the_compose_stack_has_postgres_and_minio_pinned() -> None:
     compose = (HARNESS / "compose.yaml").read_text(encoding="utf-8")
     assert re.search(r"^  postgres:", compose, re.MULTILINE)

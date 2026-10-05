@@ -261,13 +261,19 @@ def ledger_real(ctx: Context) -> Outcome:
         locked=locked,
         locked_major=tool.parse_semver(locked)[0] if locked else None,
     )
+    compiled = ctx.upstream.get("compiler", {}).get("cases") or []
+    if not compiled:  # e.g. a stub compiler: a real ledger that registered nothing is not green
+        return Outcome(
+            {"cases": [], "locked_package_schema": locked, "tenant": LEDGER_TENANT},
+            ("the compiler stage compiled no case to register",),
+        )
     cases: list[Json] = []
     server = _embedded_postgres(ctx)
     try:
         uri = _catalog_database(server)
         roots = (ctx.work / "packages",)
         with PostgresCatalog(uri, LEDGER_TENANT, package_roots=roots) as catalog:
-            for upstream in ctx.upstream.get("compiler", {}).get("cases", []):
+            for upstream in compiled:
                 case, package = str(upstream["case"]), upstream.get("package")
                 row: Json = {"case": case}
                 cases.append(row)
