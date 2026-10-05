@@ -134,7 +134,7 @@ without re-parsing the corpus. Forces:
    hold none of them keep their bytes. Package-schema 7.0.0 (programme rule:
    the integer is the registry major); no catalog-api bump (Ledger ADR 0011 §4). The Ledger's projections (Ledger ADR 0009) are regenerated
    by its tool: `task_brief.site` and `work_order.site` fill the existing site columns, so
-   migration 0009 is a guard. The coordinator renumbers at merge if another kind-adding change
+   migration 0010 is a guard. The coordinator renumbers at merge if another kind-adding change
    lands first.
 
 ## Alternatives considered
