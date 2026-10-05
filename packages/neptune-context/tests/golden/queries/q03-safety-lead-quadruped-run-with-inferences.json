@@ -1,0 +1,26 @@
+{
+  "as_of": 2,
+  "budget": {
+    "items": 20
+  },
+  "clock_bridges": [],
+  "explain": [],
+  "frame_bridges": [],
+  "graph": {
+    "direction": "out",
+    "hops": 1,
+    "predicates": [
+      "recorded_by"
+    ]
+  },
+  "include_inferred": true,
+  "query_version": 1,
+  "regions": [],
+  "subjects": [
+    {
+      "declared_id": "record:rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557",
+      "kind": "run",
+      "same_as_depth": 0
+    }
+  ]
+}

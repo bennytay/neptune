@@ -1,0 +1,159 @@
+{
+  "findings": [],
+  "gaps": [],
+  "header": {
+    "as_of": 2,
+    "budget": {
+      "dropped": 0,
+      "exhausted": [],
+      "limits": {
+        "items": 20
+      },
+      "tokenizer": "neptune-context.utf8-bytes-div-4/1",
+      "used": {
+        "bytes": 2102,
+        "items": 1,
+        "tokens": 526
+      }
+    },
+    "head": 5,
+    "inference_included": true,
+    "ledger_snapshot": {
+      "catalog_api_version": "1.6.0"
+    },
+    "memory_snapshot": {
+      "as_of": 2,
+      "generation": "sha256:25b298b7665b83de1b81dc8976225387962cd649bfa218bf62f300f422e5e0fe",
+      "graph_schema_version": 1
+    },
+    "produced_by": {
+      "config_hash": "sha256:75eeb847fd19641d461fd836bb30edbb9d6ade05c961a651d7abaac1f0eb0aa4",
+      "engine_id": "neptune-context.golden",
+      "engine_version": "1"
+    },
+    "query_id": "query:sha256:580783e8520d2e29b53c85a01054ccb09aed2cacfa4fbae87720553fce34a458"
+  },
+  "id": "packet:sha256:82982ea595b87054725f36cbf5308a3252b2d79129d6d107ec8c3fbbfe8ef44b",
+  "items": [
+    {
+      "assertion_kind": "inferred",
+      "claim": {
+        "assertion_kind": "inferred",
+        "confidence": {
+          "knowledge": "known",
+          "value": 0.82
+        },
+        "id": "claim:sha256:82e8a9c0e08785f48c6f2d5585e232ed58c5e3b04fc689e5418a72b84757822a",
+        "object": {
+          "kind": "node",
+          "node_id": "asset-tag:QUAD-07",
+          "node_type": "machine"
+        },
+        "predicate": "recorded_by",
+        "provenance": {
+          "config_hash": "sha256:2ffd0feb1fb21fba6dad6f680ae069aba9d04ef2b219d2a83df67f2bacdf1f5a",
+          "consolidator_id": "golden.fixture_model",
+          "consolidator_version": "1",
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "byte_range",
+                  "length": 1818,
+                  "offset": 0
+                },
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/rosbag2_bagfile_information"
+                }
+              ],
+              "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+            }
+          ],
+          "model": {
+            "model_id": "golden-fixture-model",
+            "model_version": "1"
+          },
+          "records": [
+            "rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557"
+          ]
+        },
+        "recorded_at": 2,
+        "subject": {
+          "kind": "node",
+          "node_id": "record:rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557",
+          "node_type": "run"
+        },
+        "superseded_at": "open",
+        "supersedes": [],
+        "valid": {
+          "end": {
+            "domain_id": "rec:sha256:1e3d871df8a74f4227f096710ce3683b5b2f7642102d12471a8bbc89f6aeb0fd",
+            "ticks": 1790762400045000000
+          },
+          "start": {
+            "domain_id": "rec:sha256:1e3d871df8a74f4227f096710ce3683b5b2f7642102d12471a8bbc89f6aeb0fd",
+            "ticks": 1790762400000000000
+          }
+        }
+      },
+      "confidence": {
+        "knowledge": "known",
+        "value": 0.82
+      },
+      "id": "item:sha256:6dbdaa7a1d832d5262fae7f94229cbf4aef2430e3864acdf51528c566c431030",
+      "kind": "claim",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 1818,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/rosbag2_bagfile_information"
+              }
+            ],
+            "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+          }
+        ],
+        "model": {
+          "model_id": "golden-fixture-model",
+          "model_version": "1"
+        },
+        "records": [
+          "rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557"
+        ],
+        "transform": {
+          "config_hash": "sha256:2ffd0feb1fb21fba6dad6f680ae069aba9d04ef2b219d2a83df67f2bacdf1f5a",
+          "producer_id": "golden.fixture_model",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "graph",
+            "rank": 1,
+            "score": 1.0
+          }
+        ],
+        "score": 0.01639344262295082
+      }
+    }
+  ],
+  "kind": "context_packet",
+  "packet_version": 1,
+  "superseded_since": [
+    {
+      "by": [
+        "claim:sha256:00184efbae2633598b9cf8f2c1393bba611a93806557431fe766891482afd513"
+      ],
+      "claim": "claim:sha256:82e8a9c0e08785f48c6f2d5585e232ed58c5e3b04fc689e5418a72b84757822a",
+      "superseded_at": 3
+    }
+  ]
+}
