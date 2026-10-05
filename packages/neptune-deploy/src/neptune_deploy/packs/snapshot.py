@@ -430,8 +430,11 @@ def _clock_map(value: JsonValue, pointer: str, subject: Node) -> None:
         _R.integer(rate["numerator"], child(at, "numerator"), 1)
 
     def bound(item: JsonValue, at: str) -> None:
-        if _stamp(item, at).domain != target:
+        duration = _stamp(item, at)
+        if duration.domain != target:
             raise _R.fail("a residual bound counts ticks of the target clock", at)
+        if duration.ticks < 0:
+            raise _R.fail("a residual bound is not negative", child(at, "ticks"))
 
     _state(clock["anchor"], child(pointer, "anchor"), anchor)
     _state(clock["rate"], child(pointer, "rate"), fraction)

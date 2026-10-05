@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import deploy_pack_corpus as corpus
 from deploy_pack_corpus import fixture_path as corpus_fixture
 from deploy_pack_graphs import HMI, TEACH, fixture_path, rec
 from deploy_pack_support import (
@@ -313,6 +314,12 @@ CLOCK_MAP_CASES: list[tuple[str, Any, str, str]] = [
         {"knowledge": "known", "value": {"domain_id": "rec:sha256:" + "f" * 64, "ticks": 0}},
         "/value/residual_bound/value",
         "ticks of the target clock",
+    ),
+    (
+        "value/residual_bound",
+        {"knowledge": "known", "value": {"domain_id": corpus.CTRL14, "ticks": -1}},
+        "/value/residual_bound/value/ticks",
+        "not negative",
     ),
 ]
 
