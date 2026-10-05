@@ -83,7 +83,9 @@ FIXTURES: Final = Path(__file__).parents[1] / "fixtures" / "model"
 PLATFORMS: Final = ("drone", "quadruped", "manipulator", "mobile_robot")
 # Two deployments' records (ADR 0051): an AMR in a warehouse and a manipulator cell.
 DEPLOYMENTS: Final = ("warehouse_amr", "manipulator_cell")
-EXAMPLES: Final = (*PLATFORMS, *DEPLOYMENTS)
+# A fleet register whose row states an identity link (ADR 0050 §10).
+REGISTERS: Final = ("fleet_register",)
+EXAMPLES: Final = (*PLATFORMS, *DEPLOYMENTS, *REGISTERS)
 READERS: Final[dict[str, Callable[[JsonValue], Any]]] = {
     "calibration": calibration_from_json,
     "clock_mapping": clock_mapping_from_json,
@@ -346,6 +348,7 @@ REPRESENTED_AS: Final = {
         "risk_assessment",
         "timestamp_domain",
     },
+    ("fleet_register", "fleet.csv"): {"identity_link", "structured_record", "structured_table"},
     ("warehouse_amr", "records.json"): {
         "authorisation_envelope",
         "change_record",
