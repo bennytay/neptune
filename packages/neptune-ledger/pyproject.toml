@@ -10,12 +10,29 @@ authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # pyarrow: query() returns a pyarrow.Table (catalog API, ADR 0004); same floor as the compiler.
 # duckdb and datafusion scan packages' series Parquet in place (ADR 0013). Pinned: a new engine
 # version can change plans and pruning, so a bump re-runs the pushdown and budget tests.
+# The media store (ADR 0014): pylance holds extracted artefacts as Lance blobs; mcap and
+# mcap-ros2-support read frames from MCAP, whose chunks lz4 and zstandard inflate (bounded, in
+# lake.decode), pillow encodes rasters, pypdfium2 renders pages and pyyaml walks YAML for JSON
+# pointers. Each decoder library's version is part of every artefact's transform, so they are
+# pinned: a bump is a new extraction lineage. pyarrow (the row decoder) keeps the compiler's
+# floor instead, so the workspace shares one pyarrow; its installed version is still in every
+# row artefact's transform. numpy (pylance's) is pinned below 2.4, whose stubs use Python 3.12
+# syntax that every workspace member's 3.11 mypy check would fail to parse.
 dependencies = [
   "datafusion==54.0.0",
   "duckdb==1.5.6",
+  "lz4==4.4.5",
+  "mcap==1.5.0",
+  "mcap-ros2-support==0.5.7",
   "neptune",
+  "numpy==2.3.5",
+  "pillow==12.3.0",
   "psycopg[binary]==3.3.6",
   "pyarrow>=25.0.1",
+  "pylance==12.0.0",
+  "pypdfium2==5.13.0",
+  "pyyaml==6.0.3",
+  "zstandard==0.25.0",
 ]
 
 # `ledger register <root>`, `ledger verify <id>` (MVL-90); a thin front end until access/ lands.
@@ -59,7 +76,7 @@ mypy_path = "src"
 # pyarrow ships no type information; api.arrow and lake/ import it. datafusion's object_store
 # module is a compiled extension without stubs.
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.*", "datafusion.object_store"]
+module = ["pyarrow", "pyarrow.*", "datafusion.object_store", "pypdfium2", "mcap_ros2.*", "lz4", "lz4.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
