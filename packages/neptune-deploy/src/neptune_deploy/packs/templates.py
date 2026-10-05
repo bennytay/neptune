@@ -12,6 +12,7 @@ they are grouped. It holds no code: a new report is a new template file. ::
         {"id": "in-force", "title": "Configuration in force", "description": "…",
          "kind": "states",                      # claims | states | timeline
          "subject_types": ["machine"],          # optional; default: the template's
+         "same_event": ["same_as"],             # optional, timeline sections only
          "about": [[], [{"predicate": "located_at", "direction": "in"}]],
          "predicates": {"has_configuration": "known",
                         "configuration_candidate": "ambiguous",
@@ -21,9 +22,13 @@ they are grouped. It holds no code: a new report is a new template file. ::
 
 ``about`` lists paths from the pack subject; each hop follows a claim of ``predicate`` outward (the
 subject's claim, to its object node) or inward (a claim whose object is the node, to its subject).
-``[]`` is the subject itself. ``predicates`` selects the claims about the nodes reached and says
-which missingness state each one expresses: Memory states ``Ambiguous`` and ``Unknown`` as
-predicates (``*_candidate``, ``*_unknown``), never as blank objects.
+``shared`` goes from a node to every other node stating the same object under the predicate (an
+incident to the timeline entries evidenced by the same record). ``[]`` is the subject itself.
+``same_event`` (timeline sections) names predicates whose claims make two event nodes one event
+(two records of one incident), so their times are compared as one event's. ``predicates``
+selects the claims about the nodes reached and says which missingness state each one expresses:
+Memory states ``Ambiguous`` and ``Unknown`` as predicates (``*_candidate``, ``*_unknown``), never
+as blank objects.
 
 The shipped templates live in ``packs/templates/<id>@<version>.json``, and ``lock.json`` pins the
 sha256 of each one's canonical JSON. Loading refuses a file whose hash is not its lock entry, so an
@@ -48,7 +53,7 @@ from neptune_deploy.packs.spec import SUBJECT_TYPES
 TEMPLATE_SCHEMA: Final = "neptune-deploy.pack-template/1"
 SECTION_KINDS: Final = ("claims", "states", "timeline")
 KNOWLEDGE_ROLES: Final = ("ambiguous", "known", "unknown")
-DIRECTIONS: Final = ("in", "out")
+DIRECTIONS: Final = ("in", "out", "shared")
 MAX_TEMPLATE_BYTES: Final = 1024 * 1024
 LOCK_FILE: Final = "lock.json"
 
@@ -58,7 +63,7 @@ _R: Final = Reader("template_malformed")
 @dataclass(frozen=True)
 class Hop:
     predicate: str
-    direction: str  # "out": subject -> object; "in": object -> subject
+    direction: str  # "out": subject -> object; "in": object -> subject; "shared": same object
 
     def to_json(self) -> JsonObject:
         return {"direction": self.direction, "predicate": self.predicate}
@@ -73,9 +78,10 @@ class SectionTemplate:
     subject_types: tuple[str, ...]
     about: tuple[tuple[Hop, ...], ...]
     predicates: Mapping[str, str]  # predicate -> knowledge role
+    same_event: tuple[str, ...] = ()  # timeline sections: predicates joining nodes into one event
 
     def to_json(self) -> JsonObject:
-        return {
+        out: JsonObject = {
             "about": [[hop.to_json() for hop in path] for path in self.about],
             "description": self.description,
             "id": self.id,
@@ -84,6 +90,9 @@ class SectionTemplate:
             "subject_types": list(self.subject_types),
             "title": self.title,
         }
+        if self.same_event:
+            out = {**out, "same_event": list(self.same_event)}
+        return out
 
 
 @dataclass(frozen=True)
@@ -154,7 +163,7 @@ def _section(value: JsonValue, pointer: str, template_types: tuple[str, ...]) ->
         value,
         pointer,
         ("about", "description", "id", "kind", "predicates", "title"),
-        ("subject_types",),
+        ("same_event", "subject_types"),
     )
     subject_types = template_types
     if "subject_types" in section:
@@ -187,14 +196,28 @@ def _section(value: JsonValue, pointer: str, template_types: tuple[str, ...]) ->
         _R.string(name, child(at, name), TOKEN): _R.choice(role, child(at, name), KNOWLEDGE_ROLES)
         for name, role in predicates.items()
     }
+    kind = _R.choice(section["kind"], child(pointer, "kind"), SECTION_KINDS)
+    same_event: tuple[str, ...] = ()
+    if "same_event" in section:
+        at = child(pointer, "same_event")
+        if kind != "timeline":
+            raise _R.fail("same_event is for timeline sections", at)
+        names = [
+            _R.string(item, child(at, i), TOKEN)
+            for i, item in enumerate(_R.array(section["same_event"], at))
+        ]
+        if not names or len(set(names)) != len(names):
+            raise _R.fail("same_event is a non-empty list without repeats", at)
+        same_event = tuple(sorted(names))
     return SectionTemplate(
         id=_R.string(section["id"], child(pointer, "id"), TOKEN),
         title=_R.text(section["title"], child(pointer, "title")),
         description=_R.text(section["description"], child(pointer, "description")),
-        kind=_R.choice(section["kind"], child(pointer, "kind"), SECTION_KINDS),
+        kind=kind,
         subject_types=subject_types,
         about=tuple(paths),
         predicates={name: roles[name] for name in sorted(roles)},
+        same_event=same_event,
     )
 
 
