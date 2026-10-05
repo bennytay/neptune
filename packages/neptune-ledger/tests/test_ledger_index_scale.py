@@ -20,13 +20,13 @@ from ledger_series_packages import read
 from neptune.model.run import Stream
 from neptune.store.package import package_contents, write_package
 from neptune.store.series import SERIES_SETTINGS, write_series
+from neptune_ledger.api.types import FrameReference
 from neptune_ledger.catalog.check import check_package, open_root
 from neptune_ledger.catalog.migrate import apply_migrations
 from neptune_ledger.lake.space_index import (
     _LIMIT,
     _PLACED,
     _UNPLACED,
-    FrameReference,
     extent_rows,
     reference_text,
 )

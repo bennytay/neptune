@@ -1,0 +1,47 @@
+{
+  "api_version": "1.7.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "budget": {
+    "bytes": 1024,
+    "exceeded": [
+      "time"
+    ],
+    "limits": {
+      "max_bytes": 536870912,
+      "max_millis": 500,
+      "max_rows": 10000
+    },
+    "reproducible": false,
+    "rows": 1
+  },
+  "findings": [
+    {
+      "code": "budget_exceeded",
+      "detail": "the time budget of 500 ms ran out; the first 1 rows of the answer are returned, and which rows depends on the wall clock",
+      "subject": "time"
+    }
+  ],
+  "plan": [
+    {
+      "detail": "candidates from thread_member by (thread_id, registration_key)",
+      "engine": "postgres",
+      "operation": "candidates.thread"
+    },
+    {
+      "detail": "resolve each lineage set the rows touch under latest_transform",
+      "engine": "postgres",
+      "operation": "lineage"
+    },
+    {
+      "detail": "the longest prefix that fits, as one chunk",
+      "engine": "arrow",
+      "operation": "budget"
+    }
+  ]
+}

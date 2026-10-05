@@ -33,7 +33,12 @@ from neptune.identity import canonical_json
 from neptune.model.frames import FrameRef, HomogeneousMatrix, MatrixLayout, Pose, TransformDirection
 from neptune.model.knowledge import Knowledge, Known
 from neptune.model.spatial import CrsCode, GeodeticPosition
-from neptune_ledger.api.types import CatalogFinding, TransactionKey
+from neptune_ledger.api.types import (
+    CatalogFinding,
+    CrsReference,
+    FrameReference,
+    TransactionKey,
+)
 
 Conn = psycopg.Connection[tuple[Any, ...]]
 ReferenceKind = Literal["crs", "frame"]
@@ -189,22 +194,7 @@ def _position(kind: str, rid: str, at: str, position: Any) -> list[ExtentRow]:
 # --- Reads -----------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class FrameReference:
-    """A frame as a query names it: its declared id in one frame graph (``FrameRef``)."""
-
-    frame_graph_id: str
-    frame_id: str
-
-
-@dataclass(frozen=True)
-class CrsReference:
-    """A coordinate reference system as a query names it, verbatim (``CrsCode``)."""
-
-    authority: str
-    code: str
-
-
+# The two references a box query can name: the catalog API's own types (catalog-api 1.7.0).
 Reference = FrameReference | CrsReference
 
 
