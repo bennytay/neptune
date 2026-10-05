@@ -1,4 +1,4 @@
-# 0006 — Acceptance corpus: generated in `harness/acceptance`, locked by version, gold answers cited by path and selector
+# 0007 — Acceptance corpus: generated in `harness/acceptance`, locked by version, gold answers cited by path and selector
 
 - Status: Accepted
 - Date: 2026-10-05

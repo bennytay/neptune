@@ -3,7 +3,7 @@
   "corpus": "acceptance",
   "corpus_version": "1.0.0",
   "consumers": ["context-c4-benchmark", "deploy-d3-evidence-packs", "demo-v1"],
-  "scoring": "Platform ADR 0006 section 6: a claim is supported when the answer cites at least one of its evidence items (a resolved record id, or for a message a resolved row); an answer fails a question when it cites a must_not_cite item as support or asserts a trap's wrong reading.",
+  "scoring": "Platform ADR 0007 section 6: a claim is supported when the answer cites at least one of its evidence items (a resolved record id, or for a message a resolved row); an answer fails a question when it cites a must_not_cite item as support or asserts a trap's wrong reading.",
   "questions": [
     {
       "id": "Q1",

@@ -1,5 +1,5 @@
 """The acceptance corpus through the harness: one real ingest, partial success, the storyline's
-evidence in the package and every gold evidence item resolved (Platform ADR 0006)."""
+evidence in the package and every gold evidence item resolved (Platform ADR 0007)."""
 
 import json
 from collections import Counter

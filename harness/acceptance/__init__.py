@@ -1,6 +1,6 @@
 """The acceptance corpus: one messy two-site deployment, generated, versioned and locked.
 
-Platform ADR 0006. ``build()`` returns every file of the corpus by its path under the corpus root;
+Platform ADR 0007. ``build()`` returns every file of the corpus by its path under the corpus root;
 ``materialise(root)`` writes them. Nothing here reads a clock, randomness or the network, so the
 bytes are the same on every host; ``corpus.lock.json`` pins them, and a changed byte without a new
 ``VERSION`` fails the tests. ``gold.json`` holds the questions the corpus is built to answer, with
@@ -17,7 +17,7 @@ from typing import Any, Final
 
 NAME: Final = "acceptance"
 # MAJOR: a gold answer changes meaning or evidence is removed. MINOR: files or questions are added
-# and every existing answer still holds. PATCH: bytes change and no answer does. ADR 0006 section 3.
+# and every existing answer still holds. PATCH: bytes change and no answer does. ADR 0007 section 3.
 VERSION: Final = "1.0.0"
 HERE: Final = Path(__file__).resolve().parent
 LOCK: Final = HERE / "corpus.lock.json"
@@ -101,7 +101,7 @@ def lock_problems(files: dict[str, bytes]) -> list[str]:
         out.append(
             "the corpus no longer matches corpus.lock.json"
             + (f" ({', '.join(changed)})" if changed else "")
-            + ": bump VERSION (ADR 0006 section 3) and run `python -m harness.acceptance lock`"
+            + ": bump VERSION (ADR 0007 section 3) and run `python -m harness.acceptance lock`"
         )
     return out
 

@@ -1,6 +1,6 @@
 """The input corpus: cases the compiler stage ingests, one folder of sources per case.
 
-The default is the acceptance corpus (``harness.acceptance``, Platform ADR 0006): one generated,
+The default is the acceptance corpus (``harness.acceptance``, Platform ADR 0007): one generated,
 versioned hand-over folder of two sites and three robot types, ingested as one case, with gold
 answers whose evidence the compiler stage resolves. ``worked-examples`` is the compiler's four
 worked examples (``tests/fixtures/model/<example>/sources``: a drone, a manipulator, a mobile robot

@@ -1,5 +1,5 @@
 """The acceptance corpus without ingesting it: determinism, the lock, sizes, the storyline's
-ingredients in the bytes, and the gold document's shape (Platform ADR 0006)."""
+ingredients in the bytes, and the gold document's shape (Platform ADR 0007)."""
 
 import copy
 import json

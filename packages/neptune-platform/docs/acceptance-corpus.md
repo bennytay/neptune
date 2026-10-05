@@ -2,7 +2,7 @@
 
 The programme's one acceptance fixture and the Demo v1 data: a messy hand-over of two sites and three robot
 types, with one incident to reconstruct and gold answers to score against. Decision record:
-[ADR 0006](adr/0006-acceptance-corpus-layout-versioning-and-gold-answers.md). Code: `harness/acceptance/`.
+[ADR 0007](adr/0007-acceptance-corpus-layout-versioning-and-gold-answers.md). Code: `harness/acceptance/`.
 
 ## Use it
 
@@ -50,12 +50,12 @@ The managed export `cell_config.yaml` (2026-09-01) still holds the old tool and 
 configuration was active, Q4 what is unknown, Q5 the timeline and the clocks, Q6 the S-007 AMR incident), each a
 reference answer plus claims that cite evidence ids; `traps` list what an answer must not misread. Evidence is a
 corpus path and a selector, resolved per package by `harness.acceptance.resolve` (the selectors are documented
-there). Scoring: ADR 0006 §6.
+there). Scoring: ADR 0007 §6.
 
 ## Change it
 
 1. Edit `harness/acceptance/generate.py` (or `gold.json`). Keep every file under 512 KB and every value invented.
-2. Bump `VERSION` in `harness/acceptance/__init__.py` by ADR 0006 §3, and `corpus_version` in `gold.json`.
+2. Bump `VERSION` in `harness/acceptance/__init__.py` by ADR 0007 §3, and `corpus_version` in `gold.json`.
 3. `uv run --all-packages python -m harness.acceptance lock`, then `make check PKG=neptune-platform`: the
    ingest test resolves every evidence item and checks the expected findings.
 4. Say in the PR what changed for consumers (an answer, an evidence id, a new question).

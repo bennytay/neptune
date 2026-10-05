@@ -2,7 +2,7 @@
 
 One command that checks the contracts, flows a corpus through compiler, ledger, memory and context, issues a
 smoke query and writes a report. Decision record: [ADR 0004](adr/0004-integration-harness.md). Code: `harness/`.
-The default corpus is the versioned [acceptance corpus](acceptance-corpus.md) (ADR 0006).
+The default corpus is the versioned [acceptance corpus](acceptance-corpus.md) (ADR 0007).
 
 ## Run it
 
@@ -71,4 +71,4 @@ a stage `failed` names the case; a stage `error` with "needs ..." means start th
 
 Every gate issue states "harness green at <sha>, corpus acceptance <version> (tree <id>)" in its acceptance:
 run `make harness` (or dispatch the workflow), and quote the report's corpus line and stage modes
-([ADR 0006](adr/0006-acceptance-corpus-layout-versioning-and-gold-answers.md) §4).
+([ADR 0007](adr/0007-acceptance-corpus-layout-versioning-and-gold-answers.md) §4).

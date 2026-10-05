@@ -1,4 +1,4 @@
-"""The acceptance corpus's generator: an operations hand-over for two sites (Platform ADR 0006).
+"""The acceptance corpus's generator: an operations hand-over for two sites (Platform ADR 0007).
 
 ``sites/S-007`` is the Deploy D1 warehouse AMR fleet (Deploy ADR 0004), taken from
 ``make_archetypes.fleet()`` and narrowed to its S-007 robots. ``sites/PLANT-2`` is the D1

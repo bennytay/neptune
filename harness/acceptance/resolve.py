@@ -1,4 +1,4 @@
-"""Resolve the gold answers' evidence against a compiled package (Platform ADR 0006 section 5).
+"""Resolve the gold answers' evidence against a compiled package (Platform ADR 0007 section 5).
 
 A gold evidence item names a corpus path and a selector; this finds the records of the package
 that hold it. The result is what a consumer scores against: an answer cites an evidence item when

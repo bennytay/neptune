@@ -204,7 +204,7 @@ def compiler_real(ctx: Context) -> Outcome:
 
 def resolve_gold(package: Path, gold_path: Path) -> Json:
     """The case's gold answers checked, and their evidence resolved against its package
-    (ADR 0006): counts, the evidence that resolved to nothing, and the gold file's own problems."""
+    (ADR 0007): counts, the evidence that resolved to nothing, and the gold file's own problems."""
     from harness.acceptance import resolve
 
     gold = json.loads(gold_path.read_text(encoding="utf-8"))
