@@ -18,7 +18,7 @@ from neptune.model.schema import canonical_schema
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import ValueType
 from neptune_memory.schema.nodes import NodeType
-from neptune_memory.schema.predicates import Cardinality
+from neptune_memory.schema.predicates import CORE_PREDICATES, VOCABULARY_VERSION, Cardinality
 from neptune_memory.schema.supersede import FindingCode
 
 if TYPE_CHECKING:
@@ -231,6 +231,13 @@ def _memory_defs() -> dict[str, JsonValue]:
             }
         ),
         "NodeType": {"enum": sorted(str(t) for t in NodeType)},
+        # The core vocabulary's names at this version (ADR 0009 §6), so a vocabulary change is a
+        # schema change the registry publishes. A claim's predicate stays a Token: a graph
+        # document carries its own vocabulary, which may extend the core.
+        "CorePredicate": {
+            "description": f"a predicate of the core vocabulary, version {VOCABULARY_VERSION}",
+            "enum": [spec.name for spec in CORE_PREDICATES.specs],
+        },
         "NotApplicable": not_applicable,
         "PredicateRegistry": _obj({"predicates": _array(_ref("PredicateSpec"))}),
         "PredicateSpec": _obj(

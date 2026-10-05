@@ -21,7 +21,8 @@ def test_graph_schema_v1_is_published_and_active() -> None:
     contract = tomllib.loads((REGISTRY / "contract.toml").read_text(encoding="utf-8"))
     assert contract["status"] == "active"
     assert contract["owner"]["version_constant"] == "neptune_memory.schema:GRAPH_SCHEMA_VERSION"
-    for published in ("1.0.0", "1.1.0"):  # 1.1.0: has_name, stream and document (ADR 0008)
+    # 1.1.0: has_name, stream and document (ADR 0008); 1.2.0: run thread predicates (ADR 0009)
+    for published in ("1.0.0", "1.1.0", "1.2.0"):
         version = json.loads(
             (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")
         )

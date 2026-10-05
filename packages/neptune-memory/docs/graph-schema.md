@@ -1,10 +1,11 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.1.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.2.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
-([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.0.0's goldens still
-validate and its graph still passes the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
+([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.2.0 (minor) adds the
+run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6). Earlier goldens still
+validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
 ## Nodes
@@ -36,7 +37,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 3`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 4`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -44,13 +45,19 @@ major version (ADR 0002 §5).
 
 | Predicate | Subject | Object | Cardinality | Meaning |
 |---|---|---|---|---|
+| `at_site` | run | site | one | the site a run took place at, as declared |
+| `at_site_candidate` | run | site | many | ambiguous: the evidence names several sites for the run |
+| `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
+| `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
+| `executes_task_candidate` | episode, run | task | many | ambiguous: the evidence names several tasks |
 | `governed_by` | deployment, fleet, machine, site | policy | many | an operating rule or control policy that applies |
 | `has_calibration` | sensor | configuration | one | the calibration in force |
 | `has_configuration` | deployment, machine, sensor | configuration | many | a parameter set, description file or other configuration in force |
+| `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
 | `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
 | `located_at` | asset, machine | site, zone | one | where it is |
@@ -61,6 +68,7 @@ major version (ADR 0002 §5).
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
 | `recorded_by` | run | machine | one | the machine whose log a run is |
+| `recorded_by_candidate` | run | machine | many | ambiguous: the evidence names several machines for the run |
 | `runs_model` | machine | model_version | many | a learned model it runs |
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
@@ -147,6 +155,14 @@ def test_graph_schema_contract(check):
     ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md)).
     `same_as_candidate` is pairwise: every candidate of an `Ambiguous` link, and threads citing one source. People are named only by declared
     identifiers: never blank, never padded with whitespace.
+12. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run
+    node is a compiler `Run`'s declared logical id, else `record:<run record id>`. Every claim about a run holds over
+    its stated `[first, last]` on its own clock, and again on a civil clock only where a `timestamp_domain` or a
+    stated `clock_mapping` puts it there. `continues` links the parts of one run its `RunAssembly` states, in time
+    order on one clock; parts whose clocks cannot be compared are `continues_candidate` both ways. `recorded_by`,
+    `at_site` and `executes_task` are `Known` only when every ground names one id; otherwise each reading is a
+    `*_candidate` claim. `consolidate.runs.involvement` reads them back as `Known`, `Ambiguous`, `Unknown` or
+    `NotCovered`.
 
 ## Caveat: a resolver configuration is a store generation
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from jsonschema import Draft202012Validator
 
-from memory_golden_fixtures import FIRST, PUBLISHED, built, generator, published
+from memory_golden_fixtures import EARLIER, PUBLISHED, built, generator, published
 from neptune.identity import canonical_json
 from neptune_memory.contract._fixture_model import FIXTURE_MODEL
 from neptune_memory.contract.golden import TRANSACTIONS, build_golden
@@ -26,6 +26,8 @@ from neptune_memory.schema.reference import ReferenceReader
 from neptune_memory.schema.supersede import FindingCode, as_of, is_closure
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from neptune_memory.schema.claim import Claim
 
 
@@ -66,11 +68,13 @@ def test_schema_export_is_published_and_validates_every_golden() -> None:
     )
 
 
-def test_the_first_published_golden_still_loads_and_passes_the_suite() -> None:
-    """1.1.0 is a minor release: a consumer pinned to 1.0.0 keeps its golden and its answers."""
-    first = load_golden(FIRST / "golden" / "graph.json")
+@pytest.mark.parametrize("earlier", EARLIER, ids=lambda path: path.name)
+def test_earlier_published_goldens_still_load_and_pass_the_suite(earlier: Path) -> None:
+    """1.1.0 and 1.2.0 are minor releases: a consumer pinned to an earlier minor keeps its
+    golden and its answers."""
+    golden = load_golden(earlier / "golden" / "graph.json")
     for check in CHECKS:
-        check(ReferenceReader, first)
+        check(ReferenceReader, golden)
 
 
 def test_input_order_does_not_change_the_golden() -> None:
