@@ -1,0 +1,1498 @@
+{
+  "$defs": {
+    "AdapterLocator": {
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      },
+      "properties": {
+        "kind": {
+          "pattern": "^[a-z][a-z0-9_.\\-]*:[a-z][a-z0-9_]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ByteRange": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "byte_range"
+        },
+        "length": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "length",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "Cardinality": {
+      "enum": [
+        "many",
+        "one"
+      ]
+    },
+    "Claim": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "confidence": {
+                "$ref": "#/$defs/NotApplicable"
+              },
+              "provenance": {
+                "not": {
+                  "required": [
+                    "model"
+                  ]
+                }
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "assertion_kind": {
+                "const": "inferred"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "confidence": {
+                "not": {
+                  "$ref": "#/$defs/NotApplicable"
+                }
+              },
+              "provenance": {
+                "required": [
+                  "model"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "description": "subject predicate object over a valid interval, recorded at a Ledger transaction (ADR 0002 §2). id hashes everything but recorded_at, superseded_at, supersedes. An inferred claim names its model in provenance; an observed or stated one has confidence not_applicable and no model (ADR 0006 §3).",
+      "properties": {
+        "assertion_kind": {
+          "$ref": "#/$defs/ClaimAssertionKind"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "id": {
+          "$ref": "#/$defs/ClaimId"
+        },
+        "object": {
+          "$ref": "#/$defs/ClaimObject"
+        },
+        "predicate": {
+          "$ref": "#/$defs/Token"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ClaimProvenance"
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "subject": {
+          "$ref": "#/$defs/NodeRef"
+        },
+        "superseded_at": {
+          "$ref": "#/$defs/TxEnd"
+        },
+        "supersedes": {
+          "items": {
+            "$ref": "#/$defs/ClaimId"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "$ref": "#/$defs/Interval"
+        }
+      },
+      "required": [
+        "assertion_kind",
+        "confidence",
+        "id",
+        "object",
+        "predicate",
+        "provenance",
+        "recorded_at",
+        "subject",
+        "superseded_at",
+        "supersedes",
+        "valid"
+      ],
+      "type": "object"
+    },
+    "ClaimAssertionKind": {
+      "enum": [
+        "inferred",
+        "observed",
+        "stated"
+      ]
+    },
+    "ClaimId": {
+      "pattern": "^claim:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "ClaimObject": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NodeRef"
+        },
+        {
+          "$ref": "#/$defs/TypedLiteral"
+        },
+        {
+          "$ref": "#/$defs/LedgerRecordRef"
+        }
+      ]
+    },
+    "ClaimProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "config_hash": {
+          "$ref": "#/$defs/ConfigHash"
+        },
+        "consolidator_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "consolidator_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelRef"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "config_hash",
+        "consolidator_id",
+        "consolidator_version",
+        "evidence",
+        "records"
+      ],
+      "type": "object"
+    },
+    "ClaimsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ResolutionFinding"
+          },
+          "type": "array"
+        },
+        "other_clocks": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "as_of",
+        "claims",
+        "findings",
+        "other_clocks"
+      ],
+      "type": "object"
+    },
+    "Confidence": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConfigHash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "ContentId": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "EpisodeView": {
+      "additionalProperties": false,
+      "properties": {
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "episode": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "claims",
+        "episode"
+      ],
+      "type": "object"
+    },
+    "EpisodesResult": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/EpisodeView"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "locator": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ByteRange"
+              },
+              {
+                "$ref": "#/$defs/RecordRange"
+              },
+              {
+                "$ref": "#/$defs/Page"
+              },
+              {
+                "$ref": "#/$defs/PageRegion"
+              },
+              {
+                "$ref": "#/$defs/Span"
+              },
+              {
+                "$ref": "#/$defs/Row"
+              },
+              {
+                "$ref": "#/$defs/RowCell"
+              },
+              {
+                "$ref": "#/$defs/ImageRegion"
+              },
+              {
+                "$ref": "#/$defs/VideoFrame"
+              },
+              {
+                "$ref": "#/$defs/JsonPointer"
+              },
+              {
+                "$ref": "#/$defs/FrameLocator"
+              },
+              {
+                "$ref": "#/$defs/ObjectLocator"
+              },
+              {
+                "$ref": "#/$defs/AdapterLocator"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentId"
+            },
+            {
+              "$ref": "#/$defs/ExternalObjectRef"
+            }
+          ]
+        }
+      },
+      "required": [
+        "locator",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ExternalObjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "connector_id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "external"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "revision_token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connector_id",
+        "kind",
+        "object_id",
+        "revision_token"
+      ],
+      "type": "object"
+    },
+    "FindingCode": {
+      "enum": [
+        "clock_mismatch",
+        "overridden_on_arrival"
+      ]
+    },
+    "FindingId": {
+      "pattern": "^finding:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FindingProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "config_hash": {
+          "$ref": "#/$defs/ConfigHash"
+        },
+        "resolver_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "resolver_version": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_hash",
+        "resolver_id",
+        "resolver_version"
+      ],
+      "type": "object"
+    },
+    "FrameLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "frame"
+        },
+        "ref": {
+          "$ref": "#/$defs/FrameRef"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "FrameRef": {
+      "additionalProperties": false,
+      "properties": {
+        "frame_graph_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "frame_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame_graph_id",
+        "frame_id"
+      ],
+      "type": "object"
+    },
+    "Graph": {
+      "additionalProperties": false,
+      "description": "one resolved history: every claim version ordered by (recorded_at, id), every finding, and the resolver configuration whose hash is its generation (ADR 0006)",
+      "properties": {
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ResolutionFinding"
+          },
+          "type": "array"
+        },
+        "generation": {
+          "$ref": "#/$defs/ConfigHash"
+        },
+        "graph_schema_version": {
+          "const": 1
+        },
+        "head": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "kind": {
+          "const": "memory.graph"
+        },
+        "resolver_config": {
+          "$ref": "#/$defs/ResolverConfig"
+        }
+      },
+      "required": [
+        "claims",
+        "findings",
+        "generation",
+        "graph_schema_version",
+        "head",
+        "kind",
+        "resolver_config"
+      ],
+      "type": "object"
+    },
+    "ImageRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "image_region"
+        },
+        "x0": {
+          "type": "integer"
+        },
+        "x1": {
+          "type": "integer"
+        },
+        "y0": {
+          "type": "integer"
+        },
+        "y1": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "x0",
+        "x1",
+        "y0",
+        "y1"
+      ],
+      "type": "object"
+    },
+    "Interval": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "const": "open"
+            }
+          ]
+        },
+        "start": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "JsonPointer": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "json_pointer"
+        },
+        "pointer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "pointer"
+      ],
+      "type": "object"
+    },
+    "LedgerRecordRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "record"
+        },
+        "record_id": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "kind",
+        "record_id"
+      ],
+      "type": "object"
+    },
+    "LedgerTx": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ModelRef": {
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "model_version": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "model_version"
+      ],
+      "type": "object"
+    },
+    "Neighbour": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeRef"
+        },
+        "via": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "depth",
+        "node",
+        "via"
+      ],
+      "type": "object"
+    },
+    "NeighboursResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ResolutionFinding"
+          },
+          "type": "array"
+        },
+        "hops": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "neighbours": {
+          "items": {
+            "$ref": "#/$defs/Neighbour"
+          },
+          "type": "array"
+        },
+        "start": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "as_of",
+        "findings",
+        "hops",
+        "neighbours",
+        "start"
+      ],
+      "type": "object"
+    },
+    "NodeRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "node"
+        },
+        "node_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        }
+      },
+      "required": [
+        "kind",
+        "node_id",
+        "node_type"
+      ],
+      "type": "object"
+    },
+    "NodeResult": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/NodeView"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NodeType": {
+      "enum": [
+        "asset",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ]
+    },
+    "NodeView": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ResolutionFinding"
+          },
+          "type": "array"
+        },
+        "incoming": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "as_of",
+        "claims",
+        "findings",
+        "incoming",
+        "node"
+      ],
+      "type": "object"
+    },
+    "NonFinite": {
+      "additionalProperties": false,
+      "properties": {
+        "non_finite": {
+          "enum": [
+            "nan",
+            "inf",
+            "-inf"
+          ]
+        }
+      },
+      "required": [
+        "non_finite"
+      ],
+      "type": "object"
+    },
+    "NotApplicable": {
+      "additionalProperties": false,
+      "properties": {
+        "knowledge": {
+          "const": "not_applicable"
+        }
+      },
+      "required": [
+        "knowledge"
+      ],
+      "type": "object"
+    },
+    "ObjectLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "object"
+        },
+        "object_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "object_id"
+      ],
+      "type": "object"
+    },
+    "Page": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "page"
+        }
+      },
+      "required": [
+        "index",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PageRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "page_region"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "x0": {
+          "type": "number"
+        },
+        "x1": {
+          "type": "number"
+        },
+        "y0": {
+          "type": "number"
+        },
+        "y1": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "page",
+        "x0",
+        "x1",
+        "y0",
+        "y1"
+      ],
+      "type": "object"
+    },
+    "PredicateRegistry": {
+      "additionalProperties": false,
+      "properties": {
+        "predicates": {
+          "items": {
+            "$ref": "#/$defs/PredicateSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "predicates"
+      ],
+      "type": "object"
+    },
+    "PredicateSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cardinality": {
+          "$ref": "#/$defs/Cardinality"
+        },
+        "description": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "domain": {
+          "items": {
+            "$ref": "#/$defs/NodeType"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "$ref": "#/$defs/Token"
+        },
+        "range": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NodeType"
+              },
+              {
+                "$ref": "#/$defs/ValueType"
+              }
+            ]
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "version": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cardinality",
+        "description",
+        "domain",
+        "name",
+        "range",
+        "version"
+      ],
+      "type": "object"
+    },
+    "RecordId": {
+      "pattern": "^rec:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "RecordRange": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "end": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "record_range"
+        },
+        "start": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "channel",
+        "domain_id",
+        "end",
+        "kind",
+        "start"
+      ],
+      "type": "object"
+    },
+    "ResolutionFinding": {
+      "additionalProperties": false,
+      "description": "a resolver finding, bi-temporal like a claim; id hashes code, claim, others and provenance (ADR 0006 §5)",
+      "properties": {
+        "claim": {
+          "$ref": "#/$defs/ClaimId"
+        },
+        "code": {
+          "$ref": "#/$defs/FindingCode"
+        },
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "others": {
+          "items": {
+            "$ref": "#/$defs/ClaimId"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/FindingProvenance"
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "superseded_at": {
+          "$ref": "#/$defs/TxEnd"
+        }
+      },
+      "required": [
+        "claim",
+        "code",
+        "id",
+        "others",
+        "provenance",
+        "recorded_at",
+        "superseded_at"
+      ],
+      "type": "object"
+    },
+    "ResolverConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "priorities": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Token"
+          },
+          "type": "object"
+        },
+        "vocabulary": {
+          "$ref": "#/$defs/PredicateRegistry"
+        },
+        "vocabulary_version": {
+          "description": "the core vocabulary's version: 7 when this schema was exported (VOCABULARY_VERSION)",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "priorities",
+        "vocabulary",
+        "vocabulary_version"
+      ],
+      "type": "object"
+    },
+    "Row": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "row"
+        },
+        "row": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "row"
+      ],
+      "type": "object"
+    },
+    "RowCell": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "integer"
+        },
+        "column_name": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "row_cell"
+        },
+        "row": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "column",
+        "kind",
+        "row"
+      ],
+      "type": "object"
+    },
+    "Span": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "span"
+        },
+        "start": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "kind",
+        "start"
+      ],
+      "type": "object"
+    },
+    "SpatialResult": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/SpatialView"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SpatialView": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "frame": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "site": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "as_of",
+        "claims",
+        "frame",
+        "site"
+      ],
+      "type": "object"
+    },
+    "Timestamp": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "ticks": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain_id",
+        "ticks"
+      ],
+      "type": "object"
+    },
+    "Token": {
+      "pattern": "^[a-z][a-z0-9_.\\-]*$",
+      "type": "string"
+    },
+    "TxEnd": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        {
+          "const": "open"
+        }
+      ]
+    },
+    "TypedLiteral": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "text"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "$ref": "#/$defs/NotApplicable"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "integer"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "$ref": "#/$defs/NotApplicable"
+            },
+            "value": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "real"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "$ref": "#/$defs/NotApplicable"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/$defs/NonFinite"
+                }
+              ]
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "boolean"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "$ref": "#/$defs/NotApplicable"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "quantity"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/Unit"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "unknown"
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/Unit"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "description": "a quantity's unit exactly as declared; it inherits the claim's provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/$defs/NonFinite"
+                }
+              ]
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "instant"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "$ref": "#/$defs/NotApplicable"
+            },
+            "value": {
+              "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Unit": {
+      "description": "a catalogued unit's canonical symbol (ADR 0013)",
+      "type": "string"
+    },
+    "ValueType": {
+      "enum": [
+        "boolean",
+        "instant",
+        "integer",
+        "quantity",
+        "real",
+        "record",
+        "text"
+      ]
+    },
+    "VideoFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "index": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "video_frame"
+        },
+        "pts": {
+          "type": "integer"
+        },
+        "track": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain_id",
+        "index",
+        "kind",
+        "pts",
+        "track"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:neptune:schema:graph:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Graph"
+    }
+  ],
+  "description": "Neptune Memory's graph schema (neptune-memory ADR 0002, 0005, 0006): a graph document; claims, findings and the vocabulary are #/$defs/Claim, #/$defs/ResolutionFinding and #/$defs/PredicateRegistry; MemoryReader results are #/$defs/NodeResult, ClaimsResult, NeighboursResult, EpisodesResult and SpatialResult. Generated from neptune_memory.schema; the Python readers in neptune_memory.schema.codec are stricter.",
+  "title": "Neptune Memory graph schema, version 1"
+}

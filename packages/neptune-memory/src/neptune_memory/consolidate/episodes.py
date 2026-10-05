@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
+from neptune.identity import canonical_json
 from neptune.identity.ids import record_id
 from neptune.model.finding import Severity
 from neptune.model.knowledge import (
@@ -153,7 +154,7 @@ _EVENTS: Final[Mapping[str, Callable[[Mapping[str, object]], events.Event]]] = {
 
 def _read(ledger: LedgerReader) -> _View:
     view = _View()
-    seen: dict[RecordId, events.Event] = {}
+    seen: dict[RecordId, tuple[bytes, events.Event]] = {}  # by id: its whole content, parsed
     conflicted: set[RecordId] = set()
     for ref in ledger.list_packages():
         for kind, silent in _SILENT.items():
@@ -171,12 +172,13 @@ def _read(ledger: LedgerReader) -> _View:
             for index, record in enumerate(ledger.read_records(ref.package_id, kind) or ()):
                 try:
                     event = parser(record)
-                except events.Malformed as exc:
+                    content = canonical_json.dumps(dict(record))  # type: ignore[arg-type]
+                except (events.Malformed, ValueError, TypeError) as exc:
                     view.findings.append(_malformed(kind, ref.package_id, index, str(exc)))
                     continue
                 if event.record in conflicted:
                     continue
-                if seen.setdefault(event.record, event) != event:
+                if seen.setdefault(event.record, (content, event))[0] != content:
                     conflicted.add(event.record)
                     view.findings.append(
                         _finding(
@@ -190,7 +192,7 @@ def _read(ledger: LedgerReader) -> _View:
     for rid in sorted(seen):
         if rid in conflicted:
             continue
-        event = seen[rid]
+        event = seen[rid][1]
         (view.interventions if event.kind == events.INTERVENTION else view.incidents).append(event)
     return view
 

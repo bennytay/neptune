@@ -16,7 +16,7 @@ statement.
 | `assertion-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `catalog-api` | `neptune-ledger` | active | 1.6.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
-| `graph-schema` | `neptune-memory` | active | 1.3.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
+| `graph-schema` | `neptune-memory` | active | 1.5.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
 | `query-packet` | `neptune-context` | planned | — | — | `neptune-deploy`, `neptune-learn` |
 | `dataset-manifest` | `neptune-learn` | planned | — | — | none in this repository |
 

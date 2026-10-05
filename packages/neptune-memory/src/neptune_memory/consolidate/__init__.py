@@ -7,5 +7,6 @@ version + config gives byte-identical claims. Missing evidence stays explicit, n
 the identity policy (``same_as`` only on declared grounds, everything else a candidate) and
 ``identity_records`` parses the Ledger records it reads (ADR 0008); ``runs`` holds run threads
 (nodes, membership, continuation, declared roles and intervals) and ``run_records`` parses its
-records (ADR 0009).
+records (ADR 0009); ``episodes`` holds episodes from stated task evidence, bounded by stated
+instants, with interventions and stops, and ``event_records`` parses the events it reads (ADR 0012).
 """

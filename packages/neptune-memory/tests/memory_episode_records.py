@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from memory_identity_records import STATED, Record, ambiguous, cite, provenance, rid
-from neptune.model.ids import LogicalId
+from neptune.model.ids import LogicalId, RecordId
 from neptune.model.knowledge import Known, Unknown
 from neptune.model.lifecycle import IncidentRecord, Intervention
 
@@ -45,7 +45,7 @@ def intervention(
     start: Timestamp | None = None,
     end: Timestamp | None = None,
     outcome: str | None = None,
-) -> tuple[Record, str]:
+) -> tuple[Record, RecordId]:
     """An ``Intervention`` declared by ticket ``name``."""
     declared = provenance(cite(f"ticket {name}"), STATED)
     record = Intervention(
@@ -74,7 +74,7 @@ def incident(
     related: Sequence[LogicalId | Sequence[LogicalId]] | None = (),
     occurred: Timestamp | None = None,
     description: str = "emergency stop",
-) -> tuple[Record, str]:
+) -> tuple[Record, RecordId]:
     """An ``IncidentRecord`` (a stop or a fault) declared by report ``name``."""
     declared = provenance(cite(f"incident {name}"), STATED)
     record = IncidentRecord(

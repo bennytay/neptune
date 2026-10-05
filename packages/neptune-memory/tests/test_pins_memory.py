@@ -22,8 +22,9 @@ def test_graph_schema_v1_is_published_and_active() -> None:
     assert contract["status"] == "active"
     assert contract["owner"]["version_constant"] == "neptune_memory.schema:GRAPH_SCHEMA_VERSION"
     # 1.1.0: has_name, stream and document (ADR 0008); 1.3.0: run thread predicates (ADR 0009;
-    # 1.2.0 is MVL-127's configuration lineage, published on its own branch)
-    for published in ("1.0.0", "1.1.0", "1.3.0"):
+    # 1.2.0 is MVL-127's configuration lineage, published on its own branch); 1.5.0: episode
+    # predicates (ADR 0012; 1.4.0 is MVL-130's, published on its own branch)
+    for published in ("1.0.0", "1.1.0", "1.3.0", "1.5.0"):
         version = json.loads(
             (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")
         )
