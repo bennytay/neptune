@@ -20,7 +20,7 @@ def _ok(_: Context) -> Outcome:
 
 
 def _context(tmp_path: Path, registry: object | None = None) -> Context:
-    _, cases = corpus.select()
+    _, cases = corpus.select(name="worked-examples")
     return Context(registry=registry or contracts.registry(), work=tmp_path, cases=cases)
 
 

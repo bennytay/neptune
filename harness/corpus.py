@@ -1,8 +1,10 @@
 """The input corpus: cases the compiler stage ingests, one folder of sources per case.
 
-Today the corpus is the compiler's four worked examples (``tests/fixtures/model/<example>/sources``:
-a drone, a manipulator, a mobile robot and a quadruped). The Deploy D1 archetype fixtures replace
-them when they land: that is ``ARCHETYPES``, the one place to wire them in.
+The default is the acceptance corpus (``harness.acceptance``, Platform ADR 0007): one generated,
+versioned hand-over folder of two sites and three robot types, ingested as one case, with gold
+answers whose evidence the compiler stage resolves. ``worked-examples`` is the compiler's four
+worked examples (``tests/fixtures/model/<example>/sources``: a drone, a manipulator, a mobile robot
+and a quadruped), each its own case; ``--corpus DIR`` is any folder of case folders.
 """
 
 from __future__ import annotations
@@ -11,36 +13,44 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from harness import acceptance
+
 REPO: Final = Path(__file__).resolve().parents[1]
 WORKED_EXAMPLES: Final = REPO / "tests" / "fixtures" / "model"
 EXAMPLE_NAMES: Final = ("drone", "manipulator", "mobile_robot", "quadruped")
-
-# HOOK (Deploy D1): the archetype fixtures, one folder per archetype, each a folder of sources.
-# When the Deploy project lands them, point this at the directory (its location is that
-# project's to choose) and the harness uses them instead of the worked examples; nothing else
-# changes. Until the directory exists, this is skipped on purpose.
-ARCHETYPES: Final = REPO / "packages" / "neptune-deploy" / "fixtures" / "archetypes"
+ACCEPTANCE: Final = acceptance.NAME
+NAMES: Final = (ACCEPTANCE, "worked-examples")
+# Where the acceptance corpus is written when the caller names no directory.
+DEFAULT_BUILD: Final = REPO / "harness" / ".run" / "corpus"
 
 
 @dataclass(frozen=True)
 class Case:
-    """One robot's sources: ``id`` names it in the report, ``sources`` is the folder to ingest."""
+    """One case: ``id`` names it in the report, ``sources`` is the folder to ingest, ``gold`` the
+    gold answers whose evidence the compiler stage resolves against the case's package."""
 
     id: str
     sources: Path
+    gold: Path | None = None
 
 
 def _cases_in(root: Path) -> list[Case]:
     return [Case(path.name, path) for path in sorted(root.iterdir()) if path.is_dir()]
 
 
-def select(override: Path | None = None) -> tuple[str, list[Case]]:
-    """(corpus name, cases): ``--corpus`` if given, else the archetypes if present, else the
-    worked examples. The name is what the report says the corpus is."""
+def select(
+    override: Path | None = None, *, name: str = ACCEPTANCE, into: Path | None = None
+) -> tuple[str, list[Case]]:
+    """(corpus label, cases). ``override`` (``--corpus DIR``) wins; else ``name``. The acceptance
+    corpus is generated under ``into`` (default ``harness/.run/corpus``); its label carries the
+    version, which is what a gate quotes."""
     if override is not None:
         return "custom", _cases_in(override)
-    if ARCHETYPES.is_dir():
-        return "deploy-d1-archetypes", _cases_in(ARCHETYPES)
-    return "worked-examples", [
-        Case(name, WORKED_EXAMPLES / name / "sources") for name in EXAMPLE_NAMES
+    if name == "worked-examples":
+        return name, [Case(n, WORKED_EXAMPLES / n / "sources") for n in EXAMPLE_NAMES]
+    if name != ACCEPTANCE:
+        raise ValueError(f"unknown corpus {name!r}; choose one of {', '.join(NAMES)}")
+    root = acceptance.materialise((into or DEFAULT_BUILD) / f"{ACCEPTANCE}-{acceptance.VERSION}")
+    return f"{ACCEPTANCE} {acceptance.VERSION}", [
+        Case(f"{ACCEPTANCE}-{acceptance.VERSION}", root, acceptance.GOLD)
     ]
