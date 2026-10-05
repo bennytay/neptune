@@ -10,6 +10,7 @@ resolution-markers = [
 [manifest]
 members = [
     "neptune",
+    "neptune-context",
     "neptune-deploy",
     "neptune-ledger",
     "neptune-memory",
@@ -634,6 +635,23 @@ dev = [
     { name = "ruff", specifier = ">=0.8" },
     { name = "types-jsonschema", specifier = ">=4.23" },
     { name = "types-pyyaml", specifier = ">=6.0" },
+]
+
+[[package]]
+name = "neptune-context"
+version = "0.0.1"
+source = { editable = "packages/neptune-context" }
+dependencies = [
+    { name = "neptune" },
+    { name = "neptune-ledger" },
+    { name = "neptune-memory" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "neptune", editable = "." },
+    { name = "neptune-ledger", editable = "packages/neptune-ledger" },
+    { name = "neptune-memory", editable = "packages/neptune-memory" },
 ]
 
 [[package]]
