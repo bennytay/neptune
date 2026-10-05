@@ -115,10 +115,12 @@ when asked, works over any `MemoryReader`, and compares no clocks.
 
 Clocks are related, never coerced, with `schema.clocks.convert(reader, ticks, from_clock, to_clock, as_of, *,
 include_inferred=True, max_hops=8)`: exact ticks of `to_clock` (a `Fraction`) with the error bound the mappings
-state, through `clock_map` claims that hold at that instant, forward or inverted. Declared mappings are tried
-first, estimated ones only if no declared chain converts. The result is `Known`, `Ambiguous` (mappings that hold
-disagree) or `Unknown` with a `MissingHop`: the clocks reached, the clock not reached, and the mappings that exist
-but do not apply at that instant (ADR 0011 §3).
+state, through `clock_map` claims that hold at that instant, forward or inverted, along every route of every
+length. Declared mappings are tried first, estimated ones only if the declared ones decide nothing. The result is
+`Known` (every route agrees), `Ambiguous` (routes or mappings that hold disagree) or `Unknown` with a
+`MissingHop`: nothing arrives, or some branch is undecided (a mapping in force without parameters, a conflict a
+later hop's validity would settle, too many readings); it names the clocks reached, the mappings that do not
+apply, and the readings that did arrive (ADR 0011 §5).
 
 Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, `ClaimsResult`,
 `NeighboursResult`, `EpisodesResult`, `SpatialResult`). A `Knowledge`-wrapped result is

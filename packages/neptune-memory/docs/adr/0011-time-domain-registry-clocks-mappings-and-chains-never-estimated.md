@@ -81,9 +81,11 @@ is, else `observed`. An unstated end is `OPEN` ("until further notice", as ADR 0
   clock twice, whose hops all state an anchor and a rate, is emitted as a separate `maps_to` + `clock_map` pair
   where every hop applies. Its `ClockMap` is `composed`: `chain` (the mapping records, hop by hop), `via` (the
   clocks between) and **no parameters** (`NotApplicable`): the offset is the hops' arithmetic, computed at query
-  time (§5), so a chain claim never states a number no record states. Its window is exact:
-  `s <= f(t) < e` iff `ceil(f⁻¹(s)) <= t < ceil(f⁻¹(e))` for integer `t` and an increasing `f`, folded from the
-  last hop back. Chains are forward only; inverses are query-time arithmetic, which keeps chain claims linear in
+  time (§5), so a chain claim never states a number no record states. Its window is exact: the last hop's window
+  is folded back through each earlier hop as exact rational bounds (`lo <= f(y) < hi` iff
+  `f⁻¹(lo) <= y < f⁻¹(hi)` for an increasing `f`; a middle clock's instant is a fraction), intersected with each
+  hop's own window, and rounded once on the first clock's integer ticks (`t >= L` iff `t >= ceil(L)`, `t < H`
+  iff `t < ceil(H)`). A chain claim therefore holds exactly where `convert` carries the instant through it. Chains are forward only; inverses are query-time arithmetic, which keeps chain claims linear in
   the paths rather than quadratic in the clocks. Kind: `inferred` if any hop is estimated, else `stated` if every
   hop is, else `observed`. A chain through a revised mapping is cut at the revision like the mapping.
 
@@ -99,17 +101,28 @@ finding. Malformed or conflicting records are reported once, by the consolidator
 
 ### 5. `schema.clocks.convert`
 
-`convert(reader, ticks, from_clock, to_clock, as_of, *, include_inferred=True, max_hops=8) -> Conversion` walks
-the direct `clock_map` claims of one snapshot breadth first, forward (`rate * t + offset`) or backward (the exact
-inverse), applying a mapping only where its valid interval holds the instant on its source clock. Ticks are exact
+`convert(reader, ticks, from_clock, to_clock, as_of, *, include_inferred=True, max_hops=8) -> Conversion` finds
+every route of clocks from the instant's clock to the target that direct `clock_map` claims join (simple, at most
+`max_hops` hops) and carries the instant along each, forward (`rate * t + offset`) or backward (the exact inverse),
+through every mapping of each hop whose valid interval holds the instant on its source clock. Ticks are exact
 `Fraction`s, never rounded; the bound accumulates `rate * bound + residual` forward and
 `(bound + residual) / rate` backward, `Unknown` once a hop states none. A window starting at `INT64_MIN` (stated
-open below) holds any earlier instant a hop carries. Of readings with one value, the one with declared hops only,
-then a stated bound, then the tightest bound, then the lowest claim ids is kept. Declared mappings first; estimated ones
-only when no declared chain converts, and the result is marked `inferred`. `result` is `Known`, `Ambiguous`
-(readings that hold disagree; never one picked) or `Unknown` with `MissingHop`: the clocks reached, the clock not
-reached, and the mappings that exist but do not apply (outside validity, or no anchor or rate). Caller errors
-(ticks outside signed 64-bit, a bad clock id, a negative `max_hops`, `as_of` past `head`) raise.
+open below) holds any earlier instant a hop carries. Routes of **every** length are compared; one value is never
+picked over another:
+
+- `Known`: every reading that arrives has one value. Of equal readings, the one with declared hops only, then a
+  stated bound, the tightest bound, the fewest hops, the lowest claim ids is reported.
+- `Ambiguous`: readings that arrive differ (two declarations from one instant, a direct mapping and a chain).
+- `Unknown` with `MissingHop` when nothing arrives, or when any branch is undecided: a mapping in force that states
+  no anchor or rate (forward validity is checked first; a backward one cannot be checked without its parameters,
+  so it counts as in force); a reading of a middle clock, left by a conflict, that no hop carries on while another
+  reading of it is carried; or more than `MAX_READINGS` readings of a clock, `MAX_ROUTES` routes or `MAX_VISITS`
+  clocks visited (`too_ambiguous`). `MissingHop` names the clocks reached, the clock not decided, the mappings out
+  of force or without parameters, and the `readings` that did arrive.
+
+Declared mappings first; estimated ones only when the declared ones decide nothing, and the result is marked
+`inferred`. Caller errors (ticks outside signed 64-bit, a bad clock id, a negative `max_hops`, `as_of` past
+`head`) raise.
 
 ### 6. Contract
 

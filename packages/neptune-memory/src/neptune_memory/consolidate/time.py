@@ -416,53 +416,66 @@ def piece_drafts(piece: Piece, confidence: Knowledge[float] | None = None) -> li
 # --- Chains -------------------------------------------------------------------------------------
 
 
-def _intersect(a: Interval, b: Interval) -> Interval | None:
-    start = max(a.start, b.start)
-    ends = [e for e in (a.end, b.end) if isinstance(e, Timestamp)]
-    end: Timestamp | Open = min(ends) if ends else OPEN
-    return Interval(start, end) if isinstance(end, Open) or start < end else None
+# A window of instants on one clock as exact reals: ``lo <= x < hi``; ``None`` is unbounded. The
+# instant a hop carries onto a middle clock is a Fraction, so only the first clock is rounded.
+_Span = tuple[Fraction | None, Fraction | None]
 
 
-def preimage(piece: Piece, window: Interval) -> Interval | None:
-    """The source instants where ``piece`` applies and lands inside ``window`` (on its target).
+def _span(interval: Interval) -> _Span:
+    """An interval as reals; a start at ``INT64_MIN`` is stated open below (ADR 0011 §2)."""
+    start, end = interval.start.ticks, interval.end
+    return (
+        None if start == INT64_MIN else Fraction(start),
+        Fraction(end.ticks) if isinstance(end, Timestamp) else None,
+    )
 
-    Exact: for an increasing map ``f`` and integer ``t``, ``s <= f(t) < e`` iff
-    ``ceil(f⁻¹(s)) <= t < ceil(f⁻¹(e))``. ``None`` when there are none, or the piece has no
-    stated anchor and rate."""
+
+def _meet(a: _Span, b: _Span) -> _Span | None:
+    lows = [x for x in (a[0], b[0]) if x is not None]
+    highs = [x for x in (a[1], b[1]) if x is not None]
+    lo, hi = (max(lows) if lows else None), (min(highs) if highs else None)
+    return None if lo is not None and hi is not None and not lo < hi else (lo, hi)
+
+
+def preimage(piece: Piece, held: _Span) -> _Span | None:
+    """The instants of ``piece``'s source where it applies and lands in ``held`` on its target,
+    exactly: for an increasing ``f``, ``lo <= f(y) < hi`` iff ``f⁻¹(lo) <= y < f⁻¹(hi)``.
+    ``None`` when there are none, or the piece states no anchor and rate."""
     affine = piece.hop.clock_map.affine()
     if affine is None:
         return None
     rate, offset = affine
-    source = piece.source
-
-    def back(ticks: int) -> int:
-        return math.ceil((Fraction(ticks) - offset) / rate)
-
-    lower = back(window.start.ticks)
-    if window.start.ticks == INT64_MIN or lower < INT64_MIN:
-        lower = INT64_MIN  # open below, or below the earliest instant the source can write
-    if lower > INT64_MAX:
-        return None
-    end: Timestamp | Open = OPEN
-    if isinstance(window.end, Timestamp):
-        upper = back(window.end.ticks)
-        if upper <= INT64_MIN:
-            return None
-        if upper <= INT64_MAX:
-            end = Timestamp(upper, source)
-    if isinstance(end, Timestamp) and lower >= end.ticks:
-        return None
-    return _intersect(piece.interval, Interval(Timestamp(lower, source), end))
+    lo, hi = held
+    back = (
+        None if lo is None else (lo - offset) / rate,
+        None if hi is None else (hi - offset) / rate,
+    )
+    return _meet(_span(piece.interval), back)
 
 
 def window(chain: Sequence[Piece]) -> Interval | None:
-    """Where every hop of ``chain`` applies, on its first clock: folded from the last hop back."""
-    held: Interval | None = chain[-1].interval
+    """Where every hop of ``chain`` applies, on its first clock: exact bounds folded from the last
+    hop back through the middle clocks, rounded once, on the first clock's integer ticks
+    (``t >= L`` iff ``t >= ceil(L)``; ``t < H`` iff ``t < ceil(H)``)."""
+    held: _Span | None = _span(chain[-1].interval)
     for piece in reversed(chain[:-1]):
         if held is None:
             return None
         held = preimage(piece, held)
-    return held
+    if held is None:
+        return None
+    source = chain[0].source
+    lower = INT64_MIN if held[0] is None else max(INT64_MIN, math.ceil(held[0]))
+    if lower > INT64_MAX:
+        return None
+    end: Timestamp | Open = OPEN
+    if held[1] is not None:
+        upper = math.ceil(held[1])
+        if upper <= lower:
+            return None
+        if upper <= INT64_MAX:
+            end = Timestamp(upper, source)
+    return Interval(Timestamp(lower, source), end)
 
 
 @dataclass(frozen=True)

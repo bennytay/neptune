@@ -11,19 +11,23 @@ from memory_time_records import (
     MICRO,
     MILLI,
     OPEN_SIDE,
+    at,
     build,
+    claims,
     clock,
+    clock_map,
     domain,
     drone_flight,
     estimate,
     mapping,
+    mapping_id,
     reader,
     revised,
     two_sites,
 )
 from neptune.model.knowledge import Ambiguous, Known, Unknown
 from neptune.model.time import INT64_MAX, INT64_MIN, Epoch, Timescale
-from neptune_memory.schema.clocks import Conversion, Converted, convert
+from neptune_memory.schema.clocks import MAX_READINGS, Conversion, Converted, convert
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.reader import AsOfBeyondHeadError
 
@@ -209,3 +213,86 @@ def test_a_hop_stated_open_below_holds_instants_below_the_earliest_tick() -> Non
     graph = reader(build({"p": records}))
     out = known(convert(graph, INT64_MIN + 5, clock("a"), clock("c"), ledger_tx(1)))
     assert out.ticks == INT64_MIN + 5 - 2**62
+
+
+# --- Never one picked (review of #120) ----------------------------------------------------------
+
+
+def test_a_conflict_in_a_middle_clock_left_to_validity_is_never_known() -> None:
+    records = [
+        mapping("m1", "a", "b", anchor=(0, 100)),
+        mapping("m2", "a", "b", anchor=(0, 200)),
+        mapping("m3", "b", "c", anchor=(0, 0), start=150),  # holds only for m2's reading
+    ]
+    graph = reader(build({"p": records}))
+    assert isinstance(convert(graph, 0, clock("a"), clock("b"), ledger_tx(1)).result, Ambiguous)
+    result = convert(graph, 0, clock("a"), clock("c"), ledger_tx(1))
+    assert isinstance(result.result, Unknown) and result.missing is not None
+    assert [r.ticks for r in result.missing.readings] == [200]  # what the decided branch gives
+    assert [c.provenance.records for c in result.missing.outside_validity] == [(mapping_id("m3"),)]
+
+
+def test_more_readings_than_the_limit_are_unknown_never_cut_to_one() -> None:
+    records = [mapping(f"m{i}", "a", "b", anchor=(0, i)) for i in range(MAX_READINGS + 1)]
+    result = convert(reader(build({"p": records})), 0, clock("a"), clock("b"), ledger_tx(1))
+    assert isinstance(result.result, Unknown) and result.missing is not None
+    assert result.missing.too_ambiguous and result.missing.readings == ()
+
+
+def _ambiguous_rate(name: str) -> dict[str, object]:
+    record = mapping(name, "a", "b", anchor=(0, 100))
+    one, two = ({"denominator": 1, "numerator": n} for n in (1, 2))
+    record["rate"] = {"knowledge": "ambiguous", "candidates": [{"value": one}, {"value": two}]}
+    return record
+
+
+@pytest.mark.parametrize("unread", ["unknown", "ambiguous"])
+def test_a_mapping_in_force_without_its_parameters_makes_the_result_unknown(unread: str) -> None:
+    other = (
+        mapping("m2", "a", "b", anchor=(0, 100), rate=None)
+        if unread == "unknown"
+        else _ambiguous_rate("m2")
+    )
+    records = [mapping("m1", "a", "b", anchor=(0, 100)), other]
+    result = convert(reader(build({"p": records})), 0, clock("a"), clock("b"), ledger_tx(1))
+    assert isinstance(result.result, Unknown) and result.missing is not None
+    assert [c.provenance.records for c in result.missing.parameters_unknown] == [
+        (mapping_id("m2"),)
+    ]
+    assert [r.ticks for r in result.missing.readings] == [100]
+    # Out of force, it decides nothing: the other mapping converts.
+    later = [
+        mapping("m1", "a", "b", anchor=(0, 100)),
+        mapping("m3", "a", "b", anchor=(0, 0), rate=None, start=50),
+    ]
+    assert (
+        known(convert(reader(build({"p": later})), 0, clock("a"), clock("b"), ledger_tx(1))).ticks
+        == 100
+    )
+
+
+def test_a_three_hop_chain_window_is_exact_and_agrees_with_convert() -> None:
+    records = [
+        mapping("h1", "a", "b", anchor=(0, 0), rate=Fraction(1, 10)),
+        mapping("h2", "b", "c", anchor=(0, 0), rate=Fraction(2)),
+        mapping("h3", "c", "d", anchor=(0, 0), start=0, end=5),
+    ]
+    results = build({"p": records})
+    (chain,) = [c for c in claims(results, "clock_map") if len(clock_map(c).chain) == 3]
+    assert (chain.valid_from, chain.valid_to) == (at("a", 0), at("a", 25))  # 2 * t / 10 < 5
+    graph = reader(results)
+    for t in range(-3, 32):
+        converted = convert(graph, t, clock("a"), clock("d"), ledger_tx(1)).result
+        assert isinstance(converted, Known) == chain.valid.contains(at("a", t)), t
+    assert known(convert(graph, 24, clock("a"), clock("d"), ledger_tx(1))).ticks == Fraction(24, 5)
+
+
+def test_a_direct_mapping_and_a_chain_that_disagree_are_ambiguous() -> None:
+    chain = [mapping("a-b", "a", "b", anchor=(0, 0)), mapping("b-c", "b", "c", anchor=(0, 0))]
+    disagree = reader(build({"p": [*chain, mapping("a-c", "a", "c", anchor=(0, 5))]}))
+    result = convert(disagree, 1, clock("a"), clock("c"), ledger_tx(1)).result
+    assert isinstance(result, Ambiguous)
+    assert sorted(c.value.ticks for c in result.candidates) == [1, 6]
+    agree = reader(build({"p": [*chain, mapping("a-c", "a", "c", anchor=(0, 0))]}))
+    out = known(convert(agree, 1, clock("a"), clock("c"), ledger_tx(1)))
+    assert out.ticks == 1 and len(out.path) == 1  # one value; the reading kept has the fewest hops

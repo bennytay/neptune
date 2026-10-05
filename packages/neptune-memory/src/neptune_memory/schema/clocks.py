@@ -1,29 +1,32 @@
-"""Converting an instant between clocks through ``clock_map`` claims, at query time (ADR 0011 §3).
+"""Converting an instant between clocks through ``clock_map`` claims, at query time (ADR 0011 §5).
 
-``convert`` walks the mapping claims of one snapshot (``as_of``) over any ``MemoryReader``, breadth
-first from the instant's clock: forward along a mapping (its source to its target) or backward
-(target to source, the exact inverse of an increasing affine map). A mapping applies only where
-its claim's valid interval holds the instant on its source clock, so a revised mapping's old
-parameters are used before the revision and the new ones after. Composed (chain) claims are not
-walked: they cite chains of the same direct mappings, whose arithmetic is done here.
+``convert`` reads the mapping claims of one snapshot (``as_of``) over any ``MemoryReader``. It finds
+every route of clocks from the instant's clock to the target (simple, at most ``max_hops`` hops)
+and carries the instant along each, forward along a mapping (its source to its target) or backward
+(the exact inverse of an increasing affine map), through every mapping of each hop that holds at
+the instant on its source clock. So a revised mapping's old parameters apply before the revision
+and the new ones after. Composed (chain) claims are not walked: they cite chains of the same
+direct mappings, whose arithmetic is done here.
 
-Nothing is estimated and nothing is rounded: the result is exact ticks of the target clock (a
+Nothing is estimated and nothing is rounded: a reading is exact ticks of the target clock (a
 ``Fraction``), with the error bound the mappings state accumulated along the way
 (``rate * bound + residual`` forward, ``(bound + residual) / rate`` backward), ``Unknown`` once any
-hop states none. Declared mappings are tried first; estimated (inferred) ones only when no
-declared chain converts the instant, and then the result says so.
+hop states none. Declared mappings are tried first; estimated (inferred) ones only when the
+declared ones decide nothing, and then the result says so. Routes of every length are compared.
 
-- ``Known``: one reading. ``Ambiguous``: mappings that hold at that instant disagree (two
-  declarations from one instant, or two chains of one length); never one picked.
-- ``Unknown``: no chain converts the instant; ``missing`` names the hop that is missing: the
-  clocks that were reached, the clock that was not, and the mappings that exist but do not apply
-  (outside their validity, or stating no anchor or rate).
+- ``Known``: every route that arrives gives one value.
+- ``Ambiguous``: routes or mappings that hold give different values; never one picked.
+- ``Unknown``: nothing arrives, or some branch is undecided: a mapping that holds but states no
+  anchor or rate, a reading of a middle clock (left by a conflict) that no hop carries while
+  another is carried on, or more routes or readings than the limits. ``missing`` names the clocks
+  reached, the target, the mappings that could not be applied, and any readings that did arrive.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fractions import Fraction
+from itertools import pairwise
 from typing import TYPE_CHECKING, Final
 
 from neptune.model.ids import RecordId, parse_record_id
@@ -44,8 +47,11 @@ if TYPE_CHECKING:
 # Deep enough for boot -> site clock -> GPS -> another site's clock -> its robot's boot clock and
 # back; callers set their own.
 DEFAULT_MAX_HOPS: Final = 8
-# Distinct readings carried per clock; more than this is reported, never silently cut.
+# Distinct readings carried per clock, routes compared, and clocks visited finding them; past any
+# of these the result is Unknown and says so (``too_ambiguous``), never one picked.
 MAX_READINGS: Final = 8
+MAX_ROUTES: Final = 64
+MAX_VISITS: Final = 4096
 
 
 @dataclass(frozen=True)
@@ -62,15 +68,17 @@ class Converted:
 
 @dataclass(frozen=True)
 class MissingHop:
-    """Why no chain converts the instant: from any of ``reached`` to ``target`` there is no
-    mapping that holds at the instant. ``outside_validity`` and ``parameters_unknown`` are the
-    mappings touching ``reached`` that exist but could not be applied, sorted by claim id."""
+    """Why no conversion is decided: no route from ``reached`` (the clocks a reading got to) to
+    ``target`` holds at the instant, or some route is undecided (``readings`` then holds what the
+    others give). ``outside_validity`` and ``parameters_unknown`` are the mappings on the routes
+    that exist but could not be applied, sorted by claim id."""
 
     reached: tuple[RecordId, ...]
     target: RecordId
     outside_validity: tuple[Claim, ...]
     parameters_unknown: tuple[Claim, ...]
-    too_ambiguous: bool = False  # more than ``MAX_READINGS`` readings of one clock
+    too_ambiguous: bool = False  # past ``MAX_READINGS``, ``MAX_ROUTES`` or ``MAX_VISITS``
+    readings: tuple[Converted, ...] = ()  # what some routes give while another is undecided
 
 
 @dataclass(frozen=True)
@@ -169,9 +177,14 @@ def _holds(claim: Claim, ticks: Fraction) -> bool:
 
 
 def _apply(step: _Step, reading: _Reading) -> _Reading | str:
-    """The reading carried across ``step``, or why it cannot be: ``unknown`` or ``outside``."""
+    """The reading carried across ``step``, or why not: ``outside`` (the mapping does not hold at
+    that instant) or ``unknown`` (it may hold, but states no anchor or rate to apply). A forward
+    step's validity is checked first, on the instant it already has; a backward step's needs its
+    parameters, so without them it may hold and is ``unknown``."""
     affine = step.clock_map.affine()
     if affine is None:
+        if not step.backward and not _holds(step.claim, reading.ticks):
+            return "outside"
         return "unknown"
     rate, offset = affine
     residual = step.clock_map.residual_bound
@@ -189,60 +202,167 @@ def _apply(step: _Step, reading: _Reading) -> _Reading | str:
     return _Reading(ticks, bound, (*reading.path, step.claim), (*reading.backward, step.backward))
 
 
-def _preference(reading: _Reading) -> tuple[bool, bool, Fraction, tuple[str, ...]]:
+def _preference(reading: _Reading) -> tuple[bool, bool, Fraction, int, tuple[str, ...]]:
     """Of readings with one value, keep the best-evidenced: declared hops only, a stated bound,
-    the tightest bound, then the path's claim ids (so the choice is deterministic)."""
+    the tightest bound, the fewest hops, then the path's claim ids (so the choice is
+    deterministic). It never chooses between values: those are compared, never picked."""
     inferred = any(is_inferred(c.assertion_kind) for c in reading.path)
     bound = reading.bound
-    return (inferred, bound is None, bound or Fraction(0), tuple(c.id for c in reading.path))
+    ids = tuple(c.id for c in reading.path)
+    return (inferred, bound is None, bound or Fraction(0), len(ids), ids)
+
+
+def _distinct(readings: list[_Reading]) -> list[_Reading]:
+    """One reading per value, the best-evidenced, in value order."""
+    kept: dict[Fraction, _Reading] = {}
+    for reading in sorted(readings, key=_preference):
+        kept.setdefault(reading.ticks, reading)
+    return sorted(kept.values(), key=lambda r: r.ticks)
+
+
+@dataclass
+class _Outcome:
+    """What every route to the target says at the instant: the readings that arrive, whether any
+    branch was left undecided (a mapping in force that cannot be applied, a reading of a middle
+    clock that no hop carries while another reading of it is carried on, or too many readings),
+    and the mappings that could not be applied."""
+
+    reached: set[RecordId]
+    readings: list[_Reading] = field(default_factory=list)
+    undecided: bool = False
+    crowded: bool = False
+    outside: dict[str, Claim] = field(default_factory=dict)
+    unknown: dict[str, Claim] = field(default_factory=dict)
+
+
+def _routes(
+    graph: _Graph, source: RecordId, target: RecordId, max_hops: int
+) -> list[tuple[RecordId, ...]] | None:
+    """Every simple sequence of clocks from ``source`` to ``target`` that mappings join, of at
+    most ``max_hops`` hops, in a fixed order; ``None`` past ``MAX_ROUTES`` (never cut short)."""
+    found: list[tuple[RecordId, ...]] = []
+    visits = 0
+
+    def walk(path: tuple[RecordId, ...]) -> bool:
+        nonlocal visits
+        visits += 1
+        if visits > MAX_VISITS:
+            return False
+        for there in sorted({step.to for step in graph.steps(path[-1])}):
+            if there in path:
+                continue
+            if there == target:
+                found.append((*path, there))
+                if len(found) > MAX_ROUTES:
+                    return False
+            elif len(path) < max_hops and not walk((*path, there)):
+                return False
+        return True
+
+    if max_hops == 0:
+        return []
+    return found if walk((source,)) else None
+
+
+def _evaluate(
+    graph: _Graph, route: tuple[RecordId, ...], start: _Reading, outcome: _Outcome
+) -> None:
+    """Carry every reading along ``route``, every mapping of each hop that holds; add what
+    arrives, and whether any branch was left undecided, to ``outcome``."""
+    assert (
+        outcome.outside is not None and outcome.unknown is not None and outcome.reached is not None
+    )
+    readings = [start]
+    undecided = False
+    for here, there in pairwise(route):
+        steps = [s for s in graph.steps(here) if s.to == there]
+        carried: list[_Reading] = []
+        dropped = 0
+        for reading in readings:
+            moved = False
+            for step in steps:
+                out = _apply(step, reading)
+                if isinstance(out, _Reading):
+                    carried.append(out)
+                    moved = True
+                elif out == "unknown":
+                    outcome.unknown[step.claim.id] = step.claim
+                    undecided = moved = True
+                else:
+                    outcome.outside[step.claim.id] = step.claim
+            dropped += not moved
+        if carried and dropped:
+            undecided = True  # validity picked among readings a conflict left open: never Known
+        if not carried:
+            break
+        outcome.reached.add(there)
+        readings = _distinct(carried)
+        if len(readings) > MAX_READINGS:
+            outcome.crowded = undecided = True
+            break
+    else:
+        outcome.readings.extend(readings)
+    outcome.undecided = outcome.undecided or undecided
+
+
+def _reach(
+    graph: _Graph, start: _Reading, source: RecordId, max_hops: int, outcome: _Outcome
+) -> None:
+    """Every clock a reading of the instant gets to, anywhere, and the mappings it stops at: what
+    an ``Unknown`` names as reached and blocked. Breadth first, each clock once."""
+    assert (
+        outcome.outside is not None and outcome.unknown is not None and outcome.reached is not None
+    )
+    frontier: dict[RecordId, list[_Reading]] = {source: [start]}
+    seen = {source}
+    for _ in range(max_hops):
+        found: dict[RecordId, list[_Reading]] = {}
+        for here in sorted(frontier):
+            for step in graph.steps(here):
+                if step.to in seen:
+                    continue
+                for reading in frontier[here]:
+                    out = _apply(step, reading)
+                    if isinstance(out, _Reading):
+                        found.setdefault(step.to, []).append(out)
+                    elif out == "unknown":
+                        outcome.unknown[step.claim.id] = step.claim
+                    else:
+                        outcome.outside[step.claim.id] = step.claim
+        if not found:
+            return
+        seen.update(found)
+        outcome.reached.update(found)
+        frontier = {clock: _distinct(rs)[:MAX_READINGS] for clock, rs in found.items()}
 
 
 def _search(
     graph: _Graph, ticks: int, source: RecordId, target: RecordId, max_hops: int
 ) -> Conversion:
-    frontier: dict[RecordId, list[_Reading]] = {
-        source: [_Reading(Fraction(ticks), Fraction(0), (), ())]
-    }
-    reached: set[RecordId] = {source}
-    outside: dict[str, Claim] = {}
-    unknown: dict[str, Claim] = {}
-    crowded = False
-    for _ in range(max_hops):
-        found: dict[RecordId, list[_Reading]] = {}
-        for here in sorted(frontier):
-            for step in graph.steps(here):
-                if step.to in reached:
-                    continue
-                for reading in frontier[here]:
-                    carried = _apply(step, reading)
-                    if carried == "unknown":
-                        unknown[step.claim.id] = step.claim
-                    elif carried == "outside":
-                        outside[step.claim.id] = step.claim
-                    elif isinstance(carried, _Reading):
-                        found.setdefault(step.to, []).append(carried)
-        if not found:
-            break
-        frontier = {}
-        for clock, readings in found.items():
-            distinct: dict[Fraction, _Reading] = {}
-            for reading in sorted(readings, key=_preference):
-                distinct.setdefault(reading.ticks, reading)
-            if len(distinct) > MAX_READINGS:
-                crowded = True
-                continue
-            frontier[clock] = sorted(distinct.values(), key=lambda r: r.ticks)
-        reached.update(found)
-        if target in frontier:
-            return Conversion(_result(frontier[target], target), None)
-        if target in found:  # reached, but with too many readings to report
-            break
+    """Every route to the target, compared: one value is ``Known``, several are ``Ambiguous``,
+    and any undecided branch (or too many routes or readings) is ``Unknown``, never one picked."""
+    start = _Reading(Fraction(ticks), Fraction(0), (), ())
+    outcome = _Outcome({source})
+    routes = _routes(graph, source, target, max_hops)
+    if routes is None:
+        outcome.crowded = outcome.undecided = True
+        routes = []
+    for route in routes:
+        _evaluate(graph, route, start, outcome)
+    readings = _distinct(outcome.readings)
+    if readings and not outcome.undecided:
+        return Conversion(_result(readings, target), None)
+    _reach(graph, start, source, max_hops, outcome)
+    assert (
+        outcome.outside is not None and outcome.unknown is not None and outcome.reached is not None
+    )
     missing = MissingHop(
-        reached=tuple(sorted(reached - {target})),
+        reached=tuple(sorted(outcome.reached - {target})),
         target=target,
-        outside_validity=tuple(outside[k] for k in sorted(outside)),
-        parameters_unknown=tuple(unknown[k] for k in sorted(unknown)),
-        too_ambiguous=crowded,
+        outside_validity=tuple(outcome.outside[k] for k in sorted(outcome.outside)),
+        parameters_unknown=tuple(outcome.unknown[k] for k in sorted(outcome.unknown)),
+        too_ambiguous=outcome.crowded,
+        readings=tuple(_converted(r, target) for r in readings),
     )
     return Conversion(Unknown(), missing)
 
