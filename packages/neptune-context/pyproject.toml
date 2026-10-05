@@ -1,0 +1,48 @@
+# Workspace member generated from packages/_template by scripts/new-package.sh.
+# Dev tools (ruff, mypy, pytest) come from the root project's `dev` group; `make setup` installs them.
+[project]
+name = "neptune-context"
+version = "0.0.1"
+description = "Neptune Context: query language, retrieval and context packets over Memory and the Ledger."
+requires-python = ">=3.11"
+authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
+# Context is Layer 3: it reads the Ledger's catalog API and Memory's graph schema and writes nothing
+# to either (ADR 0001). The workspace dependency list drives CI selection, so a Ledger or Memory
+# change also runs this job. The pins are contracts/lock.toml and neptune_context.pins.
+dependencies = ["neptune", "neptune-ledger", "neptune-memory"]
+
+[tool.uv.sources]
+neptune = { workspace = true }
+neptune-ledger = { workspace = true }
+neptune-memory = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neptune_context"]
+
+# Shared lint rules live in the root pyproject; paths below are relative to this package.
+[tool.ruff]
+extend = "../../pyproject.toml"
+src = ["src", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+xfail_strict = true
+markers = [
+  "integration: exercises multiple components against real fixtures",
+  "slow: takes more than a few seconds; excluded by `make test-fast`",
+]
