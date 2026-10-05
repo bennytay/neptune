@@ -31,8 +31,9 @@ if TYPE_CHECKING:
 # core (ADR 0006 §4). 3: ``has_name`` joined (ADR 0007 §2), and the predicates that hold for every
 # node type widened to ``stream`` and ``document`` (ADR 0008 §6). The vocabulary is part of
 # graph-schema (``GRAPH_SCHEMA_VERSION``). 4: the configuration lineage predicates (ADR 0010,
-# MVL-127). 5: the run thread predicates joined (ADR 0009 §6).
-VOCABULARY_VERSION: Final = 5
+# MVL-127). 5: the run thread predicates joined (ADR 0009 §6). 6: MVL-130's clock predicates.
+# 7: the episode predicates joined (ADR 0012 §5).
+VOCABULARY_VERSION: Final = 7
 
 # Identity predicates (ADR 0003 §1). Only ``memory.identity`` grounds ``same_as``, never by
 # inference; ``same_as_candidate`` is pairwise, one claim each way. The runner enforces both.
@@ -53,6 +54,21 @@ CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
         AT_SITE: "at_site_candidate",
         EXECUTES_TASK: "executes_task_candidate",
         CONTINUES: "continues_candidate",
+    }
+)
+
+# Episodes (ADR 0012). ``starts_at`` / ``ends_at`` are an episode's boundaries on one clock, each
+# citing what states it; ``intervened`` names an ``Intervention`` record; ``outcome`` is a declared
+# outcome, verbatim, and is never inferred. The ``_candidate`` forms are ambiguous readings.
+STARTS_AT: Final = "starts_at"
+ENDS_AT: Final = "ends_at"
+INTERVENED: Final = "intervened"
+OUTCOME: Final = "outcome"
+EPISODE_CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        STARTS_AT: "starts_at_candidate",
+        ENDS_AT: "ends_at_candidate",
+        INTERVENED: "intervened_candidate",
     }
 )
 
@@ -359,6 +375,55 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
     ),
     _p("operated_by", {_N.RUN}, {_N.PERSON}, _MANY, "a declared operator or supervisor"),
     _p("episode_of", {_N.EPISODE}, {_N.RUN}, _ONE, "the run an episode segments"),
+    _p(
+        "starts_at",
+        {_N.EPISODE},
+        {_V.INSTANT},
+        _ONE,
+        "where an episode starts on a clock, as its evidence states",
+    ),
+    _p(
+        "starts_at_candidate",
+        {_N.EPISODE},
+        {_V.INSTANT},
+        _MANY,
+        "ambiguous: the evidence states several starts on this clock; which is undecided",
+    ),
+    _p(
+        "ends_at",
+        {_N.EPISODE},
+        {_V.INSTANT},
+        _ONE,
+        "where an episode ends on a clock, as its evidence states",
+    ),
+    _p(
+        "ends_at_candidate",
+        {_N.EPISODE},
+        {_V.INSTANT},
+        _MANY,
+        "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+    ),
+    _p(
+        "intervened",
+        {_N.EPISODE},
+        {_V.RECORD},
+        _MANY,
+        "a human intervention during the episode (an Intervention record, by id)",
+    ),
+    _p(
+        "intervened_candidate",
+        {_N.EPISODE},
+        {_V.RECORD},
+        _MANY,
+        "ambiguous: the intervention may have been during the episode; the evidence does not say",
+    ),
+    _p(
+        "outcome",
+        {_N.EPISODE},
+        {_V.TEXT},
+        _ONE,
+        "the outcome a record declares for the episode, verbatim; never inferred",
+    ),
     _p(
         "maintenance_state",
         {_N.MACHINE, _N.SENSOR, _N.ASSET},
