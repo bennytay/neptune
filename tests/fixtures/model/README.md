@@ -1,7 +1,8 @@
 # Worked examples
 
 Four robots, each with the sources such a team typically has, and the canonical records those
-sources declare (MVL-70), plus two deployments' lifecycle records (MVL-83, ADR 0051). `make examples` rebuilds everything here from `make_examples.py`, and
+sources declare (MVL-70), plus two deployments' lifecycle records (MVL-83, ADR 0051) and a fleet
+register whose row states an identity link (MVL-126, ADR 0050 §10). `make examples` rebuilds everything here from `make_examples.py`, and
 `tests/integration/test_worked_examples.py` checks that the committed files are exactly its output.
 
 | Example | Sources | What it shows |
@@ -12,6 +13,7 @@ sources declare (MVL-70), plus two deployments' lifecycle records (MVL-83, ADR 0
 | `mobile_robot` | `drive.bag` (ROS 1), `sites.csv`, `photos/dock.png` | a register with blank cells, its rows and the sites they name, each id and name citing its cell; a photo's pixels and its EXIF capture time, position and camera serial |
 | `warehouse_amr` | `records.json` (a deployment-records export) | AMR-07's warehouse deployment at site S-007: commissioning baseline, authorisation envelope with per-zone speed limits, a remote assist, an incident, the map and zone change that followed, and the risk assessment |
 | `manipulator_cell` | `records.json` (a deployment-records export) | cell CELL-3: commissioning baseline, risk assessment with declared PLr scores, a joint-drive replacement and the requalification that returned it to service |
+| `fleet_register` | `fleet.csv` | four robots of four embodiments by asset tag; the drone's row also gives its PX4 `sys_uuid`, so it states one `co_declared` identity link (asset tag UAV-0042 to the drone log's `sys_uuid`), never a merge |
 
 Each example directory holds `sources/` (the files, as an ingest root) and `records/<kind>.jsonl`:
 one canonical-JSON line per record, sorted by id (ADR 0002), with the ledger (`source_artifact`,
