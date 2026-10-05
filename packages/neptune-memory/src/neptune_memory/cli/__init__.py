@@ -11,11 +11,16 @@ Rule: thin wrappers over the library; no logic of their own, and no direct packa
   (the old one stays if the rebuild is refused).
 - ``dump [--as-of TX]``: every claim version of the tenant's graph (or the graph as of ``TX``) as
   canonical JSON Lines, ordered by claim id, to ``--out`` or stdout.
+- ``verify GRAPH``: check a graph document file someone else holds (a consumer's fixture) with the
+  codec: every claim and finding id against its content, canonical order, ``generation``, and the
+  rest of what ``graph_from_json`` checks. One line per problem on stdout and exit 1; a one-line
+  summary and exit 0 when it decodes. Needs no ``--graphs`` or ``--tenant``.
 
 ``--ledger`` is a Ledger export (``neptune_memory.ledger.LedgerExport``), ``--graphs`` the root of
 the tenants' graph directories (``neptune_memory.store.graphs``). Exit status: 0 done, 1 refused
 (a snapshot that does not follow the graph, a dropped consolidator, a lineage that cannot be
-ordered, a bad tenant directory), 2 usage or unreadable input.
+ordered, a bad tenant directory, a graph document that does not verify), 2 usage or unreadable
+input.
 """
 
 from __future__ import annotations
@@ -35,6 +40,8 @@ from neptune_memory.consolidate.snapshot import (
     extend,
 )
 from neptune_memory.ledger import ledger_export_from_json
+from neptune_memory.schema import GRAPH_SCHEMA_VERSION
+from neptune_memory.schema.codec import graph_from_json, graph_problems
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.reader import AsOfBeyondHeadError
 from neptune_memory.schema.supersede import LineageError, as_of
@@ -52,8 +59,9 @@ USAGE: Final = 2
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="memory", description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("--graphs", type=Path, required=True, help="root of the tenants' graphs")
-    parser.add_argument("--tenant", required=True)
+    # Required by every command but ``verify``, which reads one file and no tenant.
+    parser.add_argument("--graphs", type=Path, help="root of the tenants' graphs")
+    parser.add_argument("--tenant")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("consolidate", "rebuild"):
         command = commands.add_parser(name)
@@ -62,6 +70,8 @@ def _parser() -> argparse.ArgumentParser:
     dump = commands.add_parser("dump")
     dump.add_argument("--as-of", type=int, default=None, dest="as_of")
     dump.add_argument("--out", type=Path, default=None)
+    verify = commands.add_parser("verify")
+    verify.add_argument("graph", type=Path, help="a graph document (graph.json)")
     return parser
 
 
@@ -76,14 +86,34 @@ def _constant(token: str) -> object:
     raise ValueError(f"{token} is not JSON")
 
 
-def _ledger(path: Path) -> LedgerExport:
+def _strict_json(path: Path, what: str) -> object:
     """Any strict JSON (no repeated keys, no NaN), canonical or not."""
     text = path.read_bytes().decode("utf-8")
     try:
-        data = json.loads(text, object_pairs_hook=_unique, parse_constant=_constant)
+        return json.loads(text, object_pairs_hook=_unique, parse_constant=_constant)
     except RecursionError as exc:
-        raise ValueError("the Ledger export is nested too deeply") from exc
-    return ledger_export_from_json(data)
+        raise ValueError(f"the {what} is nested too deeply") from exc
+
+
+def _ledger(path: Path) -> LedgerExport:
+    return ledger_export_from_json(_strict_json(path, "Ledger export"))
+
+
+def _verify(path: Path, out: TextIO) -> int:
+    """``memory verify``: one line per problem and ``REFUSED``, or a summary line and ``OK``."""
+    data = _strict_json(path, "graph document")
+    problems = graph_problems(data)  # type: ignore[arg-type]  # any JSON value; it checks
+    for problem in problems:
+        out.write(f"{path}: {problem}\n")
+    if problems:
+        return REFUSED
+    document = graph_from_json(data)  # type: ignore[arg-type]
+    out.write(
+        f"{path}: ok: graph-schema {GRAPH_SCHEMA_VERSION} document, head {document.head}, "
+        f"{len(document.resolution.claims)} claims, {len(document.resolution.findings)} "
+        f"findings, {len(document.builds)} builds, generation {document.generation}\n"
+    )
+    return OK
 
 
 def _consolidate(
@@ -126,8 +156,13 @@ def main(
         args = _parser().parse_args(argv)
     except SystemExit as exc:
         return USAGE if exc.code else OK
-    graphs = TenantGraphs(args.graphs)
     try:
+        if args.command == "verify":
+            return _verify(args.graph, out)
+        if args.graphs is None or args.tenant is None:
+            err.write(f"memory: {args.command} needs --graphs and --tenant\n")
+            return USAGE
+        graphs = TenantGraphs(args.graphs)
         if args.command == "dump":
             if args.out is None:
                 _dump(graphs, args.tenant, args.as_of, out)
