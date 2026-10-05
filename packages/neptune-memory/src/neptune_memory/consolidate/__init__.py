@@ -17,5 +17,7 @@ its tables and config (ADR 0013); ``calibration`` holds calibration history per 
 between consecutive calibrations in declared units and ``calibrated_by``, and
 ``calibration_records`` parses what it reads (ADR 0014);
 ``coverage`` holds what each run recorded, its gaps, rates, integrity findings and sensor presence,
-and ``coverage_records`` parses its records (ADR 0015).
+and ``coverage_records`` parses its records (ADR 0015). ``snapshot`` registers and plans the
+consolidators, runs them over one Ledger snapshot into a ``MemorySnapshot``, and folds the run
+into a graph document with its builds (ADR 0016).
 """

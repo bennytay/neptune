@@ -1,6 +1,6 @@
 # 0007 — G1 gate: withdrawal, names, evidence status, and the final store decision
 
-- Status: Accepted
+- Status: Accepted; §5.3 (package-scoped builds) superseded by 0016
 - Date: 2026-10-02
 - Issue: MVL-106
 

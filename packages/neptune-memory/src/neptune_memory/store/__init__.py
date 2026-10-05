@@ -4,7 +4,8 @@ Rule: packages are read only through ``neptune_memory.ledger.LedgerReader``; thi
 opens package files and never imports ``neptune.store``. The chosen engine is PostgreSQL 16 +
 pgvector, queried with SQL (``postgres.PostgresStore``; an Apache AGE snapshot is optional).
 ``neo4j.Neo4jStore`` is a stub kept so the store stays swappable (ADR 0004). Database drivers are
-never imported here: callers pass a connection.
+never imported here: callers pass a connection. ``graphs.TenantGraphs`` keeps each tenant's graph
+document and snapshot records on disk for the ``memory`` CLI (ADR 0016 §4).
 """
 
 from neptune_memory.store.neo4j import Neo4jStore
