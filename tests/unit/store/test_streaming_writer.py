@@ -76,7 +76,7 @@ def test_a_whole_package_with_series_and_derived_tables_streams_byte_for_byte(
     root = tmp_path / "package"
     identity = write_package_stream(
         root,
-        reversed(package.records),
+        reversed(list(package.records)),
         scratch=spill_dir(tmp_path),
         series=package.series,
         blobs=package.blobs,
@@ -142,7 +142,8 @@ def test_a_refused_write_leaves_no_half_package(tmp_path: Path) -> None:
     root = tmp_path / "p"
     with pytest.raises(PackageError, match="transform"):
         write_package_stream(root, records, scratch=spill_dir(tmp_path), budget=TINY)
-    assert list(root.iterdir()) == []
+    assert not root.exists()  # written beside it, renamed only when whole (ADR 0070)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["scratch"]
 
 
 def test_a_derived_kind_that_is_not_a_name_writes_nothing_outside_the_package(
