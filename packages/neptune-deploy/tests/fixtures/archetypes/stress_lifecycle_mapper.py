@@ -1,15 +1,20 @@
 """Scale and hostile-input measurements of the lifecycle mapper for the D1 gate (MVL-116).
 
 ``python stress_lifecycle_mapper.py [ROWS ...]`` maps grown copies of the warehouse fleet's
-committed base package, in memory, each case in its own process, and prints one line per case: the
-mapper's wall time, the time to write the package's bytes (the compiler's ``package_files``), peak
-resident memory, the package's size and its findings. Nothing is ingested (members may not) and
-nothing is written. ``docs/reviews/d1-gate.md`` records its output.
+committed base package, each case in its own process, and prints one line per case: the time to map
+and write the package, peak resident memory, the package's size and its findings. The grown base
+is built in memory (nothing is ingested; members may not) and the package is written to a
+temporary directory the way ``map_package`` writes it: streamed through the compiler's
+``write_package_stream`` (ADR 0012 §3), or, where ``iter_records`` does not exist (the mapper
+before ADR 0012), mapped to lists, ``package_files`` and ``write_package``. The base's own rows
+are in the figure either way. ``docs/reviews/d1-gate.md`` records its output.
 """
 
 import resource
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Sequence
 from dataclasses import replace
@@ -19,9 +24,9 @@ from typing import Any, Final
 from neptune.identity.provenance import evidence_record_id
 from neptune.model.knowledge import Known
 from neptune.model.provenance import EvidenceRef, Page, Row, Span
-from neptune.store.package import IngestPackage, package_files, read_package
+from neptune.store.package import IngestPackage, package_files, read_package, write_package
 from neptune_deploy.lifecycle import TemplateRegistry, preset
-from neptune_deploy.lifecycle.run import map_records
+from neptune_deploy.lifecycle import run as lifecycle_run
 
 HERE: Final = Path(__file__).resolve().parent
 BASE: Final = read_package(HERE / "packages" / "warehouse_amr_fleet")
@@ -114,20 +119,36 @@ def cell(column: str, value: str) -> IngestPackage:
     return replace(BASE, records=tuple(out))
 
 
+def _write(
+    base: IngestPackage, mappings: Sequence[Any], templates: Sequence[Any], out: Path
+) -> Any:
+    """The mapped package into ``out``; returns ``(bytes written, findings)``."""
+    if hasattr(lifecycle_run, "iter_records"):
+        from neptune.store.writer import write_package_stream
+
+        records = lifecycle_run.iter_records(base, mappings, templates)
+        write_package_stream(out, records, scratch=out.parent)
+    else:
+        write_package(out, package_files(lifecycle_run.map_records(base, mappings, templates)))
+    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
+    findings = (out / "records" / "ingest_finding.jsonl").read_bytes().count(b"\n")
+    return size, findings
+
+
 def measure(name: str, base: IngestPackage, presets: Sequence[str] = (), docs: bool = False) -> str:
-    """One case: wall time of the mapper and of writing its package's bytes, this process's peak
-    resident memory, and what came out."""
+    """One case: wall time to map and write the package, this process's peak resident memory,
+    and what came out."""
     start = time.perf_counter()
-    records = map_records(base, [preset(p) for p in presets], TEMPLATES if docs else ())
-    mapped = time.perf_counter()
-    files = package_files(records)
-    written = time.perf_counter()
+    with tempfile.TemporaryDirectory() as scratch:
+        size, findings = _write(
+            base, [preset(p) for p in presets], TEMPLATES if docs else (), Path(scratch) / "out"
+        )
+        shutil.rmtree(scratch, ignore_errors=True)
+    elapsed = time.perf_counter() - start
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # KiB on Linux
-    size = sum(len(data) for data in files.values())
-    findings = files["records/ingest_finding.jsonl"].count(b"\n")
     return (
-        f"{name:<44} map {mapped - start:6.2f} s  write {written - mapped:6.2f} s"
-        f"  {peak:7.0f} MiB RSS  {size / 2**20:7.2f} MiB out  {findings:5d} findings"
+        f"{name:<44} map+write {elapsed:7.2f} s  {peak:7.0f} MiB RSS"
+        f"  {size / 2**20:7.2f} MiB out  {findings:5d} findings"
     )
 
 

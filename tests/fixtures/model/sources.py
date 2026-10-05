@@ -685,6 +685,22 @@ def manipulator_cell() -> list[Source]:
     return [Source("records.json", _json(CELL_RECORDS), {})]
 
 
+# --- Fleet register: one robot per row, by asset tag and the ids its controller declares -----
+
+# The tags the other examples' sites and operators use; only the drone's controller id is listed.
+FLEET_REGISTER: Final = (
+    "asset_tag,platform,px4_sys_uuid\r\n"
+    f"UAV-0042,aerial,{DRONE_SYS_UUID}\r\n"
+    "QUAD-03,legged,\r\n"
+    "ARM-05,manipulator,\r\n"
+    "AMR-12,mobile,\r\n"
+)
+
+
+def fleet_register() -> list[Source]:
+    return [Source("fleet.csv", FLEET_REGISTER.encode(), {})]
+
+
 EXAMPLES: Final = {
     "drone": drone,
     "quadruped": quadruped,
@@ -692,4 +708,5 @@ EXAMPLES: Final = {
     "mobile_robot": mobile_robot,
     "warehouse_amr": warehouse_amr,
     "manipulator_cell": manipulator_cell,
+    "fleet_register": fleet_register,
 }
