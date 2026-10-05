@@ -9,10 +9,12 @@ operator said, and the history keeps both.
 - A retraction with no replacement, and any retraction of a ``many`` fact such as ``same_as``,
   has no mechanism: ``many`` claims never contradict, and a consolidator that stops emitting a
   claim does not withdraw it. ADR 0003 §1.4 said "undoing an identity is superseding a claim";
-  the resolver cannot do that. GAP: ADR 0007 §5 defines build withdrawal (MVL-132) and the
-  ``operator_retraction`` record (MVL-126). Pinned by the strict ``xfail`` below.
+  the resolver cannot do that. ADR 0007 §5 defines build withdrawal (MVL-132). MVL-126 landed
+  retraction (ADR 0008 §3): a ``retract`` assertion (root ADR 0062) naming the confirmation's
+  declared id, after which the identity build emits no claim resting on it. HOLDS for that half;
+  GAP for withdrawal (MVL-132), pinned by the strict ``xfail`` below.
 
-Verdict: GAP.
+Verdict: GAP (MVL-132 only).
 """
 
 from __future__ import annotations
@@ -30,12 +32,13 @@ from memory_g1_harness import (
     civil,
     draft,
     ledger,
-    link,
     reader,
     rid,
     source,
     thread,
 )
+from memory_identity_records import assertion
+from neptune.model.assertion import AssertionType
 from neptune.model.ids import LogicalId
 from neptune.model.knowledge import AssertionKind, NotCovered
 from neptune_memory.consolidate.base import Consolidation, rebuild, run_consolidator
@@ -83,34 +86,27 @@ def test_a_corrected_one_fact_is_superseded_by_the_correction_and_kept_in_histor
 
 HUMANOID_A = LogicalId("fleet-register", "apollo-03")
 HUMANOID_B = LogicalId("vendor-log", "unit-7f2c")
+CONFIRMATION = LogicalId("ops-console", "ASR-2026-0301")
 
 
 def _identity_packages(retracted: bool) -> dict[str, list[dict[str, object]]]:
-    assertion = link(
-        "operator_assertion",
+    confirmation = assertion(
         "apollo-03 is unit 7f2c",
-        HUMANOID_A,
-        HUMANOID_B,
-        MAR_02_2026,
-        predicate=SAME_AS,
-        operator="badge:4411",
+        AssertionType.SAME_IDENTITY,
+        (HUMANOID_A, HUMANOID_B),
+        identifier=CONFIRMATION,
+        authored_at=civil(MAR_02_2026),
     )
     packages = {
         "register": [
             thread("fleet-register", "apollo-03", "machine", cite(source("register.csv")))
         ],
         "vendor": [thread("vendor-log", "unit-7f2c", "machine", cite(source("vendor.log")))],
-        "ops-1": [assertion],
+        "ops-1": [confirmation],
     }
-    if retracted:  # the operator withdraws it: a new record, the old one untouched (ADR 0007 §5)
+    if retracted:  # the operator withdraws it: a new record, the old one untouched (ADR 0062 §5)
         packages["ops-2"] = [
-            {
-                "kind": "operator_retraction",
-                "id": rid("operator_retraction", "x"),
-                "retracts": assertion["id"],
-                "operator": "badge:4411",
-                "evidence": [cite(source("ops-2.log")).to_json()],
-            }
+            assertion("withdrawn", AssertionType.RETRACT, (), retracts=CONFIRMATION)
         ]
     return packages
 
@@ -135,10 +131,16 @@ def test_an_operator_same_as_is_a_stated_edge_with_its_record() -> None:
     assert len(same.provenance.records) == 1
 
 
+def test_the_build_after_a_retraction_emits_nothing_that_rests_on_it() -> None:
+    """MVL-126's half of ADR 0007 §5.4: the consolidator drops the retracted ground."""
+    assert _identity(2, retracted=True) == []
+    assert _run(2, retracted=True).findings == ()
+
+
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="GAP MVL-126 + MVL-132: no retraction or withdrawal yet (ADR 0007 §5)",
+    reason="GAP MVL-132: no build withdrawal yet (ADR 0007 §5)",
 )
 def test_a_retracted_same_as_stops_being_current_and_stays_in_history() -> None:
     claims = _identity(1, retracted=False) + _identity(2, retracted=True)
