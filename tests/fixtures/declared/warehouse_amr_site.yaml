@@ -1,0 +1,25 @@
+site:
+  id: WH-3
+  name: Riverside fulfilment centre
+  aliases: [Riverside DC, Building 3]
+  location:
+    latitude: -33.8121
+    longitude: 151.0034
+    crs: "EPSG:4326"
+  assets:
+    - id: DOCK-2
+      name: Charging dock 2
+      category: charger
+    - id: AISLE-14
+      name: Aisle 14
+      category: aisle
+tasks:
+  - id: PICK-NIGHT
+    name: Night replenishment
+    objective: Move full pallets from receiving to aisle 14 before 06:00.
+    site: WH-3
+    assets: [AISLE-14, DOCK-2]
+    machines: [AMR-07, AMR-09]
+    requirements:
+      - id: PICK-R1
+        text: Robots shall keep 0.5 m from people in shared aisles.

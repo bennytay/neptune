@@ -1,13 +1,14 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.4.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.5.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
 run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.4.0 (minor) adds the `clock` node
 type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
-([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)). Earlier goldens still
+([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.5.0 (minor) adds the
+episode predicates ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md) §5). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -42,7 +43,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 6`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 7`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -60,6 +61,8 @@ major version (ADR 0002 §5).
 | `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
+| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
+| `ends_at_candidate` | episode | instant | many | ambiguous: may end here (a stated end, or a stop event inside it) |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
@@ -71,6 +74,8 @@ major version (ADR 0002 §5).
 | `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
 | `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
+| `intervened` | episode | record | many | a human intervention during the episode (an `Intervention` record) |
+| `intervened_candidate` | episode | record | many | ambiguous: the intervention may have been during the episode |
 | `located_at` | asset, machine | site, zone | one | where it is |
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
 | `maps_to` | clock | clock | many | a declared or estimated mapping, or a chain of them, takes its ticks to another clock's |
@@ -78,6 +83,7 @@ major version (ADR 0002 §5).
 | `mounted_on` | sensor | asset, machine | one | what a sensor is attached to |
 | `not_covered_by_authorisation` | run | configuration | many | observed: no authorisation envelope in the Ledger names the configuration then |
 | `operated_by` | run | person | many | a declared operator or supervisor |
+| `outcome` | episode | text | one | the outcome a record declares for the episode, verbatim; never inferred |
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
 | `recorded_by` | run | machine | one | the machine whose log a run is |
@@ -86,6 +92,7 @@ major version (ADR 0002 §5).
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
+| `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
 | `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
@@ -145,7 +152,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.4.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.5.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -213,6 +220,15 @@ def test_graph_schema_contract(check):
     or on a chain of them; Memory never estimates an offset, never assumes an unstated validity open, and never
     re-times a claim. A later-starting mapping of one clock pair holds from its start, and the earlier one's
     claims end there ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)).
+15. **Episodes are stated attempts, never inferred** ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md)).
+    A run with stated task evidence holds one episode (`episode_of`, its `executes_task`), bounded on each clock by
+    the span its records state (`starts_at`, `ends_at`, only on a clock the records state it on, never on a
+    mapping's projection); a run with none, or with no time placement, holds no episode. A stated stop
+    (`incident_record`) inside the episode makes the end `ends_at_candidate` readings. `intervened` names an
+    `Intervention` that names the run, or names its machine and surely overlaps it on one clock; an overlap that
+    holds only within a projection's error is `intervened_candidate`. No record declares an outcome yet, so
+    `outcome` reads `Unknown`. `consolidate.episodes.episodes_of`, `boundary_of` and `outcome_of` read them back
+    as `Known`, `Ambiguous`, `Unknown` or `NotCovered`.
 
 ## Caveat: a resolver configuration is a store generation
 
@@ -227,7 +243,8 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
 
 ## Not in v1
 
-- `episodes` and `spatial` structure (G3).
+- The `episodes` and `spatial` queries (G3). Episode claims exist from 1.5.0; `MemoryReader.episodes` still
+  answers `NotCovered`.
 - Cross-clock comparison inside the resolver: claims on two clocks are still never compared there
   (`clock_mismatch`). A consumer relates them with `schema.clocks.convert`; no claim is ever re-timed.
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,
