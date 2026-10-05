@@ -250,6 +250,12 @@ def nodes(ledger: LedgerReader) -> tuple[NodeRef, ...]:
     return tuple(node.ref for node in _read(ledger).nodes.values())
 
 
+def node_threads(ledger: LedgerReader) -> Mapping[NodeRef, tuple[Thread, ...]]:
+    """Each node ``nodes`` keys, with its thread records sorted by record id. Other consolidators
+    resolve the ids a record declares through this, so no node is keyed twice (ADR 0010 §1)."""
+    return {node.ref: node.threads for node in _read(ledger).nodes.values()}
+
+
 # --- Human assertions: retraction ---------------------------------------------------------------
 
 Status = Literal["effective", "retracted", "undecided"]
