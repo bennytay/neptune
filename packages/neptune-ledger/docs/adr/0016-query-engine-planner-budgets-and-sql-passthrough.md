@@ -194,7 +194,9 @@ Four things break if this is wrong:
      arena for each one's first allocation, and those reservations spent the 1 GiB headroom
      while the child's resident memory stayed near 110 MB (`SELECT sum(range) FROM
      range(1500000000)` was cut for `memory` in 7 runs of 12; now 0 of 54).
-     `MALLOC_ARENA_MAX=2` keeps those reservations few as well. An allocation past the cap
+     `MALLOC_ARENA_MAX=2` keeps those reservations few as well. The cap counts committed
+     private memory, not resident memory, so a very wide answer (about 12 000 columns) is cut
+     for `memory` while its RSS is still low; the cut is deterministic. An allocation past the cap
      fails inside the child. If the child can
      report it, it does, and otherwise it dies. Either way the Ledger keeps the rows it
      already has, a prefix, and adds a `budget_exceeded` finding with subject `memory`. The
