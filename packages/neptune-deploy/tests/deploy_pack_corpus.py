@@ -32,6 +32,8 @@ statement that S-007's fleet manager syslog runs on the site's CMMS clock.
 what this module generates.
 """
 
+# ruff: noqa: E501  (corpus paths and content ids read whole)
+
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -396,20 +398,36 @@ LEG14_LENGTH: Final = 838 * SECOND
 def plant2_identity() -> Claims:
     return [
         identity(
-            ARM, "located_at", PLANT, span(P2_ASSETS, days(2026, 2, 26), None),
-            ("asset register ARM-3A",), row(ASSETS, 4),
+            ARM,
+            "located_at",
+            PLANT,
+            span(P2_ASSETS, days(2026, 2, 26), None),
+            ("asset register ARM-3A",),
+            row(ASSETS, 4),
         ),
         identity(
-            LEG, "located_at", PLANT, span(P2_ASSETS, days(2026, 5, 12), None),
-            ("asset register LEG-01",), row(ASSETS, 10),
+            LEG,
+            "located_at",
+            PLANT,
+            span(P2_ASSETS, days(2026, 5, 12), None),
+            ("asset register LEG-01",),
+            row(ASSETS, 10),
         ),
         identity(
-            WCAM, "mounted_on", ARM, span(P2_ASSETS, days(2026, 2, 26), None),
-            ("asset register WCAM-3A",), row(ASSETS, 6),
+            WCAM,
+            "mounted_on",
+            ARM,
+            span(P2_ASSETS, days(2026, 2, 26), None),
+            ("asset register WCAM-3A",),
+            row(ASSETS, 6),
         ),
         identity(
-            CELL3, "zone_of", PLANT, span(P2_ASSETS, days(2026, 2, 26), None),
-            ("asset register ARM-3A",), row(ASSETS, 4),
+            CELL3,
+            "zone_of",
+            PLANT,
+            span(P2_ASSETS, days(2026, 2, 26), None),
+            ("asset register ARM-3A",),
+            row(ASSETS, 4),
         ),
     ]
 
@@ -423,33 +441,57 @@ def plant2_configuration() -> Claims:
     return [
         # As commissioned (CR-C3-2026-02, "Configuration baseline: cfg-c3-1.4").
         chain(
-            ARM, "has_configuration", c14, span(P2_LIFE, commissioned, chg12),
-            ("commissioning baseline CR-C3-2026-02",), page(COMMISSIONING, 0),
+            ARM,
+            "has_configuration",
+            c14,
+            span(P2_LIFE, commissioned, chg12),
+            ("commissioning baseline CR-C3-2026-02",),
+            page(COMMISSIONING, 0),
         ),
         # The software change names the machine but no configuration: a gap, never bridged.
         chain(
-            ARM, "configuration_unknown", record("change record CHG0030012"),
-            span(P2_LIFE, chg12, chg13), ("change record CHG0030012",), row(CHANGES_P2, 1),
+            ARM,
+            "configuration_unknown",
+            record("change record CHG0030012"),
+            span(P2_LIFE, chg12, chg13),
+            ("change record CHG0030012",),
+            row(CHANGES_P2, 1),
         ),
         chain(
-            ARM, "configuration_unknown", record("work order WO-26-0310"),
-            span(P2_LIFE, chg12, chg13), ("work order WO-26-0310",), row(CMMS_P2, 1),
+            ARM,
+            "configuration_unknown",
+            record("work order WO-26-0310"),
+            span(P2_LIFE, chg12, chg13),
+            ("work order WO-26-0310",),
+            row(CMMS_P2, 1),
         ),
         # The 2026-08-18 finger change, approved (CHG0030013) and requalified (RQ-2026-006).
         chain(
-            ARM, "has_configuration", c15, span(P2_LIFE, chg13, wo0911),
+            ARM,
+            "has_configuration",
+            c15,
+            span(P2_LIFE, chg13, wo0911),
             ("change record CHG0030013", "requalification RQ-2026-006"),
-            row(CHANGES_P2, 2), row(REQUAL_P2, 3),
+            row(CHANGES_P2, 2),
+            row(REQUAL_P2, 3),
         ),
         # WO-26-0911 (finger set FS-0340, TCP edit, bracket refit) and WO-26-0912 (hand-eye
         # recalibration) state no configuration; no change record or requalification follows.
         chain(
-            ARM, "configuration_unknown", record("work order WO-26-0911"),
-            span(P2_LIFE, wo0911, None), ("work order WO-26-0911",), row(CMMS_P2, 6),
+            ARM,
+            "configuration_unknown",
+            record("work order WO-26-0911"),
+            span(P2_LIFE, wo0911, None),
+            ("work order WO-26-0911",),
+            row(CMMS_P2, 6),
         ),
         chain(
-            ARM, "configuration_unknown", record("work order WO-26-0912"),
-            span(P2_LIFE, wo0911, None), ("work order WO-26-0912",), row(CMMS_P2, 7),
+            ARM,
+            "configuration_unknown",
+            record("work order WO-26-0912"),
+            span(P2_LIFE, wo0911, None),
+            ("work order WO-26-0912",),
+            row(CMMS_P2, 7),
         ),
     ]
 
@@ -469,21 +511,35 @@ def plant2_runs() -> Claims:
         )
         out += [
             claim(
-                run(name), "recorded_by", ARM, window, records=(f"run {name}",),
+                run(name),
+                "recorded_by",
+                ARM,
+                window,
+                records=(f"run {name}",),
                 evidence=(pointer(MANIFEST, "/runs/1" if "09-09" in name else "/runs/2"), meta),
-                consolidator="memory.identity", recorded_at=3,
+                consolidator="memory.identity",
+                recorded_at=3,
             ),
             # The managed export (revision 1.5) is the only configuration bound to either run:
             # stated, and shown as such beside the machine chain's Unknown on another clock.
             claim(
-                run(name), "configuration_active_during", c15, window,
-                records=(f"run {name}", f"snapshot binding {name}"), evidence=(managed,),
+                run(name),
+                "configuration_active_during",
+                c15,
+                window,
+                records=(f"run {name}", f"snapshot binding {name}"),
+                evidence=(managed,),
                 recorded_at=3,
             ),
             # No envelope at PLANT-2 names cfg-c3-1.5, so no part of the window is covered.
             claim(
-                run(name), "not_covered_by_authorisation", c15, window, kind="observed",
-                records=(f"run {name}", f"snapshot binding {name}"), evidence=(managed,),
+                run(name),
+                "not_covered_by_authorisation",
+                c15,
+                window,
+                kind="observed",
+                records=(f"run {name}", f"snapshot binding {name}"),
+                evidence=(managed,),
                 recorded_at=3,
             ),
         ]
@@ -494,9 +550,14 @@ def plant2_runs() -> Claims:
     )
     out.append(
         claim(
-            run("leg01-2026-09-14"), "recorded_by", LEG, window,
-            records=("run leg01-2026-09-14",), evidence=(pointer(MANIFEST, "/runs/4"), meta),
-            consolidator="memory.identity", recorded_at=3,
+            run("leg01-2026-09-14"),
+            "recorded_by",
+            LEG,
+            window,
+            records=("run leg01-2026-09-14",),
+            evidence=(pointer(MANIFEST, "/runs/4"), meta),
+            consolidator="memory.identity",
+            recorded_at=3,
         )
     )
     # Two exports of LEG-01's configuration bind the patrol (firmware 3.1.4 and 3.2.0): an
@@ -504,11 +565,15 @@ def plant2_runs() -> Claims:
     for exported, firmware in (("2026-09-01", "3.1.4"), ("2026-09-13", "3.2.0")):
         out.append(
             claim(
-                run("leg01-2026-09-14"), "configuration_candidate",
-                config(f"leg01-patrol-fw-{firmware}"), window,
+                run("leg01-2026-09-14"),
+                "configuration_candidate",
+                config(f"leg01-patrol-fw-{firmware}"),
+                window,
                 records=("run leg01-2026-09-14", f"snapshot binding leg01 {exported}"),
                 evidence=(
-                    pointer(f"sites/PLANT-2/legged/config/{exported}/LEG-01_patrol.yaml", "/firmware"),
+                    pointer(
+                        f"sites/PLANT-2/legged/config/{exported}/LEG-01_patrol.yaml", "/firmware"
+                    ),
                 ),
                 recorded_at=3,
             )
@@ -520,27 +585,34 @@ def plant2_calibration() -> Claims:
     out = []
     for earlier, later, start, end, values in (
         (
-            "CAL-ARM3A-0623", "CAL-ARM3A-0818",
-            instant(2026, 6, 23, 17, 30), instant(2026, 8, 18, 12, 40),
+            "CAL-ARM3A-0623",
+            "CAL-ARM3A-0818",
+            instant(2026, 6, 23, 17, 30),
+            instant(2026, 8, 18, 12, 40),
             [0.0334 - 0.0334, -0.0103 - -0.0102, 0.0745 - 0.0709],
         ),
         (
-            "CAL-ARM3A-0818", "CAL-ARM3A-0911",
-            instant(2026, 8, 18, 12, 40), instant(2026, 9, 11, 10, 40),
+            "CAL-ARM3A-0818",
+            "CAL-ARM3A-0911",
+            instant(2026, 8, 18, 12, 40),
+            instant(2026, 9, 11, 10, 40),
             [0.0334 - 0.0334, -0.0103 - -0.0103, 0.0702 - 0.0745],
         ),
     ):
         out.append(
             claim(
-                WCAM, "drift",
+                WCAM,
+                "drift",
                 delta(f"calibration {earlier}", f"calibration {later}", "translation", values, "m"),
-                span(CIVIL, start, end), kind="observed",
+                span(CIVIL, start, end),
+                kind="observed",
                 records=(f"calibration {earlier}", f"calibration {later}"),
                 evidence=(
                     pointer(f"sites/PLANT-2/cell3/calibration/{earlier}.yaml", "/translation"),
                     pointer(f"sites/PLANT-2/cell3/calibration/{later}.yaml", "/translation"),
                 ),
-                consolidator="memory.calibration", recorded_at=3,
+                consolidator="memory.calibration",
+                recorded_at=3,
             )
         )
     return out
@@ -550,22 +622,50 @@ def plant2_clocks() -> Claims:
     out = clock_claims(
         ARM,
         [
-            (RUN09, BAG09_START, BAG09_START + BAG_LENGTH, "run cell3-2026-09-09",
-             pointer("sites/PLANT-2/cell3/bags/pallet_2026-09-09/metadata.yaml", "/rosbag2_bagfile_information")),
-            (RUN14, BAG14_START, BAG14_START + BAG_LENGTH, "run cell3-2026-09-14",
-             pointer("sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml", "/rosbag2_bagfile_information")),
-            (CTRL14, BAG14_START - 96_700_000_000, BAG14_START - 96_700_000_000 + BAG_LENGTH,
-             "run cell3-2026-09-14",
-             pointer("sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml", "/rosbag2_bagfile_information")),
+            (
+                RUN09,
+                BAG09_START,
+                BAG09_START + BAG_LENGTH,
+                "run cell3-2026-09-09",
+                pointer(
+                    "sites/PLANT-2/cell3/bags/pallet_2026-09-09/metadata.yaml",
+                    "/rosbag2_bagfile_information",
+                ),
+            ),
+            (
+                RUN14,
+                BAG14_START,
+                BAG14_START + BAG_LENGTH,
+                "run cell3-2026-09-14",
+                pointer(
+                    "sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml",
+                    "/rosbag2_bagfile_information",
+                ),
+            ),
+            (
+                CTRL14,
+                BAG14_START - 96_700_000_000,
+                BAG14_START - 96_700_000_000 + BAG_LENGTH,
+                "run cell3-2026-09-14",
+                pointer(
+                    "sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml",
+                    "/rosbag2_bagfile_information",
+                ),
+            ),
         ],
     )
     # Memory's estimate of the cell PC's log time against the controller's header stamps
     # (co-recorded, latency unbounded: gold Q4). Inferred, so left out unless a spec includes it.
     out += mapping(
-        RUN14, CTRL14, span(RUN14, BAG14_START, BAG14_START + BAG_LENGTH),
+        RUN14,
+        CTRL14,
+        span(RUN14, BAG14_START, BAG14_START + BAG_LENGTH),
         clock_map(CTRL14, "co_sampled", (BAG14_START, BAG14_START - 96_700_000_000), None),
         ("run cell3-2026-09-14", "derived clock mapping pallet_2026-09-14"),
-        pointer("sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml", "/rosbag2_bagfile_information"),
+        pointer(
+            "sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml",
+            "/rosbag2_bagfile_information",
+        ),
         estimated=True,
     )
     return out
@@ -589,7 +689,10 @@ def plant2_incident() -> Claims:
     """INC-C3-0011 as its report states it: the incident and its five timeline entries, on the
     report's own clock (the HMI alarm log's times as the report writes them)."""
     out = facts(
-        event(INC_C3), tick(P2_REPORT, wall(2026, 9, 14, 14, 32)), (INC_C3,), page(REPORT_P2, 0),
+        event(INC_C3),
+        tick(P2_REPORT, wall(2026, 9, 14, 14, 32)),
+        (INC_C3,),
+        page(REPORT_P2, 0),
         [
             ("event_kind", text("incident")),
             ("stated_severity", text("Property damage, no injury")),
@@ -600,12 +703,18 @@ def plant2_incident() -> Claims:
         ],
     )
     out += facts(
-        event(INC_C3), tick(P2_REPORT, wall(2026, 9, 14, 14, 32)), (INC_C3,), page(REPORT_P2, 1),
+        event(INC_C3),
+        tick(P2_REPORT, wall(2026, 9, 14, 14, 32)),
+        (INC_C3,),
+        page(REPORT_P2, 1),
         [("has_description", text(INC_C3_DESCRIPTION))],
     )
     for index, (when, said) in enumerate(INC_C3_TIMELINE):
         out += facts(
-            entry(INC_C3, index), tick(P2_REPORT, wall(*when)), (INC_C3,), page(REPORT_P2, 0),
+            entry(INC_C3, index),
+            tick(P2_REPORT, wall(*when)),
+            (INC_C3,),
+            page(REPORT_P2, 0),
             [("has_description", text(said)), ("evidenced_by", record(INC_C3))],
         )
     return out
@@ -627,16 +736,28 @@ AMR_RUN_LENGTH: Final = 600 * SECOND
 def s007_identity() -> Claims:
     return [
         identity(
-            AMR, "located_at", S007, span(P2_ASSETS, days(2025, 11, 3), None),
-            ("asset register AMR-07",), row(ASSETS, 3),
+            AMR,
+            "located_at",
+            S007,
+            span(P2_ASSETS, days(2025, 11, 3), None),
+            ("asset register AMR-07",),
+            row(ASSETS, 3),
         ),
         identity(
-            PICK_A, "zone_of", S007, span(S7_ENV, days(2026, 3, 9), None),
-            ("authorisation envelope ENV-S007-04",), row(ENVELOPES_S7, 2),
+            PICK_A,
+            "zone_of",
+            S007,
+            span(S7_ENV, days(2026, 3, 9), None),
+            ("authorisation envelope ENV-S007-04",),
+            row(ENVELOPES_S7, 2),
         ),
         identity(
-            LIDAR, "mounted_on", AMR, span(P2_ASSETS, days(2025, 11, 3), None),
-            ("asset register AMR-07",), row(ASSETS, 3),
+            LIDAR,
+            "mounted_on",
+            AMR,
+            span(P2_ASSETS, days(2025, 11, 3), None),
+            ("asset register AMR-07",),
+            row(ASSETS, 3),
         ),
     ]
 
@@ -649,29 +770,76 @@ def s007_configuration() -> Claims:
     wo0414 = wall(2026, 4, 14, 19, 30)
     rq = wall(2026, 4, 15, 9, 30)
     return [
-        chain(AMR, "has_configuration", a, span(S7_LIFE, wo0303, wo0319),
-              ("work order WO-26-0303",), row(CMMS_S7, 3)),
-        chain(AMR, "has_configuration", b, span(S7_LIFE, wo0319, wo0402),
-              ("work order WO-26-0319",), row(CMMS_S7, 4)),
-        claim(b, "succeeds", a, span(S7_LIFE, wo0319, wo0402),
-              records=("work order WO-26-0303", "work order WO-26-0319"),
-              evidence=(row(CMMS_S7, 3), row(CMMS_S7, 4)), recorded_at=2),
+        chain(
+            AMR,
+            "has_configuration",
+            a,
+            span(S7_LIFE, wo0303, wo0319),
+            ("work order WO-26-0303",),
+            row(CMMS_S7, 3),
+        ),
+        chain(
+            AMR,
+            "has_configuration",
+            b,
+            span(S7_LIFE, wo0319, wo0402),
+            ("work order WO-26-0319",),
+            row(CMMS_S7, 4),
+        ),
+        claim(
+            b,
+            "succeeds",
+            a,
+            span(S7_LIFE, wo0319, wo0402),
+            records=("work order WO-26-0303", "work order WO-26-0319"),
+            evidence=(row(CMMS_S7, 3), row(CMMS_S7, 4)),
+            recorded_at=2,
+        ),
         # The fork repair after INC-0007 states no resulting configuration: a gap.
-        chain(AMR, "configuration_unknown", record("work order WO-26-0402"),
-              span(S7_LIFE, wo0402, wo0414), ("work order WO-26-0402",), row(CMMS_S7, 5)),
+        chain(
+            AMR,
+            "configuration_unknown",
+            record("work order WO-26-0402"),
+            span(S7_LIFE, wo0402, wo0414),
+            ("work order WO-26-0402",),
+            row(CMMS_S7, 5),
+        ),
         # WO-26-0414 flashed firmware 4.3.1 but does not say which map revision: two readings.
-        chain(AMR, "configuration_candidate", c, span(S7_LIFE, wo0414, rq),
-              ("work order WO-26-0414",), row(CMMS_S7, 6)),
-        chain(AMR, "configuration_candidate", d, span(S7_LIFE, wo0414, rq),
-              ("work order WO-26-0414", "change record CHG0050023"),
-              row(CMMS_S7, 6), row(CHANGES_S7, 3)),
+        chain(
+            AMR,
+            "configuration_candidate",
+            c,
+            span(S7_LIFE, wo0414, rq),
+            ("work order WO-26-0414",),
+            row(CMMS_S7, 6),
+        ),
+        chain(
+            AMR,
+            "configuration_candidate",
+            d,
+            span(S7_LIFE, wo0414, rq),
+            ("work order WO-26-0414", "change record CHG0050023"),
+            row(CMMS_S7, 6),
+            row(CHANGES_S7, 3),
+        ),
         # As requalified: firmware 4.3.1 and map revision 14 (RQ-S007-0007).
-        chain(AMR, "has_configuration", d, span(S7_LIFE, rq, None),
-              ("requalification RQ-S007-0007",), row(REQUAL_S7, 1)),
-        claim(S007, "authorised_configuration", a,
-              span(S7_ENV, days(2026, 3, 9), days(2026, 9, 9)),
-              records=("authorisation envelope ENV-S007-04",),
-              evidence=(row(ENVELOPES_S7, 2),), recorded_at=2),
+        chain(
+            AMR,
+            "has_configuration",
+            d,
+            span(S7_LIFE, rq, None),
+            ("requalification RQ-S007-0007",),
+            row(REQUAL_S7, 1),
+        ),
+        claim(
+            S007,
+            "authorised_configuration",
+            a,
+            span(S7_ENV, days(2026, 3, 9), days(2026, 9, 9)),
+            records=("authorisation envelope ENV-S007-04",),
+            evidence=(row(ENVELOPES_S7, 2),),
+            recorded_at=2,
+        ),
     ]
 
 
@@ -679,39 +847,100 @@ def s007_runs_and_calibration() -> Claims:
     b, c, d = (config(f"AMR-07-{x}") for x in "BCD")
     w2 = span(RUN0402, RUN0402_START, RUN0402_START + AMR_RUN_LENGTH)
     w15 = span(RUN0415, RUN0415_START, RUN0415_START + AMR_RUN_LENGTH)
-    bag2 = _ref(CORPUS["sites/S-007/runs/amr-07_2026-04-02.mcap"], {"kind": "byte_range", "length": 64, "offset": 0})
-    bag15 = _ref(CORPUS["sites/S-007/runs/amr-07_2026-04-15.mcap"], {"kind": "byte_range", "length": 64, "offset": 0})
+    bag2 = _ref(
+        CORPUS["sites/S-007/runs/amr-07_2026-04-02.mcap"],
+        {"kind": "byte_range", "length": 64, "offset": 0},
+    )
+    bag15 = _ref(
+        CORPUS["sites/S-007/runs/amr-07_2026-04-15.mcap"],
+        {"kind": "byte_range", "length": 64, "offset": 0},
+    )
     lidar_cal = config("AMR-07-lidar-2026-04-14")
     return [
-        claim(run("amr07-2026-04-02"), "recorded_by", AMR, w2, records=("run amr07-2026-04-02",),
-              evidence=(pointer(MANIFEST, "/runs/7"), bag2), consolidator="memory.identity",
-              recorded_at=3),
-        claim(run("amr07-2026-04-02"), "configuration_active_during", b, w2,
-              records=("run amr07-2026-04-02", "snapshot binding amr07-2026-04-02"),
-              evidence=(bag2,), recorded_at=3),
-        claim(run("amr07-2026-04-15"), "recorded_by", AMR, w15, records=("run amr07-2026-04-15",),
-              evidence=(pointer(MANIFEST, "/runs/8"), bag15), consolidator="memory.identity",
-              recorded_at=3),
-        claim(run("amr07-2026-04-15"), "configuration_candidate", c, w15,
-              records=("run amr07-2026-04-15", "snapshot binding amr07-2026-04-15 map r13"),
-              evidence=(bag15,), recorded_at=3),
-        claim(run("amr07-2026-04-15"), "configuration_candidate", d, w15,
-              records=("run amr07-2026-04-15", "snapshot binding amr07-2026-04-15 map r14"),
-              evidence=(bag15,), recorded_at=3),
-        claim(LIDAR, "calibrated_with", lidar_cal, span(S7_LIFE, wall(2026, 4, 14, 19, 30), None),
-              records=("lidar calibration AMR-07 2026-04-14",),
-              evidence=(synthetic("AMR-07 lidar calibration file", 1),),
-              consolidator="memory.calibration", recorded_at=3),
-        claim(lidar_cal, "calibrated_by", record("work order WO-26-0414"),
-              span(S7_LIFE, wall(2026, 4, 14, 19, 30), None),
-              records=("work order WO-26-0414", "lidar calibration AMR-07 2026-04-14"),
-              evidence=(row(CMMS_S7, 6),), consolidator="memory.calibration", recorded_at=3),
+        claim(
+            run("amr07-2026-04-02"),
+            "recorded_by",
+            AMR,
+            w2,
+            records=("run amr07-2026-04-02",),
+            evidence=(pointer(MANIFEST, "/runs/7"), bag2),
+            consolidator="memory.identity",
+            recorded_at=3,
+        ),
+        claim(
+            run("amr07-2026-04-02"),
+            "configuration_active_during",
+            b,
+            w2,
+            records=("run amr07-2026-04-02", "snapshot binding amr07-2026-04-02"),
+            evidence=(bag2,),
+            recorded_at=3,
+        ),
+        claim(
+            run("amr07-2026-04-15"),
+            "recorded_by",
+            AMR,
+            w15,
+            records=("run amr07-2026-04-15",),
+            evidence=(pointer(MANIFEST, "/runs/8"), bag15),
+            consolidator="memory.identity",
+            recorded_at=3,
+        ),
+        claim(
+            run("amr07-2026-04-15"),
+            "configuration_candidate",
+            c,
+            w15,
+            records=("run amr07-2026-04-15", "snapshot binding amr07-2026-04-15 map r13"),
+            evidence=(bag15,),
+            recorded_at=3,
+        ),
+        claim(
+            run("amr07-2026-04-15"),
+            "configuration_candidate",
+            d,
+            w15,
+            records=("run amr07-2026-04-15", "snapshot binding amr07-2026-04-15 map r14"),
+            evidence=(bag15,),
+            recorded_at=3,
+        ),
+        claim(
+            LIDAR,
+            "calibrated_with",
+            lidar_cal,
+            span(S7_LIFE, wall(2026, 4, 14, 19, 30), None),
+            records=("lidar calibration AMR-07 2026-04-14",),
+            evidence=(synthetic("AMR-07 lidar calibration file", 1),),
+            consolidator="memory.calibration",
+            recorded_at=3,
+        ),
+        claim(
+            lidar_cal,
+            "calibrated_by",
+            record("work order WO-26-0414"),
+            span(S7_LIFE, wall(2026, 4, 14, 19, 30), None),
+            records=("work order WO-26-0414", "lidar calibration AMR-07 2026-04-14"),
+            evidence=(row(CMMS_S7, 6),),
+            consolidator="memory.calibration",
+            recorded_at=3,
+        ),
         *clock_claims(
             AMR,
             [
-                (RUN0402, RUN0402_START, RUN0402_START + AMR_RUN_LENGTH, "run amr07-2026-04-02", bag2),
-                (AMR07_CTRL, 8_000_000_000, 9_000_000_000, "run amr07-2026-04-02",
-                 synthetic("AMR-07 controller log", 1)),
+                (
+                    RUN0402,
+                    RUN0402_START,
+                    RUN0402_START + AMR_RUN_LENGTH,
+                    "run amr07-2026-04-02",
+                    bag2,
+                ),
+                (
+                    AMR07_CTRL,
+                    8_000_000_000,
+                    9_000_000_000,
+                    "run amr07-2026-04-02",
+                    synthetic("AMR-07 controller log", 1),
+                ),
             ],
         ),
     ]
@@ -736,7 +965,10 @@ def s007_incident() -> Claims:
     report = event(INC_0007_REPORT)
     occurred = wall(2026, 4, 2, 14, 7, 0)
     out = facts(
-        cmms, tick(S7_LIFE, occurred), (INC_0007_CMMS,), synthetic("S-007 CMMS incidents", 3),
+        cmms,
+        tick(S7_LIFE, occurred),
+        (INC_0007_CMMS,),
+        synthetic("S-007 CMMS incidents", 3),
         [
             ("event_kind", text("incident")),
             ("stated_severity", text("Minor, no injury")),
@@ -777,17 +1009,26 @@ def s007_incident() -> Claims:
         out += facts(event(name), tick(S7_SYSLOG, when), (name,), evidence, items)
         # The same statements placed on the CMMS clock through the stated mapping (bound 0).
         out += facts(
-            event(name), tick(S7_LIFE, when), (name, SYSLOG_MAP, "domain S-007 CMMS exports, local wall time"),
-            evidence, items,
+            event(name),
+            tick(S7_LIFE, when),
+            (name, SYSLOG_MAP, "domain S-007 CMMS exports, local wall time"),
+            evidence,
+            items,
         )
     out += mapping(
-        S7_SYSLOG, S7_LIFE, span(S7_SYSLOG, wall(2026, 1, 1), None),
+        S7_SYSLOG,
+        S7_LIFE,
+        span(S7_SYSLOG, wall(2026, 1, 1), None),
         clock_map(S7_LIFE, "stated", (wall(2026, 1, 1), wall(2026, 1, 1)), 0),
-        (SYSLOG_MAP,), synthetic("S-007 time-sync statement", 1), estimated=False,
+        (SYSLOG_MAP,),
+        synthetic("S-007 time-sync statement", 1),
+        estimated=False,
     )
     out += facts(
-        event(INTERVENTION), span(S7_LIFE, wall(2026, 4, 2, 14, 31), wall(2026, 4, 2, 14, 36)),
-        (INTERVENTION,), synthetic("S-007 intervention log", 31),
+        event(INTERVENTION),
+        span(S7_LIFE, wall(2026, 4, 2, 14, 31), wall(2026, 4, 2, 14, 36)),
+        (INTERVENTION,),
+        synthetic("S-007 intervention log", 31),
         [
             ("event_kind", text("intervention")),
             ("has_description", text("Technician clears the aisle and resets AMR-07")),
@@ -797,7 +1038,9 @@ def s007_incident() -> Claims:
         ],
     )
     out += facts(
-        event(CONTROLLER_FAULT), tick(AMR07_CTRL, 8_123_456_789), (CONTROLLER_FAULT,),
+        event(CONTROLLER_FAULT),
+        tick(AMR07_CTRL, 8_123_456_789),
+        (CONTROLLER_FAULT,),
         synthetic("AMR-07 controller log", 88),
         [
             ("event_kind", text("fault")),
@@ -807,7 +1050,10 @@ def s007_incident() -> Claims:
         ],
     )
     out += facts(
-        report, tick(S7_REPORT, wall(2026, 4, 2, 14, 7)), (INC_0007_REPORT,), page(REPORT_S7, 0),
+        report,
+        tick(S7_REPORT, wall(2026, 4, 2, 14, 7)),
+        (INC_0007_REPORT,),
+        page(REPORT_S7, 0),
         [
             ("event_kind", text("incident")),
             ("stated_severity", text("Minor, no injury")),
@@ -817,31 +1063,60 @@ def s007_incident() -> Claims:
             ("evidenced_by", record(INC_0007_REPORT)),
         ],
     )
-    for index, (when, said) in enumerate(INC_0007_TIMELINE):
+    for index, (moment, said) in enumerate(INC_0007_TIMELINE):
         out += facts(
-            entry(INC_0007_REPORT, index), tick(S7_REPORT, wall(*when)), (INC_0007_REPORT,),
+            entry(INC_0007_REPORT, index),
+            tick(S7_REPORT, wall(*moment)),
+            (INC_0007_REPORT,),
             page(REPORT_S7, 0),
             [("has_description", text(said)), ("evidenced_by", record(INC_0007_REPORT))],
         )
     linked = span(S7_LIFE, occurred, None)
     out.append(
-        claim(cmms, "same_as", pstop, linked, records=(INC_0007_CMMS, SYSLOG_PSTOP),
-              evidence=(synthetic("S-007 CMMS incidents", 3), synthetic("S-007 fleet manager syslog", 4182)),
-              consolidator="memory.identity", recorded_at=5)
+        claim(
+            cmms,
+            "same_as",
+            pstop,
+            linked,
+            records=(INC_0007_CMMS, SYSLOG_PSTOP),
+            evidence=(
+                synthetic("S-007 CMMS incidents", 3),
+                synthetic("S-007 fleet manager syslog", 4182),
+            ),
+            consolidator="memory.identity",
+            recorded_at=5,
+        )
     )
     out.append(
-        claim(report, "same_as_candidate", cmms, linked, records=(INC_0007_REPORT, INC_0007_CMMS),
-              evidence=(page(REPORT_S7, 0), synthetic("S-007 CMMS incidents", 3)),
-              consolidator="memory.identity", recorded_at=5)
+        claim(
+            report,
+            "same_as_candidate",
+            cmms,
+            linked,
+            records=(INC_0007_REPORT, INC_0007_CMMS),
+            evidence=(page(REPORT_S7, 0), synthetic("S-007 CMMS incidents", 3)),
+            consolidator="memory.identity",
+            recorded_at=5,
+        )
     )
     # Different sources within the 5 s window on the CMMS clock: co-occurrence, never cause.
     window = span(S7_LIFE, wall(2026, 4, 2, 14, 6, 58), wall(2026, 4, 2, 14, 7, 3))
     for a, b in ((warn, cmms), (cmms, warn)):
         out.append(
-            claim(a, "co_occurs_within", b, window, kind="observed",
-                  records=(SYSLOG_WARN, INC_0007_CMMS, SYSLOG_MAP),
-                  evidence=(synthetic("S-007 fleet manager syslog", 4179), synthetic("S-007 CMMS incidents", 3)),
-                  consolidator="memory.events", recorded_at=5)
+            claim(
+                a,
+                "co_occurs_within",
+                b,
+                window,
+                kind="observed",
+                records=(SYSLOG_WARN, INC_0007_CMMS, SYSLOG_MAP),
+                evidence=(
+                    synthetic("S-007 fleet manager syslog", 4179),
+                    synthetic("S-007 CMMS incidents", 3),
+                ),
+                consolidator="memory.events",
+                recorded_at=5,
+            )
         )
     return out
 

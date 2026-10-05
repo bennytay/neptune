@@ -86,7 +86,7 @@ def _unit(unit: JsonValue) -> str:
     return f"(unit {state})"
 
 
-def _state(value: JsonValue, show: Callable[[JsonValue], str]) -> str:
+def _state(value: object, show: Callable[[object], str]) -> str:
     """A ``Knowledge`` state of a clock map's part, as stated."""
     if not isinstance(value, Mapping):
         return "?"
@@ -101,13 +101,13 @@ def _state(value: JsonValue, show: Callable[[JsonValue], str]) -> str:
     return str(state)
 
 
-def _fraction(value: JsonValue) -> str:
+def _fraction(value: object) -> str:
     if isinstance(value, Mapping):
         return f"{value.get('numerator')}/{value.get('denominator')}"
     return "?"
 
 
-def _anchor(value: JsonValue) -> str:
+def _anchor(value: object) -> str:
     if not isinstance(value, Mapping):
         return "?"
     source, target = value.get("source"), value.get("target")
@@ -116,7 +116,7 @@ def _anchor(value: JsonValue) -> str:
     return f"{source.get('ticks')} -> {target.get('ticks')}"
 
 
-def _bound(value: JsonValue) -> str:
+def _bound(value: object) -> str:
     if isinstance(value, Mapping):
         return f"{value.get('ticks')} ticks"
     return "?"
@@ -158,9 +158,7 @@ def claim_object(value: Mapping[str, JsonValue]) -> str:
         return _clock_map(literal)
     if datatype == "delta" and isinstance(literal, Mapping):
         values = literal.get("values")
-        shown = (
-            ", ".join(_number(v) for v in values) if isinstance(values, list | tuple) else "?"
-        )
+        shown = ", ".join(_number(v) for v in values) if isinstance(values, list | tuple) else "?"
         return (
             f"delta {literal.get('quantity')} {json.dumps(literal.get('name', ''))}:"
             f" [{shown}] {_unit(value.get('unit', ''))}, later minus earlier"

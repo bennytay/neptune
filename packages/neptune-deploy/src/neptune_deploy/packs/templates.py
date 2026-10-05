@@ -25,9 +25,10 @@ subject's claim, to its object node) or inward (a claim whose object is the node
 ``shared`` goes from a node to every other node stating the same object under the predicate (an
 incident to the timeline entries evidenced by the same record). ``[]`` is the subject itself.
 ``same_event`` (timeline sections) names predicates whose claims make two event nodes one event
-(two records of one incident), so their times are compared as one event's. ``predicates`` selects the claims about the nodes reached and says
-which missingness state each one expresses: Memory states ``Ambiguous`` and ``Unknown`` as
-predicates (``*_candidate``, ``*_unknown``), never as blank objects.
+(two records of one incident), so their times are compared as one event's. ``predicates``
+selects the claims about the nodes reached and says which missingness state each one expresses:
+Memory states ``Ambiguous`` and ``Unknown`` as predicates (``*_candidate``, ``*_unknown``), never
+as blank objects.
 
 The shipped templates live in ``packs/templates/<id>@<version>.json``, and ``lock.json`` pins the
 sha256 of each one's canonical JSON. Loading refuses a file whose hash is not its lock entry, so an
@@ -202,7 +203,8 @@ def _section(value: JsonValue, pointer: str, template_types: tuple[str, ...]) ->
         if kind != "timeline":
             raise _R.fail("same_event is for timeline sections", at)
         names = [
-            _R.string(item, child(at, i), TOKEN) for i, item in enumerate(_R.array(section["same_event"], at))
+            _R.string(item, child(at, i), TOKEN)
+            for i, item in enumerate(_R.array(section["same_event"], at))
         ]
         if not names or len(set(names)) != len(names):
             raise _R.fail("same_event is a non-empty list without repeats", at)

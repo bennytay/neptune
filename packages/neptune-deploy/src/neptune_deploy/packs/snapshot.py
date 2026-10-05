@@ -450,9 +450,7 @@ def _claim(value: JsonValue, pointer: str, head: int) -> Claim:
         valid=read_interval(claim["valid"], child(pointer, "valid")),
         assertion_kind=kind,
         recorded_at=recorded_at,
-        current=_tx_end(
-            claim["superseded_at"], child(pointer, "superseded_at"), recorded_at, head
-        ),
+        current=_tx_end(claim["superseded_at"], child(pointer, "superseded_at"), recorded_at, head),
         evidence=evidence,
         records=records,
         raw=claim,

@@ -345,9 +345,13 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
         identity_claims.update(i for e in entries for i in e.identity_claims)
         # A claim on another clock is "not placed" unless the same statement is on the pack clock
         # (its placement's twin); a restated one is counted, never silently dropped.
-        twins = {(s.claim.subject, s.claim.predicate, s.claim.object_key) for s in (*inside, *beyond)}
+        twins = {
+            (s.claim.subject, s.claim.predicate, s.claim.object_key) for s in (*inside, *beyond)
+        }
         unplaced = [
-            s for s in other if (s.claim.subject, s.claim.predicate, s.claim.object_key) not in twins
+            s
+            for s in other
+            if (s.claim.subject, s.claim.predicate, s.claim.object_key) not in twins
         ]
         restated = len(other) - len(unplaced)
         other_entries = _grouped(unplaced, snapshot.cardinality)
@@ -583,9 +587,9 @@ def _identities(
             if a != b:
                 parent[b] = a
     groups: dict[Node, set[Node]] = defaultdict(set)
-    for node in {n for claim in links for n in (claim.subject, claim.object_node)}:
-        assert node is not None
-        groups[root(node)].add(node)
+    for member in {n for claim in links for n in (claim.subject, claim.object_node)}:
+        assert member is not None
+        groups[root(member)].add(member)
     claims: dict[Node, set[str]] = defaultdict(set)
     for claim in links:
         claims[root(claim.subject)].add(claim.id)
