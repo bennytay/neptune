@@ -56,6 +56,14 @@ from neptune.sdk import (
     PublishIncompleteError,
     RemoteSource,
     committed_result,
+    read_package,
+)
+from neptune.sdk.evidence import (
+    CoverageReport,
+    Evidence,
+    RecordProvenance,
+    RowExplanation,
+    ValueExplanation,
 )
 from neptune.store.package import RECEIPT
 
@@ -208,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-v", "--verbose", action="store_true", help="one progress line per job event on stderr"
     )
     _init_manifest_parser(commands)
+    _evidence_parsers(commands)
     return parser
 
 
@@ -235,6 +244,54 @@ def _init_manifest_parser(commands: "argparse._SubParsersAction[argparse.Argumen
     )
     init.add_argument("--allow-degraded-sandbox", action="store_true", help="as for ingest")
     _plugin_arguments(init)
+
+
+_EXPLAIN_DESCRIPTION: Final = """\
+Explain a value of a package: the record (its id, or an artifact's content id) and an RFC 6901
+pointer into its stored JSON line select it; the answer is its state and every citation grounding
+it: the source and the locations holding it, the locator path, the assertion kind and the
+transform chain. With no pointer, the record's provenance aggregated over it and its members
+(a run's streams, a table's rows, a frame graph's frames). With --row, one series row of a
+stream. Nothing is written; the package is read and verified first (ADR 0070)."""
+
+_COVERAGE_DESCRIPTION: Final = """\
+Count every Knowledge state of a package per record kind and field, per source, and per series
+column, and report every citation the package cannot back as a finding (ADR 0070)."""
+
+
+def _evidence_parsers(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    explain = commands.add_parser(
+        "explain",
+        help="explain where a value of a package came from and how",
+        description=_EXPLAIN_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    explain.add_argument("package", help="the package directory")
+    explain.add_argument("record", help="a record id (rec:sha256:...) or an artifact's content id")
+    explain.add_argument(
+        "pointer",
+        nargs="?",
+        help="an RFC 6901 pointer into the record's JSON ('/schema_name'); '' is the whole "
+        "record. Omit it for the record's aggregated provenance",
+    )
+    explain.add_argument(
+        "--row", type=_count, metavar="SEQ", help="explain the stream's series row SEQ"
+    )
+    explain.add_argument(
+        "--column", metavar="NAME", help="with --row: only this value column (value/<name>)"
+    )
+    explain.add_argument("--json", action="store_true", help="one canonical JSON line on stdout")
+    cover = commands.add_parser(
+        "coverage",
+        help="count every field's states per record kind, source and series column",
+        description=_COVERAGE_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cover.add_argument("package", help="the package directory")
+    cover.add_argument(
+        "--no-series", action="store_true", help="leave series files unread: records only"
+    )
+    cover.add_argument("--json", action="store_true", help="one canonical JSON line on stdout")
 
 
 def _plugin_arguments(parser: argparse.ArgumentParser) -> None:
@@ -269,6 +326,16 @@ grouping contests, the proposals and the probe's winners, each as a commented ch
 templates for the machines, sites, tasks and software no file states. As written it declares
 nothing; uncomment the lines that are true. The same folder gives the same text. An existing
 file is never overwritten without --force."""
+
+
+def _count(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"{text!r} is negative")
+    return value
 
 
 def _positive(text: str) -> int:
@@ -315,6 +382,8 @@ def run(
     if args.command is None:
         parser.print_usage(stderr)
         return exit_codes.USAGE
+    if args.command in ("explain", "coverage"):
+        return _explain(args, stdout, stderr)
     if args.no_plugins and args.plugin is not None:
         return _usage(stderr, "--plugin and --no-plugins contradict each other", args.command)
     if args.command == "init-manifest":
@@ -572,6 +641,36 @@ def _json(value: object) -> str:
 def _text(value: str) -> str:
     """A command-line or path string as printable text: undecodable bytes as ``\\x..`` escapes."""
     return value.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
+
+
+def _explain(args: argparse.Namespace, stdout: TextIO, stderr: TextIO) -> int:
+    """``neptune explain`` and ``neptune coverage``: read the package, answer, print."""
+    if args.command == "explain":
+        if args.row is not None and args.pointer is not None:
+            return _usage(stderr, "--row explains a series row; drop the pointer", "explain")
+        if args.column is not None and args.row is None:
+            return _usage(stderr, "--column needs --row", "explain")
+    try:
+        evidence = Evidence(read_package(Path(args.package)))
+        answer: ValueExplanation | RowExplanation | RecordProvenance | CoverageReport
+        if args.command == "coverage":
+            answer = evidence.coverage(series=not args.no_series)
+        elif args.row is not None:
+            answer = evidence.row(args.record, args.row, args.column)
+        elif args.pointer is not None:
+            answer = evidence.value(args.record, args.pointer)
+        else:
+            answer = evidence.record(args.record)
+    except NeptuneError as exc:
+        stderr.write(f"neptune: {exc.code}: {exc}\n")
+        return exit_codes.for_code(exc.code)
+    except Exception as exc:  # a bug: say so, with the traceback, and a stable code
+        traceback.print_exception(exc, file=stderr)
+        stderr.write(f"neptune: internal: {type(exc).__name__}: {exc}\n")
+        return exit_codes.INTERNAL
+    stdout.write(answer.dumps().decode("utf-8") + "\n" if args.json else answer.render())
+    stdout.flush()
+    return exit_codes.OK
 
 
 class _InitManifest:
