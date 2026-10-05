@@ -14,7 +14,7 @@ from neptune_deploy.packs.compile import (
     pack_id,
 )
 from neptune_deploy.packs.errors import PackError
-from neptune_deploy.packs.render import render_json, render_pdf
+from neptune_deploy.packs.render import render_claims, render_json, render_pdf
 from neptune_deploy.packs.snapshot import Snapshot, load_snapshot, read_snapshot, snapshot_id
 from neptune_deploy.packs.spec import SPEC_SCHEMA, PackSpec, load_spec, read_spec
 from neptune_deploy.packs.templates import (
@@ -45,6 +45,7 @@ __all__ = [
     "read_snapshot",
     "read_spec",
     "read_template",
+    "render_claims",
     "render_json",
     "render_pdf",
     "snapshot_id",
