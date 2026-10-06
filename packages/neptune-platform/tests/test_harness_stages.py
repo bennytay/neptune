@@ -365,3 +365,86 @@ def test_a_map_that_raises_is_that_cases_problem_not_a_stage_error(
     assert entry["status"] == "failed"
     assert entry["problems"] == ["manipulator: the Deploy map raised ValueError"]
     assert entry["output"]["cases"][0]["state"] == "error"
+
+
+def test_a_declared_source_zone_is_passed_to_the_map_by_preset_and_corpus_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each ``sources`` entry becomes ``--source-zone PRESET SOURCE ZONE`` (Platform ADR 0009); a
+    Deploy that does not take the option exits non-zero, which is the case's problem."""
+    import subprocess
+
+    zone = {"preset": "cmms_generic", "source": "handeye.yaml", "civil_time_zone": "Asia/Tokyo"}
+    ctx = _declaring(tmp_path, {"deploy_format": 1, "presets": ["cmms_generic"], "sources": [zone]})
+    seen: list[list[str]] = []
+
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 2, "", "map: unrecognized arguments")
+
+    monkeypatch.setattr(subprocess, "run", run)  # the stage's ``subprocess.run``, at call time
+    entry = run_stage(DEPLOY, ctx, services_up=False, upstream_ok=True)
+    (argv,) = seen
+    at = argv.index("--source-zone")
+    assert argv[at : at + 4] == ["--source-zone", "cmms_generic", "handeye.yaml", "Asia/Tokyo"]
+    assert entry["problems"] == [
+        "manipulator: neptune_deploy map exited 2: map: unrecognized arguments"
+    ]
+
+
+def _zones_package(root: Path, records: list[dict[str, object]]) -> Path:
+    (root / "records").mkdir(parents=True)
+    revision = {"content_id": "sha256:" + "a" * 64, "id": "r", "location": {"path": "log.csv"}}
+    (root / "records" / "source_revision.jsonl").write_text(json.dumps(revision) + "\n")
+    lines = "".join(json.dumps(record) + "\n" for record in records)
+    (root / "records" / "civil_time_zone.jsonl").write_text(lines)
+    return root
+
+
+def _zone(zone: dict[str, object], source: str = "sha256:" + "a" * 64) -> dict[str, object]:
+    evidence = {"locator": [], "source": source}
+    return {"id": "z", "provenance": {"evidence": evidence, "transform": "t"}, "zone": zone}
+
+
+@pytest.mark.parametrize(
+    ("records", "problem"),
+    [
+        ([_zone({"knowledge": "known", "value": "Asia/Tokyo"})], None),
+        ([], "preset:syslog_csv wrote no civil time zone for log.csv (declared Asia/Tokyo)"),
+        (
+            [_zone({"knowledge": "known", "value": "Asia/Tokyo"}, "sha256:" + "b" * 64)],
+            "preset:syslog_csv wrote no civil time zone for log.csv (declared Asia/Tokyo)",
+        ),
+        (
+            [
+                _zone({"knowledge": "known", "value": "Asia/Tokyo"}),
+                _zone({"knowledge": "unknown"}),
+            ],
+            "preset:syslog_csv did not apply the declared zone Asia/Tokyo"
+            " to every clock of log.csv",
+        ),
+    ],
+)
+def test_a_declared_zone_the_map_did_not_apply_is_red(
+    tmp_path: Path, records: list[dict[str, object]], problem: str | None
+) -> None:
+    """No green on nothing (ADR 0008 §3, ADR 0009): each declared zone must come back as a
+    ``civil_time_zone`` citing that source, made by that preset, stating that zone."""
+    from harness import stages
+
+    plan = stages.DeployPlan(
+        ("syslog_csv",), (), {}, (stages.SourceZone("syslog_csv", "log.csv", "Asia/Tokyo"),)
+    )
+    compiled = _zones_package(tmp_path / "compiled", [])
+    mapped = _zones_package(tmp_path / "mapped", records)
+    labels, applied = {"sha-of-preset": "preset:syslog_csv"}, {"t": "sha-of-preset"}
+    found = stages._zone_problems(plan, compiled, mapped, labels, applied)
+    assert found == ([] if problem is None else [problem])
+    # A zone by another transform does not count, and a source the base package lacks is named.
+    assert stages._zone_problems(plan, compiled, mapped, labels, {}) == [
+        "preset:syslog_csv wrote no civil time zone for log.csv (declared Asia/Tokyo)"
+    ]
+    absent = stages.SourceZone("syslog_csv", "nope.csv", "Asia/Tokyo")
+    assert stages._zone_problems(
+        stages.DeployPlan(("syslog_csv",), (), {}, (absent,)), compiled, mapped, labels, applied
+    ) == ["sources names nope.csv, which the compiled package does not hold"]

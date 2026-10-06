@@ -143,6 +143,19 @@ def test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platfor
     assert not _covered("packages/neptune-deploy/tests/test_deploy_packs_render.py")
 
 
+def test_what_memorys_snapshot_is_built_through_runs_the_harness() -> None:
+    """Memory's acceptance snapshot is built from the harness's packages (platform ADR 0009): an
+    adapter or an acceptance-corpus change runs the harness, as it runs Memory's job in ci_plan."""
+    for path in (
+        "src/neptune/adapters/mcap/adapter.py",
+        "src/neptune/adapters/tabular/csv_reader.py",
+        "harness/acceptance/generate.py",
+        "harness/acceptance/deploy.json",
+        "harness/acceptance/gold.json",
+    ):
+        assert _covered(path), path
+
+
 def test_every_contracts_owner_tests_are_inside_the_pull_request_paths() -> None:
     registry = contracts.registry()
     checked = 0

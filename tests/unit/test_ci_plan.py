@@ -315,3 +315,35 @@ def test_deploy_tests_and_docs_do_not_run_the_platform() -> None:
 def test_the_deploy_stage_inputs_exist() -> None:
     root = Path(__file__).parents[2]
     assert all((root / path).exists() for path in ci_plan.DEPLOY_STAGE_INPUTS)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/neptune/adapters/mcap/adapter.py",
+        "src/neptune/adapters/tabular/csv_reader.py",
+        "src/neptune/adapters/registry.py",  # core: Memory depends on the compiler anyway
+        "harness/acceptance/generate.py",
+        "harness/acceptance/deploy.json",
+        "tests/fixtures/mcap/make_mcap.py",
+        "packages/neptune-deploy/src/neptune_deploy/lifecycle/mapper.py",
+    ],
+)
+def test_what_memorys_acceptance_snapshot_is_built_through_runs_memory(path: str) -> None:
+    """Memory's snapshot is rebuilt from the harness's compiled and mapped corpus packages
+    (platform ADR 0009), so an adapter, the corpus or the deploy stage's code runs its job."""
+    members = {**MEMBERS, "neptune-memory": frozenset({"neptune"}), "neptune-deploy": frozenset()}
+    packages = ci_plan.plan([path], members).packages
+    assert "neptune-memory" in packages
+
+
+def test_the_rest_of_the_harness_does_not_run_memory() -> None:
+    members = {**MEMBERS, "neptune-memory": frozenset({"neptune"})}
+    for path in ("harness/stages.py", "harness/acceptancy/x.py"):
+        assert "neptune-memory" not in ci_plan.plan([path], members).packages
+
+
+def test_the_memory_snapshot_inputs_exist() -> None:
+    root = Path(__file__).parents[2]
+    assert all((root / path).exists() for path in ci_plan.MEMORY_SNAPSHOT_INPUTS)
+    assert ci_plan.MEMORY_MEMBER in ci_plan.workspace_members(root)

@@ -21,6 +21,10 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
 * the code the harness's deploy stage runs (``DEPLOY_STAGE_INPUTS``: Deploy's source, whose command
   line imports its lifecycle mapper, presets, templates and pack commands, and its project file)
   also runs ``neptune-platform``, whose tests map the acceptance corpus with it (platform ADR 0008);
+* what Memory's acceptance snapshot is built through (``MEMORY_SNAPSHOT_INPUTS``: every format
+  adapter, the acceptance corpus under ``harness/acceptance/``, its imported generators and the
+  deploy stage's code) also runs ``neptune-memory``, whose snapshot test rebuilds from the harness's
+  compiled and mapped packages (platform ADR 0009);
 * the template smoke runs when ``packages/_template/**`` or ``scripts/new-package.sh`` changed.
 
 Writes ``compiler``, ``packages`` (a JSON list) and ``template`` to ``$GITHUB_OUTPUT`` when set, and
@@ -68,6 +72,11 @@ DEPLOY_STAGE_INPUTS = (
     "packages/neptune-deploy/src/",
     "packages/neptune-deploy/pyproject.toml",
 )
+# Memory's acceptance snapshot is built from the harness's compiled and mapped packages of the
+# acceptance corpus: any adapter, the corpus itself, the writers it imports or the deploy stage's
+# code can change it, so Memory's job (its snapshot test) must run on them (platform ADR 0009).
+MEMORY_MEMBER = "neptune-memory"
+MEMORY_SNAPSHOT_INPUTS = ("src/neptune/adapters/", "harness/acceptance/", *DEPLOY_STAGE_INPUTS)
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
@@ -153,6 +162,10 @@ def plan(
         or (compiler and not core and name == HARNESS_MEMBER)
         or (name == HARNESS_MEMBER and any(p in CORPUS_INPUTS for p in changed))
         or (name == HARNESS_MEMBER and any(p.startswith(DEPLOY_STAGE_INPUTS) for p in changed))
+        or (
+            name == MEMORY_MEMBER
+            and any(p.startswith(MEMORY_SNAPSHOT_INPUTS) or p in CORPUS_INPUTS for p in changed)
+        )
     }
     projects = {_normalise(name): name for name in members}
     grew = True

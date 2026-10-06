@@ -15,7 +15,7 @@ from typing import Any, Final
 
 import pytest
 import yaml
-from harness import acceptance, corpus
+from harness import acceptance, corpus, stages
 from harness.acceptance import __main__ as acceptance_cli
 from harness.acceptance import generate, resolve
 from harness.stages import read_deploy
@@ -294,7 +294,9 @@ def test_the_gold_document_is_sound(gold: dict[str, Any]) -> None:
     morphologies = {t for q in gold["questions"] for t in q["tags"]}
     assert {"manipulator", "mobile-base", "legged"} <= morphologies
     kinds = {item["select"]["kind"] for item in gold["evidence"].values()}
-    assert kinds == set(resolve.SELECTORS)
+    # ``declaration`` joins when deploy.json's sources do: they need cmms_downtime and syslog_csv,
+    # which Deploy has not shipped on main yet (MVL-191).
+    assert kinds == set(resolve.SELECTORS) - {"declaration"}
     for item in gold["evidence"].values():
         assert item["select"]["path"] in acceptance.read_lock()["files"]
     assert {trap["kind"] for trap in gold["traps"]} >= {
@@ -489,6 +491,28 @@ def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None
     assert plan.at_least["authorisation_envelope"] == 5  # S-007's two and PLANT-2's three
 
 
+_ZONE: Final = {"preset": "x", "source": "sites/a/log.csv", "civil_time_zone": "Europe/Berlin"}
+_ZONED: Final = {"deploy_format": 1, "presets": ["x"]}
+
+
+def test_a_deploy_declaration_states_the_civil_zone_of_sources_that_state_none(
+    tmp_path: Path,
+) -> None:
+    """``sources`` (Platform ADR 0009): per preset and corpus path, the zone the reading transform
+    declares; optional, so a declaration without it reads as before."""
+    path = tmp_path / "deploy.json"
+    later = {**_ZONE, "source": "sites/a/z.csv", "civil_time_zone": "America/New_York"}
+    path.write_text(json.dumps({**_ZONED, "sources": [later, _ZONE]}), encoding="utf-8")
+    plan, problems = read_deploy(path)
+    assert problems == [] and plan is not None
+    assert [(z.source, z.civil_time_zone) for z in plan.sources] == [
+        ("sites/a/log.csv", "Europe/Berlin"),
+        ("sites/a/z.csv", "America/New_York"),
+    ]
+    path.write_text(json.dumps(_ZONED), encoding="utf-8")
+    assert read_deploy(path)[0] == stages.DeployPlan(("x",), (), {}, ())
+
+
 @pytest.mark.parametrize(
     ("document", "problem"),
     [
@@ -502,6 +526,16 @@ def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None
         ({"deploy_format": 1, "presets": ["x"], "at_least": {"k": 0}}, "at_least is not"),
         ({"deploy_format": 1, "presets": ["x"], "at_least": {"k": True}}, "at_least is not"),
         ([], "is not a JSON object"),
+        ({**_ZONED, "sources": {}}, "sources is not a list of entries"),
+        ({**_ZONED, "sources": [{"preset": "x", "source": "a.csv"}]}, "sources[0] is not {"),
+        ({**_ZONED, "sources": [{**_ZONE, "zone": "UTC"}]}, "sources[0] is not {"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": ""}]}, "has a value that is not a name"),
+        ({**_ZONED, "sources": [{**_ZONE, "preset": "y"}]}, "names preset y, which is not"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": "../a.csv"}]}, "is not a plain corpus path"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": "/a.csv"}]}, "is not a plain corpus path"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": "a\\b.csv"}]}, "is not a plain corpus path"),
+        ({**_ZONED, "sources": [{**_ZONE, "civil_time_zone": "+01:00"}]}, "not spelled as an"),
+        ({**_ZONED, "sources": [_ZONE, {**_ZONE, "civil_time_zone": "UTC"}]}, "source twice"),
     ],
 )
 def test_a_malformed_deploy_declaration_is_refused_whole(
@@ -562,3 +596,42 @@ def test_the_assertion_selector_matches_the_declared_id_and_locates_the_entry(
     assert resolve.resolve_one(package, other)["records"] == []
     with pytest.raises(resolve.GoldError, match="needs id"):
         resolve.resolve_one(package, {"kind": "assertion", "path": "a.json"})
+
+
+def test_the_declaration_selector_cites_a_zone_the_deploy_declaration_states(
+    tmp_path: Path,
+) -> None:
+    """A source that states no zone is read in the zone its mapping's declaration states (root
+    ADR 0061 §3); the gold cites that declaration by preset, path and field (Platform ADR 0009)."""
+    root = tmp_path / "package"
+    (root / "records").mkdir(parents=True)
+    (root / "records" / "source_revision.jsonl").write_text(
+        json.dumps({"content_id": "sha256:" + "2" * 64, "id": "r", "location": {"path": "a.csv"}})
+        + "\n"
+    )
+    other = {"preset": "p", "source": "b.csv", "civil_time_zone": "UTC"}
+    entry = {"preset": "p", "source": "a.csv", "civil_time_zone": "Europe/Berlin"}
+    package = resolve.Package(root, declaration={"sources": [other, entry, "junk"]})
+    select = {"kind": "declaration", "path": "a.csv", "preset": "p", "field": "civil_time_zone"}
+    found = resolve.resolve_one(package, {**select, "equals": "Europe/Berlin"})
+    (record,) = found["records"]
+    assert record.startswith("declaration:sha256:") and len(record) == 19 + 64
+    locator = {
+        "declaration": "harness/acceptance/deploy.json",
+        "pointer": "/sources/1/civil_time_zone",
+    }
+    assert found["citations"] == [{"locator": locator, "path": "a.csv", "record": record}]
+    assert resolve.supports(found, {"record": record})
+    assert resolve.supports(found, {"path": "a.csv", "locator": locator})
+    assert not resolve.supports(found, {"path": "a.csv", "locator": {"pointer": "/sources/1"}})
+    # Another value, another preset, or a source the package does not hold resolve to nothing.
+    assert resolve.resolve_one(package, {**select, "equals": "UTC"})["records"] == []
+    assert resolve.resolve_one(package, {**select, "preset": "q"})["records"] == []
+    assert (
+        "no source at b.csv" in resolve.resolve_one(package, {**select, "path": "b.csv"})["problem"]
+    )
+    with pytest.raises(resolve.GoldError, match="needs preset, field"):
+        resolve.resolve_one(package, {"kind": "declaration", "path": "a.csv"})
+    # The id is the entry's content: the same entry elsewhere in the list keeps it.
+    moved = resolve.Package(root, declaration={"sources": [entry]})
+    assert resolve.resolve_one(moved, select)["records"] == [record]

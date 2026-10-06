@@ -23,8 +23,8 @@ also shared under a second name. A vendor bulletin carries prompt-injection text
 
 Every name, number and serial is invented. All times are written as each source would write them:
 bags in nanoseconds since the Unix epoch on the recording PC's clock, header stamps on the
-controller's, CMMS and HMI times as local wall time without a zone, calibration times with an
-offset.
+controller's, CMMS, syslog and HMI times as local wall time without a zone (the Deploy declaration,
+``deploy.json``, states PLANT-2's: ``PLANT_ZONE``), calibration times with an offset.
 """
 
 # ruff: noqa: E501  (CSV rows and document lines read as a person would see them)

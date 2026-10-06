@@ -53,8 +53,9 @@ nothing more for one that does not), and for one that does the `presets` and `te
 `by_declaration` (records per `preset:<name>` and `template:<path>`) and `findings` by code. Deploy's findings
 (`table_unmapped`, `row_unmatched`, `column_unmapped`, ...) are what no mapping read: they never fail the stage.
 It fails when the map exits non-zero, a declared preset is not shipped, the package does not verify or validate,
-it holds no lifecycle record, a declaration mapped none, or an `at_least` count is not met. The mapped package
-is `work/packages/<case>.deploy`.
+it holds no lifecycle record, a declaration mapped none, an `at_least` count is not met, or a declared source
+zone (`sources`, `zones` in the row; ADR 0009) did not come back as that preset's `civil_time_zone` for that
+source. The mapped package is `work/packages/<case>.deploy`.
 
 The ledger's `output.cases[]` has, per registered package (each compiled one, then each mapped one, labelled
 `<case>.deploy`; `stage` says which): `registration` (must be `registered`), `reregistration` (must be
@@ -72,10 +73,14 @@ A case maps with Deploy when it carries a declaration (`Case.deploy`). The accep
 `harness/acceptance/deploy.json`:
 
 ```json
-{"deploy_format": 1, "corpus": "acceptance", "corpus_version": "2.0.0",
+{"deploy_format": 1, "corpus": "acceptance", "corpus_version": "2.1.0",
  "presets": ["cmms_generic", "jira_json", "register_zone", "servicenow_csv"],
- "templates": [], "at_least": {"maintenance_event": 15}}
+ "templates": [], "at_least": {"maintenance_event": 15},
+ "sources": [{"preset": "...", "source": "<corpus path>", "civil_time_zone": "<IANA name>"}]}
 ```
+
+`sources` is optional: the civil zone a declared preset reads one source's zone-less times in, passed to the
+map as `--source-zone PRESET SOURCE ZONE` ([acceptance corpus](acceptance-corpus.md#declared-source-zones)).
 
 Add a shipped preset by name, or a template file or directory by its repository path, and raise `at_least` for
 the kinds it yields. A template outside Deploy's `src/` also needs a path in `harness.yml` and in `ci_plan.py`'s

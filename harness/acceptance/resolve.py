@@ -31,6 +31,13 @@ Selectors (``select.kind``):
 - ``assertion`` ``{path, id}``: ``assertion`` records (root ADR 0062) of the path whose declared
   ``identifier`` is ``id`` (``{namespace, value}``); located by the entry's JSON pointer. Platform
   ADR 0008.
+- ``declaration`` ``{path, preset, field, equals?}``: the ``sources`` entry of the corpus's Deploy
+  declaration (``deploy.json``) that gives the preset's reading of the path a ``field`` (today
+  ``civil_time_zone``), whose value equals ``equals`` when given: what the reading transform's
+  configuration states about a source that states nothing itself (root ADR 0061 §3). Its record id
+  is ``declaration:sha256:`` and the digest of the entry's canonical JSON, its locator
+  ``{"declaration": "harness/acceptance/deploy.json", "pointer": "/sources/<i>/<field>"}``; the
+  path must still be a source of the package. Platform ADR 0009.
 - ``clock_mapping`` ``{path, offset_s}``: derived ``clock_mapping`` lines evidenced by the path
   whose anchor offset, target minus source in seconds by each clock's stated resolution, lies in
   ``[low, high]``; a clock without a known resolution is never compared.
@@ -38,14 +45,13 @@ Selectors (``select.kind``):
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import TYPE_CHECKING, Any, Final
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any, Final
 
 Json = dict[str, Any]
 SELECTORS: Final = (
@@ -60,7 +66,12 @@ SELECTORS: Final = (
     "finding",
     "clock_mapping",
     "assertion",
+    "declaration",
 )
+# The corpus's Deploy declaration (Platform ADR 0008), by repository path: what a ``declaration``
+# citation names, and what ``Package`` reads when it is given no declaration of its own.
+DECLARATION: Final = "harness/acceptance/deploy.json"
+DECLARATION_FILE: Final = Path(__file__).resolve().parent / "deploy.json"
 
 
 class GoldError(ValueError):
@@ -73,6 +84,14 @@ class Package:
 
     root: Path
     _kinds: dict[str, list[Json]] = field(default_factory=dict)
+    # The Deploy declaration ``declaration`` items resolve against; the corpus's own when None.
+    declaration: Json | None = None
+
+    def declared_sources(self) -> list[Any]:
+        if self.declaration is None:
+            self.declaration = json.loads(DECLARATION_FILE.read_text(encoding="utf-8"))
+        sources = self.declaration.get("sources", [])
+        return sources if isinstance(sources, list) else []
 
     def kind(self, name: str, *, derived: bool = False) -> list[Json]:
         key = f"{'derived' if derived else 'records'}/{name}"
@@ -240,6 +259,26 @@ def resolve_one(package: Package, select: Json) -> Json:
             for a in package.kind("assertion")
             if _source(a) == content and _known(a.get("identifier")) == declared
         ]
+    elif kind == "declaration":
+        preset, name = _need(select, "preset", "field")
+        entries = []
+        for i, entry in enumerate(package.declared_sources()):
+            if not isinstance(entry, dict) or name not in entry:
+                continue
+            if (entry.get("preset"), entry.get("source")) != (preset, path):
+                continue
+            if "equals" not in select or entry[name] == select["equals"]:
+                entries.append((i, entry))
+        out["records"] = sorted(_entry_id(entry) for _, entry in entries)
+        out["citations"] = [
+            {
+                "locator": {"declaration": DECLARATION, "pointer": f"/sources/{i}/{name}"},
+                "path": path,
+                "record": _entry_id(entry),
+            }
+            for i, entry in sorted(entries, key=lambda e: _entry_id(e[1]))
+        ]
+        return out
     elif kind == "clock_mapping":
         (bounds,) = _need(select, "offset_s")
         low, high = Fraction(str(bounds[0])), Fraction(str(bounds[1]))
@@ -278,6 +317,12 @@ def resolve_one(package: Package, select: Json) -> Json:
             key=lambda c: str(c["record"]),
         )
     return out
+
+
+def _entry_id(entry: Json) -> str:
+    """A declaration entry's id: the sha256 of its canonical JSON (sorted keys, no spaces)."""
+    canonical = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "declaration:sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _locator(kind: str, record: Json, select: Json) -> Json | None:
@@ -367,9 +412,10 @@ def check_gold(gold: Json) -> list[str]:
     return problems
 
 
-def resolve(package_root: Path, gold: Json) -> Json:
-    """Every evidence item of ``gold`` resolved against the package: ``{evidence id: result}``."""
-    package = Package(package_root)
+def resolve(package_root: Path, gold: Json, declaration: Json | None = None) -> Json:
+    """Every evidence item of ``gold`` resolved against the package: ``{evidence id: result}``.
+    ``declaration`` items resolve against ``declaration``; the corpus's ``deploy.json`` if None."""
+    package = Package(package_root, declaration=declaration)
     return {
         key: resolve_one(package, item["select"]) for key, item in sorted(gold["evidence"].items())
     }

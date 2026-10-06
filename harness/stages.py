@@ -270,15 +270,67 @@ DEPLOY_FORMAT: Final = 1
 DEPLOY_TIMEOUT_S: Final = 900  # the mapper streams; the acceptance corpus maps in about a second
 
 
+SOURCE_KEYS: Final = frozenset({"preset", "source", "civil_time_zone"})
+
+
+@dataclass(frozen=True)
+class SourceZone:
+    """One ``sources`` entry (Platform ADR 0009): the civil time zone a declared preset reads one
+    source's zone-less times in. ``source`` is the corpus path of the source; the zone is an IANA
+    name, checked by spelling only (root ADR 0061 §1)."""
+
+    preset: str
+    source: str
+    civil_time_zone: str
+
+
 @dataclass(frozen=True)
 class DeployPlan:
     """A case's declaration (``deploy.json``, Platform ADR 0008): Deploy presets by name, document
-    templates by repository-relative path (a file or a directory of them), and the lifecycle
-    record counts the mapped package must reach."""
+    templates by repository-relative path (a file or a directory of them), the lifecycle
+    record counts the mapped package must reach, and the civil zones of sources whose exports
+    state none (ADR 0009)."""
 
     presets: tuple[str, ...]
     templates: tuple[str, ...]
     at_least: dict[str, int]
+    sources: tuple[SourceZone, ...] = ()
+
+
+def _plain_path(path: str) -> bool:
+    """A relative POSIX path with no empty, ``.`` or ``..`` part: a corpus path, never a way out."""
+    parts = path.split("/")
+    return "\\" not in path and "\0" not in path and all(p not in ("", ".", "..") for p in parts)
+
+
+def _read_sources(value: Any, presets: list[str]) -> tuple[tuple[SourceZone, ...], list[str]]:
+    """The ``sources`` entries, and why any cannot be used."""
+    from neptune.model.reference import check_iana_zone
+
+    if not isinstance(value, list):
+        return (), ["sources is not a list of entries"]
+    out: list[SourceZone] = []
+    problems: list[str] = []
+    for i, entry in enumerate(value):
+        if not isinstance(entry, dict) or set(entry) != SOURCE_KEYS:
+            problems.append(f"sources[{i}] is not {{{', '.join(sorted(SOURCE_KEYS))}}}")
+            continue
+        if not all(isinstance(entry[key], str) and entry[key] for key in SOURCE_KEYS):
+            problems.append(f"sources[{i}] has a value that is not a name")
+            continue
+        zone = SourceZone(entry["preset"], entry["source"], entry["civil_time_zone"])
+        if zone.preset not in presets:
+            problems.append(f"sources[{i}] names preset {zone.preset}, which is not declared")
+        if not _plain_path(zone.source):
+            problems.append(f"sources[{i}] source {zone.source} is not a plain corpus path")
+        try:
+            check_iana_zone(f"sources[{i}] civil_time_zone", zone.civil_time_zone)
+        except ValueError as error:
+            problems.append(str(error))
+        out.append(zone)
+    if len({(z.preset, z.source) for z in out}) != len(out):
+        problems.append("sources declares one preset's source twice")
+    return tuple(sorted(out, key=lambda z: (z.preset, z.source))), problems
 
 
 def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
@@ -315,9 +367,12 @@ def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
         at_least = {}
     if not names["presets"] and not names["templates"]:
         problems.append("the deploy declaration names no preset and no template")
+    sources, refused = _read_sources(document.get("sources", []), names["presets"])
+    problems += refused
     if problems:
         return None, problems
-    return DeployPlan(tuple(names["presets"]), tuple(names["templates"]), dict(at_least)), []
+    plan = DeployPlan(tuple(names["presets"]), tuple(names["templates"]), dict(at_least), sources)
+    return plan, []
 
 
 def _declarations(plan: DeployPlan) -> tuple[dict[str, str], list[str]]:
@@ -363,6 +418,48 @@ def _lifecycle_records(root: Path) -> tuple[dict[str, int], Counter[str]]:
     return kinds, transforms
 
 
+def _zone_problems(
+    plan: DeployPlan,
+    compiled: Path,
+    mapped: Path,
+    labels: dict[str, str],
+    applied: dict[str, str],
+) -> list[str]:
+    """Why a declared source zone was not applied: the mapped package must hold, for each
+    ``sources`` entry, a ``civil_time_zone`` record citing that source and made by that preset's
+    transform, and every such record must state the declared zone (ADR 0009)."""
+    from harness.acceptance.resolve import Package
+
+    base, out = Package(compiled), Package(mapped)
+    problems: list[str] = []
+    for zone in plan.sources:
+        content = base.content(zone.source)
+        if content is None:
+            problems.append(
+                f"sources names {zone.source}, which the compiled package does not hold"
+            )
+            continue
+        states = [
+            record.get("zone", {})
+            for record in out.kind("civil_time_zone")
+            if record.get("provenance", {}).get("evidence", {}).get("source") == content
+            and labels.get(applied.get(str(record["provenance"].get("transform")), ""))
+            == f"preset:{zone.preset}"
+        ]
+        declared = {"knowledge": "known", "value": zone.civil_time_zone}
+        if not states:
+            problems.append(
+                f"preset:{zone.preset} wrote no civil time zone for {zone.source}"
+                f" (declared {zone.civil_time_zone})"
+            )
+        elif any(state != declared for state in states):
+            problems.append(
+                f"preset:{zone.preset} did not apply the declared zone {zone.civil_time_zone}"
+                f" to every clock of {zone.source}"
+            )
+    return problems
+
+
 def _transform_sources(root: Path) -> dict[str, str]:
     """Each Deploy transform record's id, mapped to the sha256 of the mapping or template file it
     applied (its config's ``mapping_sha256`` or ``template_sha256``)."""
@@ -397,6 +494,11 @@ def _map(
     argv = [sys.executable, "-m", "neptune_deploy", "map", str(ctx.package_root(case.id))]
     argv += [arg for name in plan.presets if name in PRESETS for arg in ("-p", name)]
     argv += [arg for path in plan.templates for arg in ("-t", str(REPO / path))]
+    argv += [
+        arg
+        for zone in plan.sources
+        for arg in ("--source-zone", zone.preset, zone.source, zone.civil_time_zone)
+    ]
     argv += ["-o", str(out)]
     done = subprocess.run(
         argv, cwd=REPO, capture_output=True, text=True, timeout=DEPLOY_TIMEOUT_S, check=False
@@ -439,6 +541,13 @@ def _map(
         for kind, n in sorted(plan.at_least.items())
         if kinds.get(kind, 0) < n
     )
+    if plan.sources:
+        row["zones"] = [
+            {"preset": z.preset, "source": z.source, "civil_time_zone": z.civil_time_zone}
+            for z in plan.sources
+        ]
+        zones = _zone_problems(plan, ctx.package_root(case.id), out, labels, applied)
+        problems.extend(f"{case.id}: {problem}" for problem in zones)
 
 
 def deploy_real(ctx: Context) -> Outcome:
