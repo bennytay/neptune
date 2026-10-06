@@ -106,7 +106,7 @@ table), and Deploy's `incident_report` template. `at_least` pins what they map: 
 `intervention`, 16 `maintenance_event`, 4 `requalification_record`, 5 `change_record`, 5
 `authorisation_envelope` and 4 `structured_record` (the syslog events). It declares both `sources` zones and
 `require_assertion_scopes`. The stage is red when a declaration maps nothing
-([harness](harness.md#deploy-stage), ADR 0008).
+([harness](harness.md#read-the-report), ADR 0008).
 
 ### Declared source zones
 
