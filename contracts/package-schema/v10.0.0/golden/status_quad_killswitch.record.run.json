@@ -1,0 +1,67 @@
+{
+  "first": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 8,
+            "offset": 8
+          }
+        ],
+        "source": "sha256:32d98bd355fc2503eb7472c88c2ae13cfb25141c0064fdd8f2d5b40c7b587ead"
+      },
+      "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+    },
+    "value": {
+      "domain_id": "rec:sha256:03e87c1a9abde47eac4f7513bda2365988b6fee5b5ee7d11624f4bb3303cb681",
+      "ticks": 5000000
+    }
+  },
+  "id": "rec:sha256:5ba366c31d79fdf146bfa10e11e57bf57c910238729d88a0cbbd9041ac26f563",
+  "kind": "run",
+  "last": {
+    "knowledge": "unknown"
+  },
+  "logical_id": {
+    "knowledge": "unknown"
+  },
+  "machine": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 16,
+            "offset": 288
+          }
+        ],
+        "source": "sha256:32d98bd355fc2503eb7472c88c2ae13cfb25141c0064fdd8f2d5b40c7b587ead"
+      },
+      "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+    },
+    "value": {
+      "namespace": "px4.sys_uuid",
+      "value": "quad-0042-killsw"
+    }
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 16,
+          "offset": 0
+        }
+      ],
+      "source": "sha256:32d98bd355fc2503eb7472c88c2ae13cfb25141c0064fdd8f2d5b40c7b587ead"
+    },
+    "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+  },
+  "schema_version": 1
+}

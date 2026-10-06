@@ -18,6 +18,8 @@ package-schema shape (``identity_link`` since 3, ``assertion`` since 5, ``timest
 - ``incident_record`` and ``intervention`` (root ADR 0051): read only for the ids they declare
   themselves by (``identifiers``), so an assertion that names an event by its declared id reaches
   the event node ``memory.events`` keyed by the record (ADR 0019 §1).
+- ``machine`` (root ADR 0019 §1, ADR 0072 §1): the ids one declaration gives one machine, a
+  manifest entry's id and its aliases among them (Memory ADR 0021).
 
 Two kinds are Ledger stand-ins until Memory reads the catalog API (MVL-85) and the compiler emits
 configuration lineage (MVL-38): ``ledger_thread {id, logical_id, node_type, valid_from, evidence}``
@@ -32,11 +34,13 @@ from typing import TYPE_CHECKING, Final, Literal, TypeVar
 from neptune.model.alignment import identity_link_from_json
 from neptune.model.assertion import AssertionType, assertion_from_json
 from neptune.model.ids import LogicalId, RecordId, logical_id_from_json, parse_record_id
-from neptune.model.knowledge import Ambiguous, AssertionKind, Known
+from neptune.model.knowledge import Ambiguous, AssertionKind, Candidate, Known
 from neptune.model.lifecycle import incident_record_from_json, intervention_from_json
+from neptune.model.machine import machine_from_json
 from neptune.model.provenance import EvidenceRef, Provenance, evidence_ref_from_json
 from neptune.model.reference import timestamp_domain_from_json
 from neptune.model.time import Timestamp, timestamp_from_json
+from neptune.model.world import structured_record_from_json, structured_table_from_json
 from neptune_memory.schema.interval import OPEN, CivilClock, Open
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import is_declared_value
@@ -58,11 +62,22 @@ IDENTITY_LINK: Final = "identity_link"
 CONFIGURATION_LINEAGE: Final = "configuration_lineage"
 ASSERTION: Final = "assertion"
 TIMESTAMP_DOMAIN: Final = "timestamp_domain"
+STRUCTURED_TABLE: Final = "structured_table"
+STRUCTURED_RECORD: Final = "structured_record"
+# A typed table's column holding each row's own id in ``<namespace>`` (Deploy ADR 0017 §1).
+ROW_ID_PREFIX: Final = "@id:"
 INCIDENT_RECORD: Final = "incident_record"
 INTERVENTION: Final = "intervention"
+MACHINE: Final = "machine"
 
-# What grounds a ``same_as`` (ADR 0003 §1.2): the record kind it rests on.
-Ground = Literal["identity_link", "configuration_lineage", "operator_assertion"]
+# What grounds a ``same_as`` (ADR 0003 §1.2, ADR 0021): the record kind it rests on.
+Ground = Literal[
+    "identity_link", "configuration_lineage", "operator_assertion", "machine_declaration"
+]
+
+# Node ids in this namespace are Memory's own record-keyed nodes (``record:<record id>``: runs,
+# streams, events), so a declared id in it would name one of them (ADR 0021 §4).
+RESERVED_NAMESPACE: Final = "record"
 
 
 class Malformed(ValueError):
@@ -407,6 +422,116 @@ def incident_identifiers(record: Mapping[str, object]) -> Declaring:
 def intervention_identifiers(record: Mapping[str, object]) -> Declaring:
     parsed = _strict(intervention_from_json, record)
     return _declaring(parsed.id, parsed.identifiers)
+
+
+def id_columns(record: Mapping[str, object]) -> tuple[RecordId, dict[int, str]]:
+    """A ``structured_table``'s id and its ``@id:<namespace>`` columns, by index (ADR 0023);
+    none when its header is not ``Known`` or a namespace is not a record namespace."""
+    parsed = _strict(structured_table_from_json, record)
+    header = _known(parsed.header) or ()
+    found: dict[int, str] = {}
+    for index, name in enumerate(header):
+        namespace = name[len(ROW_ID_PREFIX) :]
+        if name.startswith(ROW_ID_PREFIX):
+            try:
+                LogicalId(namespace, "x")
+            except ValueError:
+                continue
+            found[index] = namespace
+    return parsed.id, found
+
+
+def row_identifiers(
+    record: Mapping[str, object], columns: Mapping[RecordId, Mapping[int, str]]
+) -> Declaring | None:
+    """The ids a table row declares in its table's ``@id:<namespace>`` cells (ADR 0023), as an
+    event record's ``identifiers`` are read: a ``Known`` text cell certainly, each text candidate
+    of an ``Ambiguous`` one possibly. ``None`` for a row of a table with no such column."""
+    parsed = _strict(structured_record_from_json, record)
+    named = columns.get(parsed.table)
+    if not named:
+        return None
+    certain: list[LogicalId] = []
+    possible: list[LogicalId] = []
+    refused = 0
+    for index, namespace in sorted(named.items()):
+        cell = parsed.cells[index] if index < len(parsed.cells) else None
+        readings = (
+            [(cell.value, certain)]
+            if isinstance(cell, Known)
+            else [(c.value, possible) for c in cell.candidates]
+            if isinstance(cell, Ambiguous)
+            else []
+        )
+        for value, into in readings:
+            if not isinstance(value, str):
+                continue
+            if not is_declared_value(value):
+                refused += 1
+            elif LogicalId(namespace, value) not in into:
+                into.append(LogicalId(namespace, value))
+    possible = [p for p in possible if p not in certain]
+    return Declaring(parsed.id, tuple(certain), tuple(possible), refused)
+
+
+# --- Machine declarations -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Declaration:
+    """A ``Machine`` record, as far as identity reads it (ADR 0021).
+
+    ``known`` are its ``Known`` ids in canonical order, each with its own citation; ``ambiguous``
+    one tuple per ``Ambiguous`` identifier, its candidates. ``refused`` are ids Memory cannot key a
+    node by (blank or padded, or in ``RESERVED_NAMESPACE``), with every other id still read.
+    ``document`` is the source the declaration cites: two machines one document lists are two.
+    """
+
+    record: RecordId
+    assertion_kind: AssertionKind
+    known: tuple[Side, ...]
+    ambiguous: tuple[tuple[Side, ...], ...]
+    refused: tuple[LogicalId, ...]
+    evidence: tuple[EvidenceRef, ...]
+    document: object
+
+
+def _usable(node: LogicalId) -> bool:
+    return is_declared_value(node.value) and node.namespace != RESERVED_NAMESPACE
+
+
+def machine(record: Mapping[str, object]) -> Declaration:
+    """The compiler's ``Machine``, read by the compiler's strict reader."""
+    provenance = record.get("provenance")
+    if isinstance(provenance, dict) and provenance.get("assertion_kind") == "inferred":
+        raise Inferred("an inferred machine is a derived/ record")
+    parsed = _strict(machine_from_json, record)
+    known: list[Side] = []
+    ambiguous: list[tuple[Side, ...]] = []
+    refused: list[LogicalId] = []
+    for item in parsed.identifiers:
+        readings = item.candidates if isinstance(item, Ambiguous) else (item,)
+        sides = tuple(
+            Side(c.value, _cited(c.provenance))
+            for c in readings
+            if isinstance(c, Known | Candidate)
+        )
+        refused.extend(s.node for s in sides if not _usable(s.node))
+        usable = tuple(s for s in sides if _usable(s.node))
+        if isinstance(item, Ambiguous):
+            if usable:
+                ambiguous.append(usable)
+        else:
+            known.extend(usable)
+    return Declaration(
+        record=parsed.id,
+        assertion_kind=parsed.provenance.assertion_kind,
+        known=tuple(known),
+        ambiguous=tuple(ambiguous),
+        refused=tuple(refused),
+        evidence=(parsed.provenance.evidence,),
+        document=parsed.provenance.evidence.source,
+    )
 
 
 # --- Clocks -------------------------------------------------------------------------------------

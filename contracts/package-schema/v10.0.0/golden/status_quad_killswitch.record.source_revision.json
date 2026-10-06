@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:32d98bd355fc2503eb7472c88c2ae13cfb25141c0064fdd8f2d5b40c7b587ead",
+  "id": "rec:sha256:41c27b1f8a45cd2f1d5c5f074ce5450c714309836affc4accd3eb0f0c894a250",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "logs/quad_killswitch.ulg"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

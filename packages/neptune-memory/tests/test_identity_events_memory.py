@@ -90,6 +90,7 @@ def cell(
     *extra: Record,
     downtime_ids: Sequence[LogicalId] | Knowledge[tuple[Knowledge[LogicalId], ...]] = (DOWNTIME,),
     second_downtime: bool = False,
+    row_ids: bool = False,
 ) -> tuple[dict[str, list[Record]], dict[str, Any]]:
     """The two statements of one stop, on two civil clocks, in two packages."""
     cmms_record, cmms = domain("cmms export", civil=True)
@@ -101,16 +102,17 @@ def cell(
         machines=[ARM],
         identifiers=downtime_ids,
     )
-    rows, table_id, row_ids = table(
-        "syslog",
-        ("sec", "nsec", "@clock:ts", "host", "severity", "msg"),
-        [
-            (T0 // SECOND - 2, 0, sys_clock, "ARM-3A", "notice", "program started"),
-            (T0 // SECOND, 0, sys_clock, "ARM-3A", "err", "PSTOP: collision detection joint 5"),
-        ],
-    )
+    header: tuple[str, ...] = ("sec", "nsec", "@clock:ts", "host", "severity", "msg")
+    lines: list[tuple[Any, ...]] = [
+        (T0 // SECOND - 2, 0, sys_clock, "ARM-3A", "notice", "program started"),
+        (T0 // SECOND, 0, sys_clock, "ARM-3A", "err", "PSTOP: collision detection joint 5"),
+    ]
+    if row_ids:  # Deploy's typed table: each row's own Seq as ``@id:<namespace>`` (ADR 0023)
+        header = (*header, f"@id:{SYSLOG_SEQ.namespace}")
+        lines = [(*lines[0], "4170"), (*lines[1], SYSLOG_SEQ.value)]
+    rows, table_id, row_ids_ = table("syslog", header, lines)
     cmms_package: list[Record] = [cmms_record, stop]
-    built: dict[str, Any] = {"stop": stop_id, "table": table_id, "pstop": row_ids[1]}
+    built: dict[str, Any] = {"stop": stop_id, "table": table_id, "pstop": row_ids_[1]}
     if second_downtime:  # a second log re-uses the id for another stop
         other, other_id = intervention(
             "downtime_log_b.csv row 2",
@@ -373,6 +375,33 @@ def test_an_id_no_thread_and_no_event_declares_dangles() -> None:
     _, identity = run(packages)
     assert not identity.claims
     assert codes(identity) == ["identity.dangling_link"]
+
+
+def test_an_event_rows_at_id_column_declares_its_id() -> None:
+    """ADR 0023: the PSTOP row declares ``plant.syslog:4182`` in its ``@id:`` cell, so the
+    assertion naming it joins the two stops; the notice row is no event, so its id names nothing."""
+    packages, built = cell(row_ids=True)
+    packages["assertions"] = [
+        assertion("ASR-SEQ", SAME, (DOWNTIME, SYSLOG_SEQ), authored_at=authored())
+    ]
+    _, identity = run(packages)
+    (claim,) = [c for c in identity.claims if c.predicate == SAME_AS]
+    assert {claim.subject, claim.object} == {
+        event_node(built["pstop"]),
+        event_node(built["stop"]),
+    }
+    assert built["pstop"] in claim.provenance.records
+    packages["assertions"] = [
+        assertion(
+            "ASR-4170",
+            SAME,
+            (DOWNTIME, LogicalId(SYSLOG_SEQ.namespace, "4170")),
+            authored_at=authored(),
+        )
+    ]
+    _, unplaced = run(packages)
+    assert not unplaced.claims
+    assert codes(unplaced) == ["identity.dangling_link"]
 
 
 def test_one_event_named_twice_is_one_entry() -> None:

@@ -6,7 +6,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.0.0/` (1.0.0 to 1.9.0 stay; major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.1.0/` (1.0.0 to 1.9.0 and 2.0.0 stay; 2.1.0 is golden-only, identity v4, ADRs 0021 and 0023; major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
@@ -30,9 +30,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
-    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.0.0**
-    document (`graph_schema_version: 2`, `graph_schema: "2.0.0"`, with `builds`), head 2, written by Memory's codec. It is what
-    `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.1.0**
+    document (`graph_schema_version: 2`, `graph_schema: "2.1.0"`, with `builds`), head 2, written by Memory's codec. It is what
+    `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.1.0. The pipeline:
     1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
        Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
        Both stages must run real and ok. Memory picks no preset.
@@ -72,6 +72,10 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       stated `recorded_by` machine and `at_site` site (the manifest declares no task).
     - 97 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
       2026-09-14.
+    - 10 `same_as` (identity v4): each manifest machine's declared aliases (AMR-05/06/07, ARM-3A, LEG-01:
+      `cmms.asset`, `manifest`, `servicenow.ci`; [ADR 0021](adr/0021-a-machine-records-declared-ids-are-same-as.md)),
+      and INC-C3-0011's syslog 4182 PSTOP row with CMMS DT-26-0914-01, per A. Novak's assertion, the syslog id
+      declared by the row's `@id:syslog` cell ([ADR 0023](adr/0023-event-table-rows-declare-ids-in-their-at-id-column.md)).
     - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
       `stated_severity`, `has_description` and `evidenced_by`.
     - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
@@ -89,30 +93,30 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       `cmms_downtime` preset and `syslog_csv` (#145, #149), but the corpus's `deploy.json` declares them only
       from Platform's corpus 2.1.0 (#150). Memory's config already declares the `syslog events` table. The CMMS
       and syslog stops are on separate wall clocks, so they will be `clocks_unrelated`, never compared, and the
-      same-event assertion joins them. Bag e-stops are MVL-204. No event is ever aligned through an inferred
-      mapping.
+      same-event assertion joins them. Bag e-stops are compiler `status_report`s since MVL-204, which the
+      event index does not read yet. No event is ever aligned through an inferred mapping.
     - No answer yet to "what changed since the last good run".
       - There is no `snapshot_binding`, so no `configuration_active_during` and no `authorisation_undecided`.
       - Runs are `recorded_by` `manifest:ARM-3A`. The chains are on `cmms.asset:ARM-3A` and
         `servicenow.ci:ARM-3A`, and the register declares `asset:ARM-3A`. These are four nodes until an
         `identity_link` or an operator assertion joins them, and the corpus has neither.
     - No `authorised_configuration`: no envelope places a configuration on its site.
-    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events. INC-C3-0011's stops are not
-      events here, and the corpus assertion names `plant-2.cmms.downtime:…` and `plant-2.syslog.log-p2:4182`.
-      No record declares either id (ADR 0019 §1).
+    - No calibration `drift` (MVL-207, then #129).
 
     This file is regenerated as those land, never edited.
 ## Consumes
 
-- Compiler package schema: `SCHEMA_VERSION = 9` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
+- Compiler package schema: `SCHEMA_VERSION = 10` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
   0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the task kinds, root ADR
   0063; 8 adds the robot-description kinds, root ADR 0039; 9 adds `run_declaration`, root ADR 0072, read
-  by the run consolidator with the compiler's reader, ADR 0020). Alignment records (MVL-82, package-schema 3.0.0),
+  by the run consolidator with the compiler's reader, ADR 0020; 10 the `status_report` and `safety_state`
+  kinds, root ADR 0071, which the event index does not read yet). Alignment records (MVL-82, package-schema 3.0.0),
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
-  compiler's own strict readers (ADR 0008 §1), and the `identifiers` of `incident_record` and `intervention`
-  records `memory.events` placed (ADR 0019 §1). The configuration lineage consolidator reads
+  compiler's own strict readers (ADR 0008 §1), the `identifiers` of `incident_record` and `intervention`
+  records `memory.events` placed (ADR 0019 §1) and of event table rows' `@id:<namespace>` cells (ADR 0023), and `machine` (with `run` and `run_declaration` to place it)
+  the same way (ADR 0021). The configuration lineage consolidator reads
   `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`, `authorisation_envelope`
   (lifecycle records, root ADR 0051), `run`, `snapshot_binding` (root ADR 0050 §8) and the snapshot kinds a binding
   names, the same way ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §1); the time-domain registry

@@ -1,0 +1,18 @@
+{
+  "adapter_id": "rosbag2",
+  "adapter_version": "0.3.0",
+  "config": {
+    "decode_payloads": true,
+    "max_array_items": 65536,
+    "max_decoded_columns": 512,
+    "max_message_bytes": 16777216,
+    "max_status_records": 8192,
+    "nominal_status_records": false
+  },
+  "config_hash": "sha256:b3978879ac60096b595232a3f0c0a29a441425d0ca1916f19da014c20f5020d7",
+  "id": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": []
+}

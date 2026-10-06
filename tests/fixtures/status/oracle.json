@@ -1,0 +1,795 @@
+{
+ "arm_cell.mcap": [
+  [
+   "/diagnostics",
+   1790000000000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "arm/controller",
+      "running",
+      "ARM-7",
+      []
+     ],
+     [
+      0,
+      "arm/joint_3",
+      "temperature 64 C",
+      "J3-DRIVE",
+      [
+       [
+        "temp_c",
+        "64"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000000001000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/ur/safety_mode",
+   1790000000200000000,
+   {
+    "mode": 1
+   }
+  ],
+  [
+   "/robot_status",
+   1790000000501000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000001000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "arm/controller",
+      "running",
+      "ARM-7",
+      []
+     ],
+     [
+      0,
+      "arm/joint_3",
+      "temperature 64 C",
+      "J3-DRIVE",
+      [
+       [
+        "temp_c",
+        "64"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000001001000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/robot_status",
+   1790000001501000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000002000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "arm/controller",
+      "running",
+      "ARM-7",
+      []
+     ],
+     [
+      0,
+      "arm/joint_3",
+      "temperature 64 C",
+      "J3-DRIVE",
+      [
+       [
+        "temp_c",
+        "64"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000002001000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/gripper/status",
+   1790000002500000000,
+   {
+    "statuses": [
+     [
+      0,
+      "gripper",
+      "ok",
+      "GRIP-2F",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000002501000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000003000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "arm/controller",
+      "running",
+      "ARM-7",
+      []
+     ],
+     [
+      1,
+      "arm/joint_3",
+      "temperature 71 C (limit 70 C)",
+      "J3-DRIVE",
+      [
+       [
+        "temp_c",
+        "71"
+       ],
+       [
+        "limit_c",
+        "70"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000003001000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/robot_status",
+   1790000003501000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 0
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000004000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "arm/controller",
+      "running",
+      "ARM-7",
+      []
+     ],
+     [
+      2,
+      "arm/joint_3",
+      "following error 4.2 deg",
+      "J3-DRIVE",
+      [
+       [
+        "error_deg",
+        "4.2"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000004001000000,
+   {
+    "e_stopped.val": 0,
+    "in_error.val": 1
+   }
+  ],
+  [
+   "/ur/safety_mode",
+   1790000004200000000,
+   {
+    "mode": 3
+   }
+  ],
+  [
+   "/robot_status",
+   1790000004501000000,
+   {
+    "e_stopped.val": 1,
+    "in_error.val": 1
+   }
+  ],
+  [
+   "/ur/safety_mode",
+   1790000004600000000,
+   {
+    "mode": 7
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000005000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "arm/controller",
+      "running",
+      "ARM-7",
+      []
+     ],
+     [
+      2,
+      "arm/joint_3",
+      "following error 4.2 deg",
+      "J3-DRIVE",
+      [
+       [
+        "error_deg",
+        "4.2"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000005001000000,
+   {
+    "e_stopped.val": 1,
+    "in_error.val": 1
+   }
+  ],
+  [
+   "/gripper/status",
+   1790000005500000000,
+   {
+    "statuses": [
+     [
+      3,
+      "gripper",
+      "no update for 2.0 s",
+      "GRIP-2F",
+      [
+       [
+        "age_s",
+        "2.0"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/robot_status",
+   1790000005501000000,
+   {
+    "e_stopped.val": 1,
+    "in_error.val": 1
+   }
+  ]
+ ],
+ "av_shuttle.db3": [
+  [
+   "/diagnostics",
+   1790000000000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "localization: ndt_scan_matcher",
+      "OK",
+      "",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000000005000000,
+   {
+    "state": 1
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000000500000000,
+   {
+    "statuses": [
+     [
+      0,
+      "localization: ndt_scan_matcher",
+      "OK",
+      "",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000000505000000,
+   {
+    "state": 1
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000001000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "localization: ndt_scan_matcher",
+      "OK",
+      "",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000001005000000,
+   {
+    "state": 1
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000001500000000,
+   {
+    "statuses": [
+     [
+      0,
+      "localization: ndt_scan_matcher",
+      "OK",
+      "",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000001505000000,
+   {
+    "state": 1
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000002000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "localization: ndt_scan_matcher",
+      "OK",
+      "",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000002005000000,
+   {
+    "state": 1
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000002500000000,
+   {
+    "statuses": [
+     [
+      2,
+      "localization: ndt_scan_matcher",
+      "NDT score below threshold",
+      "",
+      [
+       [
+        "nearest_voxel_score",
+        "1.9"
+       ],
+       [
+        "threshold",
+        "2.3"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000002505000000,
+   {
+    "state": 3
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000003000000000,
+   {
+    "statuses": [
+     [
+      2,
+      "localization: ndt_scan_matcher",
+      "NDT score below threshold",
+      "",
+      [
+       [
+        "nearest_voxel_score",
+        "1.9"
+       ],
+       [
+        "threshold",
+        "2.3"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000003005000000,
+   {
+    "state": 3
+   }
+  ],
+  [
+   "/diagnostics",
+   1790000003500000000,
+   {
+    "statuses": [
+     [
+      2,
+      "localization: ndt_scan_matcher",
+      "NDT score below threshold",
+      "",
+      [
+       [
+        "nearest_voxel_score",
+        "1.9"
+       ],
+       [
+        "threshold",
+        "2.3"
+       ]
+      ]
+     ]
+    ]
+   }
+  ],
+  [
+   "/system/emergency/emergency_state",
+   1790000003505000000,
+   {
+    "state": 4
+   }
+  ]
+ ],
+ "boat_failsafe.bin": [
+  [
+   "MSG",
+   100,
+   "ArduRover V4.5.1 (boat0042)"
+  ],
+  [
+   "MSG",
+   101,
+   "Frame: BOAT"
+  ],
+  [
+   "ERR",
+   9000000,
+   5,
+   1
+  ],
+  [
+   "MSG",
+   9000050,
+   "Failsafe: radio, action RTL"
+  ],
+  [
+   "ERR",
+   12000000,
+   5,
+   0
+  ],
+  [
+   "ERR",
+   14000000,
+   11,
+   2
+  ]
+ ],
+ "mobile_base.bag": [
+  [
+   "/diagnostics_agg",
+   1790000000000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "/Power System/Battery",
+      "OK",
+      "husky_battery",
+      [
+       [
+        "voltage_v",
+        "25.6"
+       ]
+      ]
+     ],
+     [
+      0,
+      "/Sensors/Lidar",
+      "OK",
+      "LMS1xx-0451",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/status",
+   1790000000010000000,
+   {
+    "e_stop": false
+   }
+  ],
+  [
+   "/diagnostics_agg",
+   1790000001000000000,
+   {
+    "statuses": [
+     [
+      0,
+      "/Power System/Battery",
+      "OK",
+      "husky_battery",
+      [
+       [
+        "voltage_v",
+        "25.6"
+       ]
+      ]
+     ],
+     [
+      0,
+      "/Sensors/Lidar",
+      "OK",
+      "LMS1xx-0451",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/status",
+   1790000001010000000,
+   {
+    "e_stop": false
+   }
+  ],
+  [
+   "/diagnostics_agg",
+   1790000002000000000,
+   {
+    "statuses": [
+     [
+      1,
+      "/Power System/Battery",
+      "Low",
+      "husky_battery",
+      [
+       [
+        "voltage_v",
+        "23.1"
+       ]
+      ]
+     ],
+     [
+      0,
+      "/Sensors/Lidar",
+      "OK",
+      "LMS1xx-0451",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/status",
+   1790000002010000000,
+   {
+    "e_stop": true
+   }
+  ],
+  [
+   "/diagnostics_agg",
+   1790000003000000000,
+   {
+    "statuses": [
+     [
+      1,
+      "/Power System/Battery",
+      "Low",
+      "husky_battery",
+      [
+       [
+        "voltage_v",
+        "23.1"
+       ]
+      ]
+     ],
+     [
+      0,
+      "/Sensors/Lidar",
+      "OK",
+      "LMS1xx-0451",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/status",
+   1790000003010000000,
+   {
+    "e_stop": true
+   }
+  ],
+  [
+   "/diagnostics_agg",
+   1790000004000000000,
+   {
+    "statuses": [
+     [
+      1,
+      "/Power System/Battery",
+      "Low",
+      "husky_battery",
+      [
+       [
+        "voltage_v",
+        "23.1"
+       ]
+      ]
+     ],
+     [
+      3,
+      "/Sensors/Lidar",
+      "No message received",
+      "LMS1xx-0451",
+      []
+     ]
+    ]
+   }
+  ],
+  [
+   "/status",
+   1790000004010000000,
+   {
+    "e_stop": false
+   }
+  ]
+ ],
+ "quad_killswitch.ulg": {
+  "actuator_armed": [
+   [
+    5200000,
+    false
+   ],
+   [
+    5400000,
+    false
+   ],
+   [
+    5600000,
+    false
+   ],
+   [
+    5800000,
+    true
+   ],
+   [
+    6000000,
+    true
+   ],
+   [
+    6200000,
+    true
+   ],
+   [
+    6400000,
+    false
+   ],
+   [
+    6600000,
+    false
+   ]
+  ],
+  "logged": [
+   [
+    5100000,
+    54,
+    "Armed by RC"
+   ],
+   [
+    5800010,
+    50,
+    "Manual kill switch engaged"
+   ],
+   [
+    6400010,
+    52,
+    "Manual kill switch disengaged"
+   ]
+  ],
+  "tagged": [
+   [
+    5800020,
+    52,
+    17,
+    "[commander] Motors stopped"
+   ]
+  ]
+ }
+}

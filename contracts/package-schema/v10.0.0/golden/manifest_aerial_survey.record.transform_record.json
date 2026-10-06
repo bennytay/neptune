@@ -1,0 +1,25 @@
+{
+  "adapter_id": "neptune.grouping",
+  "adapter_version": "0.2.0",
+  "config": {
+    "gap_seconds": 60,
+    "sessions": [
+      {
+        "name": "survey-flight-1",
+        "paths": [
+          "flights/flight.ulg"
+        ]
+      }
+    ]
+  },
+  "config_hash": "sha256:140634f142b0d83d2125ac4960614fb87b35f2f9308767e246e02968d86839d2",
+  "id": "rec:sha256:0b1c9b3e1d52f1bd53d18245fe5b97f7f83ca1ab38b56a7f15b40c511a529a19",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": [
+    "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe",
+    "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+    "rec:sha256:abad4478a34e5b9abeb03583fdec1a67c69d030fbb6870d4dc0de109e7a1c88f"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "category": "missing",
+  "code": "neptune.bindings.snapshot_unresolved",
+  "details": {
+    "run": "rec:sha256:dcdee35a202f5e49cf687c260b409a263f4603872b44de26fa982c9e51408200",
+    "sessions": [
+      "rec:sha256:dd1c798c5b1c606f599f0ffe7b697d24836086decd83b3b02186c9f073ae67bf"
+    ],
+    "snapshot_kind": "calibration"
+  },
+  "id": "rec:sha256:122fc79e65a53d36543bedbfd989c6d056e32961f0d6f07c9dad62e867353c80",
+  "kind": "ingest_finding",
+  "message": "no calibration record is bound to the run: the binding is unresolved",
+  "records": [
+    "rec:sha256:dcdee35a202f5e49cf687c260b409a263f4603872b44de26fa982c9e51408200"
+  ],
+  "related": [],
+  "schema_version": 1,
+  "severity": "info",
+  "subject": {
+    "kind": "evidence",
+    "ref": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 16,
+          "offset": 0
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    }
+  },
+  "transform": "rec:sha256:79c1fdbafa98b9cb8f1c3da7ee751ccb6c7894d3f8bc0228a437e128b7f61dd2"
+}

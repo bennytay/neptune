@@ -28,9 +28,11 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.flightlog.common import (
     KNOWN,
+    NOMINAL_OPTION,
     NOT_APPLICABLE,
     NOT_COVERED,
     TABLE_ROW_WEIGHT,
+    ULOG_LEVELS,
     Cite,
     ColumnSpec,
     Findings,
@@ -46,7 +48,10 @@ from neptune.adapters.flightlog.common import (
     int_cell,
     place_of,
     real_cell,
+    safety_state,
+    sample_time,
     series_template,
+    status_report,
     text_cell,
     text_value,
     time_field,
@@ -65,6 +70,7 @@ from neptune.adapters.flightlog.ulog_format import (
     SYNC_MAGIC,
     SYNC_MESSAGE,
     FormatError,
+    Item,
     KeyType,
     Layout,
     MessageFormat,
@@ -77,18 +83,26 @@ from neptune.adapters.flightlog.ulog_format import (
 )
 from neptune.identity.provenance import EvidenceRecord
 from neptune.model.finding import FindingCategory, Severity
-from neptune.model.ids import LogicalId
+from neptune.model.ids import LogicalId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import (
     Knowledge,
     Known,
     KnownAbsent,
     NotApplicable,
+    NotCovered,
     Unknown,
 )
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Run, Stream
 from neptune.model.series import ColumnType, state_column, value_column
+from neptune.model.status import (
+    SafetyCondition,
+    SafetyState,
+    StatusConvention,
+    StatusReport,
+    StatusValue,
+)
 from neptune.model.time import INT64_MAX, MICROSECOND, ClockRole, Epoch, Timescale, Timestamp
 from neptune.model.world import CellValue
 
@@ -110,6 +124,9 @@ TABLES: Final = {
     (ord("Q"), False): "parameters_default_data",
 }
 LOGGED: Final = "logged"
+# The format whose field PX4 defines as its manual kill switch: a safety state (ADR 0071 §2).
+SAFETY_FORMAT: Final = "actuator_armed"
+SAFETY_FIELD: Final = "manual_lockdown"
 DROPOUT: Final = "dropout"
 # bytes before the key length: multi info has is_continued, default parameters their default types
 KEY_PREFIX: Final = {ord("I"): 0, ord("P"): 0, ord("M"): 1, ord("Q"): 1}
@@ -267,6 +284,10 @@ class Walk:
         self.piece_weight = 0
         self.piece_seq: dict[str, int] = {}
         self.piece_rows: dict[str, int] = {}
+        # Status and safety-state records (ADR 0071), built in ingest mode only.
+        self.statuses: list[StatusReport | SafetyState] = []
+        self.clock: RecordId | None = None
+        self.nominal = False
 
     # -- driving ---------------------------------------------------------------------------
 
@@ -539,6 +560,17 @@ class Walk:
                 {"format": name},
             )
         shared.subs[msg_id] = Sub(msg_id, multi_id, name, place, layout)
+        if name == SAFETY_FORMAT and layout is not None and _safety_item(layout) is None:
+            self.findings.aggregate(
+                "status_definition_unrecognised",
+                name,
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                place,
+                f"a {SAFETY_FORMAT} format without a top-level bool {SAFETY_FIELD}: its rows are"
+                " rows only, no safety-state records",
+                {"format": name, "type": name},
+            )
 
     def _data(self, place: Place, payload: bytes) -> None:
         if len(payload) < 2:
@@ -582,9 +614,11 @@ class Walk:
                 {"format": sub.name, "expected": layout.size, "found": have},
             )
         key = str(msg_id)
+        safety = _safety_item(layout) if sub.name == SAFETY_FORMAT else None
         if self.plan:
             self.seq[key] = self.seq.get(key, 0) + 1
-            self.piece_weight += 1
+            # a row that may be a record weighs as a table row: a piece's records stay bounded
+            self.piece_weight += TABLE_ROW_WEIGHT if safety is not None else 1
             if layout.time_offset is None:
                 self.findings.aggregate(
                     "no_time_field",
@@ -621,6 +655,22 @@ class Walk:
         self.slots[key].row(
             place, ts, cells, time_state=NOT_COVERED if layout.time_index is None else None
         )
+        if safety is not None:
+            value = bool(values[safety.start])
+            if value or self.nominal:  # the kill switch released is its normal value
+                time = sample_time(ts, self.clock if layout.time_index is not None else None)
+                self.statuses.append(
+                    safety_state(
+                        self.cite,
+                        place,
+                        self.slots[key].stream,
+                        sub.name,
+                        SAFETY_FIELD,
+                        SafetyCondition.EMERGENCY_STOP,
+                        time,
+                        value,
+                    )
+                )
 
     def _time_range(self, what: str, place: Place) -> None:
         self.findings.aggregate(
@@ -659,7 +709,7 @@ class Walk:
         if self.plan:
             self.shared.pseudo.setdefault(LOGGED, place)
             self.seq[LOGGED] = self.seq.get(LOGGED, 0) + 1
-            self.piece_weight += 1
+            self.piece_weight += TABLE_ROW_WEIGHT  # each one is a status record too
             if ts > INT64_MAX:
                 self._time_range(LOGGED, place)
             if text is None:
@@ -673,6 +723,23 @@ class Walk:
             state_column(value_column("tag")): KNOWN if tag is not None else NOT_APPLICABLE,
         }
         self.slots[LOGGED].row(place, ts, values)
+        spec = self.cite.provenance(MAGIC_PLACE)  # the format specification's facts
+        name = ULOG_LEVELS.get(level)
+        self.statuses.append(
+            status_report(
+                self.cite,
+                place,
+                self.slots[LOGGED].stream,
+                StatusConvention.PX4_LOGGED_MESSAGE,
+                sample_time(ts, self.clock),
+                level=Known(level),
+                level_names=Known((name,) if name is not None else (), spec),
+                name=NotCovered(spec),
+                message=Known(text) if text else Unknown(),
+                hardware_id=NotCovered(spec),
+                values=Known((StatusValue("tag", tag),)) if tag is not None else NotCovered(spec),
+            )
+        )
 
     def _dropout(self, place: Place, payload: bytes) -> None:
         if len(payload) < 2:
@@ -938,6 +1005,14 @@ def _base_context(shared: Shared) -> dict[str, JsonValue]:
     return context
 
 
+def _safety_item(layout: Layout) -> Item | None:
+    """The kill switch's column in an ``actuator_armed`` layout: a top-level ``bool``."""
+    for item in layout.items:
+        if item.path == SAFETY_FIELD and item.type is ColumnType.BOOL and not item.repeated:
+            return item
+    return None
+
+
 def _read(source: SourceReader, start: int, end: int) -> list[bytes]:
     return list(read_pieces(source, start, end)) if end > start else []
 
@@ -1008,6 +1083,8 @@ def ingest(source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOu
     rows = {k: as_int(v) for k, v in as_dict(context["rows"]).items()}
     walk = Walk(source, cite, shared, findings, plan=False, seq=seq, rows=rows)
     walk.tables = Tables(cite, {k: list(v) for k, v in shared.tables.items()}, rows)
+    walk.clock = cite.record_id(TimestampDomain.kind, HEADER, time_field("timestamp"))
+    walk.nominal = config.flag(NOMINAL_OPTION)
     first = as_int(context["number"]) == 0
     records: list[EvidenceRecord] = []
     if first:
@@ -1025,6 +1102,7 @@ def ingest(source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOu
     walk.run(as_int(context["start"]), as_int(context["end"]))
     series = [slot.batch() for slot in walk.slots.values() if first or slot.rows]
     records.extend(walk.tables.records())
+    records.extend(walk.statuses)
     return ChunkOutput(records=tuple(records), series=tuple(series))
 
 

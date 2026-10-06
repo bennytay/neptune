@@ -1,0 +1,26 @@
+{
+  "header": {
+    "knowledge": "not_applicable"
+  },
+  "id": "rec:sha256:3d642a2d1e45ecf6c7e3c9fa40ef5863a14739fabbaede1a537a75db2f1413c2",
+  "kind": "structured_table",
+  "name": {
+    "knowledge": "known",
+    "value": "parameters"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 27,
+          "offset": 418
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    },
+    "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+  },
+  "schema_version": 1
+}

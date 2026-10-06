@@ -1,0 +1,263 @@
+{
+  "absent": [],
+  "ambiguous": [],
+  "clocks": [
+    {
+      "field": "header.stamp",
+      "id": "rec:sha256:32745f61178d97b52de0232947ab477831a7ea7184ccd8169bb67f6807434fef",
+      "scope": [
+        "/diagnostics"
+      ]
+    },
+    {
+      "field": "timestamp",
+      "id": "rec:sha256:a6cb4931c2d9d4603efbd497288683a6417641fb52a4407f7f2cb2463fa97fac",
+      "scope": []
+    }
+  ],
+  "entities": [],
+  "findings": [
+    {
+      "category": "unsupported",
+      "code": "rosbag2.payload_partly_decoded",
+      "id": "rec:sha256:3ec122f855bb05f8065144c9b912c589bc163095f2841979815863cf1f61a6f5",
+      "message": "topic 1's payloads are decoded, but 2 field path(s) are walked without a column; each row still cites its message",
+      "severity": "info"
+    }
+  ],
+  "id": "rec:sha256:e4be2a55b8080d03177bcea8d89e4ec9e029f401fee7758a3e96368969a430f4",
+  "kind": "ingest_receipt",
+  "records": {
+    "assertion": 0,
+    "asset": 0,
+    "authorisation_envelope": 0,
+    "calibration": 0,
+    "change_record": 0,
+    "civil_time_zone": 0,
+    "clock_mapping": 0,
+    "commissioning_baseline": 0,
+    "configuration_snapshot": 0,
+    "configuration_value": 0,
+    "description_expansion": 0,
+    "description_extension": 0,
+    "document_block": 0,
+    "document_record": 0,
+    "frame": 0,
+    "frame_binding": 0,
+    "frame_graph": 0,
+    "frame_transform": 0,
+    "hardware_component": 0,
+    "hardware_configuration": 0,
+    "hardware_specification": 0,
+    "identity_link": 0,
+    "image": 0,
+    "incident_record": 0,
+    "ingest_finding": 1,
+    "intervention": 0,
+    "machine": 0,
+    "maintenance_event": 0,
+    "requalification_record": 0,
+    "requirement": 0,
+    "risk_assessment": 0,
+    "run": 1,
+    "run_assembly": 0,
+    "run_declaration": 0,
+    "safety_state": 3,
+    "site": 0,
+    "snapshot_binding": 0,
+    "software_configuration": 0,
+    "sop_section": 0,
+    "source_absence": 0,
+    "source_artifact": 1,
+    "source_revision": 1,
+    "spatial_artifact": 0,
+    "status_report": 3,
+    "stream": 2,
+    "structured_record": 0,
+    "structured_table": 0,
+    "task_brief": 0,
+    "timestamp_domain": 2,
+    "transform_record": 1,
+    "video": 0,
+    "work_order": 0
+  },
+  "runs": [
+    {
+      "first": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 8,
+                "offset": 16292
+              }
+            ],
+            "source": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf"
+          },
+          "transform": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71"
+        },
+        "value": {
+          "domain_id": "rec:sha256:a6cb4931c2d9d4603efbd497288683a6417641fb52a4407f7f2cb2463fa97fac",
+          "ticks": 1790000000000000000
+        }
+      },
+      "id": "rec:sha256:e988bf4b3f38c2013d1b3f866bcae2eb08d5bd55a77560f331eb8e6f7b5e8649",
+      "last": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 8,
+                "offset": 15117
+              }
+            ],
+            "source": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf"
+          },
+          "transform": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71"
+        },
+        "value": {
+          "domain_id": "rec:sha256:a6cb4931c2d9d4603efbd497288683a6417641fb52a4407f7f2cb2463fa97fac",
+          "ticks": 1790000003505000000
+        }
+      },
+      "logical_id": {
+        "knowledge": "unknown"
+      },
+      "machine": {
+        "knowledge": "unknown"
+      },
+      "streams": 2
+    }
+  ],
+  "schema_version": 10,
+  "sources": [
+    {
+      "content_id": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf",
+      "location": {
+        "kind": "local",
+        "path": "logs/av_shuttle.db3"
+      },
+      "read_by": [
+        "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71"
+      ],
+      "size": 24576
+    }
+  ],
+  "streams": [
+    {
+      "clocks": [
+        "rec:sha256:a6cb4931c2d9d4603efbd497288683a6417641fb52a4407f7f2cb2463fa97fac"
+      ],
+      "first": {
+        "knowledge": "unknown"
+      },
+      "id": "rec:sha256:df467db485d0f97d6826b2763e6d31e37ca89e7bd0542dc42643423b0e153a85",
+      "last": {
+        "knowledge": "unknown"
+      },
+      "message_count": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 168,
+                "offset": 3568
+              }
+            ],
+            "source": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf"
+          },
+          "transform": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71"
+        },
+        "value": 8
+      },
+      "run": "rec:sha256:e988bf4b3f38c2013d1b3f866bcae2eb08d5bd55a77560f331eb8e6f7b5e8649",
+      "topic": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 89,
+                "offset": 12140
+              }
+            ],
+            "source": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf"
+          },
+          "transform": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71"
+        },
+        "value": "/system/emergency/emergency_state"
+      }
+    },
+    {
+      "clocks": [
+        "rec:sha256:a6cb4931c2d9d4603efbd497288683a6417641fb52a4407f7f2cb2463fa97fac",
+        "rec:sha256:32745f61178d97b52de0232947ab477831a7ea7184ccd8169bb67f6807434fef"
+      ],
+      "first": {
+        "knowledge": "unknown"
+      },
+      "id": "rec:sha256:fb77ef80527890fd0d976005e2bfa61fd458537fcc5d026ee695c79c8c69828f",
+      "last": {
+        "knowledge": "unknown"
+      },
+      "message_count": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 168,
+                "offset": 3568
+              }
+            ],
+            "source": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf"
+          },
+          "transform": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71"
+        },
+        "value": 8
+      },
+      "run": "rec:sha256:e988bf4b3f38c2013d1b3f866bcae2eb08d5bd55a77560f331eb8e6f7b5e8649",
+      "topic": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 59,
+                "offset": 12229
+              }
+            ],
+            "source": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf"
+          },
+          "transform": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71"
+        },
+        "value": "/diagnostics"
+      }
+    }
+  ],
+  "transforms": [
+    {
+      "adapter_id": "rosbag2",
+      "adapter_version": "0.3.0",
+      "config_hash": "sha256:b3978879ac60096b595232a3f0c0a29a441425d0ca1916f19da014c20f5020d7",
+      "id": "rec:sha256:260e48093d242619cfa115c9fb63c75f9c8b48e65ae0a00199ee546890934a71",
+      "libraries": {},
+      "upstream": []
+    }
+  ]
+}
