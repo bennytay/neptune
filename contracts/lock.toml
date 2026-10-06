@@ -17,6 +17,6 @@ query-packet = "1.0.0"
 package-schema = "10.0.0"
 
 [neptune-memory]
-catalog-api = "1.1.0"
+catalog-api = "1.7.0"
 
 [neptune-platform]
