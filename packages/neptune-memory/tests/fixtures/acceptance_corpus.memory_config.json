@@ -1,0 +1,37 @@
+{
+  "memory.events": {
+    "tables": [
+      {
+        "at": {
+          "nanoseconds": "Timestamp.nanosec",
+          "seconds": "Timestamp.sec"
+        },
+        "clock": {
+          "column": "@clock:Timestamp"
+        },
+        "description": "Message",
+        "kind": "MsgID",
+        "machine": {
+          "column": "Host",
+          "namespace": "syslog.host"
+        },
+        "name": "syslog events",
+        "severity": "Severity",
+        "vendor": "syslog"
+      }
+    ],
+    "vendors": {
+      "intervention": {
+        "text": {
+          "Protective stop": "protective_stop"
+        }
+      },
+      "syslog": {
+        "text": {
+          "ESTOP": "emergency_stop",
+          "PSTOP": "protective_stop"
+        }
+      }
+    }
+  }
+}

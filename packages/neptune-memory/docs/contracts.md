@@ -29,31 +29,42 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
-  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
-    (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
-    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
-    1. The harness's compiler stage compiles the corpus into one package, registered at tx 1.
-    2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
-       `servicenow_csv` presets into a lifecycle package, registered at tx 2.
-    3. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers both and
-       answers `threads_of` for every record ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)).
-    4. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
+  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **1.9.0**
+    document (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
+    `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
+       Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
+       Both stages must run real and ok. Memory picks no preset.
+    2. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers them at
+       tx 1 and tx 2 and answers `threads_of` for every record ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)).
+       The harness's ledger stage keeps no catalog to ask, so this one is the generator's own.
+    3. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
        `derived/clock_mapping` fits.
-    5. The deterministic consolidators run, with `memory.time_estimates` alongside
-       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
+    4. The deterministic consolidators run, with `memory.time_estimates` alongside
+       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)), under
+       `tests/fixtures/acceptance_corpus.memory_config.json`. That file declares Deploy's `syslog events`
+       table as an event table keyed by `MsgID` and maps `PSTOP`, `ESTOP` and the CMMS `Protective stop` to
+       registered kinds ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §5).
+       Wall-clock ticks stay on their own domain: two logs are compared only through a stated clock mapping.
 
-    Copy the file byte for byte; do not edit it.
+    **Deploy** copies the `.gz` byte for byte into its fixtures (decompress with any gzip reader, e.g.
+    `gzip -dc`, if it needs the JSON) and never edits either. **Context** reads the `.gz`: decompress it
+    and decode with `neptune_memory.schema.codec.graph_from_json`, or check it first with `memory verify`.
   - Regenerate it from the repository root with
     `uv run --all-packages --all-groups python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
-    makes it stale.
+    makes it stale. The decompressed document is the contract and is always compared byte for byte. The `.gz`
+    bytes are packaging: `acceptance_corpus.gzip.json` records the level and `zlib` they were deflated with, and
+    they are compared only under that `zlib`, so another `zlib` with the same document does not fail.
   - A regeneration is byte-identical on any host, in CI and locally. Record ids depend only on what the
     repository pins: the corpus, adapter versions, the libraries in `uv.lock` and the Python minor version in
     `.python-version`. `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names
     what moved. Cite corpus evidence by source path and locator, not by record id: a version bump renames record
     ids.
-  - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
+  - Check a copy without importing `neptune_memory`: `memory verify FILE`, gzipped or not (told by its bytes).
+    It exits 0 with a summary line. It
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
   - What it holds today:
@@ -74,9 +85,12 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
       The 13th run states no first instant (`untimeable_window`).
   - What it lacks:
-    - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
-      incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
-      inferred mapping.
+    - No event for INC-C3-0011, and no `co_occurs_within`. Deploy ships the arm-cell incident template, the
+      `cmms_downtime` preset and `syslog_csv` (#145, #149), but the corpus's `deploy.json` declares them only
+      from Platform's corpus 2.1.0 (#150). Memory's config already declares the `syslog events` table. The CMMS
+      and syslog stops are on separate wall clocks, so they will be `clocks_unrelated`, never compared, and the
+      same-event assertion joins them. Bag e-stops are MVL-204. No event is ever aligned through an inferred
+      mapping.
     - No answer yet to "what changed since the last good run".
       - There is no `snapshot_binding`, so no `configuration_active_during` and no `authorisation_undecided`.
       - Runs are `recorded_by` `manifest:ARM-3A`. The chains are on `cmms.asset:ARM-3A` and
