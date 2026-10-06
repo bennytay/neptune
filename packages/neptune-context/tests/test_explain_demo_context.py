@@ -1,10 +1,12 @@
 """Demo v1 (ADR 0010): "why did the arm-cell incident happen, what changed" over the acceptance
 corpus's Memory snapshot (the graph ``test_engine_demo_context.py`` answers queries over).
 
-The arm ``ARM-3A`` in cell 3 at PLANT-2 ran configuration 1.4, then nothing stated, then 1.5,
-and from 26 Sep 2026 no stated configuration at all; its incident is a later event on the cell
-controller's clock. ``diff`` must surface that change from Memory's claims alone, ``why`` must
-cite the incident's evidence, and the MCP tools must answer with the same packets.
+Memory's pipeline-built snapshot states the arm ``ARM-3A``'s configuration under ServiceNow's
+name for it: firmware 5.6.0 from March 2026, replaced from tick 1787057400 on ServiceNow's clock by
+the tool-centre-point change ``TCP z=145.5 mm``. Its incident is an event node whose claims carry
+the record's evidence; Memory states no link from the incident to the arm, and Context adds none.
+``diff`` must surface the configuration change from Memory's claims alone, ``why`` must cite the
+incident's evidence, and the MCP tools must answer with the same packets.
 """
 
 from __future__ import annotations
@@ -35,14 +37,15 @@ if TYPE_CHECKING:
 
     from neptune_context.packets.model import ContextPacket
 
-ARM = Subject("machine", "asset-tag:ARM-3A", same_as_depth=1)
-# The clock the cell's configuration records state their intervals on.
+ARM = Subject("machine", "servicenow.ci:ARM-3A")
+# The clock ServiceNow's change records state their intervals on.
 CONFIG_CLOCK = DomainClock(
-    "rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2"
+    "rec:sha256:659e221e993c637fb9dc0a93a1cf07880be2dac2688971d18afab81ba82b78d4"
 )
-IN_1_4 = Instant(CONFIG_CLOCK, 1_772_200_000_000_000_000)  # cfg-c3-1.4 in force
-IN_1_5 = Instant(CONFIG_CLOCK, 1_788_000_000_000_000_000)  # cfg-c3-1.5 in force
-AFTER_1_5 = Instant(CONFIG_CLOCK, 1_789_100_000_000_000_000)  # 1.5 has ended
+BEFORE_5_6_0 = Instant(CONFIG_CLOCK, 1_770_000_000)  # firmware 5.6.0 not yet in force
+IN_5_6_0 = Instant(CONFIG_CLOCK, 1_780_000_000)  # firmware 5.6.0 in force
+AFTER_TCP_CHANGE = Instant(CONFIG_CLOCK, 1_790_000_000)  # the TCP change in force
+HEAD = 2
 
 
 @cache
@@ -82,33 +85,37 @@ def changes(packet: ContextPacket) -> list[tuple[str, Change, tuple[str, ...]]]:
     ]
 
 
-def test_what_changed_before_the_incident_the_stated_configuration_ended() -> None:
-    packet = ask(what_changed(IN_1_5, AFTER_1_5))
-    assert changes(packet) == [("has_configuration", Change.CLOSED, ("cfg:cfg-c3-1.5",))]
-    (trail,) = packet.trails
-    assert isinstance(trail, DiffTrail)
-    opened = {c.predicate for c in trail.changes if c.change is Change.OPENED}
-    assert opened == {"configuration_unknown"}  # from then on no configuration is stated
-    text = render_markdown(packet)
-    assert "### configuration\\_unknown" in text and '"cfg:cfg-c3-1.5"' in text
+def incident_description() -> Claim:
+    """The incident's own description claim: what Memory states about the event, with its record."""
+    return next(
+        c
+        for c in F.demo_document().resolution.claims
+        if c.predicate == "has_description" and c.subject.node_type == "event"
+    )
 
 
-def test_what_changed_between_the_two_configurations() -> None:
-    packet = ask(what_changed(IN_1_4, IN_1_5))
+def test_what_changed_across_the_tcp_change_the_firmware_configuration_is_superseded() -> None:
+    packet = ask(what_changed(IN_5_6_0, AFTER_TCP_CHANGE))
     assert changes(packet) == [
-        ("has_configuration", Change.CLOSED, ("cfg:cfg-c3-1.4",)),
-        ("has_configuration", Change.OPENED, ("cfg:cfg-c3-1.5",)),
+        (
+            "has_configuration",
+            Change.SUPERSEDED,
+            ("servicenow.u_after:5.6.0", "servicenow.u_after:TCP z=145.5 mm"),
+        )
     ]
-    # The incident, the arm's location and the camera mount sit on other clocks: named only.
-    assert any(str(g.code) == "other_clock" and g.at == "/explain/0" for g in packet.gaps)
+    text = render_markdown(packet)
+    assert "**superseded**" in text and "replaced by" in text and "TCP z=145.5 mm" in text
+
+
+def test_what_changed_before_the_firmware_the_first_configuration_opens() -> None:
+    packet = ask(what_changed(BEFORE_5_6_0, IN_5_6_0))
+    assert changes(packet) == [("has_configuration", Change.OPENED, ("servicenow.u_after:5.6.0",))]
 
 
 def test_what_memory_learned_about_the_arm_across_the_corpus() -> None:
-    packet = ask(what_changed(1, int(reader().head)))
+    packet = ask(what_changed(1, HEAD))
     (trail,) = packet.trails
     assert isinstance(trail, DiffTrail)
-    opened = sorted({c.predicate for c in trail.changes if c.change is Change.OPENED})
-    assert {"has_configuration", "involves", "recorded_by", "configuration_unknown"} <= set(opened)
     assert all(c.change is Change.OPENED for c in trail.changes)  # nothing was superseded
     found = {
         configuration(packet, i)
@@ -116,27 +123,24 @@ def test_what_memory_learned_about_the_arm_across_the_corpus() -> None:
         if c.predicate == "has_configuration"
         for i in c.after
     }
-    assert found == {"cfg:cfg-c3-1.4", "cfg:cfg-c3-1.5"}
+    assert found == {"servicenow.u_after:5.6.0", "servicenow.u_after:TCP z=145.5 mm"}
 
 
-def test_why_the_incident_involves_the_arm_cites_its_record() -> None:
-    involves = next(
-        c
-        for c in F.demo_document().resolution.claims
-        if c.predicate == "involves" and getattr(c.object, "node_id", "") == "asset-tag:ARM-3A"
-    )
-    query = Query(include_inferred=True, budget=Budget(items=20), explain=(Why(involves.id),))
+def test_why_the_incident_is_described_cites_its_record() -> None:
+    described = incident_description()
+    query = Query(include_inferred=True, budget=Budget(items=20), explain=(Why(described.id),))
     packet = ask(query)
     (trail,) = packet.trails
-    assert isinstance(trail, WhyTrail) and trail.steps[0].claim == involves.id
-    assert trail.steps[0].evidence == involves.provenance.evidence
-    assert involves.id in packet.claim_ids
+    assert isinstance(trail, WhyTrail) and trail.steps[0].claim == described.id
+    assert trail.steps[0].evidence == described.provenance.evidence
+    assert described.provenance.evidence
+    assert described.id in packet.claim_ids
     text = render_markdown(packet)
-    assert f"neptune://claim/{involves.id}?as_of=5" in text
+    assert f"neptune://claim/{described.id}?as_of={HEAD}" in text
 
 
 def test_the_demo_answers_are_byte_identical_every_time() -> None:
-    query = what_changed(IN_1_5, AFTER_1_5)
+    query = what_changed(IN_5_6_0, AFTER_TCP_CHANGE)
     first = ask(query)
     fresh = Client(LocalEngine(IndexedReader(F.demo_document()))).query(query)
     assert canonical_bytes(fresh) == canonical_bytes(first)
@@ -145,26 +149,22 @@ def test_the_demo_answers_are_byte_identical_every_time() -> None:
 
 def test_claude_code_gets_why_and_diff_over_mcp_unchanged() -> None:
     client = AsyncClient(LocalEngine(reader()))
-    involves = next(
-        c
-        for c in F.demo_document().resolution.claims
-        if c.predicate == "involves" and getattr(c.object, "node_id", "") == "asset-tag:ARM-3A"
-    )
-    subject = {"kind": "machine", "declared_id": "asset-tag:ARM-3A", "same_as_depth": 1}
+    described = incident_description()
+    subject = {"kind": "machine", "declared_id": "servicenow.ci:ARM-3A"}
 
     async def go() -> tuple[types.CallToolResult, types.CallToolResult]:
         async with create_connected_server_and_client_session(
             build_server(client), read_timeout_seconds=timedelta(seconds=20)
         ) as session:
             why = await session.call_tool(
-                "neptune_why", {"claim_id": involves.id, "include_inferred": True}
+                "neptune_why", {"claim_id": described.id, "include_inferred": True}
             )
             diff = await session.call_tool(
                 "neptune_diff",
                 {
                     "subject": subject,
                     "before": 1,
-                    "after": 5,
+                    "after": HEAD,
                     "include_inferred": True,
                     "max_items": 80,
                 },
@@ -173,19 +173,9 @@ def test_claude_code_gets_why_and_diff_over_mcp_unchanged() -> None:
 
     why, diff = asyncio.run(go())
     assert not why.isError and not diff.isError
-    expected = Client(LocalEngine(reader())).why(involves.id, include_inferred=True)
+    expected = Client(LocalEngine(reader())).why(described.id, include_inferred=True)
     first = why.content[0]
     assert isinstance(first, types.TextContent) and first.text == render_answer(expected)
-    assert expected.trails and involves.id in first.text
+    assert expected.trails and described.id in first.text
     text = diff.content[0]
     assert isinstance(text, types.TextContent) and "has_configuration" in text.text
-
-
-def test_what_changed_between_the_configurations_names_the_unstated_period() -> None:
-    packet = ask(what_changed(IN_1_4, IN_1_5))
-    (trail,) = packet.trails
-    assert isinstance(trail, DiffTrail)
-    between = [c for c in trail.changes if c.change is Change.BETWEEN]
-    assert {c.predicate for c in between} == {"configuration_unknown"}
-    assert len(between) == 2  # the two records that leave the configuration open, 2026-03..09
-    assert "**between**" in render_markdown(packet)
