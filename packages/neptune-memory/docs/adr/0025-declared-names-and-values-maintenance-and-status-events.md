@@ -84,6 +84,9 @@ facts reach the Ledger but stop at Memory:
 
 ## Consequences
 
+- `memory.events` version 2 is a new lineage: every one of its 81 claim ids in the acceptance snapshot changes
+  (the version is hashed into each id), and the build withdraws the version 1 claims. Run, configuration,
+  identity and every other consolidator's claim ids are unchanged.
 - The acceptance snapshot gains the work orders, their actions, the residual warnings, the incident's stated cause,
   named configurations and runs, and the calibration values (claim counts in the PR).
 - A configuration no run is bound to and no machine span places (`cell_config.yaml` in the acceptance corpus)

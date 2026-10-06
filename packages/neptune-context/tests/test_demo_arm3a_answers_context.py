@@ -1,11 +1,13 @@
 """Demo v1's two arm-cell questions over Memory's live snapshot, through the MCP tools (ADR 0014).
 
-"What changed on ARM-3A since the last good run" and "why did INC-C3-0011 happen" are asked as the
-skill tells an agent to: ``neptune_entities`` for the names, then ``neptune_query`` from the
-machine's declared ids (and the incident's node), two to four hops both ways over the predicates
-that carry work orders, causes, runs, configurations, names and declared values. The answers must
-state, with item and source citations, the claims Memory ADR 0025 adds: WO-26-0911's four actions
-and diagnosis, the CAL-ARM3A-0818 and -0911 names, the 1.86 px reprojection error and the two z
+"What changed on ARM-3A since the last good run" and "why did INC-C3-0011 happen" are asked with
+``neptune_entities`` for the names, then ``neptune_query`` from the machine's declared ids (and
+the incident's node), three hops both ways over the predicates that carry work orders, causes,
+runs, configurations, names and declared values, with a budget large enough to hold every item.
+These are hand-written test queries, not the calls the agent skill prescribes (2 hops, any
+predicate, a small budget), which does not reach these claims yet. The answers must state, with
+item and source citations, the claims Memory ADR 0025 adds: WO-26-0911's four actions and
+diagnosis, the CAL-ARM3A-0818 and -0911 names, the 1.86 px reprojection error and the two z
 offsets. They are pinned by claim id, not by text: a regeneration that renames them fails here.
 """
 
@@ -69,7 +71,7 @@ QUESTIONS: Final = {
     "what changed on ARM-3A since the last good run": _query(
         [{"kind": "machine", "declared_id": i} for i in ARM], 3
     ),
-    # The incident report names the arm under its own id; the agent names each one it means.
+    # The incident report names the arm under its own id, joined to no other: name it too.
     "why did INC-C3-0011 happen": _query(
         [
             {"kind": "event", "declared_id": INCIDENT},
