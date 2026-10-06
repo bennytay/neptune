@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 REPO: Final = Path(__file__).resolve().parents[3]
 REGISTRY: Final = REPO / "contracts" / "graph-schema"
-PUBLISHED: Final = REGISTRY / "v1.7.0"  # the latest: what this code must reproduce
+PUBLISHED: Final = REGISTRY / "v1.8.0"  # the latest: what this code must reproduce
 FIRST: Final = REGISTRY / "v1.0.0"  # still read by consumers pinned to 1.0.0
 EARLIER: Final = (
     FIRST,
@@ -30,6 +30,7 @@ EARLIER: Final = (
     REGISTRY / "v1.4.0",
     REGISTRY / "v1.5.0",
     REGISTRY / "v1.6.0",
+    REGISTRY / "v1.7.0",
 )  # every earlier stable minor of major 1
 
 

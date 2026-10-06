@@ -15,5 +15,7 @@ read (ADR 0012); ``events`` holds events (nodes per stated record, registered ki
 declared vendor mappings, co-occurrence that is never cause), and ``event_records`` also parses
 its tables and config (ADR 0013); ``calibration`` holds calibration history per sensor, drift
 between consecutive calibrations in declared units and ``calibrated_by``, and
-``calibration_records`` parses what it reads (ADR 0014).
+``calibration_records`` parses what it reads (ADR 0014);
+``coverage`` holds what each run recorded, its gaps, rates, integrity findings and sensor presence,
+and ``coverage_records`` parses its records (ADR 0015).
 """
