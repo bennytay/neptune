@@ -1,7 +1,7 @@
 {
   "gold_format": 1,
   "corpus": "acceptance",
-  "corpus_version": "2.0.0",
+  "corpus_version": "2.1.0",
   "consumers": ["context-c4-benchmark", "deploy-d3-evidence-packs", "demo-v1"],
   "scoring": "Platform ADR 0007 section 6: a claim is supported when the answer gives, for at least one of its evidence items, a citation that harness.acceptance.resolve.supports accepts: one of the item's resolved record ids (for a message item only a row: the stream record with the row's seq; the stream alone never counts), or the item's path and an equal locator (row, page, pointer, topic and log_time, parameter, code), which is how a package without compiler base records (Deploy D3) scores against the base package of the same corpus version. An answer fails a question when it cites a must_not_cite item as support or asserts a trap's wrong reading.",
   "questions": [

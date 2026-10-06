@@ -206,6 +206,13 @@ def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str
     pstop = datetime.fromisoformat(syslog["4182"]["Timestamp"])
     assert (cmms - pstop).total_seconds() == 32
     assert syslog["4182"]["Host"] == "ARM-3A" and "PSTOP" in syslog["4182"]["Message"]
+    # One RFC 5424 MSGID per event type, for a mapping to key on (the storyline's four events).
+    assert {seq: row["MsgID"] for seq, row in syslog.items()} == {
+        "4170": "PGM_START",
+        "4182": "PSTOP",
+        "4183": "ESTOP",
+        "4186": "LOTO",
+    }
     assert stops["DT-26-0914-01"]["Restarted"] == ""  # a blank, never a restart time
     seconds = int((pstop - datetime(1970, 1, 1)).total_seconds())  # local wall time, as written
     assert generate.local_ns(2026, 9, 14, 14, 32, 38) == (seconds + 4 * 3600) * 10**9  # EDT
@@ -215,7 +222,10 @@ def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str
     assert (document["format"], document["version"]) == ("neptune.assertions", 1)
     (entry,) = document["assertions"]
     assert entry["assertion_type"] == "same_identity"
-    assert [s["value"] for s in entry["scope"]] == ["DT-26-0914-01", "4182"]
+    assert entry["scope"] == [
+        {"namespace": "cmms.downtime", "value": "DT-26-0914-01"},
+        {"namespace": "syslog", "value": "4182"},
+    ]
     assert entry["author"] == {"namespace": "plant-2.staff", "value": "a.novak"}
     assert entry["authored_at"] == "2026-09-15T09:05:00-04:00"
     assert entry["payload"] == {"incident": "INC-C3-0011", "relation": "same_event"}

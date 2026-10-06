@@ -81,6 +81,8 @@ LEGGED: Final = f"{PLANT}/legged"
 SECOND: Final = 10**9
 MS: Final = 10**6
 EDT_HOURS: Final = 4  # PLANT-2 and S-007 keep US Eastern daylight time in September
+# PLANT-2's civil time zone: what its zone-less exports are declared in (``deploy.json``).
+PLANT_ZONE: Final = "America/New_York"
 
 # The cell PC (CELL3-IPC) records the bags; its clock is free-running and ahead of the controller.
 IPC_AHEAD_2026_09_09: Final = 95_600 * MS
@@ -522,7 +524,8 @@ def calibrations() -> dict[str, bytes]:
 # --- PLANT-2: the stop of INC-C3-0011 in the CMMS and in syslog, and who joined them -----------
 
 # The CMMS's downtime log: the operator enters the stop at the HMI terminal, by hand, after the
-# fact. Its INC-C3-0011 stop says 14:33:10; the controller logged its protective stop at 14:32:38
+# fact, in plant local wall time without a zone; the declaration that maps it states the zone
+# (``deploy.json`` ``sources``, Platform ADR 0009). Its INC-C3-0011 stop says 14:33:10; the controller logged its protective stop at 14:32:38
 # (the incident report's HMI time and the bag's header stamp): the same stop, 32 s apart.
 CMMS_STOP: Final = "2026-09-14 14:33:10"
 SYSLOG_PSTOP: Final = "2026-09-14 14:32:38"
@@ -578,12 +581,14 @@ DOWNTIME: Final = (
 )
 
 # The plant's syslog collector (LOG-P2), exported as CSV for the review: its sequence number, the
-# sender's own timestamp (local time, as the collector shows it), host, facility, severity, tag.
-# ARM-3A's controller and PLC-C3 keep synchronised time (the site survey); the cell PC does not
-# send syslog.
+# sender's own timestamp (local wall time without a zone, as the collector shows it), host,
+# facility, severity, tag, the sender's RFC 5424 MSGID (one code per event type, what a mapping
+# keys on) and the message. The export states no zone: the declaration that maps it does
+# (``deploy.json`` ``sources``, Platform ADR 0009). ARM-3A's controller and PLC-C3 keep
+# synchronised time (the site survey); the cell PC does not send syslog.
 SYSLOG_PSTOP_SEQ: Final = "4182"
 SYSLOG: Final = (
-    ("Seq", "Timestamp", "Host", "Facility", "Severity", "Tag", "Message"),
+    ("Seq", "Timestamp", "Host", "Facility", "Severity", "Tag", "MsgID", "Message"),
     (
         "4170",
         "2026-09-14 14:28:00",
@@ -591,6 +596,7 @@ SYSLOG: Final = (
         "user",
         "notice",
         "PALLET_C3",
+        "PGM_START",
         "program PALLET_C3 1.4.0 started from the HMI",
     ),
     (
@@ -600,6 +606,7 @@ SYSLOG: Final = (
         "local0",
         "err",
         "SAFETY",
+        "PSTOP",
         "PSTOP: collision detection joint 5, external torque 41.7 Nm > 35.0 Nm, pick P1",
     ),
     (
@@ -609,6 +616,7 @@ SYSLOG: Final = (
         "local0",
         "crit",
         "SAFETY",
+        "ESTOP",
         "ESTOP: OP-2.ES1 pressed",
     ),
     (
@@ -618,13 +626,16 @@ SYSLOG: Final = (
         "local0",
         "notice",
         "SAFETY",
+        "LOTO",
         "cell 3 locked out (LOTO-C3-2)",
     ),
 )
 
 # A person's statement that the CMMS stop and the syslog stop are one event (root ADR 0062's
 # ``neptune.assertions`` file, as the review console writes it): stated evidence, applied by
-# nobody but Memory.
+# nobody but Memory. Its scope names each stop as Deploy's mappings identify it, in Deploy's
+# generic namespaces: ``cmms.downtime`` + the Downtime ID (``cmms_downtime``) and ``syslog`` + the
+# Seq (``syslog_csv``); the ticket is a ``cmms.work_order`` (``cmms_generic``).
 SAME_EVENT_ASSERTION: Final = {
     "format": "neptune.assertions",
     "version": 1,
@@ -634,17 +645,17 @@ SAME_EVENT_ASSERTION: Final = {
             "assertion_type": "same_identity",
             "author": {"namespace": "plant-2.staff", "value": "a.novak"},
             "authored_at": "2026-09-15T09:05:00-04:00",
-            "authored_zone": "America/New_York",
+            "authored_zone": PLANT_ZONE,
             "scope": [
-                {"namespace": "plant-2.cmms.downtime", "value": "DT-26-0914-01"},
-                {"namespace": "plant-2.syslog.log-p2", "value": SYSLOG_PSTOP_SEQ},
+                {"namespace": "cmms.downtime", "value": "DT-26-0914-01"},
+                {"namespace": "syslog", "value": SYSLOG_PSTOP_SEQ},
             ],
             "payload": {"incident": "INC-C3-0011", "relation": "same_event"},
             "rationale": (
                 "Same stop. I entered DT-26-0914-01 at the HMI terminal after the E-stop; it is"
                 " the protective stop the controller logged as syslog 4182. Both are INC-C3-0011."
             ),
-            "ticket": {"namespace": "plant-2.cmms", "value": "WO-26-0915"},
+            "ticket": {"namespace": "cmms.work_order", "value": "WO-26-0915"},
         }
     ],
 }
