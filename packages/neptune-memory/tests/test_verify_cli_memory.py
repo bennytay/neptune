@@ -1,7 +1,8 @@
 """``memory verify GRAPH``: a consumer's graph document checked with Memory's codec, one line per
 problem (``schema.codec.graph_problems``).
 
-Good documents are the acceptance-corpus snapshot and the published golden graph; every corrupted
+Good documents are the acceptance-corpus snapshot (a gzip file, read decompressed) and the published
+golden graph; every corrupted
 copy is one of them with one or more problems put in, and is reported exactly that many times.
 """
 
@@ -17,19 +18,21 @@ import pytest
 
 from memory_golden_fixtures import PUBLISHED
 from neptune.identity import canonical_json
-from neptune_memory.cli import OK, REFUSED, USAGE, main
+from neptune_memory.cli import MAX_GRAPH_BYTES, OK, REFUSED, USAGE, main
 from neptune_memory.schema.codec import graph_from_json, graph_problems
+from neptune_memory.store.gzipped import deterministic_gzip, gunzip, is_gzip
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-SNAPSHOT: Final = Path(__file__).resolve().parent / "fixtures" / "acceptance_corpus.graph.json"
+SNAPSHOT: Final = Path(__file__).resolve().parent / "fixtures" / "acceptance_corpus.graph.json.gz"
 GOLDEN: Final = PUBLISHED / "golden" / "graph.json"
 GOOD: Final = (SNAPSHOT, GOLDEN)
 
 
 def load(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = path.read_bytes()
+    return json.loads(gunzip(data, MAX_GRAPH_BYTES) if is_gzip(data) else data)
 
 
 def verify(path: Path) -> tuple[int, list[str], str]:
@@ -62,7 +65,7 @@ def test_a_good_document_verifies_with_a_one_line_summary(path: Path) -> None:
     graph = graph_from_json(load(path))
     assert (status, err) == (OK, "")
     assert lines == [
-        f"{path}: ok: graph-schema 1 document, head {graph.head}, "
+        f"{path}: ok: graph-schema {graph.release or 1} document, head {graph.head}, "
         f"{len(graph.resolution.claims)} claims, {len(graph.resolution.findings)} findings, "
         f"{len(graph.builds)} builds, generation {graph.generation}"
     ]
@@ -145,8 +148,19 @@ def test_a_consistency_problem_is_the_codecs_own_line(tmp_path: Path) -> None:
 
 def test_a_wrong_graph_schema_version_is_a_line(tmp_path: Path) -> None:
     document = load(SNAPSHOT)
-    document["graph_schema_version"] = 2
-    assert bad(tmp_path, document) == ["graph_schema_version 2 is not supported"]
+    document["graph_schema"] = "1.9.0"
+    assert bad(tmp_path, document) == ["graph_schema '1.9.0' is not a 2.x release"]
+    # A 2.x document without its release, or labelled 1.x while naming one (ADR 0019 §3).
+    del document["graph_schema"]
+    assert bad(tmp_path, document) == [
+        "graph document: missing keys ['graph_schema'], unexpected keys []"
+    ]
+    document["graph_schema_version"] = 3
+    assert bad(tmp_path, document) == ["graph_schema_version 3 is not supported"]
+    document["graph_schema_version"], document["graph_schema"] = 1, "2.0.0"
+    assert bad(tmp_path, document) == [
+        "graph document: missing keys [], unexpected keys ['graph_schema']"
+    ]
 
 
 def test_a_document_that_is_not_an_object_is_one_line(tmp_path: Path) -> None:
@@ -168,6 +182,46 @@ def test_unreadable_input_is_a_usage_error(tmp_path: Path, text: bytes, reason: 
     status, lines, err = verify(path)
     assert (status, lines) == (USAGE, [])
     assert err.startswith(f"memory: {reason}")
+
+
+def test_a_gzipped_document_is_verified_as_its_content(tmp_path: Path) -> None:
+    """Told by its bytes: the same document gzipped or not, under any name, verifies alike."""
+    document = canonical_json.dumps(load(GOLDEN))
+    misnamed, packed = tmp_path / "graph.json.gz", tmp_path / "graph.json"
+    misnamed.write_bytes(document)  # plain JSON under a .gz name
+    packed.write_bytes(deterministic_gzip(document))  # gzip under a .json name
+    assert verify(misnamed)[0] == verify(packed)[0] == OK
+    corrupted = load(GOLDEN)
+    corrupted["generation"] = "sha256:" + "0" * 64
+    packed.write_bytes(deterministic_gzip(canonical_json.dumps(corrupted)))
+    status, lines, _ = verify(packed)
+    assert status == REFUSED
+    assert len(lines) == 1 and "generation" in lines[0]
+
+
+def test_a_file_over_the_input_cap_is_refused_unread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import neptune_memory.cli as cli
+
+    monkeypatch.setattr(cli, "MAX_GRAPH_FILE_BYTES", SNAPSHOT.stat().st_size - 1)
+    status, lines, err = verify(SNAPSHOT)
+    assert (status, lines) == (USAGE, [])
+    assert "larger than" in err
+
+
+def test_a_broken_gzip_is_a_usage_error(tmp_path: Path) -> None:
+    good = SNAPSHOT.read_bytes()
+    for name, data in (
+        ("truncated", good[: len(good) // 2]),
+        ("trailing", good + b"x"),
+        ("corrupt", good[:20] + bytes(64) + good[84:]),
+    ):
+        path = tmp_path / f"{name}.json.gz"
+        path.write_bytes(data)
+        status, lines, err = verify(path)
+        assert (status, lines) == (USAGE, []), name
+        assert err.startswith("memory: invalid input"), name
 
 
 def test_a_missing_file_is_a_usage_error(tmp_path: Path) -> None:

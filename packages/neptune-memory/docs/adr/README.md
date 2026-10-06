@@ -14,9 +14,9 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0005](0005-split-closures-bi-temporal-findings-and-the-resolver-config.md) | Split closures, bi-temporal findings and the resolver's config | Accepted; §1.1 (later-arrival tie-break) and §1.4 (no resurrection) superseded by 0016 for histories resolved with builds |
 | [0006](0006-graph-schema-v1-contract-surface-and-memory-reader.md) | Graph-schema v1: contract surface, version policy and the MemoryReader | Accepted |
 | [0007](0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) | G1 gate: withdrawal, names, evidence status, and the final store decision | Accepted; §5.3 (package-scoped builds) superseded by 0016 |
-| [0008](0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) | The identity consolidator on compiler identity links and assertions | Accepted |
+| [0008](0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) | The identity consolidator on compiler identity links and assertions | Accepted; §2's logical-id-only scope and §3's "record ids in a scope are not read" superseded by 0019 §1 |
 | [0009](0009-run-threads-and-cross-package-continuation.md) | Run threads and cross-package continuation from RunAssembly records | Accepted |
-| [0010](0010-configuration-lineage-consolidator.md) | The configuration lineage consolidator | Accepted |
+| [0010](0010-configuration-lineage-consolidator.md) | The configuration lineage consolidator | Accepted; §2's `succeeds` at each chain change and §6's reading of `succeeds` superseded by 0019 §2 |
 | [0011](0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md) | The time-domain registry: clocks, mappings and chains, never estimated | Accepted |
 | [0012](0012-episodes-from-stated-task-evidence.md) | Episodes from stated task evidence: one attempt per tasked run, stated boundaries, no inferred outcome | Accepted |
 | [0013](0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) | Event index: evidence-linked event claims and co-occurrence that is never cause | Accepted |
@@ -24,5 +24,7 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0015](0015-coverage-and-health-consolidator.md) | The coverage and health consolidator | Accepted |
 | [0016](0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md) | Memory snapshots, the rebuild CLI and build withdrawal | Accepted |
 | [0017](0017-estimated-clock-mappings-in-a-tenant-graph.md) | Estimated clock mappings in a tenant graph | Accepted |
+| [0018](0018-thread-membership-from-the-catalog-api.md) | Thread membership from the catalog API | Accepted |
+| [0019](0019-events-in-identity-and-machine-scoped-configuration-changes.md) | Events in identity, and configuration changes scoped to a machine | Accepted |
 | [0020](0020-runs-read-the-compilers-run-declaration.md) | The run consolidator reads the compiler's run_declaration | Accepted |
 | [0021](0021-a-machine-records-declared-ids-are-same-as.md) | A machine record's declared ids are same_as | Accepted |

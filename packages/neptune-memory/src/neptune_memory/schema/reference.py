@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from neptune.model.knowledge import Known, NotCovered
-from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import is_inferred
 from neptune_memory.schema.nodes import NodeRef
 from neptune_memory.schema.reader import (
@@ -53,10 +52,11 @@ class ReferenceReader:
         self._versions = {c.id: c for c in document.resolution.claims}
         self._generation = document.generation
         self._head = document.head
+        self._major = document.graph_schema_version
 
     @property
     def graph_schema_version(self) -> int:
-        return GRAPH_SCHEMA_VERSION
+        return self._major
 
     @property
     def generation(self) -> ConfigHash:

@@ -98,4 +98,5 @@ def test_claims_survive_expiry_with_their_evidence_refs_and_ids() -> None:
 def test_there_is_no_retention_signal_to_mark_a_ref_unavailable_yet() -> None:
     """GAP pin (MVL-132): flip when the Ledger reader exposes evidence status (ADR 0007 §6)."""
     surface = {name for name in dir(LedgerReader) if not name.startswith("_")}
-    assert surface == {"catalog_api_version", "list_packages", "read_records"}
+    # threads_of (ADR 0018) is thread membership, not evidence status: the gap stays open.
+    assert surface == {"catalog_api_version", "list_packages", "read_records", "threads_of"}

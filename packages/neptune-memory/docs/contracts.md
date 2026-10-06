@@ -6,12 +6,12 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 1`, published as `contracts/graph-schema/v1.9.0/` (1.0.0 to 1.8.0 stay)
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.0.0/` (1.0.0 to 1.9.0 stay; major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
   - `neptune_memory.schema`: `NodeRef`/`NodeType`/`Tier`, `Claim` and its objects and provenance (with `ModelRef`),
-    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 10`), the
+    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 11`), the
     superseding resolver (`resolve`, `as_of`, `ResolutionFinding`, `resolver_config`, and from 1.9.0 `Build` for
     withdrawal), `codec` (strict JSON) and `export.graph_schema`. Claim model:
     [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md); superseding:
@@ -29,28 +29,42 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
-  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
-    (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
-    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
-    1. The harness's compiler stage compiles the corpus into one package, registered at tx 1.
-    2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
-       `servicenow_csv` presets into a lifecycle package, registered at tx 2.
-    3. Both are exported as the records the Ledger catalogs, plus the compiler's `derived/clock_mapping` fits.
+  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.0.0**
+    document (`graph_schema_version: 2`, `graph_schema: "2.0.0"`, with `builds`), head 2, written by Memory's codec. It is what
+    `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
+       Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
+       Both stages must run real and ok. Memory picks no preset.
+    2. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers them at
+       tx 1 and tx 2 and answers `threads_of` for every record ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)).
+       The harness's ledger stage keeps no catalog to ask, so this one is the generator's own.
+    3. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
+       `derived/clock_mapping` fits.
     4. The deterministic consolidators run, with `memory.time_estimates` alongside
-       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
+       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)), under
+       `tests/fixtures/acceptance_corpus.memory_config.json`. That file declares Deploy's `syslog events`
+       table as an event table keyed by `MsgID` and maps `PSTOP`, `ESTOP` and the CMMS `Protective stop` to
+       registered kinds ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §5).
+       Wall-clock ticks stay on their own domain: two logs are compared only through a stated clock mapping.
 
-    Copy the file byte for byte; do not edit it.
+    **Deploy** copies the `.gz` byte for byte into its fixtures (decompress with any gzip reader, e.g.
+    `gzip -dc`, if it needs the JSON) and never edits either. **Context** reads the `.gz`: decompress it
+    and decode with `neptune_memory.schema.codec.graph_from_json`, or check it first with `memory verify`.
   - Regenerate it from the repository root with
-    `uv run --all-packages python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
+    `uv run --all-packages --all-groups python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
-    makes it stale.
+    makes it stale. The decompressed document is the contract and is always compared byte for byte. The `.gz`
+    bytes are packaging: `acceptance_corpus.gzip.json` records the level and `zlib` they were deflated with, and
+    they are compared only under that `zlib`, so another `zlib` with the same document does not fail.
   - A regeneration is byte-identical on any host, in CI and locally. Record ids depend only on what the
     repository pins: the corpus, adapter versions, the libraries in `uv.lock` and the Python minor version in
     `.python-version`. `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names
     what moved. Cite corpus evidence by source path and locator, not by record id: a version bump renames record
     ids.
-  - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
+  - Check a copy without importing `neptune_memory`: `memory verify FILE`, gzipped or not (told by its bytes).
+    It exits 0 with a summary line. It
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
   - What it holds today:
@@ -62,15 +76,30 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       `stated_severity`, `has_description` and `evidenced_by`.
     - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
       drop them with `include_inferred=False`. One is the cell PC's ≈ −96.7 s on 2026-09-14.
+    - Configuration chains from all 16 `maintenance_event`s and 5 `change_record`s, `stated`, each citing its
+      records. There are 11 `has_configuration` spans, on the machine id each system states:
+      - `cmms.asset:ARM-3A` is on `firmware:5.6.0`; WO-26-0911 is among the eight work orders that span cites.
+      - `servicenow.ci:ARM-3A` goes from `5.6.0` to `TCP z=145.5 mm`, via `servicenow.u_after`.
+    - No `succeeds` (ADR 0019 §2). The changes are each machine's own abutting `has_configuration` spans:
+      AMR-07's `firmware:4.2.0` to `firmware:4.3.1` (CMMS), and ARM-3A's ServiceNow `5.6.0` to `TCP z=145.5 mm`.
+    - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
+      The 13th run states no first instant (`untimeable_window`).
   - What it lacks:
-    - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
-      incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
-      inferred mapping.
-    - No configuration lineage and no `authorisation_undecided`. Deploy's 5 `change_record`, 15
-      `maintenance_event` (WO-26-0911 among them) and 2 `authorisation_envelope` records are in the Ledger
-      export. Memory places them on Ledger thread nodes, which it reads today only from the `ledger_thread`
-      stand-in (ADR 0003 §1); no real Ledger export carries those. 
-    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
+    - No event for INC-C3-0011, and no `co_occurs_within`. Deploy ships the arm-cell incident template, the
+      `cmms_downtime` preset and `syslog_csv` (#145, #149), but the corpus's `deploy.json` declares them only
+      from Platform's corpus 2.1.0 (#150). Memory's config already declares the `syslog events` table. The CMMS
+      and syslog stops are on separate wall clocks, so they will be `clocks_unrelated`, never compared, and the
+      same-event assertion joins them. Bag e-stops are MVL-204. No event is ever aligned through an inferred
+      mapping.
+    - No answer yet to "what changed since the last good run".
+      - There is no `snapshot_binding`, so no `configuration_active_during` and no `authorisation_undecided`.
+      - Runs are `recorded_by` `manifest:ARM-3A`. The chains are on `cmms.asset:ARM-3A` and
+        `servicenow.ci:ARM-3A`, and the register declares `asset:ARM-3A`. These are four nodes until an
+        `identity_link` or an operator assertion joins them, and the corpus has neither.
+    - No `authorised_configuration`: no envelope places a configuration on its site.
+    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events. INC-C3-0011's stops are not
+      events here, and the corpus assertion names `plant-2.cmms.downtime:…` and `plant-2.syslog.log-p2:4182`.
+      No record declares either id (ADR 0019 §1).
 
     This file is regenerated as those land, never edited.
 ## Consumes
@@ -82,7 +111,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
-  compiler's own strict readers (ADR 0008 §1), and `machine` (with `run` and `run_declaration` to place it)
+  compiler's own strict readers (ADR 0008 §1), the `identifiers` of `incident_record` and `intervention`
+  records `memory.events` placed (ADR 0019 §1), and `machine` (with `run` and `run_declaration` to place it)
   the same way (ADR 0021). The configuration lineage consolidator reads
   `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`, `authorisation_envelope`
   (lifecycle records, root ADR 0051), `run`, `snapshot_binding` (root ADR 0050 §8) and the snapshot kinds a binding
@@ -92,6 +122,11 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   `calibration`, `hardware_configuration`, `hardware_component`, `frame_transform`, `frame_binding`,
   `maintenance_event` and `requalification_record` the same way
   ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md) §1).
-- Ledger catalog API: `CATALOG_API_VERSION = "pending: pinned when MVL-85 (Ledger catalog API) lands"`.
-  Until then Memory codes against the `LedgerReader` Protocol in `neptune_memory/ledger.py` and tests
-  against `StubLedger`.
+- Ledger catalog API: `CATALOG_API_VERSION = "1.7.0"` (`contracts/catalog-api/v1.7.0/`, locked in
+  `contracts/lock.toml`). Memory reads thread membership from the catalog's `threads_of` answers (`ThreadsOf`,
+  `Membership`, `UnresolvedMembership`, `ThreadKey`), parsed from the published wire form by
+  `neptune_memory.ledger.threads_of_from_json` without the bookkeeping `api_version`, `as_of` and `findings`;
+  it imports no Ledger code ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)). It reads through
+  the `LedgerReader` Protocol in `neptune_memory/ledger.py`; the `memory` CLI's Ledger export carries the
+  answers under `threads`. The `ledger_thread` stand-in (ADR 0003 §1) stays for the archetype goldens and
+  unit tests; a reader that answers no thread queries is read through it alone.

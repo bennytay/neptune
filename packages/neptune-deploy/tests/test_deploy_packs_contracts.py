@@ -19,9 +19,11 @@ from deploy_pack_support import (
     schema_path,
 )
 from neptune_deploy.packs.appendix import CATALOG_API_VERSION, resolution
+from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_1X_PIN
 from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_PIN as READER_PIN
 
-GRAPH_SCHEMA_PIN = "1.6.0"
+GRAPH_SCHEMA_PIN = "2.0.0"
+GRAPH_SCHEMA_1X = "1.6.0"  # the 1.x fixtures' shape, read as ADR 0015 reads 1.x
 DOCS = Path(__file__).resolve().parents[1] / "docs"
 
 
@@ -39,19 +41,19 @@ def test_fixture_files_are_what_the_generator_writes(name: str) -> None:
 
 def test_the_configuration_snapshot_is_a_graph_schema_document() -> None:
     document = json.loads(fixture_path("arm_cell_configuration").read_bytes())
-    _validator(schema_path("graph-schema", GRAPH_SCHEMA_PIN), "Graph").validate(document)
+    _validator(schema_path("graph-schema", GRAPH_SCHEMA_1X), "Graph").validate(document)
 
 
 def test_the_events_snapshot_is_a_graph_schema_document_of_the_event_minor() -> None:
     document = json.loads(fixture_path("arm_cell_events").read_bytes())
-    _validator(schema_path("graph-schema", GRAPH_SCHEMA_PIN), "Graph").validate(document)
+    _validator(schema_path("graph-schema", GRAPH_SCHEMA_1X), "Graph").validate(document)
     # the 1.2.0 schema predates the event node type: the events snapshot needs the pinned minor
     with pytest.raises(ValidationError, match="event"):
         _validator(schema_path("graph-schema", "1.2.0"), "Graph").validate(document)
 
 
 def test_event_kinds_are_the_published_enum() -> None:
-    schema = json.loads(schema_path("graph-schema", GRAPH_SCHEMA_PIN).read_text("utf-8"))
+    schema = json.loads(schema_path("graph-schema", GRAPH_SCHEMA_1X).read_text("utf-8"))
     kinds = set(schema["$defs"]["EventKind"]["enum"])
     document = json.loads(fixture_path("arm_cell_events").read_bytes())
     used = {c["object"]["value"] for c in document["claims"] if c["predicate"] == "event_kind"}
@@ -89,6 +91,7 @@ def test_a_graph_at_head_zero_pins_no_transaction() -> None:
 def test_deploy_pins_the_contracts_it_reads() -> None:
     lock = tomllib.loads((CONTRACTS / "lock.toml").read_text(encoding="utf-8"))["neptune-deploy"]
     assert lock["graph-schema"] == GRAPH_SCHEMA_PIN == READER_PIN
+    assert GRAPH_SCHEMA_1X_PIN == GRAPH_SCHEMA_1X
     assert lock["catalog-api"] == CATALOG_API_VERSION
     table = (DOCS / "contracts.md").read_text(encoding="utf-8")
     assert re.search(

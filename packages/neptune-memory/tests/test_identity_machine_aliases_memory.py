@@ -130,7 +130,7 @@ def test_manifest_aliases_are_stated_same_as_citing_the_machine_record_and_its_f
     (declaration,) = of_kind(records, "run_declaration")
     for claim in result.claims:
         assert claim.assertion_kind is AssertionKind.STATED
-        assert claim.provenance.consolidator_version == "3"
+        assert claim.provenance.consolidator_version == "4"
         assert set(claim.provenance.records) == {arm["id"], run["id"], declaration["id"]}
         assert claim.valid_from.ticks > 0  # the run's first instant: a convention, not a lifetime
     # ARM-4 has an alias but no run or thread places it; the reserved namespace is refused.

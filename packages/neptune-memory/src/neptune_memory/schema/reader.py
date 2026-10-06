@@ -208,7 +208,8 @@ class MemoryReader(Protocol):
 
     @property
     def graph_schema_version(self) -> int:
-        """The graph-schema major this reader implements (``schema.GRAPH_SCHEMA_VERSION``)."""
+        """The graph-schema major of the graph this reader serves: ``schema.GRAPH_SCHEMA_VERSION``
+        for one Memory writes, 1 for a 1.x document read as written (ADR 0019 §3)."""
         ...
 
     @property

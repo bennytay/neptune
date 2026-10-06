@@ -44,7 +44,8 @@ declaration giving one machine several ids is stated evidence that they name one
 5. **Withdrawal** is as for every stated link: an edited manifest is a new record, and a build
    without the old one withdraws its claims (ADR 0016); a `distinct_identity` across a joined pair
    is `identity.contested`, never a dropped claim.
-6. The identity consolidator's version becomes `3`: its claims are a new lineage.
+6. The identity consolidator's version becomes `4` (after ADR 0019's `3`): its claims are a new
+   lineage.
 
 ## Alternatives considered
 
@@ -63,6 +64,7 @@ declaration giving one machine several ids is stated evidence that they name one
 - Manifest runs, CMMS work orders and ServiceNow incidents on one machine meet in
   `same_as_closure`; a log's own id and the manifest id stop being two machines.
 - Identity now also reads `run` and `run_declaration`, only to time machine links.
-- The graph-schema golden and the acceptance snapshot carry identity version `3` once regenerated.
+- The graph-schema golden (2.1.0, a golden-only minor) and the acceptance snapshot carry identity
+  version `4`.
 - Revisit when Memory reads thread membership from the catalog (ADR 0018), which may place a
   machine's ids directly.

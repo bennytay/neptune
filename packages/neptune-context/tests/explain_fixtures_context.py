@@ -1,11 +1,11 @@
 """Fixtures for why and diff (ADR 0010): a resolved history across seven embodiments.
 
 The history is resolved by Memory's own ``resolve`` (so split closures, ``supersedes`` links,
-lineage retirements and findings are Memory's), over four transactions, then one claim newer
-than the pinned graph-schema is added as Memory would hold it:
+lineage retirements and findings are Memory's), over four transactions, then one ``drift`` claim
+is added as Memory would hold it (``pin_without`` replays a pin that predates it):
 
 - manipulator ``ARM-7`` and its wrist camera ``WCAM-7``: a March calibration replaced by an April
-  one (tx 2), and an observed ``drift`` claim citing both calibration files (beyond the pin);
+  one (tx 2), and an observed ``drift`` claim citing both calibration files;
 - legged robot ``LEG-9``: firmware 3.1.4 believed open-ended (tx 1), then a new configuration
   lineage restates it as ended on 1 May and adds firmware 3.2.0 from 1 May (tx 3);
 - mobile robot ``AMR-9``: moved from the dock to aisle 9 (tx 2), and a run it recorded;
@@ -25,14 +25,24 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+from unittest import mock
 
 from neptune_ledger.api import QueryMeta, Resolution, from_json, query_table
-from neptune_memory.schema.claim import Claim, ClaimProvenance, ModelRef, TypedLiteral, ValueType
+from neptune_memory.schema.claim import (
+    Claim,
+    ClaimProvenance,
+    Delta,
+    DeltaQuantity,
+    ModelRef,
+    TypedLiteral,
+    ValueType,
+)
 from neptune_memory.schema.codec import GraphDocument, graph_from_json
 from neptune_memory.schema.interval import OPEN, CivilClock, LedgerTx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -46,6 +56,10 @@ from neptune.model.knowledge import AssertionKind, Known, NotApplicable
 from neptune.model.provenance import EvidenceRef, evidence_ref_from_json
 from neptune.model.time import Epoch, Timescale, Timestamp
 from neptune.model.units import unit_from_json
+from neptune_context import pinned
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 ROOT: Final = Path(__file__).resolve().parents[3]
 CATALOG_GOLDEN: Final = ROOT / "contracts" / "catalog-api" / "v1.7.0" / "golden"
@@ -373,12 +387,25 @@ def assertions() -> list[Claim]:
 
 def drift() -> Claim:
     """The wrist camera's drift between its two calibrations: observed, citing both calibration
-    files, and newer than the pinned graph-schema 1.6.0 (``drift`` is Memory ADR 0014)."""
+    files (``drift`` is Memory ADR 0014, inside the graph-schema 2.0.0 pin). Its value is a
+    ``delta``, the only range ``drift`` has: the declared translation's April numbers minus its
+    March numbers, in millimetres as both files declare them."""
     return dataclasses.replace(
         claim(
             WCAM,
             "drift",
-            TypedLiteral(ValueType.QUANTITY, 4.3, Known(unit_from_json("mm"))),
+            TypedLiteral(
+                ValueType.DELTA,
+                Delta(
+                    CAL_MARCH_REC,
+                    CAL_APRIL_REC,
+                    DeltaQuantity.PARAMETER,
+                    "values",
+                    (0.0, -0.1, 4.3),
+                    name="translation",
+                ),
+                Known(unit_from_json("mm")),
+            ),
             MAR_1,
             APR_14,
             evidence=(
@@ -402,6 +429,16 @@ def build() -> GraphDocument:
         resolver_config(CORE_PREDICATES, PRIORITIES),
         HEAD,
     )
+
+
+@contextmanager
+def pin_without(*names: str) -> Iterator[None]:
+    """Context's pin as if it predated ``names``: Memory ahead of the pin (ADR 0007 §6). Since
+    graph-schema 2.0.0 no released predicate is beyond the pin, so the beyond-the-pin paths are
+    exercised by narrowing it."""
+    narrowed = pinned.predicates() - set(names)
+    with mock.patch.object(pinned, "predicates", lambda: narrowed):
+        yield
 
 
 @cache

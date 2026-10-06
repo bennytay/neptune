@@ -13,6 +13,10 @@ a bound of it, or an assertion's ``authored_at``) is ``Ambiguous``, with that wi
 and threads of one type in different namespaces that cite one identical evidence ref. Nothing is
 merged: ``same_as`` is an edge that queries traverse (``schema.traverse.same_as_closure``).
 
+Event nodes are ``memory.events``'s, read from its claims (identity runs after it): an assertion
+may name an event by its record id or by an id the event's record declares, and a scope that
+names two events joins them like any two nodes (ADR 0019 §1).
+
 Records are parsed by ``consolidate.identity_records``; this module decides. Malformed or
 contradictory input is a finding and never a claim, and the rest of the build is unaffected.
 """
@@ -26,11 +30,13 @@ from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 from neptune.identity import canonical_json
 from neptune.model.assertion import AssertionType
 from neptune.model.finding import Severity
+from neptune.model.ids import LogicalId
 from neptune.model.knowledge import AssertionKind, Known
 from neptune.model.time import Timestamp
 from neptune_memory.consolidate import identity_records as parse
 from neptune_memory.consolidate import run_records
 from neptune_memory.consolidate.base import (
+    EVENTS_CONSOLIDATOR_ID,
     IDENTITY_CONSOLIDATOR_ID,
     ClaimDraft,
     ConsolidationFinding,
@@ -41,6 +47,8 @@ from neptune_memory.consolidate.identity_records import (
     ASSERTION,
     CONFIGURATION_LINEAGE,
     IDENTITY_LINK,
+    INCIDENT_RECORD,
+    INTERVENTION,
     MACHINE,
     THREAD,
     TIMESTAMP_DOMAIN,
@@ -50,6 +58,8 @@ from neptune_memory.consolidate.identity_records import (
     Thread,
     Window,
 )
+from neptune_memory.consolidate.run_records import RECORD_NAMESPACE
+from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, CivilClock, Open
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
@@ -59,7 +69,7 @@ from neptune_memory.schema.predicates import SAME_AS_CANDIDATE as SAME_AS_CANDID
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
-    from neptune.model.ids import LogicalId, RecordId
+    from neptune.model.ids import RecordId
     from neptune.model.jsonvalue import JsonValue
     from neptune.model.knowledge import Knowledge
     from neptune.model.provenance import EvidenceRef
@@ -70,6 +80,10 @@ if TYPE_CHECKING:
 # The vocabulary identity claims are validated against. Since graph-schema v1 the identity
 # predicates are core (ADR 0006 §4), so this is ``CORE_PREDICATES``; kept as a name for callers.
 IDENTITY_PREDICATES: Final = CORE_PREDICATES
+
+# The claim ``memory.events`` names an event's record with (ADR 0013 §1): how identity finds the
+# event nodes it may join and the record each is keyed by.
+EVIDENCED_BY: Final = "evidenced_by"
 
 
 Key = bytes  # a logical id's canonical JSON: the order subjects are chosen in (ADR 0003 §1.4)
@@ -125,7 +139,16 @@ def _malformed(kind: str, package_id: str, index: int, reason: str) -> Consolida
 @dataclass(frozen=True)
 class _Node:
     ref: NodeRef
-    threads: tuple[Thread, ...]  # sorted by record id
+    threads: tuple[Thread, ...]  # sorted by record id; none for an event node
+    # An event node's own start and the records placing it: its start when a statement states
+    # none, as a thread node's first thread is (ADR 0008 §2, ADR 0019 §1).
+    origin: tuple[Timestamp, tuple[RecordId, ...]] | None = None
+
+    def first(self) -> tuple[Timestamp, tuple[RecordId, ...]]:
+        if self.threads:
+            return self.threads[0].valid_from, (self.threads[0].record,)
+        assert self.origin is not None  # an event node always has one
+        return self.origin
 
 
 @dataclass
@@ -339,10 +362,154 @@ def _doubters(
     return sorted({a for a, t, _ in edges if t == record and status[a] != "retracted"})
 
 
-def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[RecordId]]]:
+# --- Event nodes --------------------------------------------------------------------------------
+
+
+@dataclass
+class _Events:
+    """The event nodes ``memory.events`` keyed by a record, and the ids their records declare.
+
+    ``origins`` maps an event's record to its own start and the records placing it there (its
+    placement on its record's clock: the ``evidenced_by`` claim citing the fewest records, as a
+    projection through a clock mapping adds the mapping). ``declaring`` maps a declared id to the
+    event records that certainly declare it and those that possibly do (an ``Ambiguous`` item).
+    """
+
+    origins: dict[RecordId, tuple[Timestamp, tuple[RecordId, ...]]] = field(default_factory=dict)
+    declaring: dict[Key, tuple[set[RecordId], set[RecordId]]] = field(default_factory=dict)
+
+    @staticmethod
+    def node(record: RecordId) -> LogicalId:
+        return LogicalId(RECORD_NAMESPACE, record)
+
+
+# The event kinds whose records declare ids (``identifiers``), and their readers.
+_DECLARING: Final[Mapping[str, Callable[[Mapping[str, object]], parse.Declaring]]] = {
+    INCIDENT_RECORD: parse.incident_identifiers,
+    INTERVENTION: parse.intervention_identifiers,
+}
+
+
+def _events(view: _View, ledger: LedgerReader, previous: Sequence[Claim]) -> _Events:
+    """Event nodes from ``memory.events``'s claims, added to the node view (ADR 0019 §1).
+
+    Only an event keyed by a whole record (``record:<rec id>``) is named by a record id or a
+    declared id; a timeline entry is in no scope. A key a Ledger thread already holds keeps the
+    thread's node. Records ``memory.events`` did not place are not read: it reports them.
+    """
+    found = _Events()
+    best: dict[RecordId, tuple[tuple[int, str], Claim]] = {}
+    for claim in previous:
+        if (
+            claim.provenance.consolidator_id != EVENTS_CONSOLIDATOR_ID
+            or claim.predicate != EVIDENCED_BY
+            or claim.subject.node_type is not NodeType.EVENT
+            or not isinstance(claim.object, LedgerRecordRef)
+        ):
+            continue
+        record = claim.object.record_id
+        if claim.subject != node_ref(NodeType.EVENT, _Events.node(record)):
+            continue
+        rank = (len(claim.provenance.records), claim.id)
+        if record not in best or rank < best[record][0]:
+            best[record] = (rank, claim)
+    for record in sorted(best):
+        node = _Events.node(record)
+        if _key(node) in view.nodes:
+            continue
+        claim = best[record][1]
+        found.origins[record] = (claim.valid_from, claim.provenance.records)
+        view.nodes[_key(node)] = _Node(node_ref(NodeType.EVENT, node), (), found.origins[record])
+    view.nodes = dict(sorted(view.nodes.items()))
+    declared: dict[RecordId, set[parse.Declaring]] = {}
+    for ref in ledger.list_packages():
+        for kind, reader in _DECLARING.items():
+            for record_json in ledger.read_records(ref.package_id, kind) or ():
+                try:
+                    declaring = reader(record_json)
+                except parse.Malformed:
+                    continue  # the compiler's reader refuses it: memory.events placed no event
+                if declaring.record in found.origins:
+                    declared.setdefault(declaring.record, set()).add(declaring)
+    for record, readings in sorted(declared.items()):
+        if len(readings) > 1:
+            continue  # one id, two contents: memory.events placed nothing on it either
+        (declaring,) = readings
+        if declaring.refused:
+            view.findings.append(
+                _finding(
+                    "malformed_identifier",
+                    "an event's record declares ids that are blank or padded with whitespace;"
+                    " they name nothing, and its other ids still do",
+                    (record,),
+                    refused=declaring.refused,
+                )
+            )
+        for ids, slot in ((declaring.certain, 0), (declaring.possible, 1)):
+            for node in ids:
+                found.declaring.setdefault(_key(node), (set(), set()))[slot].add(record)
+    return found
+
+
+@dataclass(frozen=True)
+class _Entry:
+    """What one scope entry names: one node, or (``certain`` false) every node it may name;
+    ``records`` the event records it was resolved through."""
+
+    nodes: tuple[LogicalId, ...]
+    certain: bool
+    records: tuple[RecordId, ...] = ()
+
+
+def _resolve(
+    view: _View, events: _Events, statement: Statement
+) -> tuple[list[_Entry], list[RecordId]]:
+    """The scope's entries, each as the nodes it names, and its record ids that name none.
+
+    A logical id names its Ledger thread's node; with none, the event nodes whose records declare
+    it: one record that certainly does is one node, anything else (several records, an
+    ``Ambiguous`` item) every node it may name. Neither: the id as written, which ``_ends``
+    reports as dangling. A record id names its event node, if ``memory.events`` keyed one by it;
+    otherwise it names evidence, not a thing, and is not read (ADR 0008 §3). Entries naming the
+    same nodes (a record and the id it declares) are one entry.
+    """
+    entries: list[_Entry] = []
+    for node in statement.nodes or ():
+        key = _key(node)
+        if key in view.nodes or key not in events.declaring:
+            entries.append(_Entry((node,), True))
+            continue
+        certain, possible = events.declaring[key]
+        records = tuple(sorted(certain | possible))
+        nodes = tuple(sorted((_Events.node(r) for r in records), key=_key))
+        entries.append(_Entry(nodes, len(certain) == 1 and not possible, records))
+    unread: list[RecordId] = []
+    for record in statement.records:
+        if record in events.origins:
+            entries.append(_Entry((_Events.node(record),), True, (record,)))
+        else:
+            unread.append(record)
+    merged: dict[tuple[Key, ...], _Entry] = {}
+    for entry in entries:
+        key_ = tuple(_key(n) for n in entry.nodes)
+        seen = merged.get(key_)
+        if seen is not None:
+            entry = _Entry(
+                entry.nodes,
+                entry.certain or seen.certain,
+                tuple(sorted({*seen.records, *entry.records})),
+            )
+        merged[key_] = entry
+    return list(merged.values()), unread
+
+
+def _from_statements(
+    view: _View, events: _Events
+) -> tuple[list[Link], dict[frozenset[Key], set[RecordId]]]:
     """``same_identity`` assertions that stand, as links; ``distinct_identity`` ones, as pairs
     with the assertions that declare them distinct. A ``same_identity`` that may have been
-    retracted, or whose own identifier is ``Ambiguous``, is an undecided link: candidates."""
+    retracted, whose own identifier is ``Ambiguous``, or whose scope may name several events for
+    one entry, is undecided: candidates."""
     status = _statuses(view.statements)
     edges = _edges(view.statements)
     by_record = {s.record: s for s in view.statements}
@@ -395,40 +562,74 @@ def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[
             )
             if kind is AssertionType.DISTINCT_IDENTITY:
                 continue  # a distinctness that may be withdrawn suppresses nothing
-        ids = statement.nodes or ()
-        if len(ids) < 2:
+        entries, unread = _resolve(view, events, statement)
+        if len(entries) < 2:
+            details: dict[str, JsonValue] = {"unread_records": len(unread)} if unread else {}
             view.findings.append(
                 _finding(
                     "assertion_scope",
-                    f"a {kind} assertion needs two logical ids in a Known scope",
+                    f"a {kind} assertion needs two logical ids or event records in a Known scope",
                     rid,
+                    Severity.WARNING,
+                    **details,
                 )
             )
             continue
-        ordered = sorted(ids, key=_key)
+        joined = tuple(r for e in entries for r in e.records)
+        uncertain = [e for e in entries if not e.certain]
+        if uncertain:
+            view.findings.append(
+                _finding(
+                    "scope_ambiguous",
+                    f"a {kind} assertion names an id several event records declare, or one may"
+                    " declare; it is not a decided statement about any one of them",
+                    (statement.record, *joined),
+                    events=[n.value for e in uncertain for n in e.nodes],
+                )
+            )
         if kind is AssertionType.DISTINCT_IDENTITY:
+            # A distinctness about an entry that may name several events suppresses nothing.
+            ordered = sorted((e.nodes[0] for e in entries if e.certain), key=_key)
             for a in ordered:
                 for b in ordered[ordered.index(a) + 1 :]:
                     distinct.setdefault(frozenset((_key(a), _key(b))), set()).add(statement.record)
             continue
-        links.append(
+        decided = (
+            statement.timed
+            and not statement.identifier_ambiguous
+            and not doubters
+            and status[statement.record] == "effective"
+        )
+        evidence = (
+            *statement.evidence,
+            *(ref for d in doubters for ref in by_record[d].evidence),
+        )
+        also = (*doubters, *joined)
+        if not uncertain:
+            ordered = sorted((e.nodes[0] for e in entries), key=_key)
+            pairs = [(ordered[0], tuple(Side(node) for node in ordered[1:]))]
+        else:
+            # Every node an entry may name, against every node another may: each a candidate.
+            pairs = [
+                (a, tuple(Side(b) for b in later.nodes if b != a))
+                for i, entry in enumerate(entries)
+                for later in entries[i + 1 :]
+                for a in entry.nodes
+            ]
+        links.extend(
             Link(
                 record=statement.record,
                 ground="operator_assertion",
                 assertion_kind=AssertionKind.STATED,
-                left=ordered[0],
-                right=tuple(Side(node) for node in ordered[1:]),
-                decided=statement.timed
-                and not statement.identifier_ambiguous
-                and not doubters
-                and status[statement.record] == "effective",
+                left=left,
+                right=right,
+                decided=decided and not uncertain,
                 windows=statement.windows,
-                evidence=(
-                    *statement.evidence,
-                    *(ref for d in doubters for ref in by_record[d].evidence),
-                ),
-                also=tuple(doubters),
+                evidence=evidence,
+                also=also,
             )
+            for left, right in pairs
+            if right
         )
     return links, distinct
 
@@ -692,12 +893,13 @@ class IdentityConsolidator:
     """Deterministic ``same_as`` / ``same_as_candidate`` claims. Takes no configuration.
 
     Version 2 (ADR 0008) reads the compiler's ``identity_link`` and ``assertion`` kinds; version 1
-    read ADR 0003's stand-ins, so its claims are another lineage. Version 3 (ADR 0021) also reads
-    ``machine`` records: the ids one declaration gives one machine are ``same_as``.
+    read ADR 0003's stand-ins, so its claims are another lineage. Version 3 (ADR 0019) also joins
+    event nodes, read from ``memory.events``'s claims, that an assertion names. Version 4 (ADR 0021)
+    also reads ``machine`` records: the ids one declaration gives one machine are ``same_as``.
     """
 
     consolidator_id: Final = IDENTITY_CONSOLIDATOR_ID
-    version: Final = "3"
+    version: Final = "4"
     model: Final[ModelRef | None] = None
 
     def consolidate(
@@ -715,7 +917,8 @@ class IdentityConsolidator:
                     keys=sorted(config),
                 )
             )
-        stated, distinct = _from_statements(view)
+        events = _events(view, ledger, previous)
+        stated, distinct = _from_statements(view, events)
         machines = _from_machines(view, ledger)
         links = sorted((*view.links, *stated, *machines), key=lambda link: link.record)
         for link in (link for link in links if not link.windows):
@@ -820,18 +1023,18 @@ def _interval(
     view: _View, link: Link, window: Window, subject: _Node
 ) -> _Timed | ConsolidationFinding:
     """The window on a shared clock where it declares one. A window that states no start holds
-    from the subject's first thread record (by record id; ADR 0008 §2), which the claim then
-    cites, so a conventional start is told from a stated one. A convention, not a lifetime:
-    Memory models none (ADR 0007 §3)."""
+    from the subject's first thread record (by record id; ADR 0008 §2), or an event subject's own
+    start (ADR 0019 §1), which the claim then cites, so a conventional start is told from a stated
+    one. A convention, not a lifetime: Memory models none (ADR 0007 §3)."""
     end = OPEN if isinstance(window.end, Open) else view.place(window.end)
     records: tuple[RecordId, ...] = ()
     if window.start is None:
-        if not subject.threads:  # a machine record's id, with no thread to start from
+        if not subject.threads and subject.origin is None:  # a machine record's id alone
             return _link_finding(
                 "untimeable_window", link, "states no start and its subject has no thread"
             )
-        first = subject.threads[0]
-        start, records = view.place(first.valid_from), (first.record,)
+        first, records = subject.first()
+        start = view.place(first)
     else:
         start = view.place(window.start)
     if isinstance(end, Timestamp) and (end.domain_id != start.domain_id or not start < end):

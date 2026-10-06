@@ -177,7 +177,7 @@ class Run:
         reason = pinned.claim_beyond_pin(claim)
         if reason is not None:
             return (
-                f"{reason} is newer than Context's pinned graph-schema {GRAPH_SCHEMA_VERSION}:"
+                f"{reason} is not in Context's pinned graph-schema {GRAPH_SCHEMA_VERSION}:"
                 " the claim is named, not carried"
             )
         allowed = self.clocks

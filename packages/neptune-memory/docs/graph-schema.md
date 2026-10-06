@@ -1,7 +1,7 @@
-# Graph schema v1
+# Graph schema v2
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.9.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v2.0.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.0.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -14,7 +14,8 @@ calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-c
 §4, §6); 1.8.0 (minor) adds the coverage and health predicates
 ([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6); 1.9.0 (minor) adds the graph document's optional
 `builds` and `#/$defs/Build`, for withdrawal ([ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md);
-the vocabulary is unchanged). Earlier goldens still
+the vocabulary is unchanged). **2.0.0 (major)** narrows `succeeds` and names the release in every document
+(below; [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3). Within major 1, earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -50,7 +51,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 10`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 11`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -121,7 +122,7 @@ major version (ADR 0002 §5).
 | `sensor_recorded` | run | sensor | many | a sensor of a configuration bound to the run recorded in it: a run's file declares its identifier |
 | `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
 | `stated_severity` | event | text, integer | one | the severity a record states, verbatim; never ranked or compared |
-| `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
+| `succeeds` | configuration | configuration | many | a source states the subject replaces the object as configurations, wherever they appear; never read from one machine's chain (ADR 0019 §2) |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 `EventKind` (`#/$defs/EventKind`) lists the registered event kinds, the only objects of `event_kind`:
@@ -157,9 +158,29 @@ edge (`parent`, `child`), in the `representation` both declare, with the transfo
 - A **graph document** (`#/$defs/Graph`) is one resolved history: every claim version and every finding, the
   `resolver_config` whose hash is its `generation`, and its `head`: the latest Ledger transaction it covers. The
   head may be later than every `recorded_at`, because a transaction can produce no claim. From 1.9.0 it may hold
-  `builds` (`#/$defs/Build`), ordered by `(recorded_at, consolidator_id)`: each consolidator run it was resolved
+  `builds` (`#/$defs/Build`; optional, and when present it has at least one build, `minItems` 1), ordered by
+  `(recorded_at, consolidator_id)`: each consolidator run it was resolved
   with, its lineage (consolidator id, version, config hash), its transaction and every claim id it emitted, possibly
-  none. A document without builds writes no `builds` key and reads exactly as 1.8.0.
+  none. A document without builds writes no `builds` key and reads exactly as 1.8.0. From 2.0.0 it names the
+  full release it was written to, `graph_schema` (`"2.0.0"`), beside the major `graph_schema_version`, so a
+  consumer can tell minors apart; any 2.x minor reads it.
+
+## Migrating from 1.x to 2.0.0
+
+2.0.0 is a major release because a claim changed meaning, not shape
+([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3):
+
+- **`succeeds`** no longer marks a change on a machine's chain; configuration nodes are shared, so it read
+  fleet-wide. A consumer that selected `succeeds` for "what changed" reads a machine's changes from its own
+  `has_configuration` spans (guarantee 12); `succeeds` now holds only where a source states it of two
+  configurations, and no consolidator claims it today.
+- **`graph_schema`**: a 2.x graph document carries its release; a reader checks the major and may branch on it.
+- **Identity** (consolidator version 3) may join `event` nodes an assertion names (guarantee 11). A consumer that
+  assumed `same_as` joins only thread nodes follows it for events too.
+- Shapes are otherwise unchanged. 1.x documents stay valid against their own published schemas, and
+  `schema.codec.graph_from_json` still reads one as written, labelled major 1 and never relabelled. As the
+  registry requires, the PR publishing 2.0.0 raises every in-repo consumer's lock to it (Context, Deploy), with
+  their contract tests passing at 2.0.0.
 
 ## Reading: `MemoryReader`
 
@@ -194,7 +215,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.9.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v2.0.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -244,11 +265,25 @@ def test_graph_schema_contract(check):
     reported as `identity.retraction_ambiguous`. A `same_identity` of that kind becomes `same_as_candidate` pairs
     that cite the retracts leaving it in doubt, and a `distinct_identity` of that kind suppresses nothing. A
     `same_identity` whose own `identifier` is `Ambiguous` is always candidates, never `same_as`.
+    An assertion may name an `event` node ([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md)
+    §1): by the record `memory.events` keyed it by, or by an id its `incident_record` or `intervention` declares
+    (a Ledger thread's node first). An id several event records declare, or one only possibly does, is
+    `identity.scope_ambiguous` and candidates, never `same_as`; a record id that names no event is not read, and a
+    blank or padded declared id names nothing (`identity.malformed_identifier`).
 12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
     places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
     the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
-    nearest configuration in time; where records disagree, every reading is a `configuration_candidate`. No
-    `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
+    nearest configuration in time; where records disagree, every reading is a `configuration_candidate`.
+    Configuration nodes are shared by every machine that names them, so a change is the machine's own: two
+    `memory.configuration` claims `has_configuration(m → A)` ending at `t` and `has_configuration(m → B)` starting
+    at the same `t` (one `Timestamp`, so one clock), `A ≠ B`. Nothing else is a change: an unknown or candidate span
+    between them, or another clock, breaks the adjacency, so no change is read across a gap
+    ([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §2;
+    `consolidate.configuration.transitions` reads it). In vocabulary 11 only `memory.configuration` emits
+    `has_configuration`. Where several spans of one machine end at `t` and several begin at `t`, each ending and
+    beginning pair with different configurations is one change, as `transitions` reads it. A
+    `configuration_candidate` or `configuration_unknown` span beside a decided one marks an ambiguous or unknown
+    boundary, never a change. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
     made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
     envelope end is never read as open.
 13. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run

@@ -149,7 +149,7 @@ class _Diff:
                     self.withheld.add(claim.id)
                 elif (reason := pinned.claim_beyond_pin(claim)) is not None:
                     self.named.setdefault(
-                        f"{reason} is newer than Context's pinned graph-schema: not compared",
+                        f"{reason} is not in Context's pinned graph-schema: not compared",
                         set(),
                     ).add(claim.id)
                 else:
@@ -231,7 +231,7 @@ class _Diff:
                 self.withheld.add(passing.id)
             elif (reason := pinned.claim_beyond_pin(passing)) is not None:
                 self.named.setdefault(
-                    f"{reason} is newer than Context's pinned graph-schema: not compared", set()
+                    f"{reason} is not in Context's pinned graph-schema: not compared", set()
                 ).add(passing.id)
             else:
                 changes.append(DiffChange(passing.predicate, Change.BETWEEN, (), (passing.id,)))

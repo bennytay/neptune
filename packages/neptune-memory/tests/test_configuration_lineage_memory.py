@@ -31,7 +31,10 @@ from neptune.model.ids import LogicalId, RecordId
 from neptune.model.knowledge import Knowledge, KnownAbsent, NotApplicable, NotCovered, Unknown
 from neptune.model.time import Epoch, Timescale, Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
-from neptune_memory.consolidate.configuration import ConfigurationLineageConsolidator
+from neptune_memory.consolidate.configuration import (
+    ConfigurationLineageConsolidator,
+    transitions,
+)
 from neptune_memory.schema.claim import Claim, LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, CivilClock, Open, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -83,7 +86,15 @@ def chain(result: Consolidation, machine: NodeRef) -> list[tuple[str, Timestamp,
 
 
 def successions(result: Consolidation) -> set[tuple[str, str]]:
-    return {(c.subject.node_id, c.object.node_id) for c in of(result, "succeeds")}  # type: ignore[union-attr]
+    """Every machine's changes, (after, before), read from its spans (ADR 0019 §2); and, as
+    configuration nodes are shared across machines, never a ``succeeds`` claim."""
+    assert of(result, "succeeds") == []
+    machines = {c.subject for c in of(result, "has_configuration")}
+    return {
+        (t.after.node_id, t.before.node_id)
+        for machine in machines
+        for t in transitions(result.claims, machine)
+    }
 
 
 def codes(result: Consolidation) -> list[str]:
@@ -131,8 +142,10 @@ def test_warehouse_chain_runs_from_commissioning_through_two_changes() -> None:
         ("siteops.configuration:CFG-AMR07-r4", "siteops.configuration:CFG-AMR07-r3"),
         ("siteops.configuration:CFG-AMR07-r5", "siteops.configuration:CFG-AMR07-r4"),
     }
-    (latest,) = [c for c in of(result, "succeeds") if c.valid_from == firmware]
-    assert latest.valid_to == OPEN and latest.assertion_kind == "stated"
+    (latest,) = [t for t in transitions(result.claims, AMR_NODE) if t.at == firmware]
+    before, after = latest.claims
+    assert before.valid_to == firmware == after.valid_from and after.valid_to == OPEN
+    assert after.subject == before.subject == AMR_NODE  # the change is this machine's
     assert all(c.assertion_kind == "stated" for c in result.claims)
 
 
@@ -148,9 +161,10 @@ def test_a_requalification_extends_the_span_it_requalifies_and_adds_its_evidence
     assert requalified <= set(r5.provenance.records)
     # Two records, each citing its form and its own date and configuration cells.
     assert len(r5.provenance.records) == 2 and len(r5.provenance.evidence) >= 2
-    # The succession cites both sides of the change only, never the requalification after it.
-    (succession,) = [c for c in of(result, "succeeds") if c.subject == r5.object]
-    assert record_id_of(records[-1]) not in succession.provenance.records
+    # The change into r5 is read from the two spans, each citing its own side of it.
+    (change_,) = [t for t in transitions(result.claims, AMR_NODE) if t.after == r5.object]
+    assert change_.claims[1] == r5
+    assert record_id_of(records[-1]) not in change_.claims[0].provenance.records
 
 
 def test_warehouse_authorisation_is_a_site_claim_on_the_envelope_window() -> None:
