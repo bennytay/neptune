@@ -22,7 +22,7 @@
     {
       "id": "reconstruction",
       "title": "Reconstruction on the chosen clock",
-      "description": "Each placement on the pack clock in onset order: the event's stated kind, severity, description, machines, place and the record it rests on. A placement through a clock mapping names the mapping records. Records of one event are compared as one event. Events involving any id of an involved machine (through same_as) are included.",
+      "description": "Each placement on the pack clock in onset order: the event's stated kind, severity, description, stated cause, name, declared values, machines, place and the record it rests on. A placement through a clock mapping names the mapping records. Records of one event are compared as one event. Events involving any id of an involved machine (through same_as) are included.",
       "kind": "timeline",
       "same_event": ["same_as"],
       "about": [
@@ -41,7 +41,7 @@
         [{"predicate": "at_site", "direction": "out"}, {"predicate": "at_site", "direction": "in"}],
         [{"predicate": "in_zone", "direction": "out"}, {"predicate": "in_zone", "direction": "in"}]
       ],
-      "predicates": {"event_kind": "known", "declared_kind": "known", "stated_severity": "known", "has_description": "known", "involves": "known", "involves_candidate": "ambiguous", "at_site": "known", "at_site_candidate": "ambiguous", "in_zone": "known", "in_zone_candidate": "ambiguous", "evidenced_by": "known"}
+      "predicates": {"event_kind": "known", "declared_kind": "known", "stated_severity": "known", "has_description": "known", "involves": "known", "involves_candidate": "ambiguous", "at_site": "known", "at_site_candidate": "ambiguous", "in_zone": "known", "in_zone_candidate": "ambiguous", "evidenced_by": "known", "stated_cause": "known", "has_name": "known", "declared_value": "known"}
     },
     {
       "id": "machine-identities",

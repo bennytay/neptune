@@ -41,6 +41,21 @@
       "predicates": {"has_configuration": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
     },
     {
+      "id": "configuration-values",
+      "title": "Configuration values",
+      "description": "The name and every value each configuration of the machine declares (a calibration's name, its reprojection error, its transformation), as the configuration states them: declared, never computed or compared here. Each configuration the chain reaches, decided or candidate.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "has_configuration", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "has_configuration", "direction": "out"}],
+        [{"predicate": "configuration_candidate", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "configuration_candidate", "direction": "out"}],
+        [{"predicate": "recorded_by", "direction": "in"}, {"predicate": "configuration_active_during", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "recorded_by", "direction": "in"}, {"predicate": "configuration_active_during", "direction": "out"}]
+      ],
+      "predicates": {"has_name": "known", "declared_value": "known"}
+    },
+    {
       "id": "runs",
       "title": "Runs and the configuration each ran with",
       "description": "The runs recorded by the machine (or possibly by it), each with the configuration bound to it over its window on the run's own clock: decided, ambiguous or unknown.",
