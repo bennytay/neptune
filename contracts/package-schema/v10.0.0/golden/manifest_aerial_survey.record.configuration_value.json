@@ -1,0 +1,57 @@
+{
+  "id": "rec:sha256:0f7b6fc0b6a85352f62f41e1b84c2781776010bcb36f99becca85b197c491bd4",
+  "key_tag": {
+    "knowledge": "not_applicable"
+  },
+  "kind": "configuration_value",
+  "occurrence": [],
+  "order": 0,
+  "path": [],
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "index": 0,
+          "kind": "config:document"
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": ""
+        }
+      ],
+      "source": "sha256:a9a0efc707fbca842362a234520211aa837daf147496a617bc487411e0f65518"
+    },
+    "transform": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+  },
+  "schema_version": 2,
+  "snapshot": "rec:sha256:b1f8cfecf941230413667990f222303576dec6adbbdbb33d0385dbdc0227745a",
+  "tag": {
+    "knowledge": "known",
+    "value": "?"
+  },
+  "text": {
+    "knowledge": "not_applicable"
+  },
+  "value": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "end": 379,
+            "kind": "span",
+            "start": 0
+          }
+        ],
+        "source": "sha256:a9a0efc707fbca842362a234520211aa837daf147496a617bc487411e0f65518"
+      },
+      "transform": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+    },
+    "value": {
+      "length": 4,
+      "type": "mapping"
+    }
+  }
+}

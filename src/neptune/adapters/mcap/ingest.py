@@ -38,6 +38,7 @@ from neptune.adapters.mcap.scan import (
     place_from_json,
     read_exact,
 )
+from neptune.adapters.rosmsg.status import Unrecognised, recognised, unrecognised_report
 from neptune.adapters.rosmsg.streams import (
     HEADER_STAMP,
     Declared,
@@ -145,6 +146,14 @@ def decoding_of(
     )
 
 
+def definition_of(read: "Records", schema: Place | None, cite: "Cite") -> EvidenceRef | None:
+    """The bytes of a channel's schema's definition, as its stream cites them."""
+    if schema is None:
+        return None
+    start, length = read.schema(schema).data
+    return cite.evidence(schema.within(RECORD_HEADER + start, length)) if length else None
+
+
 def over_of(context: Mapping[str, JsonValue]) -> frozenset[int]:
     """The channels a chunk's context names as past the source's decoding budget."""
     return frozenset(as_int(item) for item in as_list(context.get("over_budget", [])))
@@ -192,6 +201,10 @@ class Cite:
     @property
     def log_time(self) -> RecordId:
         return self.record_id(TimestampDomain.kind, MAGIC_PLACE, time_field("log_time"))
+
+    def header_clock(self, place: Place) -> RecordId:
+        """The id of the clock a channel's leading header stamps (ADR 0068 §2)."""
+        return self.record_id(TimestampDomain.kind, place, time_field(HEADER_STAMP))
 
     def channel(self, place: Place) -> Ids:
         return Ids(
@@ -512,7 +525,7 @@ class Declarations:
         """The clock a leading ``std_msgs/Header``'s stamp reads (ADR 0068 §2)."""
         cite, where = self.cite, (time_field(HEADER_STAMP),)
         return header_domain(
-            record_id=cite.record_id(TimestampDomain.kind, place, *where),
+            record_id=cite.header_clock(place),
             provenance=cite.provenance(place, *where),
             scope=scope,
             definition=Provenance(definition, cite.transform.id, AssertionKind.STATED),
@@ -525,6 +538,18 @@ class Declarations:
             "id": channel.id,
             "message_encoding": channel.message_encoding.shown,
         }
+        status = recognised(decoding)
+        if isinstance(status, Unrecognised):
+            shape = unrecognised_report(status, f"channel {channel.id}", details)
+            self.finding(
+                shape.code,
+                shape.category,
+                shape.severity,
+                place,
+                shape.message,
+                shape.details,
+                records=(stream,),
+            )
         report = decoding_report(decoding, f"channel {channel.id}", details)
         if report is not None:
             self.finding(

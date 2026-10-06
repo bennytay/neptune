@@ -53,6 +53,13 @@ from neptune.adapters.rosbag1.scan import (
     scan,
     whole,
 )
+from neptune.adapters.rosmsg.status import (
+    Recognised,
+    Sample,
+    StatusWriter,
+    Unrecognised,
+    recognised,
+)
 from neptune.adapters.rosmsg.streams import (
     Decoding,
     Undecoded,
@@ -63,6 +70,8 @@ from neptune.adapters.rosmsg.streams import (
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.knowledge import Knowledge, Known, Unknown
+from neptune.model.provenance import EvidenceRef
 from neptune.model.series import (
     SEQ,
     ColumnType,
@@ -70,6 +79,7 @@ from neptune.model.series import (
     SeriesColumn,
     locator_column,
 )
+from neptune.model.time import Timestamp
 
 _CHUNK_PROBLEMS = {
     "too_large": ("record_too_large", FindingCategory.LIMIT),
@@ -92,6 +102,9 @@ class Slot:
     decoding: Decoding | None = None
     columns: tuple[tuple[str, ColumnType, bool], ...] = ()
     undecoded: Undecoded = field(default_factory=Undecoded)
+    clocks: tuple[RecordId, ...] = ()  # the stream's clocks, in order
+    status: Recognised | None = None  # what its messages state as records (ADR 0071)
+    definition: EvidenceRef | None = None  # its definition's bytes
 
 
 @dataclass(frozen=True)
@@ -160,14 +173,23 @@ class Data:
         # In file order, so each chunk that holds declarations is decompressed once.
         for conn, where, seq in sorted(entries, key=lambda item: as_place(item[1]).steps):
             place = as_place(where)
-            decoding = decoding_of(parse_connection(reader.record(place)), config, over)
+            connection = parse_connection(reader.record(place))
+            decoding = decoding_of(connection, config, over)
+            usable = decoding if isinstance(decoding, Decoding) else None
             kinds = columns(decoding)
+            clocks = [self.cite.clock]
+            if usable is not None and usable.has_header:
+                clocks.append(self.cite.header_clock(place))
+            status = recognised(decoding)
             self.slots[as_int(conn)] = Slot(
                 self.cite.stream(place),
                 as_int(seq),
                 {name: [] for name, _, _ in kinds},
-                decoding if isinstance(decoding, Decoding) else None,
+                usable,
                 kinds,
+                clocks=tuple(clocks),
+                status=None if isinstance(status, Unrecognised) else status,
+                definition=self.cite.definition(place, connection) if status else None,
             )
             if self.indexed and self.lead:
                 self._declare(as_int(conn), place)
@@ -177,6 +199,7 @@ class Data:
             self.units.append((as_int(pos), as_place(info[0]) if info else None))
         self.findings: list[IngestFinding] = []
         self.read: dict[int, int] | None = None  # the last chunk's messages, for its Index Data
+        self.status = StatusWriter(config)
 
     def _declare(self, conn: int, place: Place) -> None:
         (offset, length) = place.steps[0]
@@ -226,7 +249,12 @@ class Data:
                 end = positions[k + 1] if k + 1 < len(positions) else self.end
                 self._walk(unit[0], end, unit)
         self._payload_findings()
-        return ChunkOutput(series=tuple(self._batches()), findings=tuple(self.findings))
+        self._status_findings()
+        return ChunkOutput(
+            records=tuple(self.status.records),
+            series=tuple(self._batches()),
+            findings=tuple(self.findings),
+        )
 
     def _planned(self, info: Place | None) -> Planned | None:
         if info is None:
@@ -502,7 +530,7 @@ class Data:
                 rows[locator_column(step, "length")].append(size)
                 rows[locator_column(step, "offset")].append(offset)
             if slot.decoding is not None:
-                self._decode(slot, chunk.data, inner.offset, inner.length, Place(steps))
+                self._decode(slot, chunk.data, inner.offset, inner.length, Place(steps), tick)
         held.walk = records
         if greatest >= 0:
             held.times = (least, greatest)
@@ -698,16 +726,49 @@ class Data:
             [index.conn, index.count, found] if index is not None else [-1, -1, -1]
         )
 
-    def _decode(self, slot: Slot, data: bytes, offset: int, length: int, place: Place) -> None:
+    def _decode(
+        self, slot: Slot, data: bytes, offset: int, length: int, place: Place, tick: int | None
+    ) -> None:
         """A message's payload into its row's value cells and header clock (ADR 0068 §1): the
-        data after the record's header and the data's own length."""
+        data after the record's header and the data's own length; and the status or
+        safety-state records it states (ADR 0071)."""
         assert slot.decoding is not None
         header_length = int.from_bytes(data[offset : offset + 4], "little")
         start = offset + 8 + header_length
-        decoded = decode_row(slot.decoding, memoryview(data)[start : offset + length])
+        payload = memoryview(data)[start : offset + length]
+        decoded = decode_row(slot.decoding, payload)
         add_cells(slot.rows, slot.decoding, decoded, HEADER_CLOCK)
         if decoded.problem is not None:
             slot.undecoded.add(decoded.problem.reason, place)
+        if slot.status is None:
+            return
+        times: list[Knowledge[Timestamp]] = []
+        for clock, value in zip(slot.clocks, (tick, decoded.stamp), strict=False):
+            times.append(Known(Timestamp(value, clock)) if value is not None else Unknown())
+        sample = Sample(
+            self.source.content_id, place.locator(), 8 + header_length, tuple(times), place
+        )
+        decoder = slot.decoding.decoder
+        self.status.add(
+            slot.status, slot.stream, slot.definition, sample, payload, decoder.cdr, decoder.limits
+        )
+
+    def _status_findings(self) -> None:
+        """One finding per stream whose messages here left status records unwritten."""
+        connections = {slot.stream: conn for conn, slot in self.slots.items()}
+        for stream, place, report in self.status.reports():
+            assert isinstance(place, Place)
+            self.findings.append(
+                self.reporter.finding(
+                    report.code,
+                    report.category,
+                    report.severity,
+                    place,
+                    report.message,
+                    {**report.details, "id": connections[stream]},
+                    records=(stream,),
+                )
+            )
 
     # -- output --
 

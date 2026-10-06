@@ -115,6 +115,7 @@ class Decoding:
     decoder: Decoder
     mode: str  # full, partial, header_only
     detail: str  # why header_only, else ""
+    definition: Definition | None = None  # what the layout was compiled from
 
     @property
     def columns(self) -> tuple[Column, ...]:
@@ -307,9 +308,9 @@ def _layout(
             layout = compile_layout(parsed, limits, header_only=True, reserved=reserved)
         except DefinitionError:
             return NotDecoded(f"layout_{exc.reason}", str(exc))
-        return Decoding(Decoder(layout, cdr, limits), "header_only", str(exc))
+        return Decoding(Decoder(layout, cdr, limits), "header_only", str(exc), parsed)
     mode = "partial" if layout.left_out else "full"
-    return Decoding(Decoder(layout, cdr, limits), mode, "")
+    return Decoding(Decoder(layout, cdr, limits), mode, "", parsed)
 
 
 @dataclass(frozen=True)

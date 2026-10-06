@@ -58,7 +58,7 @@ def records(name: str) -> list[Any]:
     """Every record of one golden package, through the compiler's strict readers."""
     manifest = canonical_json.loads((GOLDEN / name / MANIFEST).read_bytes())
     assert isinstance(manifest, dict)
-    assert manifest["schema_version"] == SCHEMA_VERSION == 9
+    assert manifest["schema_version"] == 9 <= SCHEMA_VERSION
     found: list[Any] = []
     for path in sorted((GOLDEN / name / "records").glob("*.jsonl")):
         _, read = RECORD_KINDS[path.stem]

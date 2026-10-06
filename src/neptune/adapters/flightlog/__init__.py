@@ -33,6 +33,7 @@ from neptune.adapters.contract import (
     Chunk,
     ChunkExtent,
     ChunkOutput,
+    ConfigOption,
     Documented,
     FormatSpec,
     InspectResult,
@@ -47,7 +48,7 @@ from neptune.adapters.contract import (
     read_pieces,
 )
 from neptune.adapters.flightlog import dataflash, ulog
-from neptune.adapters.flightlog.common import Findings
+from neptune.adapters.flightlog.common import NOMINAL_OPTION, Findings
 from neptune.adapters.flightlog.dataflash_format import FMT_TYPE
 from neptune.adapters.flightlog.dataflash_format import HEAD as DATAFLASH_HEAD
 from neptune.adapters.flightlog.ulog_format import MAGIC as ULOG_MAGIC
@@ -67,7 +68,7 @@ def _code(name: str, description: str) -> Documented:
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id="flightlog",
-    version="0.1.0",
+    version="0.2.0",
     abi=ABI_VERSION,
     summary="PX4 ULog and ArduPilot DataFlash flight logs: a run, a stream per message type with"
     " decoded rows, tables for parameters, info and declared units.",
@@ -77,8 +78,23 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         FormatSpec("ULog", extensions=(".ulg", ".ulog"), magic=(Magic(0, ULOG_MAGIC),)),
     ),
-    record_kinds=("run", "stream", "structured_record", "structured_table", "timestamp_domain"),
-    config=(),
+    record_kinds=(
+        "run",
+        "safety_state",
+        "status_report",
+        "stream",
+        "structured_record",
+        "structured_table",
+        "timestamp_domain",
+    ),
+    config=(
+        ConfigOption(
+            NOMINAL_OPTION,
+            False,
+            "also write a safety_state record for each actuator_armed message whose"
+            " manual_lockdown (the kill switch) is false; off, those stay rows only",
+        ),
+    ),
     libraries=(),
     finding_codes=(
         _code(
@@ -145,6 +161,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "size_mismatch",
             "ULog data messages shorter than their format get no rows (error); longer ones are"
             " read from their format's fields (inconsistent, warning)",
+        ),
+        _code(
+            "status_definition_unrecognised",
+            "an ArduPilot MSG or ERR format, or a ULog actuator_armed format, without the"
+            " columns its records are read from; its rows are rows only (unsupported, info)",
         ),
         _code(
             "time_out_of_range",
@@ -237,6 +258,15 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "locators",
             "a row cites its whole message or record as one byte_range in the file; a table row"
             " cites its message and each cell its bytes",
+        ),
+        Documented(
+            "status",
+            "every ULog logged message (L, C) is a status_report (level as stored, its ULog"
+            " name, the text, a C message's tag as a value), every DataFlash MSG (text) and ERR"
+            " (Subsys and ECode as values) record one too, and an actuator_armed message whose"
+            " manual_lockdown is true a safety_state (emergency_stop); each cites its whole"
+            " message, its time the row's on the boot clock; what a format has no place for is"
+            " not_covered. Such rows weigh as table rows in planning",
         ),
         Documented(
             "ulog_columns",

@@ -1,0 +1,59 @@
+{
+  "adapter_id": "neptune.manifest",
+  "adapter_version": "0.2.0",
+  "config": {
+    "declarations": {
+      "machines": [
+        {
+          "aliases": {
+            "serial": [
+              "20235400123"
+            ]
+          },
+          "embodiment": "manipulator",
+          "id": "ur5e-cell-3"
+        }
+      ],
+      "neptune": 1,
+      "runs": [
+        {
+          "machine": "ur5e-cell-3",
+          "name": "cell3-pick-0412",
+          "paths": [
+            "cell3/runs/pick_0412"
+          ],
+          "site": "plant-2",
+          "snapshots": [
+            {
+              "path": "cell3/config/controller.yaml"
+            }
+          ],
+          "task": "bin-pick"
+        }
+      ],
+      "sites": [
+        {
+          "id": "plant-2",
+          "name": "Riverside plant 2"
+        }
+      ],
+      "tasks": [
+        {
+          "description": "Pick parts from the inbound bin",
+          "id": "bin-pick"
+        }
+      ]
+    },
+    "location": {
+      "kind": "local",
+      "path": "neptune.yaml"
+    },
+    "source": "sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"
+  },
+  "config_hash": "sha256:ffba634841614070edc793f8716033e4212f62c37a0607907654b13fa30b3447",
+  "id": "rec:sha256:23927b89c269692d44bf9db26bf5c432a34c9d9b28e3c9d1988284808a9b49b1",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": []
+}

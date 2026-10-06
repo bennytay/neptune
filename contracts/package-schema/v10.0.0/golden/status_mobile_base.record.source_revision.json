@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:02f466a808ab8153537884be337acea10524eaeb3c64aa6b66a3a408a311eaf9",
+  "id": "rec:sha256:e303eb5e865c25975f467b02e4228412a917def7520b134d2d74515f82f64f6c",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "logs/mobile_base.bag"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

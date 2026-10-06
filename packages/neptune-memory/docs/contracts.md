@@ -93,8 +93,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       `cmms_downtime` preset and `syslog_csv` (#145, #149), but the corpus's `deploy.json` declares them only
       from Platform's corpus 2.1.0 (#150). Memory's config already declares the `syslog events` table. The CMMS
       and syslog stops are on separate wall clocks, so they will be `clocks_unrelated`, never compared, and the
-      same-event assertion joins them. Bag e-stops are MVL-204. No event is ever aligned through an inferred
-      mapping.
+      same-event assertion joins them. Bag e-stops are compiler `status_report`s since MVL-204, which the
+      event index does not read yet. No event is ever aligned through an inferred mapping.
     - No answer yet to "what changed since the last good run".
       - There is no `snapshot_binding`, so no `configuration_active_during` and no `authorisation_undecided`.
       - Runs are `recorded_by` `manifest:ARM-3A`. The chains are on `cmms.asset:ARM-3A` and
@@ -106,10 +106,11 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     This file is regenerated as those land, never edited.
 ## Consumes
 
-- Compiler package schema: `SCHEMA_VERSION = 9` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
+- Compiler package schema: `SCHEMA_VERSION = 10` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
   0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the task kinds, root ADR
   0063; 8 adds the robot-description kinds, root ADR 0039; 9 adds `run_declaration`, root ADR 0072, read
-  by the run consolidator with the compiler's reader, ADR 0020). Alignment records (MVL-82, package-schema 3.0.0),
+  by the run consolidator with the compiler's reader, ADR 0020; 10 the `status_report` and `safety_state`
+  kinds, root ADR 0071, which the event index does not read yet). Alignment records (MVL-82, package-schema 3.0.0),
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the

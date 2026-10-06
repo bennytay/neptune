@@ -596,3 +596,132 @@ class Decoder:
         if not 0 <= nanos < NANOS:
             return None
         return seconds * NANOS + nanos
+
+
+# --- Whole values -------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Struct:
+    """One message value read whole: its type, its fields by name and where each field's bytes
+    are, as offsets into the payload (``start`` and ``end`` the value's own). A field holds a
+    primitive (``int``, ``float``, ``bool``), text (``str``, or ``BAD_TEXT`` where it is not
+    UTF-8), ``(secs, nsecs)`` for ROS 1 ``time`` and ``duration``, ``bytes`` for a byte array, a
+    ``Struct``, or a tuple of those for an array."""
+
+    type: str
+    start: int
+    end: int
+    fields: dict[str, object]
+    spans: dict[str, tuple[int, int]]
+
+
+def decode_value(
+    definition: Definition, payload: bytes | memoryview, cdr: bool, limits: DecodeLimits
+) -> Struct:
+    """``payload`` read whole by ``definition``'s root type, bounded as ``Decoder.decode`` is.
+
+    For the few types whose values are read as records (ADR 0071), never for a stream's columns:
+    nested arrays and byte arrays are read here too. Raises ``Malformed`` where the payload does
+    not hold the type, or passes a limit; a type that holds itself, or nests deeper than
+    ``MAX_DEPTH``, is ``Malformed`` too (``unsupported``), never a recursion error.
+    """
+    if len(payload) > limits.max_message_bytes:
+        raise Malformed("message_limit", limit=True)
+    big, start = False, 0
+    if cdr:
+        if len(payload) < 4:
+            raise Malformed("short")
+        if payload[0] != 0 or payload[1] not in (0, 1):
+            raise Malformed("encapsulation")
+        big, start = payload[1] == 0, 4
+    state = _State(payload, start, cdr, big, [], limits)
+    reader = _ValueReader(definition, state, definition.encoding == "ros1msg")
+    value = reader.message(definition.root_type, (definition.root,))
+    trailing = len(payload) - state.pos
+    if trailing > (3 if cdr else 0):
+        raise Malformed("trailing_bytes")
+    return value
+
+
+class _ValueReader:
+    def __init__(self, definition: Definition, state: _State, ros1: bool) -> None:
+        self.types = definition.types
+        self.state = state
+        self.ros1 = ros1
+
+    def message(self, message: MessageDef, ancestors: tuple[str, ...]) -> Struct:
+        if len(ancestors) > MAX_DEPTH:
+            raise Malformed("unsupported")
+        state = self.state
+        start = state.pos
+        fields: dict[str, object] = {}
+        spans: dict[str, tuple[int, int]] = {}
+        if not message.fields and not self.ros1:
+            _Primitive("uint8", None).read(state, 0)  # rosidl's one-byte placeholder
+        for field in message.fields:
+            fields[field.name], spans[field.name] = self.field(field, ancestors)
+        return Struct(message.name, start, state.pos, fields, spans)
+
+    def field(self, field: FieldDef, ancestors: tuple[str, ...]) -> tuple[object, tuple[int, int]]:
+        state = self.state
+        if field.array is None:
+            return self.element(field, ancestors)
+        if field.array is ArrayKind.FIXED:
+            count = field.length or 0
+        else:
+            count = state.count()
+            if (
+                field.array is ArrayKind.BOUNDED
+                and field.length is not None
+                and count > field.length
+            ):
+                raise Malformed("array_bound")
+        if count > state.limits.max_array_items:
+            raise Malformed("array_limit", limit=True)
+        start = state.pos
+        if field.declared in BYTE_NAMES:
+            state.need(count)
+            data = bytes(state.buf[state.pos : state.pos + count])
+            state.pos += count
+            return data, (start, state.pos)
+        # a count past what the bytes left could hold is a lie, refused before the walk
+        least = 4 if field.wire == "string" else struct.calcsize(_CODES.get(field.wire or "", "x"))
+        state.need(count * (least if field.wire is not None else 0))
+        state.walk(count)
+        items = []
+        for _ in range(count):
+            value, _span = self.element(field, ancestors)
+            items.append(value)
+        return tuple(items), (start, state.pos)
+
+    def element(
+        self, field: FieldDef, ancestors: tuple[str, ...]
+    ) -> tuple[object, tuple[int, int]]:
+        state = self.state
+        wire = field.wire
+        if wire is None:
+            if field.type in ancestors:
+                raise Malformed("unsupported")
+            message = self.message(self.types[field.type], (*ancestors, field.type))
+            return message, (message.start, message.end)
+        if wire == "wstring":
+            raise Malformed("unsupported")
+        if wire in ("time", "duration"):
+            start = state.pos
+            state.need(8)
+            pair = struct.unpack_from("<ii" if wire == "duration" else "<II", state.buf, state.pos)
+            state.pos += 8
+            return pair, (start, state.pos)
+        cells: list[object] = [None]
+        state.cells = cells
+        if wire == "string":
+            state.align(4)  # a string's span starts at its length, aligned
+            start = state.pos
+            _String(field.bound, 0).read(state, 0)
+            return cells[0], (start, state.pos)
+        primitive = _Primitive(wire, 0)
+        state.align(primitive.size)
+        start = state.pos
+        primitive.read(state, 0)
+        return cells[0], (start, state.pos)

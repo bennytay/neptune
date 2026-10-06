@@ -277,6 +277,8 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "run": "run",
         "stream": "run",
         "run_declaration": "run",
+        "status_report": "run",
+        "safety_state": "run",
         "machine": "machine",
         "hardware_configuration": "machine",
         "hardware_component": "machine",

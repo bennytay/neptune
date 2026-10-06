@@ -21,6 +21,7 @@ from neptune.adapters.rosbag1.scan import (
     read_exact,
     scan,
 )
+from neptune.adapters.rosmsg.status import Unrecognised, recognised, unrecognised_report
 from neptune.adapters.rosmsg.streams import (
     HEADER_STAMP,
     Declared,
@@ -179,6 +180,17 @@ class Cite:
 
     def stream(self, place: Place) -> RecordId:
         return self.record_id(Stream.kind, place)
+
+    def header_clock(self, place: Place) -> RecordId:
+        """The id of the clock a connection's leading header stamps (ADR 0068 §2)."""
+        return self.record_id(TimestampDomain.kind, place, time_field(HEADER_STAMP))
+
+    def definition(self, place: Place, connection: Connection) -> EvidenceRef | None:
+        """The bytes of a connection's ``message_definition``, as its stream cites them."""
+        field = connection.header.find(b"message_definition")
+        if field is None or field.length == 0:
+            return None
+        return self.evidence(place.within(field.start, field.length))
 
 
 def as_place(data: JsonValue) -> Place:
@@ -405,7 +417,7 @@ class Declarations:
         """The clock a leading ``Header``'s stamp reads (ADR 0068 §2)."""
         cite, where = self.cite, (time_field(HEADER_STAMP),)
         return header_domain(
-            record_id=cite.record_id(TimestampDomain.kind, place, *where),
+            record_id=cite.header_clock(place),
             provenance=cite.provenance(place, *where),
             scope=(topic.value,) if isinstance(topic, Known) else ("connection", str(conn)),
             definition=Provenance(definition, cite.transform.id, AssertionKind.STATED),
@@ -415,6 +427,18 @@ class Declarations:
         self, conn: int, place: Place, stream: RecordId, decoding: Decoding | NotDecoded
     ) -> None:
         details: dict[str, JsonValue] = {"id": conn, "message_encoding": MESSAGE_ENCODING}
+        status = recognised(decoding)
+        if isinstance(status, Unrecognised):
+            shape = unrecognised_report(status, f"connection {conn}", details)
+            self.finding(
+                shape.code,
+                shape.category,
+                shape.severity,
+                place,
+                shape.message,
+                shape.details,
+                records=(stream,),
+            )
         report = decoding_report(decoding, f"connection {conn}", details)
         if report is not None:
             self.finding(

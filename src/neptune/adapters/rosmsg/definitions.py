@@ -8,12 +8,15 @@ bytes are laid out.
 - ``ros1msg`` and ``ros2msg``: the root type's fields, then each dependency after a line of
   ``=`` and a ``MSG: <name>`` line, as MCAP, rosbag1 and rosbag2 write them. A name without a
   package resolves in the package of the type that uses it; ROS 1's ``Header`` is
-  ``std_msgs/Header``; ``pkg/msg/Name`` and ``pkg/Name`` are one type. Constants are dropped
-  (they take no bytes); ROS 2 defaults are ignored (the payload holds every field).
+  ``std_msgs/Header``; ``pkg/msg/Name`` and ``pkg/Name`` are one type. Constants take no bytes:
+  an integer or boolean one is kept on its type (``byte ERROR=2``, ADR 0071 §3), any other is
+  dropped; ROS 2 defaults are ignored (the payload holds every field).
 - ``ros2idl``: each type after a line of ``=`` and an ``IDL: <name>`` line (MCAP's layout of the
   IDL rosidl generates): modules, structs, typedefs (with array declarators), sequences, bounded
-  strings and the IDL primitive names. Annotations, constants and preprocessor lines are skipped;
-  enums, unions, ``long double``, ``wchar`` and multi-dimensional arrays are refused.
+  strings and the IDL primitive names. An integer or boolean ``const`` in a ``<Name>_Constants``
+  module (rosidl's place for a type's constants) is kept on ``<Name>``; other constants,
+  annotations and preprocessor lines are skipped; enums, unions, ``long double``, ``wchar`` and
+  multi-dimensional arrays are refused.
 
 Every parser is bounded by ``Limits``: the definition's bytes, its types and fields, and the
 length of a name. A definition past one raises ``DefinitionError`` with a reason the adapter
@@ -98,6 +101,18 @@ _TYPE: Final = re.compile(
     r"(?:\[(?P<array>(?:<=)?[0-9]*)\])?"
 )
 _CONSTANT: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]*\s*=")
+_INTEGER: Final = re.compile(r"[+-]?[0-9]{1,20}")
+_BOOLEANS: Final = {"true": True, "false": False}
+_INTEGER_WIRES: Final = frozenset(
+    {"int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"}
+)
+# The .msg type names a kept constant may have: ROS 1's and ROS 2's integers (byte, char) and bool.
+_CONSTANT_TYPES: Final = frozenset(
+    name
+    for table in (_ROS1, _ROS2)
+    for name, wire in table.items()
+    if wire == "bool" or wire in _INTEGER_WIRES
+)
 _DIGITS: Final = 12  # a length beyond 10**12 is not one any payload holds
 
 
@@ -124,9 +139,19 @@ class FieldDef:
 
 
 @dataclass(frozen=True)
+class ConstantDef:
+    """A constant a type declares: its name, verbatim, and its integer or boolean value. It takes
+    no bytes on the wire; it names a value a field of the type may hold (``ERROR = 2``)."""
+
+    name: str
+    value: int | bool
+
+
+@dataclass(frozen=True)
 class MessageDef:
     name: str
     fields: tuple[FieldDef, ...]
+    constants: tuple[ConstantDef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -236,8 +261,33 @@ def _uncommented(text: str) -> str:
     return text
 
 
-def _msg_field(line: str, package: str, ros2: bool, limits: Limits) -> FieldDef | None:
-    """One line's field, or ``None`` for a constant."""
+def constant_value(text: str, boolean: bool) -> int | bool | None:
+    """A constant's value as an integer (decimal, as ROS writes them) or, for a boolean type, a
+    boolean; ``None`` for any other value, which is not kept."""
+    text = text.strip()
+    if boolean:
+        if text.lower() in _BOOLEANS:
+            return _BOOLEANS[text.lower()]
+        return {"1": True, "0": False}.get(text)
+    if _INTEGER.fullmatch(text):
+        return int(text)
+    return None
+
+
+def _msg_constant(token: str, rest: str, limits: Limits) -> ConstantDef | None:
+    """A ``.msg`` constant's name and integer or boolean value; ``None`` for any other."""
+    name, _, value = rest.partition("=")
+    name = name.strip()
+    if token not in _CONSTANT_TYPES or not _NAME.fullmatch(name):
+        return None  # only an integer or boolean constant names a value a field may hold
+    found = constant_value(_uncommented(value), token == "bool")
+    return ConstantDef(_cap(name, limits, "constant name"), found) if found is not None else None
+
+
+def _msg_field(
+    line: str, package: str, ros2: bool, limits: Limits
+) -> FieldDef | ConstantDef | None:
+    """One line's field, or its constant (``None`` for one that is not kept)."""
     parts = line.split(None, 1)
     if len(parts) < 2:
         raise DefinitionError("malformed", f"{_shown(line)} is not a type and a name")
@@ -246,7 +296,7 @@ def _msg_field(line: str, package: str, ros2: bool, limits: Limits) -> FieldDef 
     if match is None:
         raise DefinitionError("malformed", f"{_shown(token)} is not a field type")
     if _CONSTANT.match(rest):
-        return None  # a constant takes no bytes on the wire
+        return _msg_constant(token, rest, limits)  # a constant takes no bytes on the wire
     words = _uncommented(rest).split()
     if not words or not _NAME.fullmatch(words[0]):
         raise DefinitionError("malformed", f"{_shown(rest)} is not a field name")
@@ -313,6 +363,7 @@ def _parse_msg(text: str, root: str, ros2: bool, limits: Limits) -> dict[str, Me
     for name, lines in sections:
         package = name.split("/", 1)[0]
         fields: list[FieldDef] = []
+        constants: list[ConstantDef] = []
         seen: set[str] = set()
         for line in lines:
             count += 1
@@ -321,11 +372,14 @@ def _parse_msg(text: str, root: str, ros2: bool, limits: Limits) -> dict[str, Me
             field = _msg_field(line, package, ros2, limits)
             if field is None:
                 continue
+            if isinstance(field, ConstantDef):
+                constants.append(field)
+                continue
             if field.name in seen:
                 raise DefinitionError("malformed", f"{name} declares {field.name} twice")
             seen.add(field.name)
             fields.append(field)
-        declared = MessageDef(name, tuple(fields))
+        declared = MessageDef(name, tuple(fields), tuple(constants))
         if name in types and types[name] != declared:
             raise DefinitionError("malformed", f"{name} is defined twice, differently")
         types.setdefault(name, declared)
@@ -340,6 +394,7 @@ _TOKEN: Final = re.compile(
     re.DOTALL,
 )
 _SKIPPED: Final = re.compile(r"\s+|//[^\n]*|/\*.*?\*/", re.DOTALL)
+_CONSTANTS: Final = "_Constants"
 
 
 def _tokens(text: str) -> list[str]:
@@ -362,11 +417,18 @@ class _Idl:
 
     MAX_DEPTH: Final = 32
 
-    def __init__(self, tokens: list[str], limits: Limits, types: dict[str, MessageDef]) -> None:
+    def __init__(
+        self,
+        tokens: list[str],
+        limits: Limits,
+        types: dict[str, MessageDef],
+        constants: dict[tuple[str, ...], list[ConstantDef]],
+    ) -> None:
         self.tokens = tokens
         self.at = 0
         self.limits = limits
         self.types = types
+        self.constants = constants
         self.typedefs: dict[str, FieldDef] = {}
         self.fields = 0
 
@@ -429,11 +491,37 @@ class _Idl:
             elif token == "typedef":
                 self.typedef(scope)
             elif token == "const":
-                self.skip_to_semicolon()
+                self.constant(scope)
             elif token in ("enum", "union"):
                 raise DefinitionError("unsupported", f"an IDL {token} is not read")
             else:
                 raise DefinitionError("malformed", f"unexpected {_shown(token)}")
+
+    def constant(self, scope: tuple[str, ...]) -> None:
+        """``const <type> <NAME> = <value>;``: kept under ``scope`` when its value is an
+        integer or a boolean (``-1`` is two tokens), else skipped."""
+        self.take("const")
+        words: list[str] = []
+        while (token := self.take()) != ";":
+            words.append(token)
+        if "=" not in words:
+            raise DefinitionError("malformed", "a const has no value")
+        at = words.index("=")
+        if at < 2:
+            raise DefinitionError("malformed", "a const has a type and a name")
+        name, kind = words[at - 1], " ".join(words[: at - 1])
+        wire = _IDL.get(kind)
+        if wire is None or (wire != "bool" and wire not in _INTEGER_WIRES):
+            return  # only an integer or boolean constant names a value a field may hold
+        value = constant_value("".join(words[at + 1 :]), wire == "bool")
+        if value is None or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            return
+        self.fields += 1
+        if self.fields > self.limits.max_fields:
+            raise DefinitionError("field_limit", f"more than {self.limits.max_fields} fields")
+        self.constants.setdefault(scope, []).append(
+            ConstantDef(_cap(name, self.limits, "constant name"), value)
+        )
 
     def type_spec(self, scope: tuple[str, ...], depth: int = 0) -> FieldDef:
         """A type as a field without a name: primitive, string, sequence or scoped name."""
@@ -582,9 +670,18 @@ def _parse_idl(text: str, limits: Limits) -> dict[str, MessageDef]:
             continue
         sections[-1].append(raw)
     types: dict[str, MessageDef] = {}
+    constants: dict[tuple[str, ...], list[ConstantDef]] = {}
     for lines in sections:
-        reader = _Idl(_tokens("\n".join(lines)), limits, types)
+        reader = _Idl(_tokens("\n".join(lines)), limits, types, constants)
         reader.definitions((), 0)
         if reader.peek() is not None:
             raise DefinitionError("malformed", f"unexpected {reader.peek()!r} at the top level")
+    for scope, declared in sorted(constants.items()):
+        # rosidl puts a type's constants in a module named after it: pkg::msg::Name_Constants
+        if not scope or not scope[-1].endswith(_CONSTANTS) or len(scope[-1]) == len(_CONSTANTS):
+            continue
+        owner = _idl_message_name("::".join((*scope[:-1], scope[-1][: -len(_CONSTANTS)])))
+        message = types.get(owner) if owner is not None else None
+        if message is not None and not message.constants:
+            types[message.name] = MessageDef(message.name, message.fields, tuple(declared))
     return types

@@ -50,6 +50,14 @@ from neptune.adapters.rosbag2._sqlite import (
     rowid_alias,
     text_value,
 )
+from neptune.adapters.rosmsg.status import (
+    Recognised,
+    Sample,
+    StatusWriter,
+    Unrecognised,
+    recognised,
+    unrecognised_report,
+)
 from neptune.adapters.rosmsg.streams import (
     HEADER_STAMP,
     Declared,
@@ -65,6 +73,7 @@ from neptune.adapters.rosmsg.streams import (
     plan_stream,
     undecoded_report,
 )
+from neptune.adapters.rosmsg.streams import Row as DecodedRow
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -229,6 +238,7 @@ class Message:
     cell: ByteRange
     data_bytes: int
     payload: bytes | None = None  # the data's bytes when all of them are in the cell's page
+    payload_at: int = 0  # where the data's bytes start in the cell's
 
 
 def decode_message(cell: Cell, columns: dict[str, int]) -> Message | str:
@@ -248,7 +258,8 @@ def decode_message(cell: Cell, columns: dict[str, int]) -> Message | str:
     place = ByteRange(stamp.offset, stamp.size) if stamp.size else where
     end = data.at + data.size
     payload = cell.local[data.at : end] if end <= len(cell.local) else None
-    return Message(cell.rowid, topic_id, ticks, place, where, data.size, payload)
+    at = cell.body - cell.offset + data.at
+    return Message(cell.rowid, topic_id, ticks, place, where, data.size, payload, at)
 
 
 @dataclass(frozen=True)
@@ -616,6 +627,11 @@ class _Streams:
             adapter_locator(TIME_FIELD, {"name": "timestamp"}),
         )
 
+    def header_clock(self, topic: Topic) -> RecordId:
+        """The id of the clock a topic's leading header stamps (ADR 0068 §2)."""
+        where = adapter_locator(TIME_FIELD, {"name": HEADER_STAMP})
+        return self.cite.record_id(TimestampDomain.kind, topic.place, where)
+
 
 def _ints(value: JsonValue) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
@@ -798,7 +814,7 @@ class _Declarations:
         cite = self.cite
         where = adapter_locator(TIME_FIELD, {"name": HEADER_STAMP})
         return header_domain(
-            record_id=cite.record_id(TimestampDomain.kind, topic.place, where),
+            record_id=self.ids.header_clock(topic),
             provenance=cite.provenance(topic.place, where),
             scope=(name.value,) if isinstance(name, Known) else ("topic", str(topic.row.rowid)),
             definition=cite.provenance(definition, kind=AssertionKind.STATED),
@@ -811,6 +827,20 @@ class _Declarations:
             "rowid": topic.row.rowid,
             "serialization_format": topic.values.get("serialization_format") or "",
         }
+        status = recognised(decoding)
+        if isinstance(status, Unrecognised):
+            shape = unrecognised_report(status, f"topic {topic.row.rowid}", details)
+            self.findings.append(
+                self.cite.finding(
+                    shape.code,
+                    shape.category,
+                    shape.severity,
+                    (topic.place,),
+                    shape.message,
+                    shape.details,
+                    records=(stream,),
+                )
+            )
         report = decoding_report(decoding, f"topic {topic.row.rowid}", details)
         if report is not None:
             self.findings.append(
@@ -830,6 +860,13 @@ def series_template(source: SourceReader) -> SeriesProvenance:
     """A row cites its message's cell: its length and offset in the file."""
     step = step_template("byte_range", per_row=("length", "offset"))
     return SeriesProvenance(source.content_id, (step,), AssertionKind.OBSERVED)
+
+
+@dataclass(frozen=True)
+class _Status:
+    kind: Recognised
+    clocks: tuple[RecordId, ...]
+    definition: EvidenceRef | None
 
 
 class _Rows:
@@ -855,6 +892,8 @@ class _Rows:
         definitions = read_definitions(self.db, self.layout)
         decodings = decodings_of(self.source, topics, definitions, self.ids.cite.config)
         kinds = {rowid: columns(decoding) for rowid, decoding in decodings.items()}
+        statuses = self._statuses(topics, definitions, decodings)
+        writer = StatusWriter(self.ids.cite.config)
         undecoded: dict[int, Undecoded] = {}
         rows: dict[int, dict[str, list[object]]] = {}
         for cell in self.db.table(self.layout.messages.root, low, high):
@@ -881,6 +920,9 @@ class _Rows:
                     reason = "not_local"
                 if reason is not None:
                     undecoded.setdefault(message.topic, Undecoded()).add(reason, message.cell)
+                status = statuses.get(message.topic)
+                if status is not None:
+                    self._status(writer, streams[message.topic], status, message, decoded, decoding)
         batches = tuple(
             SeriesBatch(
                 streams[topic],
@@ -891,7 +933,76 @@ class _Rows:
             )
             for topic, found in sorted(rows.items())
         )
-        return ChunkOutput(series=batches, findings=tuple(self._findings(undecoded, streams)))
+        findings = [*self._findings(undecoded, streams), *self._status_findings(writer, streams)]
+        return ChunkOutput(records=tuple(writer.records), series=batches, findings=tuple(findings))
+
+    def _statuses(
+        self,
+        topics: "list[Topic]",
+        definitions: "dict[str, Definition]",
+        decodings: "dict[int, Decoding | NotDecoded]",
+    ) -> dict[int, _Status]:
+        """Per topic whose messages state status or safety-state records (ADR 0071): what they
+        are, its clocks and its definition's bytes."""
+        found: dict[int, _Status] = {}
+        for topic in topics:
+            decoding = decodings[topic.row.rowid]
+            kind = recognised(decoding)
+            if kind is None or isinstance(kind, Unrecognised):
+                continue
+            assert isinstance(decoding, Decoding)
+            clocks = [self.ids.clock]
+            if decoding.has_header:
+                clocks.append(self.ids.header_clock(topic))
+            declared = definitions.get(topic.values.get("type") or "")
+            text = declared.text if declared is not None else None
+            evidence = self.ids.cite.evidence(text) if text is not None else None
+            found[topic.row.rowid] = _Status(kind, tuple(clocks), evidence)
+        return found
+
+    def _status(
+        self,
+        writer: StatusWriter,
+        stream: RecordId,
+        status: "_Status",
+        message: Message,
+        decoded: DecodedRow,
+        decoding: Decoding,
+    ) -> None:
+        times: list[Knowledge[Timestamp]] = []
+        for clock, value in zip(status.clocks, (message.ticks, decoded.stamp), strict=False):
+            times.append(Known(Timestamp(value, clock)) if value is not None else Unknown())
+        steps = (message.cell,)
+        sample = Sample(
+            self.source.content_id, steps, message.payload_at, tuple(times), message.cell
+        )
+        decoder = decoding.decoder
+        writer.add(
+            status.kind,
+            stream,
+            status.definition,
+            sample,
+            message.payload,
+            decoder.cdr,
+            decoder.limits,
+        )
+
+    def _status_findings(
+        self, writer: StatusWriter, streams: dict[int, RecordId]
+    ) -> Iterator[IngestFinding]:
+        """One finding per topic whose messages here left status records unwritten."""
+        topics = {stream: rowid for rowid, stream in streams.items()}
+        for stream, place, report in writer.reports():
+            assert isinstance(place, ByteRange)
+            yield self.ids.cite.finding(
+                report.code,
+                report.category,
+                report.severity,
+                (place,),
+                report.message,
+                {**report.details, "rowid": topics[stream]},
+                records=(stream,),
+            )
 
     def _findings(
         self, undecoded: dict[int, Undecoded], streams: dict[int, RecordId]
