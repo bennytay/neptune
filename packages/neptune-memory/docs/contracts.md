@@ -68,43 +68,44 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
   - What it holds today:
-    - 12 runs from both sites, with `evidenced_by` and `has_member`.
+    - 12 runs from both sites, with `evidenced_by` and `has_member`, and from each run's `run_declaration` a
+      stated `recorded_by` machine and `at_site` site (the manifest declares no task).
     - 97 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
       2026-09-14.
     - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
       `stated_severity`, `has_description` and `evidenced_by`.
     - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
       drop them with `include_inferred=False`. One is the cell PC's ≈ −96.7 s on 2026-09-14.
-    - Configuration chains from Deploy's lifecycle records, all `stated` and each citing its work orders:
-      - All 15 `maintenance_event`s are on chains, as `has_configuration` on the machine id the CMMS states.
-        `cmms.asset:ARM-3A` is on `firmware:5.6.0` from WO-26-0310 on, and WO-26-0911 is among the seven
-        work orders that span cites; its firmware did not change. AMR-05, AMR-06 and LEG-01 have one span each.
-      - One `succeeds`: AMR-07's `firmware:4.3.1` succeeds `firmware:4.2.0` at WO-26-0414.
-      - The 5 `change_record`s state no configuration (`NotCovered` in Deploy's mapping). So each gives
-        `configuration_unknown` on its `servicenow.ci:*` machine, plus a `chain_gap`.
+    - Configuration chains from all 16 `maintenance_event`s and 5 `change_record`s, `stated`, each citing its
+      records. There are 11 `has_configuration` spans, on the machine id each system states:
+      - `cmms.asset:ARM-3A` is on `firmware:5.6.0`; WO-26-0911 is among the eight work orders that span cites.
+      - `servicenow.ci:ARM-3A` goes from `5.6.0` to `TCP z=145.5 mm`, via `servicenow.u_after`.
+    - Two `succeeds`: AMR-07's `firmware:4.3.1` after `firmware:4.2.0` (CMMS), and ARM-3A's ServiceNow
+      `TCP z=145.5 mm` after `5.6.0`.
     - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
-      The 13th run states no first instant, so it is not placed (`untimeable_window`).
+      The 13th run states no first instant (`untimeable_window`).
   - What it lacks:
-    - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
-      incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
-      inferred mapping.
+    - No event for INC-C3-0011, and no `co_occurs_within`. Deploy ships the arm-cell incident template, the
+      `cmms_downtime` preset and `syslog_csv` (#145, #149), but the corpus's `deploy.json` declares them only
+      from Platform's corpus 2.1.0 (#150). Memory's config already declares the `syslog events` table. The CMMS
+      and syslog stops are on separate wall clocks, so they will be `clocks_unrelated`, never compared, and the
+      same-event assertion joins them. Bag e-stops are MVL-204. No event is ever aligned through an inferred
+      mapping.
     - No answer yet to "what changed since the last good run".
-      - Runs name no machine, so no run meets a chain (MVL-205).
-      - There is no `snapshot_binding`, so there is no `configuration_active_during` and no
-        `authorisation_undecided`.
-      - Each chain is keyed by the namespace that declares it. `cmms.asset:ARM-3A`, `servicenow.ci:ARM-3A` and
-        the register's `asset:ARM-3A` are three nodes until an `identity_link` or an operator assertion joins
-        them; the corpus has neither.
-    - No `authorised_configuration`. Both envelopes name no configuration (`envelope_unplaced`), and their
-      `valid_from` and `valid_until` are on two different clocks (`untimeable_window`).
+      - There is no `snapshot_binding`, so no `configuration_active_during` and no `authorisation_undecided`.
+      - Runs are `recorded_by` `manifest:ARM-3A`. The chains are on `cmms.asset:ARM-3A` and
+        `servicenow.ci:ARM-3A`, and the register declares `asset:ARM-3A`. These are four nodes until an
+        `identity_link` or an operator assertion joins them, and the corpus has neither.
+    - No `authorised_configuration`: no envelope places a configuration on its site.
     - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
 
     This file is regenerated as those land, never edited.
 ## Consumes
 
-- Compiler package schema: `SCHEMA_VERSION = 8` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
+- Compiler package schema: `SCHEMA_VERSION = 9` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
   0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the task kinds, root ADR
-  0063; 8 adds the robot-description kinds, root ADR 0039). Alignment records (MVL-82, package-schema 3.0.0),
+  0063; 8 adds the robot-description kinds, root ADR 0039; 9 adds `run_declaration`, root ADR 0072, read
+  by the run consolidator with the compiler's reader, ADR 0020). Alignment records (MVL-82, package-schema 3.0.0),
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the

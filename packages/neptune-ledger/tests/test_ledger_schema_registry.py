@@ -32,6 +32,7 @@ from neptune.model.knowledge import AssertionKind, Known, NotCovered
 from neptune.model.machine import DescriptionExpansion
 from neptune.model.provenance import Provenance
 from neptune.model.record import SCHEMA_VERSION
+from neptune.model.run import Run, RunDeclaration
 from neptune.model.task import WorkOrder
 from neptune.store.package import package_files, read_package
 from neptune_ledger.api import codec
@@ -529,10 +530,11 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
 
 
 def newest_package(tmp_path: Path) -> WorkedPackage:
-    """A package of package-schema 8: the schema-4 manipulator cell plus one work order (version 7,
+    """A package of package-schema 9: the schema-4 manipulator cell plus one work order (version 7,
     root ADR 0063), stated by a declared-records transform over the cell's risk-assessment
-    transform, and one Xacro expansion (version 8, root ADR 0039) a description adapter observed
-    in the same bytes. No worked example holds a version-7 or version-8 kind, and a package is
+    transform, one Xacro expansion (version 8, root ADR 0039) a description adapter observed in
+    the same bytes, and a manifest's run declaration (version 9, root ADR 0072) about a run the
+    same declaration states. No worked example holds a version-7, 8 or 9 kind, and a package is
     written at the lowest version that holds its records, so the newest version needs a record of
     its own."""
     cell = materialise("manipulator_cell", tmp_path / "manipulator_cell-4")
@@ -567,16 +569,33 @@ def newest_package(tmp_path: Path) -> WorkedPackage:
         len(expanded),
         (),
     )
-    files = package_files([*records, declared, order, xacro, expansion])
+    run = Run(
+        evidence_record_id("run", evidence, declared),
+        stated,
+        Known(LogicalId("manifest", "cell3-pick"), stated),
+        NotCovered(),
+        NotCovered(),
+        NotCovered(),
+    )
+    named = RunDeclaration(
+        evidence_record_id("run_declaration", evidence, declared),
+        stated,
+        run.id,
+        Known(LogicalId("manifest", "cell3-pick"), stated),
+        Known(LogicalId("manifest", "ARM-3A"), stated),
+        Known(LogicalId("manifest", "PLANT-2"), stated),
+        NotCovered(),
+    )
+    files = package_files([*records, declared, order, xacro, expansion, run, named])
     return write("manipulator_cell", tmp_path / "manipulator_cell", files)
 
 
 def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
-    """Boundary: the registry's newest version (the manipulator cell with a work order and a
-    description expansion, version 8) registers; the same package one version past it is a future
-    version."""
+    """Boundary: the registry's newest version (the manipulator cell with a work order, a
+    description expansion and a run declaration, version 9) registers; the same package one
+    version past it is a future version."""
     cell = newest_package(tmp_path)
     assert cell.schema_version == shipped_registry().latest.version == SCHEMA_VERSION
     manifest = dict(cell.manifest)

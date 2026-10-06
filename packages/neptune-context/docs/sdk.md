@@ -40,7 +40,13 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
 - The in-process engine is `neptune_context.engine.LocalEngine(memory_reader, catalog=None)` (ADR 0007): it
   runs the graph channel over a Memory reader (and the Ledger's indexes when a `CatalogApi` is given), fuses,
   cuts to the budget and assembles the packet. `read_graph(path)` loads a Memory graph document into Memory's
-  reference reader. Lexical and vector channels join through `LocalEngine(..., channels=[...])`.
+  reference reader, indexed by claim id for `why` (`explain.IndexedReader`). Lexical and vector channels join
+  through `LocalEngine(..., channels=[...])`.
+- `why` and `diff` answers carry `packet.trails` (ADR 0010): the why tree (root, corroborating, conflicting
+  and alternative claims, each with its evidence) and the what-changed list (opened, closed, superseded, by
+  predicate). `neptune_context.explain.render_markdown(packet)` renders any packet for people, with
+  `neptune://claim/<id>?as_of=N` links (open with `why`) and `neptune://evidence/<token>?as_of=N` links
+  (open with `hydrate`; the MCP server's resource URIs).
 - `StubEngine.from_directory(Path("tests/golden/packets"))` answers exactly the queries it has recorded
   packets for and says `not_found` for anything else: for fixtures and offline builds. It reads regular
   `*.json` files only (symlinks and other files are skipped), checks each size before reading, and refuses a
@@ -316,6 +322,10 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
 - A packet answer is cited sentences (`render.agent.render_answer`):
   - a header with the snapshot, the clock and the inference policy;
   - **What changed** first;
+  - a **why outline** and **what-changed lines** when the packet has trails ([ADR 0011](adr/0011-agent-renderer-trails-why-outlines-and-diff-change-lines.md)):
+    each node or change is a sentence naming its claim and citing its evidence, a conflict names the resolver
+    finding, a repeat and every cap or gap says so, and a diff says `held only between the two points` for a
+    version that opened and closed inside the window;
   - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`;
   - quantities by declared unit, findings and gaps;
   - an `Items:` footer (item and claim ids) and the `Evidence:` footer.

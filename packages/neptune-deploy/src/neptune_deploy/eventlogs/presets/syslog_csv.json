@@ -1,0 +1,11 @@
+{
+  "schema": "neptune-deploy.event-log-mapping/1",
+  "id": "syslog.csv",
+  "version": "1",
+  "description": "A syslog collector's messages exported as CSV, one message per row, every column copied verbatim and cited: Seq (the collector's sequence number, also the row's identifier under 'syslog'), Host, Facility, Severity, Tag, MsgID (RFC 5424 MSGID) and Message. Timestamp is the sender's local wall time as the collector shows it, read to the precision it states, never moved to UTC. The export states no zone: the caller passes the source's civil_time_zone where the site declares one, and otherwise it is Unknown (ADR 0016, ADR 0017).",
+  "table": "syslog events",
+  "requires": ["Timestamp", "Message"],
+  "identifier": {"column": "Seq", "namespace": "syslog"},
+  "time": {"column": "Timestamp", "format": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"], "zone": "unstated"},
+  "columns": ["Seq", "Host", "Facility", "Severity", "Tag", "MsgID", "Message"]
+}

@@ -1,0 +1,196 @@
+{
+  "findings": [],
+  "gaps": [
+    {
+      "at": "/explain/0",
+      "channel": "graph",
+      "code": "not_covered",
+      "detail": "in this why tree, predicate 'drift' is newer than Context's pinned graph-schema 1.6.0: the claim is named, not carried",
+      "refs": [
+        "claim:sha256:0f58915eea7300da8e3fb4f46cb589520951c741957b9f72da1df3bb32d15947"
+      ]
+    }
+  ],
+  "header": {
+    "as_of": 4,
+    "budget": {
+      "dropped": 0,
+      "exhausted": [],
+      "limits": {
+        "items": 10
+      },
+      "tokenizer": "neptune-context.utf8-bytes-div-4/1",
+      "used": {
+        "bytes": 1984,
+        "items": 2,
+        "tokens": 496
+      }
+    },
+    "head": 4,
+    "inference_included": false,
+    "ledger_snapshot": {
+      "catalog_api_version": "1.7.0"
+    },
+    "memory_snapshot": {
+      "as_of": 4,
+      "generation": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
+      "graph_schema_version": 1
+    },
+    "produced_by": {
+      "config_hash": "sha256:00942ee9ca1cd0d6f4b9335773b91877c593d07fce55f116d44f943e6aa4bc87",
+      "engine_id": "neptune-context.local",
+      "engine_version": "1"
+    },
+    "query_id": "query:sha256:10547e6457332b2d5902a211cd9819a66da29363e43408ab0fa666d84fe4b00a"
+  },
+  "id": "packet:sha256:1ddb57961013345a14b91fcf784df739372c0b5f2dd2cc394064bd52b7847f83",
+  "items": [
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/translation"
+          }
+        ],
+        "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+      },
+      "id": "item:sha256:c2a8a10d1f9f5cb021ad4c17e635d4141ce2600606a5934d1a79c6ecce991850",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/translation"
+              }
+            ],
+            "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+          }
+        ],
+        "records": [
+          "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+          "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+        ],
+        "transform": {
+          "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
+          "producer_id": "fixture.calibration",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 1,
+            "score": 0.5
+          }
+        ],
+        "score": 0.01639344262295082
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    },
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/translation"
+          }
+        ],
+        "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+      },
+      "id": "item:sha256:da387ba42e5b4c0e112eafca605836475e06eacf8fe1426cbf1527983aa01057",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/translation"
+              }
+            ],
+            "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+          }
+        ],
+        "records": [
+          "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+          "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+        ],
+        "transform": {
+          "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
+          "producer_id": "fixture.calibration",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 2,
+            "score": 0.5
+          }
+        ],
+        "score": 0.016129032258064516
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    }
+  ],
+  "kind": "context_packet",
+  "packet_version": 1,
+  "superseded_since": [],
+  "trails": [
+    {
+      "at": "/explain/0",
+      "claim": "claim:sha256:0f58915eea7300da8e3fb4f46cb589520951c741957b9f72da1df3bb32d15947",
+      "kind": "why",
+      "steps": [
+        {
+          "assertion_kind": "observed",
+          "claim": "claim:sha256:0f58915eea7300da8e3fb4f46cb589520951c741957b9f72da1df3bb32d15947",
+          "depth": 0,
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/translation"
+                }
+              ],
+              "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+            },
+            {
+              "locator": [
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/translation"
+                }
+              ],
+              "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+            }
+          ],
+          "relation": "root",
+          "repeat": false
+        }
+      ]
+    }
+  ]
+}

@@ -4,6 +4,7 @@ naming the JSON pointer of what it refused."""
 import json
 import re
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar
 from typing import Final
 
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -45,10 +46,15 @@ def parse_document(data: bytes, code: str, max_bytes: int) -> JsonValue:
 
 
 class Reader:
-    """Typed access to one document; ``code`` is the error code its refusals carry."""
+    """Typed access to one document; ``code`` is the error code its refusals carry.
 
-    def __init__(self, code: str) -> None:
+    ``unread`` is an opt-in sink (Deploy ADR 0015): while it holds a list, an object's unknown keys
+    are appended to it, as JSON pointers, instead of refused. Known keys stay strict.
+    """
+
+    def __init__(self, code: str, unread: ContextVar[list[str] | None] | None = None) -> None:
         self.code = code
+        self.unread = unread
 
     def fail(self, message: str, pointer: str) -> PackError:
         return PackError(self.code, message, pointer)
@@ -67,7 +73,10 @@ class Reader:
             raise self.fail(f"missing {', '.join(sorted(missing))}", pointer)
         extra = sorted(set(value) - set(required) - set(optional))
         if extra:
-            raise self.fail(f"unexpected {', '.join(extra)}", pointer)
+            sink = self.unread.get() if self.unread is not None else None
+            if sink is None:
+                raise self.fail(f"unexpected {', '.join(extra)}", pointer)
+            sink.extend(child(pointer, key) for key in extra)
         return value
 
     def array(self, value: JsonValue, pointer: str) -> Sequence[JsonValue]:

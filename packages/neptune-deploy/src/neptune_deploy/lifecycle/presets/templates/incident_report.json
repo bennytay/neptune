@@ -1,0 +1,107 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "incident.report",
+  "version": "1",
+  "description": "An incident report form: labelled header fields (Incident no, Site, Zone, Location, Machine, Assets, Occurred at, Severity, Related records), a Time | Event timeline table and two free-text sections (Description, Root cause) copied verbatim under their spans, never summarised. Times are a date and a time of day as the form writes them, to the minute or to the second, on the document's own clock, with the precision written. The form states no zone, so none is declared. A time of day without a date is never completed: it stays Unknown with a finding (ADR 0016).",
+  "kind": "incident_record",
+  "formats": [
+    "pdf"
+  ],
+  "zone": "unstated",
+  "tables": {
+    "timeline": [
+      "Time",
+      "Event"
+    ]
+  },
+  "requires": {
+    "labels": [
+      "Incident no",
+      "Occurred at"
+    ],
+    "headings": [
+      "Timeline"
+    ],
+    "tables": [
+      "timeline"
+    ]
+  },
+  "ignore": {
+    "headings": [
+      "Incident report",
+      "Timeline"
+    ]
+  },
+  "fields": {
+    "identifiers": [
+      {
+        "label": "Incident no",
+        "namespace": "incident_report.incident"
+      }
+    ],
+    "site": {
+      "label": "Site",
+      "namespace": "incident_report.site"
+    },
+    "machines": [
+      {
+        "label": "Machine",
+        "namespace": "incident_report.machine",
+        "split": ";"
+      }
+    ],
+    "related": [
+      {
+        "label": "Related records",
+        "namespace": "incident_report.record",
+        "split": ";"
+      }
+    ],
+    "occurred": {
+      "label": "Occurred at",
+      "format": [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M"
+      ],
+      "required": true
+    },
+    "severity": {
+      "label": "Severity"
+    },
+    "zone": {
+      "label": "Zone",
+      "namespace": "incident_report.zone"
+    },
+    "location": {
+      "label": "Location"
+    },
+    "assets": [
+      {
+        "label": "Assets",
+        "namespace": "incident_report.asset",
+        "split": ";"
+      }
+    ],
+    "timeline": {
+      "rows": "timeline",
+      "each": {
+        "time": {
+          "column": "Time",
+          "format": [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M"
+          ]
+        },
+        "text": {
+          "column": "Event"
+        }
+      }
+    },
+    "description": {
+      "section": "Description"
+    },
+    "root_cause": {
+      "section": "Root cause"
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "first": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 8,
+            "offset": 361
+          }
+        ],
+        "source": "sha256:0a35978d52fc40d9e9373fe0aeb61647d80c070ec7b41bd9463cbb48c3251efb"
+      },
+      "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+    },
+    "value": {
+      "domain_id": "rec:sha256:a97ec68c3889a988277e3f79507e7af4e267f138d0d88171431195f52e381d11",
+      "ticks": 2000000000
+    }
+  },
+  "id": "rec:sha256:fecd699331854a745187c71ffb0bcc1315028ff7746cfc3a050292502ae09f74",
+  "kind": "run",
+  "last": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 8,
+            "offset": 369
+          }
+        ],
+        "source": "sha256:0a35978d52fc40d9e9373fe0aeb61647d80c070ec7b41bd9463cbb48c3251efb"
+      },
+      "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+    },
+    "value": {
+      "domain_id": "rec:sha256:a97ec68c3889a988277e3f79507e7af4e267f138d0d88171431195f52e381d11",
+      "ticks": 2000000000
+    }
+  },
+  "logical_id": {
+    "knowledge": "unknown"
+  },
+  "machine": {
+    "knowledge": "unknown"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 38,
+          "offset": 8
+        }
+      ],
+      "source": "sha256:0a35978d52fc40d9e9373fe0aeb61647d80c070ec7b41bd9463cbb48c3251efb"
+    },
+    "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+  },
+  "schema_version": 1
+}
