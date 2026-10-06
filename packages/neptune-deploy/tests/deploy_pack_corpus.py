@@ -1,6 +1,7 @@
-"""Generator of the Demo v1 snapshot (``fixtures/packs/acceptance_corpus.graph.json``, ADR 0014).
+"""Generator of the Demo v1 test double (``fixtures/packs/acceptance_corpus.test_double.graph.json``,
+ADR 0014): not a Memory snapshot.
 
-A frozen Memory graph document about the acceptance corpus (Platform ADR 0007, ``harness/acceptance``
+A hand-written graph document about the acceptance corpus (Platform ADR 0007, ``harness/acceptance``
 version 1.0.0): PLANT-2's manipulator cell (ARM-3A, incident INC-C3-0011) and legged inspection robot
 (LEG-01), and S-007's lift AMR (AMR-07, incident INC-0007). It is **hand-written in the shape of
 graph-schema**, not computed: Memory cannot build it from the corpus yet, because
@@ -1195,7 +1196,7 @@ def acceptance_corpus() -> dict[str, Any]:
     }
 
 
-NAME: Final = "acceptance_corpus"
+NAME: Final = "acceptance_corpus.test_double"
 
 
 def fixture_bytes() -> bytes:

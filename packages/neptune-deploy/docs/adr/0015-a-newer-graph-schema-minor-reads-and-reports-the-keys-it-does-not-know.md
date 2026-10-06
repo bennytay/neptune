@@ -3,7 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-06
 - Issue: MVL-161
-- Amends: ADR 0013 §2 (the snapshot reader is strict about the contract's shapes)
+- Amends: ADR 0013 §2 (the snapshot reader is strict about the contract's shapes); ADR 0014 §7 (the
+  demo snapshot's name and standing)
 - Uses: contracts/graph-schema (1.6.0 pinned; 1.9.0, Memory PR #133, adds an optional `builds` key to `Graph`)
 
 ## Context
@@ -34,6 +35,13 @@ a lenient one that dropped unknown keys would lose data without saying so. The d
    wrote.
 6. **Where it shows.** The pack gains a top-level `findings` list and `snapshot.declared_schema_version`, and the
    PDF header a `Not read:` line per finding. All three appear only when a finding exists.
+
+7. **The demo snapshot is a test double.** ADR 0014 §7's `tests/fixtures/packs/acceptance_corpus.graph.json` is
+   hand-written in graph-schema shape (claim ids that do not match their content, unsorted lists, a generation
+   that is not Memory's hash, 1.7 claims), so it is not a Memory snapshot and is not named as one. It is now
+   `acceptance_corpus.test_double.graph.json`, with a README beside it and one beside the sample PDF. Memory's
+   consolidator-built `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json` replaces it. Its
+   bytes, and so every golden and the sample PDF, are unchanged by the rename.
 
 ## Consequences
 
