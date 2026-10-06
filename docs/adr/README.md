@@ -78,4 +78,5 @@ header).
 | [0068](0068-payload-decoding-and-frame-alignment-run-trees-links-and-comparable-references.md) | Payload decoding and frame alignment: declared definitions into columns, run trees, links and comparable references | Accepted |
 | [0069](0069-salvage-by-chunk-declared-extents-and-loss-accounting.md) | Salvage by chunk: a lost chunk, declared extents, and an exact account of what was lost | Accepted |
 | [0070](0070-bounded-crash-safe-package-io-atomic-writes-and-a-streaming-reader.md) | Bounded, crash-safe package I/O: atomic writes and a streaming reader | Accepted |
+| [0071](0071-status-and-safety-state-records-from-declared-log-types.md) | Status and safety-state records from declared log types | Accepted |
 | [0072](0072-manifest-declarations-as-stated-records-run-declarations-entities-and-snapshot-pins.md) | Manifest declarations as stated records: run declarations, entities and snapshot pins | Accepted |

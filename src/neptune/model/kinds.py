@@ -101,6 +101,12 @@ from neptune.model.source import (
     source_artifact_from_json,
     source_revision_from_json,
 )
+from neptune.model.status import (
+    SafetyState,
+    StatusReport,
+    safety_state_from_json,
+    status_report_from_json,
+)
 from neptune.model.task import (
     Requirement,
     SOPSection,
@@ -151,6 +157,8 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (Run, run_from_json),
         (Stream, stream_from_json),
         (RunDeclaration, run_declaration_from_json),
+        (StatusReport, status_report_from_json),
+        (SafetyState, safety_state_from_json),
         (Machine, machine_from_json),
         (HardwareConfiguration, hardware_configuration_from_json),
         (HardwareComponent, hardware_component_from_json),

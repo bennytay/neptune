@@ -57,7 +57,7 @@ def declaration(run: RecordId = RUN, **fields: Any) -> RunDeclaration:
 
 def test_it_is_a_run_family_kind_from_version_9() -> None:
     assert RunDeclaration.family is Family.RUN
-    assert KIND_SINCE["run_declaration"] == RUN_DECLARATION_SINCE == 9 == SCHEMA_VERSION
+    assert KIND_SINCE["run_declaration"] == RUN_DECLARATION_SINCE == 9 <= SCHEMA_VERSION
     assert "run_declaration" in kinds_at(9) and "run_declaration" not in kinds_at(8)
     assert package_version(["run", "run_declaration"]) == 9
 

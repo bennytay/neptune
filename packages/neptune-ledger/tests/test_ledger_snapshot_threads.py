@@ -311,11 +311,12 @@ def test_migration_0012_refuses_a_catalog_holding_unthreaded_snapshots(
     pg: Conn, pg_uri: str, tmp_path: Path
 ) -> None:
     """A snapshot registered under the old membership has no thread rows, and the thread tables
-    are append-only: the migration refuses and the catalog is rebuilt."""
+    are append-only: the migration refuses and the catalog is rebuilt. The old catalog has every
+    other migration (13's ``stream_ids`` column too, which today's registration fills)."""
     shipped = migrations()
     (last,) = [m for m in shipped if m.name == "configuration_snapshot_threads"]
     assert last.version == 12
-    apply_migrations(pg, "acme", shipped=[m for m in shipped if m.version < 12])
+    apply_migrations(pg, "acme", shipped=[m for m in shipped if m.version != 12])
     with PostgresCatalog(pg_uri, "acme", package_roots=None) as old:
         assert old.register(schema_2(tmp_path).root).outcome == "registered"
     with pytest.raises(psycopg.errors.RaiseException, match="rebuild this catalog"):
@@ -325,7 +326,7 @@ def test_migration_0012_refuses_a_catalog_holding_unthreaded_snapshots(
 def test_migration_0012_applies_to_a_catalog_without_snapshots(
     pg: Conn, pg_uri: str, tmp_path: Path
 ) -> None:
-    apply_migrations(pg, "acme", shipped=[m for m in migrations() if m.version < 12])
+    apply_migrations(pg, "acme", shipped=[m for m in migrations() if m.version != 12])
     with PostgresCatalog(pg_uri, "acme", package_roots=None) as old:
         assert old.register(materialise("drone", tmp_path / "drone").root).outcome == "registered"
     assert apply_migrations(pg, "acme") == [12]

@@ -1,0 +1,62 @@
+{
+  "id": "rec:sha256:02e4a9c3891169c42bb0a41ce83068a7b20bcb2555af451f21bd8d9c2bbe2521",
+  "key_tag": {
+    "knowledge": "not_applicable"
+  },
+  "kind": "configuration_value",
+  "occurrence": [
+    0
+  ],
+  "order": 0,
+  "path": [
+    "neptune"
+  ],
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "index": 0,
+          "kind": "config:document"
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": "/neptune"
+        }
+      ],
+      "source": "sha256:c12ebb1202058aa3cfd50d59fee0f8ab8f1d0eab3dce9cd9c4b517c15356ecb7"
+    },
+    "transform": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+  },
+  "schema_version": 2,
+  "snapshot": "rec:sha256:3119b955933711d55cb9aa0c04d1e28dfeb359251baa174fba9d16ee12f0618c",
+  "tag": {
+    "knowledge": "known",
+    "value": "?"
+  },
+  "text": {
+    "knowledge": "known",
+    "value": "1"
+  },
+  "value": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "end": 10,
+            "kind": "span",
+            "start": 9
+          }
+        ],
+        "source": "sha256:c12ebb1202058aa3cfd50d59fee0f8ab8f1d0eab3dce9cd9c4b517c15356ecb7"
+      },
+      "transform": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+    },
+    "value": {
+      "type": "int",
+      "value": 1
+    }
+  }
+}

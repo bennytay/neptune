@@ -1,0 +1,153 @@
+{
+  "cells": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4,
+              "offset": 272
+            }
+          ],
+          "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+        },
+        "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+      },
+      "value": "MODE"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 6,
+              "offset": 292
+            }
+          ],
+          "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+        },
+        "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+      },
+      "value": "TimeUS"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 1,
+              "offset": 276
+            }
+          ],
+          "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+        },
+        "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+      },
+      "value": "Q"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 1,
+              "offset": 1387
+            }
+          ],
+          "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+        },
+        "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+      },
+      "value": "s"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 64,
+              "offset": 711
+            }
+          ],
+          "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+        },
+        "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+      },
+      "value": "s"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 1,
+              "offset": 1403
+            }
+          ],
+          "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+        },
+        "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+      },
+      "value": "F"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 8,
+              "offset": 1303
+            }
+          ],
+          "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+        },
+        "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+      },
+      "value": 1e-06
+    }
+  ],
+  "id": "rec:sha256:0db45a9256050a088de45ace81a336924f84cecdf9c287967a1e3efb79c25a9e",
+  "kind": "structured_record",
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 44,
+          "offset": 1375
+        },
+        {
+          "kind": "row",
+          "row": 0
+        }
+      ],
+      "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+    },
+    "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+  },
+  "row": 3,
+  "schema_version": 1,
+  "table": "rec:sha256:e8d3672f2d4c706b19be99d2b72395956d18efe03608308d563330ce974685dc"
+}

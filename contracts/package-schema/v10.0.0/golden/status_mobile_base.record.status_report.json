@@ -1,0 +1,127 @@
+{
+  "convention": "ros_diagnostic_status",
+  "hardware_id": {
+    "knowledge": "known",
+    "value": "husky_battery"
+  },
+  "id": "rec:sha256:77060ba2fd21a26716635d6e280634aa369e568506f7296c456c6148a2d707ff",
+  "kind": "status_report",
+  "level": {
+    "knowledge": "known",
+    "value": 1
+  },
+  "level_names": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 558,
+            "offset": 9742
+          }
+        ],
+        "source": "sha256:02f466a808ab8153537884be337acea10524eaeb3c64aa6b66a3a408a311eaf9"
+      },
+      "transform": "rec:sha256:26984b1adc1b3ecdf559c7906a33466b3cd41cb634ccda36216352472a45916b"
+    },
+    "value": [
+      "WARN"
+    ]
+  },
+  "message": {
+    "knowledge": "known",
+    "value": "Low"
+  },
+  "name": {
+    "knowledge": "known",
+    "value": "/Power System/Battery"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 2383,
+          "offset": 7014
+        },
+        {
+          "kind": "byte_range",
+          "length": 185,
+          "offset": 794
+        },
+        {
+          "kind": "byte_range",
+          "length": 75,
+          "offset": 66
+        }
+      ],
+      "source": "sha256:02f466a808ab8153537884be337acea10524eaeb3c64aa6b66a3a408a311eaf9"
+    },
+    "transform": "rec:sha256:26984b1adc1b3ecdf559c7906a33466b3cd41cb634ccda36216352472a45916b"
+  },
+  "schema_version": 10,
+  "stream": "rec:sha256:2421dd78dab330e0028480280609a88b372b36418288d72d2b1846f48cace01a",
+  "times": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "observed",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 2383,
+              "offset": 7014
+            },
+            {
+              "kind": "byte_range",
+              "length": 185,
+              "offset": 794
+            }
+          ],
+          "source": "sha256:02f466a808ab8153537884be337acea10524eaeb3c64aa6b66a3a408a311eaf9"
+        },
+        "transform": "rec:sha256:26984b1adc1b3ecdf559c7906a33466b3cd41cb634ccda36216352472a45916b"
+      },
+      "value": {
+        "domain_id": "rec:sha256:0219a3f6ec1b183986e62baf877624cdcc4ce2a8f7e69683a2ebe5582fc5dcab",
+        "ticks": 1790000003000000000
+      }
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "observed",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 2383,
+              "offset": 7014
+            },
+            {
+              "kind": "byte_range",
+              "length": 185,
+              "offset": 794
+            }
+          ],
+          "source": "sha256:02f466a808ab8153537884be337acea10524eaeb3c64aa6b66a3a408a311eaf9"
+        },
+        "transform": "rec:sha256:26984b1adc1b3ecdf559c7906a33466b3cd41cb634ccda36216352472a45916b"
+      },
+      "value": {
+        "domain_id": "rec:sha256:4d578116416aaa678a6c51b5ce42c751390e061e11c03575582301c7fd0eab80",
+        "ticks": 1790000003000000000
+      }
+    }
+  ],
+  "values": [
+    {
+      "key": "voltage_v",
+      "value": "23.1"
+    }
+  ]
+}

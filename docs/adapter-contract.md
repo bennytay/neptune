@@ -182,6 +182,10 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
 - A payload you do not decode still gets its rows (times and locators) plus a finding. ROS payloads
   (ROS 1, CDR) are decoded by the stream's declared definition with the shared
   `neptune.adapters.rosmsg` (ADR 0068): `value/<field path>` columns, each with its state column.
+- A sample whose *declared* type is a status or a safety state is a record too, besides its row
+  (ADR 0071): a `status_report` per status, a `safety_state` per catalogued field, citing the row's
+  message (and the item's bytes inside it), with `times` on every clock of the stream. ROS adapters use
+  `neptune.adapters.rosmsg.status`; never decide by a topic's name.
 - The chunk that emits a `Stream` emits a `SeriesBatch` for it, empty if that chunk holds none of
   its rows: the batch types the stream's columns, so a stream with no samples still has a series.
 - Give each `SeriesColumn` the `ColumnType` the source encodes (a ROS `float32` stays `float32`,

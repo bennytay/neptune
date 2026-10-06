@@ -11,7 +11,7 @@ statement.
 
 | Contract | Owner package | Status | Latest stable | Latest draft | Consumers |
 |---|---|---|---|---|---|
-| `package-schema` | `neptune` | active | 9.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
+| `package-schema` | `neptune` | active | 10.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `assertion-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
@@ -30,8 +30,8 @@ is part of another rides on its version and has no column.
 
 | Consumer | `package-schema` | `catalog-api` | `graph-schema` | `query-packet` |
 |---|---|---|---|---|
-| `neptune-ledger` | 9.0.0 current |  |  |  |
+| `neptune-ledger` | 10.0.0 current |  |  |  |
 | `neptune-memory` |  | 1.7.0 current |  |  |
 | `neptune-context` |  | 1.7.0 current | 2.0.0 current |  |
-| `neptune-deploy` | 9.0.0 current | 1.7.0 current | 2.0.0 current | 1.0.0 behind |
+| `neptune-deploy` | 10.0.0 current | 1.7.0 current | 2.0.0 current | 1.0.0 behind |
 | `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) |

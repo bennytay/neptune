@@ -1,0 +1,31 @@
+{
+  "first": {
+    "knowledge": "unknown"
+  },
+  "id": "rec:sha256:6c759ed2cf33b92ada1b5f12b5d4ceab5f11339942064f39dfdcac85b721a271",
+  "kind": "run",
+  "last": {
+    "knowledge": "unknown"
+  },
+  "logical_id": {
+    "knowledge": "unknown"
+  },
+  "machine": {
+    "knowledge": "unknown"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 3,
+          "offset": 0
+        }
+      ],
+      "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+    },
+    "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+  },
+  "schema_version": 1
+}

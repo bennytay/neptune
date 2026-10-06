@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:918f6ceb9cc58ea67b74d0bfe83ced83aaf85d95f8d04bc89e626467032002bf",
+  "id": "rec:sha256:87a9a715c4fcece9161f58fb434d3b697fb4453caf5da7a1c2e38ae6727c2f98",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "logs/av_shuttle.db3"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

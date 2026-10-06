@@ -162,7 +162,7 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
         "archive.tgz": [(PROBE_ID, PROBE_VERSION)],
         "blob.bin": [(PROBE_ID, PROBE_VERSION)],
         "bundle": [(PROBE_ID, PROBE_VERSION)],
-        "logs/flight_log": [("flightlog", "0.1.0")],
+        "logs/flight_log": [("flightlog", "0.2.0")],
         "logs/renamed": [(PROBE_ID, PROBE_VERSION)],
         "notes.txt": [("text", "0.1.0")],
         "operator_log": [("text", "0.1.0")],
