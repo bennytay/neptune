@@ -294,8 +294,7 @@ def test_the_gold_document_is_sound(gold: dict[str, Any]) -> None:
     morphologies = {t for q in gold["questions"] for t in q["tags"]}
     assert {"manipulator", "mobile-base", "legged"} <= morphologies
     kinds = {item["select"]["kind"] for item in gold["evidence"].values()}
-    # ``declaration`` joins when deploy.json's sources do: they need cmms_downtime and syslog_csv,
-    # which Deploy has not shipped on main yet (MVL-191).
+    # ``declaration`` joins with deploy.json's sources, which need Deploy's --source-zone (#149).
     assert kinds == set(resolve.SELECTORS) - {"declaration"}
     for item in gold["evidence"].values():
         assert item["select"]["path"] in acceptance.read_lock()["files"]
@@ -482,13 +481,24 @@ def test_a_package_without_base_records_scores_by_path_and_locator() -> None:
 
 
 def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None:
-    from neptune_deploy.lifecycle import PRESETS
-
     plan, problems = read_deploy(acceptance.DEPLOY)
     assert problems == [] and plan is not None
-    assert set(plan.presets) <= set(PRESETS)
+    shipped, clashes = stages._shipped_presets()  # every family: lifecycle and event-log
+    assert set(plan.presets) <= set(shipped) and clashes == []
     assert {"cmms_generic", "jira_json", "register_zone", "servicenow_csv"} <= set(plan.presets)
-    assert plan.at_least["authorisation_envelope"] == 5  # S-007's two and PLANT-2's three
+    assert {"cmms_downtime", "requalification_csv"} <= set(plan.presets)
+    assert plan.templates == (
+        "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/templates/incident_report.json",
+    )
+    # What Deploy maps from the corpus, pinned so a missing record goes red (MVL-191).
+    assert plan.at_least == {
+        "authorisation_envelope": 5,  # S-007's two and PLANT-2's three
+        "change_record": 5,
+        "incident_record": 3,
+        "intervention": 3,  # the downtime log's three stops
+        "maintenance_event": 16,
+        "requalification_record": 4,
+    }
 
 
 _ZONE: Final = {"preset": "x", "source": "sites/a/log.csv", "civil_time_zone": "Europe/Berlin"}

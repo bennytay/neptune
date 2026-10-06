@@ -14,8 +14,10 @@ the `declaration` selector, 2.1.0). Code: `harness/acceptance/`.
 uv run --all-packages python -m harness.acceptance build /tmp/corpus     # write it (56 files, 0.7 MB)
 uv run --all-packages neptune ingest /tmp/corpus --out /tmp/corpus-pkg  # one package; one error finding
 uv run --all-packages python -m harness.acceptance resolve /tmp/corpus-pkg   # gold evidence -> record ids
-uv run --all-packages python -m neptune_deploy map /tmp/corpus-pkg -p cmms_generic -p jira_json \
-    -p register_zone -p servicenow_csv -o /tmp/corpus-deploy             # what the deploy stage runs
+uv run --all-packages python -m neptune_deploy map /tmp/corpus-pkg -p cmms_downtime -p cmms_generic \
+    -p jira_json -p register_zone -p requalification_csv -p servicenow_csv \
+    -t packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/templates/incident_report.json \
+    -o /tmp/corpus-deploy                                               # what the deploy stage runs
 uv run --all-packages python -m harness.acceptance check                # build == corpus.lock.json?
 make harness                                                            # the harness ingests it by default
 ```
@@ -78,9 +80,10 @@ pointer) is ADR 0008 §6.
 
 `harness/acceptance/deploy.json` lists the Deploy presets (by name) and document templates (by repository path)
 that the harness's deploy stage maps the compiled corpus with. `at_least` gives the lifecycle record counts the
-mapped package must reach. Today it declares `cmms_generic`, `jira_json`, `register_zone` and
-`servicenow_csv` and no template: Deploy ships none on main yet. Its arm-cell incident template and
-requalification preset join it as one-line edits. The stage is red when a declaration maps nothing
+mapped package must reach. It declares `cmms_downtime`, `cmms_generic`, `jira_json`, `register_zone`,
+`requalification_csv` and `servicenow_csv`, and Deploy's `incident_report` template. `at_least` pins what
+they map: 3 `incident_record`, 3 `intervention`, 16 `maintenance_event`, 4 `requalification_record`, 5
+`change_record` and 5 `authorisation_envelope`. The stage is red when a declaration maps nothing
 ([harness](harness.md#deploy-stage), ADR 0008).
 
 ### Declared source zones
@@ -98,8 +101,8 @@ about a source that states nothing itself. Today the only field is the civil tim
 The preset must be in `presets`, the source a plain corpus path, the zone an IANA name (spelling only). The
 stage passes each entry as `--source-zone PRESET SOURCE ZONE`, and is red unless the mapped package holds that
 preset's `civil_time_zone` for that source stating that zone. Gold cites an entry with the `declaration`
-selector `{path, preset, field: "civil_time_zone", equals}`. The two entries above join `deploy.json` with the
-`cmms_downtime` and `syslog_csv` presets, once Deploy ships them and `--source-zone` on main.
+selector `{path, preset, field: "civil_time_zone", equals}`. Both
+entries join `deploy.json` with Deploy's `--source-zone` and `syslog_csv`.
 
 ### No dangling same-event links
 

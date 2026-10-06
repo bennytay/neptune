@@ -87,7 +87,10 @@ def test_the_deploy_stage_maps_every_declaration_and_the_ledger_registers_both(
     assert plan is not None
     assert row["state"] == "committed" and row["package_verified"]
     assert row["manifest_valid"] and row["receipt_valid"]
-    assert set(row["by_declaration"]) == {f"preset:{name}" for name in plan.presets}
+    assert set(row["by_declaration"]) == {
+        *(f"preset:{name}" for name in plan.presets),
+        *(f"template:{path}" for path in plan.templates),
+    }
     assert all(count > 0 for count in row["by_declaration"].values())
     counted = {**row["records"], "structured_record": sum(row["event_rows"].values())}
     assert all(counted.get(kind, 0) >= n for kind, n in plan.at_least.items())
