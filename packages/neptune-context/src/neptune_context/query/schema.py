@@ -108,6 +108,13 @@ def _defs() -> dict[str, JsonValue]:
         "ClockBridge": _obj(
             {"mapping_id": _ref("RecordId"), "source": _ref("Clock"), "target": _ref("Clock")}
         ),
+        "CompareRuns": _obj(
+            {
+                "after": _ref("Subject"),
+                "before": _ref("Subject"),
+                "kind": {"const": "compare_runs"},
+            }
+        ),
         "DeclaredId": {"pattern": _DECLARED_ID, "type": "string"},
         "Diff": _obj(
             {
@@ -126,7 +133,7 @@ def _defs() -> dict[str, JsonValue]:
                 "start": ticks,
             }
         ),
-        "Explain": {"oneOf": [_ref("Why"), _ref("Diff")]},
+        "Explain": {"oneOf": [_ref("Why"), _ref("Diff"), _ref("CompareRuns")]},
         "FrameBridge": _obj(
             {
                 "child": _ref("FrameRef"),

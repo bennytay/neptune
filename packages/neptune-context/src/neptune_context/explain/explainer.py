@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from neptune.model.knowledge import AssertionKind, Known, NotApplicable, NotCovered, Unknown
+from neptune_context.explain.compare import explain_compare
 from neptune_context.explain.diff import explain_diff
 from neptune_context.explain.history import ClaimHistory
 from neptune_context.explain.run import Caps, Run
@@ -31,7 +32,7 @@ from neptune_context.packets.model import (
     Relevance,
     Transform,
 )
-from neptune_context.query.model import Why
+from neptune_context.query.model import CompareRuns, Why
 from neptune_context.retrieve.channel import ChannelAnswer, answer
 
 if TYPE_CHECKING:
@@ -91,6 +92,8 @@ class Explainer:
                 trail = (
                     explain_why(run, index, clause.claim_id)
                     if isinstance(clause, Why)
+                    else explain_compare(run, index, clause)
+                    if isinstance(clause, CompareRuns)
                     else explain_diff(run, index, clause)
                 )
             except Exception as exc:  # partial success: one failing clause is a gap

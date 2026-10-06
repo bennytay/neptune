@@ -250,7 +250,17 @@ class Diff:
     after: int | Instant
 
 
-Explain: TypeAlias = Why | Diff
+@dataclass(frozen=True)
+class CompareRuns:
+    """What memory states differs between two runs (ADR 0015): the configurations each ran with,
+    their names and the declared values that differ, and the maintenance on the later run's
+    machine between them. ``before`` and ``after`` are runs, each named by its declared id."""
+
+    before: Subject
+    after: Subject
+
+
+Explain: TypeAlias = Why | Diff | CompareRuns
 
 
 @dataclass(frozen=True)
