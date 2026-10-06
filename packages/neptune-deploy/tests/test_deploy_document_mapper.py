@@ -131,8 +131,10 @@ def _days(text: str, pattern: str = "%Y-%m-%d") -> int:
 
 
 def _seconds(text: str) -> int:
-    """Seconds from 1970-01-01T00:00:00 of the text's own civil clock, never moved to UTC."""
-    return int((datetime.strptime(text, "%Y-%m-%d %H:%M") - datetime(1970, 1, 1)).total_seconds())
+    """Minutes from 1970-01-01T00:00:00 of the text's own civil clock, never moved to UTC: the
+    precision a time to the minute states (Deploy ADR 0016 §9)."""
+    seconds = (datetime.strptime(text, "%Y-%m-%d %H:%M") - datetime(1970, 1, 1)).total_seconds()
+    return int(seconds) // 60
 
 
 ARCHETYPES = {

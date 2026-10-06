@@ -8,6 +8,10 @@ requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = ["neptune"]
 
+# `memory consolidate | rebuild | dump` (MVL-132, ADR 0016).
+[project.scripts]
+memory = "neptune_memory.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

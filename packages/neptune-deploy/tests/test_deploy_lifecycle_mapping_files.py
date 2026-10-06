@@ -10,7 +10,7 @@ from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune_deploy.lifecycle import PRESETS, MappingError, parse_mapping, preset
 from neptune_deploy.lifecycle.mapping import MAX_MAPPING_BYTES, match_pattern
 from neptune_deploy.lifecycle.shapes import Shape, fields_of
-from neptune_deploy.lifecycle.times import DAY, check_format, read_time
+from neptune_deploy.lifecycle.times import DAY, MINUTE, check_format, read_time
 
 
 def _document(**rule: Any) -> dict[str, Any]:
@@ -175,7 +175,8 @@ def test_ignore_patterns(pattern: str, column: str, matches: bool) -> None:
         ("1970-01-01", ("%Y-%m-%d",), 0, DAY, False),
         ("1969-12-31", ("%Y-%m-%d",), -1, DAY, False),
         ("2024-02-29", ("%Y-%m-%d",), 19782, DAY, False),
-        ("2026-03-02 09:40", ("%Y-%m-%d %H:%M",), 20514 * 86400 + 34800, Fraction(1), False),
+        ("2026-03-02 09:40", ("%Y-%m-%d %H:%M",), 20514 * 1440 + 580, MINUTE, False),
+        ("1970-01-01T01:30+01:30", ("%Y-%m-%dT%H:%M%z",), 0, MINUTE, True),
         ("02/03/2026 09:40:05", ("%d/%m/%Y %H:%M:%S",), 20514 * 86400 + 34805, Fraction(1), False),
         ("1970-01-01T00:00:00Z", ("%Y-%m-%dT%H:%M:%S%z",), 0, Fraction(1), True),
         ("1970-01-01T01:00:00+01:00", ("%Y-%m-%dT%H:%M:%S%z",), 0, Fraction(1), True),
