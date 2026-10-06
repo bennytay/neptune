@@ -1,5 +1,6 @@
 Context packet packet:sha256:e42d27f40841fcb32e812398fbb00d4a9d03687c8a00f204e87c9968de63fdc9
 Query query:sha256:cb0e3fe4d97f91564ae44b5b2168ea12dce1378cf062ec13594feafbd99c2d3d, as of transaction 5 (head 5).
+Graph read: graph-schema 1.x, older than Context's pin 2.0.0; predicates such as succeeds carry their 1.x meaning.
 World time: ticks [0, 100000000) on clock rec:sha256:ab683ba52eb6d738d33b657e7b3e9704ea0772891ca65acd83b17b9ac62f0445.
 Inferred items: excluded.
 Items: 2 of 3 found; cut by the items budget.

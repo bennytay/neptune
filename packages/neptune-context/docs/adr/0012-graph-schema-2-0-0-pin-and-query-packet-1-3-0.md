@@ -65,6 +65,17 @@ the day could not decode `delta`.
 8. **Who raises a graph-schema major.** The owner's PR raises Context's lock and pin (platform ADR 0002);
    Context signs off by adding, in that same PR, this ADR, the `query-packet` bump and whatever
    adaptation the major needs. Context never raises a graph-schema major on its own.
+9. **A claim must fit its predicate's pinned signature.** `pinned.json` carries each predicate's domain
+   (subject node types) and range (object node or value types) from the pinned vocabulary golden.
+   `pinned.claim_beyond_pin` refuses a claim whose subject or object type is outside them, beside the
+   checks for a predicate, node type or value type the pin lacks: the engine names it in a `not_covered`
+   gap ("... is not in Context's pinned graph-schema 2.0.0"), and the packet reader refuses it. A
+   `drift` with a `quantity` value (every release with `drift` allows only `delta`) no longer passes.
+10. **An older graph is stated.** When the graph read is an older major than the pin
+    (`memory_snapshot.graph_schema_version` below 2), both renderers state one header line from
+    `pinned.older_graph_notice`: "Graph read: graph-schema 1.x, older than Context's pin 2.0.0;
+    predicates such as succeeds carry their 1.x meaning." It is derived from what the packet already
+    carries, so the packet and its contract do not change; the agent grammar accepts exactly that line.
 
 ## Alternatives considered
 
@@ -75,15 +86,21 @@ the day could not decode `delta`.
   the lock rule puts the consumer raise in the owner's PR.
 - **Report packets at Memory's live major.** Rejected: a packet over a 1.x document would claim major 2
   while its `succeeds` claims carry 1.x's meaning. The packet states what was read.
-- **Keep `drift` beyond the pin in the explain fixtures by editing the frozen graph.** Rejected: the
-  graph is frozen so Memory releases cannot move Context's goldens (ADR 0010). Narrowing the pin in the
-  test is enough to exercise the path.
+- **Keep `drift` beyond the pin in the explain fixtures.** Rejected: narrowing the pin in the test
+  exercises that path without holding a claim no release allows.
+- **A packet member for notices (an info finding in the packet).** Rejected for now: the major is
+  already in `memory_snapshot`, so the notice is derivable by any reader; a member would be a further
+  contract change for no new fact.
 
 ## Consequences
 
 - Calibration claims (`calibrated_with`, `calibrated_by`, `drift`) and the coverage and health predicates
-  are now carried items with provenance instead of gaps. The trail golden `trail-w1` carries its `drift`
-  root; the Demo v1 transcript carries two `drift` deltas and the three calibration evidence refs they cite.
+  are now carried items with provenance instead of gaps. The explain fixture's `drift` is now a valid
+  `delta`, and its frozen graph (`tests/golden/explain-graph.json`) was rebuilt by Memory's 2.0.0
+  resolver: a 2.x document, so the four trail goldens change in generation, closure and finding ids and
+  `graph_schema_version`, and `trail-w1` carries its `drift` root. The Demo v1 transcript carries two
+  `drift` deltas and the three calibration evidence refs they cite; it and the ten persona answers,
+  read from 1.x graphs, gain the older-graph line.
 - Deploy and Learn may raise their `query-packet` lock to 1.3.0 when they want the new predicates; until
   then the lock check warns (a minor lag).
 - The planner's prompt embeds the query schema, so its template hash and the recordings'

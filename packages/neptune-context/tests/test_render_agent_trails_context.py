@@ -358,7 +358,8 @@ def test_a_claim_beyond_the_pin_is_named_with_the_evidence_it_cites() -> None:
 def test_a_claim_inside_the_pin_is_carried_and_cited_with_its_declared_value() -> None:
     text = check_trails(CASES["why-drift"])
     (root,) = lines_of(text, "Why Memory holds ")
-    assert root.startswith('- Root claim: Observed: sensor "asset-tag:WCAM-7" drift 4.3 (unit "mm"')
+    assert root.startswith('- Root claim: Observed: sensor "asset-tag:WCAM-7" drift delta {')
+    assert '"values":[0.0,-0.1,4.3]} (unit "mm", as declared)' in root
     assert re.search(r"\[I[0-9]+\]\[E1\]\[E2\]$", root)
 
 

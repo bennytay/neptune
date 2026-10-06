@@ -35,6 +35,7 @@ from neptune.model.frames import FrameRef, TransformDirection
 from neptune.model.knowledge import NotApplicable
 from neptune.model.scalars import NonFinite
 from neptune.model.units import unit_from_text
+from neptune_context import pinned
 from neptune_context.engine import LocalEngine
 from neptune_context.packets.codec import canonical_bytes, decode
 from neptune_context.packets.findings import PacketRefused
@@ -376,6 +377,15 @@ def test_a_delta_is_stated_as_declared_and_its_names_stay_quoted_data() -> None:
         for word in ("large", "small", "significant", "drifted", "exceeds", "within", "ok"):
             assert word not in line.split()
     assert all('(unit "m", as declared)' in ln for ln in lines if ln is not rotation)
+
+
+def test_an_older_graph_is_stated_in_the_header_and_parses_back() -> None:
+    old = check(golden_packet("q01"))  # Memory's 1.x golden graph, read as written
+    notice = pinned.older_graph_notice(1)
+    assert notice is not None and notice in old.split("\n\n", 1)[0].split("\n")
+    assert "Graph read:" not in check(delta_answer())  # a 2.x document
+    with pytest.raises(CitationError):
+        parse_answer(old.replace(notice, notice.replace("1.x meaning", "no meaning")))
 
 
 def test_harden_escapes_only_inside_strings_and_reads_back() -> None:

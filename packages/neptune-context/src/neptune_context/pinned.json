@@ -2520,6 +2520,667 @@
       "succeeds",
       "zone_of"
     ],
+    "signatures": {
+      "at_site": {
+        "domain": [
+          "event",
+          "run"
+        ],
+        "range": [
+          "site"
+        ]
+      },
+      "at_site_candidate": {
+        "domain": [
+          "event",
+          "run"
+        ],
+        "range": [
+          "site"
+        ]
+      },
+      "authorised_configuration": {
+        "domain": [
+          "site"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "calibrated_by": {
+        "domain": [
+          "configuration"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "calibrated_with": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "calibration_candidate": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "clock_map": {
+        "domain": [
+          "clock"
+        ],
+        "range": [
+          "clock_map"
+        ]
+      },
+      "co_occurs_within": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "event"
+        ]
+      },
+      "configuration_active_during": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "configuration_candidate": {
+        "domain": [
+          "machine",
+          "run"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "configuration_unknown": {
+        "domain": [
+          "machine",
+          "run"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "continues": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "continues_candidate": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "declared_kind": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "integer",
+          "text"
+        ]
+      },
+      "deployed_at": {
+        "domain": [
+          "deployment"
+        ],
+        "range": [
+          "site"
+        ]
+      },
+      "drift": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "delta"
+        ]
+      },
+      "ends_at": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "instant"
+        ]
+      },
+      "ends_at_candidate": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "instant"
+        ]
+      },
+      "episode_of": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "event_kind": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "evidenced_by": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "executes_task": {
+        "domain": [
+          "episode",
+          "run"
+        ],
+        "range": [
+          "task"
+        ]
+      },
+      "executes_task_candidate": {
+        "domain": [
+          "episode",
+          "run"
+        ],
+        "range": [
+          "task"
+        ]
+      },
+      "gap": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "governed_by": {
+        "domain": [
+          "deployment",
+          "fleet",
+          "machine",
+          "site"
+        ],
+        "range": [
+          "policy"
+        ]
+      },
+      "has_calibration": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "has_clock": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "clock"
+        ]
+      },
+      "has_configuration": {
+        "domain": [
+          "deployment",
+          "machine",
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "has_description": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "has_member": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "has_name": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "has_summary": {
+        "domain": [
+          "deployment",
+          "fleet",
+          "programme"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "in_zone": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "zone"
+        ]
+      },
+      "in_zone_candidate": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "zone"
+        ]
+      },
+      "integrity_finding": {
+        "domain": [
+          "run",
+          "stream"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "intervened": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "intervened_candidate": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "involves": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "asset",
+          "machine"
+        ]
+      },
+      "involves_candidate": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "asset",
+          "machine"
+        ]
+      },
+      "located_at": {
+        "domain": [
+          "asset",
+          "machine"
+        ],
+        "range": [
+          "site",
+          "zone"
+        ]
+      },
+      "maintenance_state": {
+        "domain": [
+          "asset",
+          "machine",
+          "sensor"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "maps_to": {
+        "domain": [
+          "clock"
+        ],
+        "range": [
+          "clock"
+        ]
+      },
+      "member_of_fleet": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "fleet"
+        ]
+      },
+      "mounted_on": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "asset",
+          "machine"
+        ]
+      },
+      "not_covered_by_authorisation": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "operated_by": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "person"
+        ]
+      },
+      "outcome": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "part_of_programme": {
+        "domain": [
+          "deployment",
+          "fleet"
+        ],
+        "range": [
+          "programme"
+        ]
+      },
+      "rate_declared": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "quantity"
+        ]
+      },
+      "rate_observed": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "quantity"
+        ]
+      },
+      "rated_payload": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "quantity"
+        ]
+      },
+      "recorded": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "recorded_by": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "machine"
+        ]
+      },
+      "recorded_by_candidate": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "machine"
+        ]
+      },
+      "runs_model": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "model_version"
+        ]
+      },
+      "runs_software": {
+        "domain": [
+          "machine",
+          "sensor"
+        ],
+        "range": [
+          "software_version"
+        ]
+      },
+      "same_as": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ]
+      },
+      "same_as_candidate": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ]
+      },
+      "sensor_not_recorded": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "sensor"
+        ]
+      },
+      "sensor_presence_unknown": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "sensor"
+        ]
+      },
+      "sensor_recorded": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "sensor"
+        ]
+      },
+      "starts_at": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "instant"
+        ]
+      },
+      "stated_severity": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "integer",
+          "text"
+        ]
+      },
+      "succeeds": {
+        "domain": [
+          "configuration"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "zone_of": {
+        "domain": [
+          "zone"
+        ],
+        "range": [
+          "site"
+        ]
+      }
+    },
     "version": "2.0.0"
   }
 }

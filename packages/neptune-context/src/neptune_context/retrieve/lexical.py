@@ -737,7 +737,7 @@ class LexicalChannel:
                 _gap(
                     GapCode.NOT_COVERED,
                     _TEXT_AT,
-                    "matching claims use values beyond the pinned graph-schema",
+                    "matching claims use values not in the pinned graph-schema",
                     tuple(sorted(beyond)[:MAX_GAP_REFS]),
                 )
             )

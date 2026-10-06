@@ -46,6 +46,7 @@ from neptune_context.packets.trails import (
     WhyStep,
     WhyTrail,
 )
+from neptune_context.pinned import older_graph_notice
 
 if TYPE_CHECKING:
     from neptune_memory.schema.claim import Claim
@@ -186,6 +187,9 @@ class _Writer:
                 f"- Claims as Memory knew them at transaction {p.memory.as_of} (it trails the"
                 f" Ledger's {p.as_of})"
             )
+        notice = older_graph_notice(p.memory.graph_schema_version)
+        if notice is not None:
+            self.add(f"- {notice.removesuffix('.')}")
         if p.during is not None:
             end = "open" if p.during.end is None else str(p.during.end)
             self.add(

@@ -34,7 +34,15 @@ from typing import TYPE_CHECKING, Any, Final
 from unittest import mock
 
 from neptune_ledger.api import QueryMeta, Resolution, from_json, query_table
-from neptune_memory.schema.claim import Claim, ClaimProvenance, ModelRef, TypedLiteral, ValueType
+from neptune_memory.schema.claim import (
+    Claim,
+    ClaimProvenance,
+    Delta,
+    DeltaQuantity,
+    ModelRef,
+    TypedLiteral,
+    ValueType,
+)
 from neptune_memory.schema.codec import GraphDocument, graph_from_json
 from neptune_memory.schema.interval import OPEN, CivilClock, LedgerTx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -379,13 +387,25 @@ def assertions() -> list[Claim]:
 
 def drift() -> Claim:
     """The wrist camera's drift between its two calibrations: observed, citing both calibration
-    files (``drift`` is Memory ADR 0014, inside the graph-schema 2.0.0 pin; frozen in ``GRAPH``
-    with the quantity value it had before graph-schema gave drift a ``delta``)."""
+    files (``drift`` is Memory ADR 0014, inside the graph-schema 2.0.0 pin). Its value is a
+    ``delta``, the only range ``drift`` has: the declared translation's April numbers minus its
+    March numbers, in millimetres as both files declare them."""
     return dataclasses.replace(
         claim(
             WCAM,
             "drift",
-            TypedLiteral(ValueType.QUANTITY, 4.3, Known(unit_from_json("mm"))),
+            TypedLiteral(
+                ValueType.DELTA,
+                Delta(
+                    CAL_MARCH_REC,
+                    CAL_APRIL_REC,
+                    DeltaQuantity.PARAMETER,
+                    "values",
+                    (0.0, -0.1, 4.3),
+                    name="translation",
+                ),
+                Known(unit_from_json("mm")),
+            ),
             MAR_1,
             APR_14,
             evidence=(

@@ -99,7 +99,7 @@ def test_the_lift_amr_carries_its_calibration_claims_inside_the_pin() -> None:
         graph=GraphClause(None, 2, Direction.BOTH),
     )
     packet = ask(query)
-    assert not [g for g in packet.gaps if "newer than Context's pinned" in g.detail]
+    assert not [g for g in packet.gaps if "not in Context's pinned" in g.detail]
     carried = {i.claim.predicate for i in packet.items if isinstance(i, ClaimItem)}
     assert "calibrated_with" in carried
     assert answer_problems(query, packet) == ()

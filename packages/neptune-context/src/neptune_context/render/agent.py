@@ -70,6 +70,7 @@ from neptune_context.packets.trails import (
     WhyTrail,
     trail_index,
 )
+from neptune_context.pinned import older_graph_notice
 from neptune_context.render.citations import FOOTER, CitationError, parse_citations
 
 if TYPE_CHECKING:
@@ -100,6 +101,10 @@ _HEADER: Final = (
     re.compile(rf"Context packet packet:sha256:{_HEX}"),
     _QUERY_LINE,
     re.compile(r"Claims as Memory knew them at transaction \d+ \(it trails the Ledger's \d+\)\."),
+    re.compile(
+        r"Graph read: graph-schema \d+\.x, older than Context's pin \d+\.\d+\.\d+; predicates"
+        r" such as succeeds carry their \d+\.x meaning\."
+    ),
     re.compile(rf"World time: ticks \[-?\d+, (?:-?\d+|open)\) on clock rec:sha256:{_HEX}\."),
     re.compile(
         r"Inferred items: (?:included, each marked INFERRED; inferences are not evidence"
@@ -401,6 +406,9 @@ def _header(packet: ContextPacket) -> list[str]:
             f"Claims as Memory knew them at transaction {packet.memory.as_of}"
             f" (it trails the Ledger's {packet.as_of})."
         )
+    notice = older_graph_notice(packet.memory.graph_schema_version)
+    if notice is not None:
+        lines.append(notice)
     if packet.during is not None:
         end = "open" if packet.during.end is None else str(packet.during.end)
         lines.append(
