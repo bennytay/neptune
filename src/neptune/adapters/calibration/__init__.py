@@ -23,7 +23,6 @@ import re
 import sys
 from collections.abc import Iterator
 from typing import Final
-from xml.parsers import expat
 
 import yaml
 
@@ -89,7 +88,7 @@ _XML_START: Final = re.compile(rb"(?:\xef\xbb\xbf)?\s*<")
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id=ADAPTER_ID,
-    version="0.1.0",
+    version="0.1.1",
     abi=ABI_VERSION,
     summary="Camera, IMU and sensor-extrinsic calibration files: ROS, Kalibr and OpenCV.",
     formats=(
@@ -147,7 +146,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
             choices=("1.1", "1.2", "declared"),
         ),
     ),
-    libraries=(("expat", expat.EXPAT_VERSION), ("python", PYTHON), ("pyyaml", yaml.__version__)),
+    libraries=(("python", PYTHON), ("pyyaml", yaml.__version__)),
     finding_codes=(
         Documented(
             code("ambiguous_value"),
