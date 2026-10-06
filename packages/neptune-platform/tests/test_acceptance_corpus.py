@@ -197,6 +197,73 @@ def test_the_manifest_declares_the_machine_of_every_calibration(files: dict[str,
         assert (run["machine"], run["site"]) == ("ARM-3A", "PLANT-2")
 
 
+def _mapped_namespaces(document: Any) -> set[str]:
+    """Every ``namespace`` a mapping declares for its ``machines`` (any depth)."""
+    found: set[str] = set()
+    if isinstance(document, dict):
+        for key, value in document.items():
+            if key == "machines" and isinstance(value, list):
+                found.update(item["namespace"] for item in value)
+            else:
+                found |= _mapped_namespaces(value)
+    elif isinstance(document, list):
+        for item in document:
+            found |= _mapped_namespaces(item)
+    return found
+
+
+def test_machine_aliases_are_in_the_namespaces_the_mappings_key_machines_by(
+    files: dict[str, bytes],
+) -> None:
+    """Memory joins a record's machine to the manifest's only through a declared alias spelled as
+    the mapping keys it (Platform ADR 0013): Deploy's presets and incident template, and Memory's
+    event-table declaration for the syslog export's ``Host``. Each alias names the machine as the
+    source writes it."""
+    deploy = corpus.REPO / "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets"
+    mappings = {
+        name: _mapped_namespaces(json.loads((deploy / name).read_text(encoding="utf-8")))
+        for name in (
+            "cmms_generic.json",
+            "cmms_downtime.json",
+            "servicenow_csv.json",
+            "requalification_csv.json",
+            "templates/incident_report.json",
+        )
+    }
+    memory = json.loads(
+        (
+            corpus.REPO
+            / "packages/neptune-memory/tests/fixtures/acceptance_corpus.memory_config.json"
+        ).read_text(encoding="utf-8")
+    )
+    syslog = {t["machine"]["namespace"] for t in memory["memory.events"]["tables"]}
+    assert mappings == {
+        "cmms_generic.json": {"cmms.asset"},
+        "cmms_downtime.json": {"cmms.asset"},
+        "servicenow_csv.json": {"servicenow.ci"},
+        "requalification_csv.json": {"requalification.robot"},
+        "templates/incident_report.json": {"incident_report.machine"},
+    }
+    assert syslog == {"syslog.host"}
+    keyed = set().union(*mappings.values(), syslog)
+    for ident, _, aliases in generate.MACHINES:
+        assert set(aliases) <= keyed, ident
+        assert set(aliases.values()) == {ident}
+    by_machine = {ident: set(aliases) for ident, _, aliases in generate.MACHINES}
+    assert by_machine["ARM-3A"] == keyed  # every source names the arm of the incident
+    assert by_machine["AMR-07"] == keyed - {"syslog.host"}
+    # The sources do write the machine that way.
+    syslog_rows = _rows(files["sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv"], "Seq")
+    assert "ARM-3A" in {row["Host"] for row in syslog_rows.values()}
+    for path, robot in (
+        ("sites/PLANT-2/cell3/requalification/requalification_tests.csv", "ARM-3A"),
+        ("sites/S-007/requalification/requalification_tests.csv", "AMR-07"),
+    ):
+        assert {row["Robot"] for row in _rows(files[path], "Requal ID").values()} == {robot}
+    assert b"ARM-3A" in files["sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf"]
+    assert b"AMR-07" in files["sites/S-007/incidents/INC-0007.pdf"]
+
+
 def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str, bytes]) -> None:
     """The stop the operator joins: the CMMS's hand-entered time is 32 s after the controller's,
     which is the incident report's HMI time and the bag's header stamp of the collision."""
@@ -217,13 +284,15 @@ def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str
     seconds = int((pstop - datetime(1970, 1, 1)).total_seconds())  # local wall time, as written
     assert generate.local_ns(2026, 9, 14, 14, 32, 38) == (seconds + 4 * 3600) * 10**9  # EDT
     assert b"2026-09-14 14:32:38" in files["sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf"]
-    # The assertion joins exactly these two, and says who, when and about what.
+    # The assertion joins exactly these two and the incident report (2.2.0), and says who, when
+    # and about what.
     document = json.loads(files["sites/PLANT-2/cell3/incidents/INC-C3-0011.assertions.json"])
     assert (document["format"], document["version"]) == ("neptune.assertions", 1)
     (entry,) = document["assertions"]
     assert entry["assertion_type"] == "same_identity"
     assert entry["scope"] == [
         {"namespace": "cmms.downtime", "value": "DT-26-0914-01"},
+        {"namespace": "incident_report.incident", "value": "INC-C3-0011"},
         {"namespace": "syslog", "value": "4182"},
     ]
     assert entry["author"] == {"namespace": "plant-2.staff", "value": "a.novak"}

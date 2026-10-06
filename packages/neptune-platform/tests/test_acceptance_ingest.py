@@ -128,7 +128,11 @@ def test_the_package_holds_both_stops_32_s_apart_and_the_assertion_joining_them(
     (record,) = resolved["assert.same-stop"]["records"]
     (assertion,) = [a for a in package.kind("assertion") if a["id"] == record]
     assert assertion["provenance"]["assertion_kind"] == "stated"
-    assert [s["value"] for s in assertion["scope"]["value"]] == ["DT-26-0914-01", "4182"]
+    assert [s["value"] for s in assertion["scope"]["value"]] == [
+        "DT-26-0914-01",
+        "INC-C3-0011",
+        "4182",
+    ]
 
 
 def test_the_calibrations_land_as_configuration_until_the_compiler_reads_easy_handeye(

@@ -6,7 +6,10 @@ types, with one incident to reconstruct and gold answers to score against. Decis
 [ADR 0008](adr/0008-harness-deploy-stage-corpus-declared-mappings-and-the-assertion-selector.md) (the Deploy
 declaration, the `assertion` selector, 2.0.0) and
 [ADR 0009](adr/0009-declared-source-zones-the-declaration-selector-and-corpus-2-1-0.md) (declared source zones,
-the `declaration` selector, 2.1.0). Code: `harness/acceptance/`.
+the `declaration` selector, 2.1.0) and
+[ADR 0013](adr/0013-corpus-2-2-0-machine-aliases-every-source-names-and-the-incident-in-its-same-event-assertion.md)
+(machine aliases for every source that names a machine, the incident in the same-event assertion, 2.2.0). Code:
+`harness/acceptance/`.
 
 ## Use it
 
@@ -24,13 +27,13 @@ uv run --all-packages python -m harness.acceptance check                # build 
 make harness                                                            # the harness ingests it by default
 ```
 
-A gate quotes the version and tree id from the report's corpus line: `acceptance 2.1.0 (tree sha256:…)`.
+A gate quotes the version and tree id from the report's corpus line: `acceptance 2.2.0 (tree sha256:…)`.
 
 ## What is in it
 
 | Where | What |
 |---|---|
-| `neptune.yaml` | the run sheet: machines (AMR-05..07 `mobile_base`, ARM-3A `manipulator`, LEG-01 `legged`) with their `cmms.asset` and `servicenow.ci` aliases, sites S-007 and PLANT-2, tasks, software versions, and declared runs: the bags and patrols, each with its task, software and pinned snapshots, and each hand-eye calibration as a session of ARM-3A (easy_handeye's file names no robot) |
+| `neptune.yaml` | the run sheet: machines (AMR-05..07 `mobile_base`, ARM-3A `manipulator`, LEG-01 `legged`) with an alias for each source that names them, in the namespace its mapping keys machines by (`cmms.asset`, `servicenow.ci`, `incident_report.machine`, `requalification.robot`, `syslog.host`), sites S-007 and PLANT-2, tasks, software versions, and declared runs: the bags and patrols, each with its task, software and pinned snapshots, and each hand-eye calibration as a session of ARM-3A (easy_handeye's file names no robot) |
 | `records/asset_register.csv` | both sites' assets; stale for GRP-3A's finger set and LEG-01's firmware |
 | `sites/S-007/` | the Deploy D1 AMR fleet narrowed to S-007: URDFs, nav configs (firmware 4.3.1 after the 4.2.0 rollout), zone map and register, CMMS, changes, requalification, MCAP runs, incident INC-0007 |
 | `sites/PLANT-2/cmms`, `changes` | the plant's CMMS work orders (D1 cell rows plus WO-26-0911..0916), its downtime log (DT-26-0914-01: the INC-C3-0011 stop, entered by hand at 14:33:10) and change records (none after 2026-08-18) |
@@ -148,6 +151,13 @@ with evidence `pin.0909.calibration`, `pin.0914.calibration`, `pin.0914.vision`,
 `pin` selector; Q2.C3, Q3.C2, Q3.C6) and the gap claim Q6.C3 (`s007.manifest.amr07-0402`,
 `s007.nav2.amr07.firmware`, `s007.WO-26-0414`). No existing evidence id or answer changed meaning; a
 consumer that matches the scope's namespaces matches the new spelling.
+
+2.2.0 (MVL-191) gave ARM-3A the aliases `incident_report.machine`, `requalification.robot` and `syslog.host`, and
+AMR-07 `incident_report.machine` and `requalification.robot`, so Memory joins the incident report's, the
+requalification logs' and syslog's machine to the run sheet's by stated `same_as` (Memory ADR 0021). The
+same-event assertion's scope gained `{incident_report.incident, INC-C3-0011}`, the incident report as Deploy's
+template identifies it. Only `neptune.yaml` and `INC-C3-0011.assertions.json` changed; no evidence id moved and
+no answer changed meaning.
 
 2.0.0 (MVL-191) moved `cal.0818.z`, `cal.0911.z` (now `/transformation/z`) and `cal.0818.error`, `cal.0911.error`
 (now calibration-log rows). It added the PLANT-2 envelopes, the downtime log, the syslog export, the assertion,

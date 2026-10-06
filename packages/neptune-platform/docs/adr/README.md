@@ -17,3 +17,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0008](0008-harness-deploy-stage-corpus-declared-mappings-and-the-assertion-selector.md) | Harness deploy stage: corpus-declared Deploy mappings between compiler and ledger, and the assertion selector | Accepted |
 | [0009](0009-declared-source-zones-the-declaration-selector-and-corpus-2-1-0.md) | Declared source zones, the declaration and pin selectors, no dangling same-event links, and corpus 2.1.0 | Accepted |
 | [0010](0010-golden-only-contract-releases.md) | Golden-only contract releases for an unchanged schema | Accepted |
+| [0013](0013-corpus-2-2-0-machine-aliases-every-source-names-and-the-incident-in-its-same-event-assertion.md) | Corpus 2.2.0: machine aliases for every source that names a machine, and the incident in its same-event assertion | Accepted |
