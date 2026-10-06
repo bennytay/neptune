@@ -71,7 +71,7 @@ from neptune.identity import canonical_json
 from neptune.store.package import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport, ThreadsOf, threads_of_from_json
-from neptune_memory.store.gzipped import LEVEL, deterministic_gzip, gunzip
+from neptune_memory.store.gzipped import LEVEL, GzipError, deterministic_gzip, gunzip
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -256,6 +256,15 @@ def gzip_record() -> bytes:
     return canonical_json.dumps(document) + b"\n"
 
 
+def _document(packed: bytes) -> bytes | None:
+    """The document a committed ``.gz`` holds, or ``None`` when it is missing or not a gzip of one
+    (which ``--check`` reports as a difference, not a crash)."""
+    try:
+        return gunzip(packed, MAX_DOCUMENT) if packed else None
+    except GzipError:
+        return None
+
+
 def same_zlib(recorded: bytes) -> bool:
     """Whether ``recorded`` (a ``gzip_record``) names the running ``zlib`` and level: only then
     are two ``.gz`` files of one document expected to be equal bytes."""
@@ -304,8 +313,7 @@ def run(argv: list[str] | None = None) -> int:
         args.environment_out: args.environment_out.is_file()
         and args.environment_out.read_bytes() == environment,
         # the document always; the gzip bytes only under the zlib recorded beside them
-        args.out: bool(old)
-        and gunzip(old, MAX_DOCUMENT) == gunzip(packed, MAX_DOCUMENT)
+        args.out: _document(old) == gunzip(packed, MAX_DOCUMENT)
         and (old == packed or not same_zlib(recorded)),
     }
     for path, same in verdicts.items():

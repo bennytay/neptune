@@ -188,6 +188,17 @@ def test_a_gzipped_document_is_verified_as_its_content(tmp_path: Path) -> None:
     assert len(lines) == 1 and "generation" in lines[0]
 
 
+def test_a_file_over_the_input_cap_is_refused_unread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import neptune_memory.cli as cli
+
+    monkeypatch.setattr(cli, "MAX_GRAPH_FILE_BYTES", SNAPSHOT.stat().st_size - 1)
+    status, lines, err = verify(SNAPSHOT)
+    assert (status, lines) == (USAGE, [])
+    assert "larger than" in err
+
+
 def test_a_broken_gzip_is_a_usage_error(tmp_path: Path) -> None:
     good = SNAPSHOT.read_bytes()
     for name, data in (

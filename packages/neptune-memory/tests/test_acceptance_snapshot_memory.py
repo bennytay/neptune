@@ -153,6 +153,14 @@ def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes, bytes
         )
 
 
+def test_check_reads_a_missing_or_corrupt_gz_as_a_difference_not_a_crash() -> None:
+    document = generator()._document
+    assert document(b"") is None
+    assert document(b"\x1f\x8bnot deflate") is None
+    assert document(committed_gz()[:100]) is None  # truncated
+    assert document(committed_gz()) == committed()
+
+
 def test_the_gzip_bytes_are_compared_only_under_the_recorded_zlib() -> None:
     recorded = generator().GZIP.read_bytes()
     document = canonical_json.loads(recorded.rstrip(b"\n"))
@@ -238,4 +246,5 @@ def test_the_snapshot_is_a_deterministic_gzip_of_its_graph() -> None:
     """No file name, no time, no platform in the header: ``deterministic_gzip`` of the content."""
     data = committed_gz()
     assert data[:10] == bytes.fromhex("1f8b08000000000002ff")
-    assert deterministic_gzip(committed()) == data
+    if generator().same_zlib(generator().GZIP.read_bytes()):  # the bytes are zlib's packaging
+        assert deterministic_gzip(committed()) == data

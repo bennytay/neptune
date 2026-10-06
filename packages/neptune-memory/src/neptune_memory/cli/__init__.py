@@ -26,7 +26,8 @@ Rule: thin wrappers over the library; no logic of their own, and no direct packa
   rest of what ``graph_from_json`` checks. One line per problem on stdout and exit 1; a one-line
   summary and exit 0 when it decodes. Needs no ``--graphs`` or ``--tenant``. A gzip file (told by
   its bytes, not its name: the acceptance snapshot ships as ``.json.gz``) is read decompressed, up
-  to ``MAX_GRAPH_BYTES``; a truncated, corrupt or oversized one is unreadable input.
+  to ``MAX_GRAPH_BYTES``; a truncated, corrupt or oversized one is unreadable input, and so is any
+  file larger than ``MAX_GRAPH_FILE_BYTES``, which is refused before it is read.
 
 ``--ledger`` is a Ledger export (``neptune_memory.ledger.LedgerExport``), ``--graphs`` the root of
 the tenants' graph directories (``neptune_memory.store.graphs``). Exit status: 0 done, 1 refused
@@ -76,6 +77,8 @@ REFUSED: Final = 1
 USAGE: Final = 2
 # The largest graph document ``verify`` decompresses: past it a gzip file is refused, not inflated.
 MAX_GRAPH_BYTES: Final = 1 << 30
+# The largest file ``verify`` reads at all, gzipped or not: past it the file is refused unread.
+MAX_GRAPH_FILE_BYTES: Final = 256 << 20
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -122,6 +125,8 @@ def _constant(token: str) -> object:
 def _strict_json(path: Path, what: str, *, gzipped: bool = False) -> object:
     """Any strict JSON (no repeated keys, no NaN), canonical or not; with ``gzipped``, a gzip
     file's content is read instead of its bytes."""
+    if gzipped and path.stat().st_size > MAX_GRAPH_FILE_BYTES:
+        raise ValueError(f"the {what} file is larger than {MAX_GRAPH_FILE_BYTES} bytes")
     data = path.read_bytes()
     if gzipped and is_gzip(data):
         data = gunzip(data, MAX_GRAPH_BYTES)

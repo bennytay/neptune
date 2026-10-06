@@ -282,6 +282,35 @@ def test_a_config_spelled_otherwise_hashes_the_same(tmp_path: Path) -> None:
     )
 
 
+def test_a_changed_config_withdraws_the_old_lineage(tmp_path: Path) -> None:
+    """``consolidate`` at the next snapshot without the declaration: the syslog events built under
+    the old config are withdrawn at that snapshot (new lineage), not rewritten."""
+    records, _ = plant()
+    later = ExportedPackage("plant-2-later", 8, 2, ())  # packages are ordered by id
+    path = tmp_path / "ledger.json"
+    exported = LedgerExport(2, "stub", (ExportedPackage("plant-2", 8, 1, tuple(records)), later))
+    path.write_bytes(canonical_json.dumps(exported.to_json()))  # type: ignore[arg-type]
+    ledger = ("--ledger", str(path))
+    assert memory(
+        tmp_path, "consolidate", *ledger, "--snapshot", "1", "--config", str(CONFIG_FILE)
+    ) == (OK, "")
+    assert memory(tmp_path, "consolidate", *ledger, "--snapshot", "2") == (OK, "")
+    document = graph_from_json(json.loads((tmp_path / "graphs" / "t" / "graph.json").read_text()))
+    configured = config_hash(resolve_config(EVENTS_CONFIG))
+    events = [
+        c
+        for c in document.resolution.claims
+        if c.provenance.consolidator_id == EVENTS_CONSOLIDATOR_ID
+    ]
+    old = [c for c in events if str(c.provenance.config_hash) == configured]
+    assert old and all(c.superseded_at == ledger_tx(2) for c in old)
+    current = [c for c in events if c.is_current]
+    assert current and {str(c.provenance.config_hash) for c in current} == {
+        config_hash(resolve_config({}))
+    }
+    assert text("PSTOP") not in {c.object for c in current if c.predicate == "declared_kind"}
+
+
 def test_registrations_keep_the_estimates_model_and_refuse_unknown_ids() -> None:
     given: dict[str, dict[str, JsonValue]] = {"memory.time_estimates": {}}
     (estimates,) = [
