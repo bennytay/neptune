@@ -1,5 +1,6 @@
 """The site's build: offline output, the Sphinx configuration, and its place in check and CI."""
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -60,14 +61,18 @@ def test_sphinx_runs_strict_with_a_fresh_environment() -> None:
 
 
 def _make(*args: str) -> str:
+    # this test may itself run under `make check PKG=...`, whose variables reach a child make
+    env = {
+        k: v for k, v in os.environ.items() if k not in {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "PKG"}
+    }
     result = subprocess.run(
-        ["make", "-n", "-C", str(REPO), *args], capture_output=True, text=True, check=True
+        ["make", "-n", "-C", str(REPO), *args], capture_output=True, text=True, check=True, env=env
     )
     return result.stdout
 
 
 def test_a_whole_workspace_check_builds_the_site_and_a_package_check_does_not() -> None:
-    assert "python -m docsite" in _make("check")
+    assert "python -m docsite" in _make("check", "PKG=")
     assert "python -m docsite" not in _make("check", "PKG=neptune-platform")
 
 
