@@ -7,7 +7,10 @@ packet strictly (exact keys, exact types, no duplicate keys, no NaN) and rebuild
 model's constructors, so a decoded packet passed every check a built one did; then it recomputes
 every item id and the packet id and refuses a document whose ids do not match its content.
 Upstream values (claims, findings, evidence refs, frames, timestamps) are read by their owners'
-codecs, so a packet carries them exactly as Memory and the compiler publish them.
+codecs, so a packet carries them exactly as Memory and the compiler publish them; then each
+claim, node and finding is checked against Context's pinned graph-schema (``pinned``), so a value
+Memory added after the pin is refused as ``shape`` instead of passing because the live codec
+knows it (ADR 0007 §6).
 """
 
 from __future__ import annotations
@@ -69,6 +72,8 @@ from neptune_context.packets.model import (
     Superseded,
     Transform,
 )
+from neptune_context.pinned import claim_beyond_pin, finding_beyond_pin, node_beyond_pin
+from neptune_context.pins import GRAPH_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from neptune_memory.schema.claim import ClaimAssertionKind, ClaimId
@@ -265,8 +270,29 @@ def _record_ids(value: JsonValue, at: str) -> tuple[RecordId, ...]:
     return _each(value, at, lambda v, a: _upstream(a, lambda: _as_record(v)))
 
 
+def _beyond_pin(reason: str | None) -> None:
+    """Refuse a value the pinned graph-schema does not describe (ADR 0007 §6): Memory's live
+    codec would accept it, but this reader reads packets at Context's pin."""
+    if reason is not None:
+        raise ValueError(f"{reason} is not in the pinned graph-schema {GRAPH_SCHEMA_VERSION}")
+
+
 def _node(value: JsonValue) -> Any:
-    return node_from_json(value)
+    node = node_from_json(value)
+    _beyond_pin(node_beyond_pin(node))
+    return node
+
+
+def _claim(value: JsonValue) -> Any:
+    claim = claim_from_json(value)
+    _beyond_pin(claim_beyond_pin(claim))
+    return claim
+
+
+def _finding(value: JsonValue) -> Any:
+    finding = finding_from_json(value)
+    _beyond_pin(finding_beyond_pin(finding))
+    return finding
 
 
 def _frame(value: JsonValue) -> FrameRef:
@@ -310,7 +336,7 @@ def _build(kind: str, obj: Mapping[str, JsonValue], at: str, envelope: dict[str,
         return _upstream(f"{at}/{key}", lambda: evidence_ref_from_json(obj[key]))
 
     if kind == "claim":
-        claim = _upstream(f"{at}/claim", lambda: claim_from_json(obj["claim"]))
+        claim = _upstream(f"{at}/claim", lambda: _claim(obj["claim"]))
         return ClaimItem(**envelope, claim=claim)
     if kind == "evidence":
         return EvidenceItem(
@@ -518,9 +544,7 @@ def _packet(value: JsonValue) -> ContextPacket:
     header = _header(obj["header"], "/header")
     items = _each(obj["items"], "/items", _item)
     superseded = _each(obj["superseded_since"], "/superseded_since", _superseded)
-    findings = _each(
-        obj["findings"], "/findings", lambda v, a: _upstream(a, lambda: finding_from_json(v))
-    )
+    findings = _each(obj["findings"], "/findings", lambda v, a: _upstream(a, lambda: _finding(v)))
     gaps = _each(obj["gaps"], "/gaps", _gap)
     packet = _upstream(
         "",

