@@ -101,7 +101,7 @@ def facts(data: bytes) -> list[bytes]:
 @pytest.mark.slow
 def test_a_regeneration_states_the_same_facts(regenerated: tuple[bytes, bytes]) -> None:
     assert facts(gunzip(regenerated[0], MAX_GRAPH_BYTES)) == facts(committed()), (
-        f"acceptance_corpus.graph.json is stale (the corpus, the compiler or Memory changed). "
+        f"acceptance_corpus.graph.json.gz is stale (the corpus, the compiler or Memory changed). "
         f"{REGENERATE}"
     )
 
@@ -111,7 +111,7 @@ def differences(here: JsonValue, recorded: JsonValue) -> dict[str, object]:
     if not isinstance(here, dict) or not isinstance(recorded, dict):
         return {"environment": (here, recorded)}
     out: dict[str, object] = {}
-    for key in sorted((here.keys() | recorded.keys()) - {"transforms"}):  # corpus, gzip
+    for key in sorted((here.keys() | recorded.keys()) - {"transforms"}):
         if here.get(key) != recorded.get(key):
             out[key] = (here.get(key), recorded.get(key))
     mine, theirs = here.get("transforms"), recorded.get("transforms")

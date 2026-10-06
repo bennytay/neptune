@@ -39,8 +39,10 @@ network, and no transform records a host-bound library version (compiler #139 dr
 the same code gives the same bytes on any host. What the bytes still depend on is pinned by the
 repository: the corpus version, adapter versions, the libraries ``uv.lock`` pins and the Python
 minor version ``.python-version`` pins, all of which transform records name.
-``acceptance_corpus.environment.json`` records them, and the ``zlib`` that deflated the file, so a
-failing regeneration says which moved.
+``acceptance_corpus.environment.json`` records them, so a failing regeneration says which moved.
+The gzip bytes also depend on the ``zlib`` deflating them, which no file pins; the snapshot test
+checks the document and the gzip bytes separately and names that ``zlib`` when only the latter
+differ.
 ``tests/test_acceptance_snapshot_memory.py`` regenerates and compares, byte for byte.
 
 From the repository root, with ``G=packages/neptune-memory/tests/fixtures/<this file>``::
@@ -60,7 +62,6 @@ import io
 import json
 import sys
 import tempfile
-import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -68,7 +69,7 @@ from neptune.identity import canonical_json
 from neptune.store.package import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport, ThreadsOf, threads_of_from_json
-from neptune_memory.store.gzipped import LEVEL, deterministic_gzip
+from neptune_memory.store.gzipped import deterministic_gzip
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -241,11 +242,7 @@ def environment(export: LedgerExport) -> bytes:
             if record.get("kind") == "transform_record":
                 key = f"{record['adapter_id']} {record['adapter_version']}"
                 transforms[key] = cast("JsonValue", record["libraries"])
-    document: JsonValue = {
-        "corpus": corpus_label(),
-        "gzip": {"level": LEVEL, "zlib": zlib.ZLIB_RUNTIME_VERSION},
-        "transforms": transforms,
-    }
+    document: JsonValue = {"corpus": corpus_label(), "transforms": transforms}
     return canonical_json.dumps(document) + b"\n"
 
 
