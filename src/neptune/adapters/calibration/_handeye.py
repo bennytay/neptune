@@ -28,6 +28,7 @@ from neptune.adapters.calibration._items import Item, Kind, xml_scalar
 from neptune.adapters.calibration._params import single_number
 from neptune.model.configuration import ScalarType
 from neptune.model.frames import MAX_TEXT_LENGTH, QuaternionOrder
+from neptune.model.provenance import Locator
 from neptune.model.scalars import NonFinite
 
 FRAME_KEYS: Final = ("robot_effector_frame", "robot_base_frame")
@@ -66,9 +67,16 @@ class HandEye:
     key: str
     launch: bool = False
 
-    @property
-    def tracking(self) -> Item | None:
-        return None if self.launch else self.holder.child(TRACKING)
+    def camera(self) -> tuple[str, Locator] | None:
+        """The camera's frame, the calibrated subject, and where it is named: the
+        ``tracking_base_frame`` or MoveIt's ``child_frame_id``. ``None`` where it is no name."""
+        if self.launch:
+            args = (self.transform.attribute("args") or "").split()
+            named = args[8] if len(args) == 9 and len(args[8]) <= MAX_TEXT_LENGTH else None
+            return (named, self.transform.where) if named is not None else None
+        tracking = self.holder.child(TRACKING)
+        name = frame_name(tracking)
+        return (name, tracking.where) if name is not None and tracking is not None else None
 
 
 @dataclass(frozen=True)
@@ -153,12 +161,19 @@ def moveit_launch(root: Item) -> HandEye | None:
 
 
 def _text(item: Item | None) -> str | None:
+    """Non-empty text every reading agrees on, else ``None``."""
     if item is None or item.kind is not Kind.SCALAR or len(item.readings) != 1:
         return None
     reading = item.readings[0]
     if reading.type is not ScalarType.STRING or not isinstance(reading.value, str):
         return None
     return reading.value or None
+
+
+def frame_name(item: Item | None) -> str | None:
+    """A frame's name as a ``FrameRef`` holds one: non-empty text of at most 256 characters."""
+    name = _text(item)
+    return name if name is not None and len(name) <= MAX_TEXT_LENGTH else None
 
 
 def _flag(item: Item | None) -> bool | None:
@@ -172,21 +187,20 @@ def _flag(item: Item | None) -> bool | None:
 
 def read(hand_eye: HandEye) -> Declared | Unread:
     """The transform a hand-eye result declares, or why it is not one."""
-    declared = _read_launch(hand_eye.transform) if hand_eye.launch else _read_yaml(hand_eye)
-    if isinstance(declared, Declared):
-        for name in (declared.parent, declared.child):
-            if len(name) > MAX_TEXT_LENGTH:
-                return Unread("frame", f"a frame name is longer than {MAX_TEXT_LENGTH} characters")
-    return declared
+    return _read_launch(hand_eye.transform) if hand_eye.launch else _read_yaml(hand_eye)
 
 
 def _read_yaml(hand_eye: HandEye) -> Declared | Unread:
     parent = _parent(hand_eye)
     if isinstance(parent, Unread):
         return parent
-    child = _text(hand_eye.tracking)
+    child = frame_name(hand_eye.holder.child(TRACKING))
     if child is None:
-        return Unread("frame", f"{TRACKING} is not a frame name, so the camera's frame is unnamed")
+        return Unread(
+            "frame",
+            f"{TRACKING} is not a frame name (text of 1 to {MAX_TEXT_LENGTH} characters), so the"
+            " camera's frame is unnamed",
+        )
     if child == parent:
         return Unread("frame", f"the robot frame and {TRACKING} are one frame, {child!r}")
     numbers = _numbers(hand_eye)
@@ -212,10 +226,14 @@ def _parent(hand_eye: HandEye) -> str | Unread:
             )
         in_hand = mode == EYE_IN_HAND
     key = FRAME_KEYS[0] if in_hand else FRAME_KEYS[1]
-    parent = _text(holder.child(key))
+    parent = frame_name(holder.child(key))
     if parent is None:
         mode_name = "eye-in-hand" if in_hand else "eye-on-base"
-        return Unread("frame", f"a {mode_name} result needs {key}, which is not a frame name")
+        return Unread(
+            "frame",
+            f"a {mode_name} result needs {key}, which is not a frame name (text of 1 to"
+            f" {MAX_TEXT_LENGTH} characters)",
+        )
     return parent
 
 
@@ -225,15 +243,15 @@ def _numbers(
     mapping = hand_eye.transform
     if hand_eye.key == EASY_TRANSFORM:
         moved, turned = mapping, mapping
-        axes, components = ("x", "y", "z"), ("qx", "qy", "qz", "qw")
+        components = ("qx", "qy", "qz", "qw")
     else:
         moved_item = _mapping(mapping.child("translation"))
         turned_item = _mapping(mapping.child("rotation"))
         if moved_item is None or turned_item is None:
             return Unread("values", "transform does not hold a translation and a rotation mapping")
         moved, turned = moved_item, turned_item
-        axes, components = ("x", "y", "z"), ("x", "y", "z", "w")
-    translation = _finite(moved, axes)
+        components = ("x", "y", "z", "w")
+    translation = _finite(moved, ("x", "y", "z"))
     rotation = _finite(turned, components)
     if isinstance(translation, Unread):
         return translation
@@ -280,14 +298,13 @@ def _read_launch(node: Item) -> Declared | Unread:
         )
     numbers: list[float] = []
     for token in args[:7]:
-        scalar = xml_scalar(token)
-        value = scalar.value
-        if scalar.type not in (ScalarType.INT, ScalarType.FLOAT) or isinstance(value, bool):
-            return Unread("values", f"args value {token!r} is not a number")
-        if isinstance(value, NonFinite) or not isinstance(value, int | float):
-            return Unread("values", f"args value {token!r} is not finite")
+        value = xml_scalar(token).value  # text for a number past binary64
+        if isinstance(value, bool | NonFinite | str):
+            return Unread("values", f"args value {token!r} is not a finite number")
         numbers.append(float(value))
     parent, child = args[7], args[8]
+    if max(len(parent), len(child)) > MAX_TEXT_LENGTH:
+        return Unread("frame", f"a frame name in args is longer than {MAX_TEXT_LENGTH} characters")
     if parent == child:
         return Unread("frame", f"frame_id and child_frame_id are one frame, {parent!r}")
     x, y, z, qx, qy, qz, qw = numbers

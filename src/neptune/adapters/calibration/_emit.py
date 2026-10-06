@@ -149,8 +149,8 @@ class Emitter:
         launch = hand_eye is not None and hand_eye.launch
         flat = Flattener(self.cite, self.max_array)
         parameters = flat.run(item, consumed) if not launch else ()
-        if hand_eye is not None and launch and not transforms:
-            parameters = self._launch_args(hand_eye)
+        if hand_eye is not None and hand_eye.launch and not transforms:
+            parameters = self._launch_args(hand_eye, calibration_id)
         if fmt in (CalibrationFormat.OPENCV_YAML, CalibrationFormat.OPENCV_XML):
             self._opencv_extrinsics(item, calibration_id)
         self._gaps(flat.gaps, item, calibration_id)
@@ -163,8 +163,6 @@ class Emitter:
             if entry.subject is not None and entry.subject_where is not None
             else Unknown()
         )
-        if launch and transforms:  # MoveIt names the camera's frame only in its args
-            subject = Known(transforms[0].child.frame_id, transforms[0].provenance)
         if not parameters and not transforms:
             self.finding(
                 "not_calibration",
@@ -196,16 +194,18 @@ class Emitter:
         if item is None:
             return Unknown()
         cited = self.cite(item.where, AssertionKind.STATED)
+        if item.kind in (Kind.NULL, Kind.ALIAS, Kind.UNREAD):
+            return Unknown(cited)  # a blank is no time; an unread value has its own finding
         text = item.text if item.kind is Kind.SCALAR else None
-        civil = read_time(text.strip()) if text is not None else "it is not text"
+        civil = read_time(text.strip()) if text is not None else "it is not a scalar"
         if not isinstance(civil, Civil):
             self.finding(
                 "time_not_read",
                 FindingCategory.UNSUPPORTED,
                 Severity.WARNING,
                 item.where,
-                f"{item.name} is not read as a time: {civil}; performed is Unknown and the text"
-                " stays a parameter",
+                f"{item.name} is not read as a time: {civil}; performed is Unknown and the value"
+                " stays in the parameters",
                 {"key": item.name},
                 [calibration_id],
             )
@@ -280,12 +280,28 @@ class Emitter:
             )
         return [transform], ({hand_eye.key} if hand_eye.key else set())
 
-    def _launch_args(self, hand_eye: HandEye) -> tuple[CalibrationParameter, ...]:
+    def _launch_args(
+        self, hand_eye: HandEye, calibration_id: RecordId
+    ) -> tuple[CalibrationParameter, ...]:
         """MoveIt's args as written, where they are no transform: the evidence stays citable."""
-        args = hand_eye.transform.attribute("args")
+        node = hand_eye.transform
+        args = node.attribute("args")
         if not args:
             return ()
-        cited = self.cite(hand_eye.transform.where)
+        cited = self.cite(node.where)
+        limit = self.config.integer("max_scalar_length")
+        if len(args) > limit:
+            self.finding(
+                "value_not_read",
+                FindingCategory.UNSUPPORTED,
+                Severity.WARNING,
+                node.where,
+                f"args holds {len(args)} characters, over max_scalar_length ({limit}): the"
+                " parameter node/args is Unknown",
+                {"count": 1, "first": "node/args"},
+                [calibration_id],
+            )
+            return (CalibrationParameter("node/args", Unknown(cited), Unknown()),)
         return (CalibrationParameter("node/args", Known(args, cited), NotApplicable()),)
 
     # --- Kalibr extrinsics --------------------------------------------------------------------

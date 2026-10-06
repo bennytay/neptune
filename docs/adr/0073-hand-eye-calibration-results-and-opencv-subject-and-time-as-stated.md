@@ -68,7 +68,8 @@ is `strftime("%c")` in the C locale, since the samples never set a locale.
      both frames are the same, the finding is `frame_unresolved`. If a component is missing,
      repeated, not a number or not finite, or `args` does not hold nine values, the finding is
      `extrinsic_not_read`. In both cases no transform is emitted and the values stay parameters.
-     MoveIt's `args` text is then the parameter `node/args`.
+     MoveIt's `args` text is then the parameter `node/args`, which is `Unknown` with
+     `value_not_read` past `max_scalar_length`.
    - A sample count or error is a parameter only where a file states one. None of these formats
      does, and nothing is computed.
 3. **An OpenCV file's subject and time, stated** (amends ADR 0055 §3).
@@ -87,6 +88,7 @@ is `strftime("%c")` in the C locale, since the samples never set a locale.
    - Locale-dependent forms are not read: a two-digit year whose century is not written, or a zone
      abbreviation such as `EDT`. A leap second and a date that is not in the calendar are not read
      either. Each gives `time_not_read` and `Unknown`. The text stays a parameter in every case.
+     A null time (`calibration_time:` with no value) is `Unknown` with no finding.
 4. **No schema change.** `Calibration`, `FrameTransform` with `Pose` and `Quaternion`, and
    `TimestampDomain` all exist. The adapter adds `timestamp_domain` to its record kinds.
    - Calibration adapter 0.2.0 is new lineage (ADR 0003). Its records for files 0.1.0 read change

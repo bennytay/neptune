@@ -352,7 +352,9 @@ def test_quaternion_components_in_an_order_the_model_names_neither_are_never_reo
         ("0.0254 -0.0123 0.0701 -0.714048 -0.0357024 -0.014281 0.69904 panda_hand", "extrinsic"),
         ("0.0254 -0.0123 nan -0.714048 -0.0357024 -0.014281 0.69904 a b", "extrinsic"),
         ("0.0254 -0.0123 0.0701 x -0.0357024 -0.014281 0.69904 a b", "extrinsic"),
+        ("0.0254 -0.0123 1e999 -0.714048 -0.0357024 -0.014281 0.69904 a b", "extrinsic"),
         ("0 0 0 0 0 0 1 panda_hand panda_hand", "frame"),
+        ("0 0 0 0 0 0 1 panda_hand " + "c" * 257, "frame"),
     ],
 )
 def test_moveit_args_that_are_no_transform_stay_a_parameter(args: str, code: str) -> None:
@@ -371,7 +373,28 @@ def test_moveit_args_that_are_no_transform_stay_a_parameter(args: str, code: str
     assert [(p.name, p.value.value) for p in calibration.parameters] == [  # type: ignore[union-attr]
         ("node/args", args)
     ]
-    assert isinstance(calibration.subject, Unknown)
+    # The camera is named where args names it, a frame name or not: a child_frame_id
+    # of 1 to 256 characters.
+    tokens = args.split()
+    if len(tokens) == 9 and len(tokens[8]) <= 256:
+        assert calibration.subject.value == tokens[8]  # type: ignore[union-attr]
+    else:
+        assert isinstance(calibration.subject, Unknown)
+
+
+def test_moveit_args_past_max_scalar_length_are_not_kept() -> None:
+    data = text(MOVEIT).replace("panda_hand camera_color_optical_frame", "a")
+    output = run(data, max_scalar_length=40)
+    assert codes(output) == ["calibration.extrinsic_not_read", "calibration.value_not_read"]
+    (parameter,) = only_calibration(output).parameters
+    assert parameter.name == "node/args" and isinstance(parameter.value, Unknown)
+
+
+def test_a_camera_frame_that_is_no_frame_name_is_no_subject_either() -> None:
+    old = "tracking_base_frame: wrist_camera_color_optical_frame"
+    output = run(text(EASY).replace(old, "tracking_base_frame: 42"))
+    assert codes(output) == ["calibration.frame_unresolved"]
+    assert isinstance(only_calibration(output).subject, Unknown)
 
 
 @pytest.mark.parametrize(
@@ -530,6 +553,20 @@ def test_an_opencv_xml_string_is_read_as_opencv_reads_it_without_its_quotes() ->
     assert calibration.subject.value == "rov_down_cam"  # type: ignore[union-attr]
     found = {p.name: p.value for p in calibration.parameters}
     assert found["camera_name"].value == "rov_down_cam"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("value", ["", "null", "~"])
+def test_a_blank_time_is_unknown_without_a_finding(value: str) -> None:
+    output = run(opencv(f"calibration_time: {value}\n"))
+    assert isinstance(only_calibration(output).performed, Unknown)
+    assert codes(output) == []
+
+
+def test_a_time_that_is_no_scalar_is_reported() -> None:
+    output = run(opencv("calibration_time: [2026, 4, 12]\n"))
+    assert isinstance(only_calibration(output).performed, Unknown)
+    assert codes(output) == ["calibration.time_not_read"]
+    assert "not a scalar" in output.findings()[0].message
 
 
 def test_a_blank_camera_name_is_no_subject() -> None:

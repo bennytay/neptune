@@ -14,7 +14,6 @@ from enum import StrEnum
 from typing import Final
 
 from neptune.adapters.calibration._handeye import (
-    TRACKING,
     HandEye,
     easy_handeye,
     easy_handeye2,
@@ -110,21 +109,19 @@ def recognise(root: Item, *, opencv: bool = False, xml: bool = False) -> Recogni
     ``%YAML:1.0`` line OpenCV writes, or (``xml``) the root element is ``opencv_storage``."""
     if root.kind is not Kind.MAPPING:
         return None
-    if xml:
-        launch = moveit_launch(root)
-        if launch is not None:
-            return Recognised(
-                CalibrationFormat.MOVEIT_HANDEYE, (Entry(root, None, hand_eye=launch),)
-            )
-    for fmt, match in (
-        (CalibrationFormat.EASY_HANDEYE, easy_handeye),
-        (CalibrationFormat.EASY_HANDEYE2, easy_handeye2),
-    ):
-        found = None if xml else match(root)
+    hand_eyes = (
+        ((CalibrationFormat.MOVEIT_HANDEYE, moveit_launch),)
+        if xml
+        else (
+            (CalibrationFormat.EASY_HANDEYE, easy_handeye),
+            (CalibrationFormat.EASY_HANDEYE2, easy_handeye2),
+        )
+    )
+    for fmt, match in hand_eyes:
+        found = match(root)
         if found is not None:
-            tracking = found.holder.child(TRACKING)
-            subject = _text(tracking) or None
-            where = tracking.where if tracking is not None and subject is not None else None
+            camera = found.camera()
+            subject, where = camera if camera is not None else (None, None)
             return Recognised(fmt, (Entry(root, subject, where, hand_eye=found),))
     entries: list[Entry] = []
     for child in root.children:
