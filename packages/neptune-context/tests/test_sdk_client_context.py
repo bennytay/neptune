@@ -371,7 +371,8 @@ def test_the_stub_refuses_two_packets_for_one_query_and_bad_directories(tmp_path
         StubEngine.from_directory(root)
     assert "broken.json is not a packet" in raised.value.message
     (root / "broken.json").unlink()
-    assert StubEngine.from_directory(root).query_ids == ()
+    # MVL-147: a stub that can answer nothing is refused, not served.
+    assert _code(lambda: StubEngine.from_directory(root)) is ErrorCode.INVALID_ARGUMENT
 
 
 def test_the_stub_loads_the_golden_directory() -> None:
