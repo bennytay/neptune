@@ -110,7 +110,7 @@ def test_the_shipped_spec_is_generated_from_the_declared_package_schema() -> Non
     """The newest spec follows the declared version. Of the versions after 1 only 10 adds a
     projection column: 2 adds kinds with no hot filter, 3 and 4 fill columns 0005 made (their
     only migration is the guard 0006), and 10's status and safety-state kinds are the first to
-    state a ``stream`` (root ADR 0071), so migration 0012 adds ``stream_ids``."""
+    state a ``stream`` (root ADR 0071), so migration 0013 adds ``stream_ids``."""
     latest = shipped_registry().latest
     assert latest.version == SCHEMA_VERSION
     newest = EXPORTS / f"v{latest.contract_version}" / "schema.json"
@@ -254,7 +254,7 @@ def test_schema_key_order_does_not_change_the_spec() -> None:
 
 def test_a_bump_that_adds_a_kind_renders_its_new_columns_only() -> None:
     """No partition: the new kind lives in record_default (ADR 0008; ADR 0009 §6). Every column
-    the fixture's kind states exists already (``stream_ids`` since 0012), so the bump is a guard
+    the fixture's kind states exists already (``stream_ids`` since 0013), so the bump is a guard
     and adds none."""
     text = render_migration(shipped_spec(), projection_spec(bumped_schema()), 5)
     assert text.startswith(f"-- 0005 record projections for urn:neptune:schema:canonical:{BUMPED}")
