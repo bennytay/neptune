@@ -32,7 +32,7 @@ On a laptop with `git`, `make` and `curl`, paste this into a terminal (CI runs t
 `scripts/quickstart.sh` on a clean machine, with a 15-minute limit):
 
 ```bash
-command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && . "$HOME/.local/bin/env"; }
+command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"; }
 [ -f harness/acceptance/gold.json ] || { git clone https://github.com/bennytay/neptune.git && cd neptune; }
 make setup
 make demo
