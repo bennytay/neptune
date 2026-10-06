@@ -24,6 +24,7 @@ from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.model.ids import check_token
 from neptune_memory.consolidate.base import (
+    EVENTS_CONSOLIDATOR_ID,
     Consolidation,
     Consolidator,
     run_consolidator,
@@ -101,7 +102,8 @@ class Registration:
 def default_registrations() -> tuple[Registration, ...]:
     """The deterministic consolidators of G2, in no particular order (``plan`` orders them)."""
     return (
-        Registration(IdentityConsolidator()),
+        # Identity joins the event nodes an assertion names (ADR 0019 §1); events reads nothing.
+        Registration(IdentityConsolidator(), after=(EVENTS_CONSOLIDATOR_ID,)),
         Registration(RunConsolidator()),
         Registration(TimeDomainConsolidator()),
         Registration(ConfigurationLineageConsolidator()),

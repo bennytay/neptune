@@ -26,6 +26,7 @@ def test_graph_schema_v1_is_published_and_active() -> None:
     # 1.5.0: episode predicates (ADR 0012); 1.6.0: events (ADR 0013).
     # 1.7.0: calibration history and the delta (ADR 0014); 1.8.0: coverage and health (ADR 0015).
     # 1.9.0: the graph document's builds, for withdrawal (ADR 0016).
+    # 1.10.0: vocabulary 11, succeeds narrowed to configurations (ADR 0019).
     for published in (
         "1.0.0",
         "1.1.0",
@@ -37,6 +38,7 @@ def test_graph_schema_v1_is_published_and_active() -> None:
         "1.7.0",
         "1.8.0",
         "1.9.0",
+        "1.10.0",
     ):
         version = json.loads(
             (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")

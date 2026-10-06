@@ -1,7 +1,7 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.9.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.10.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -14,7 +14,9 @@ calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-c
 §4, §6); 1.8.0 (minor) adds the coverage and health predicates
 ([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6); 1.9.0 (minor) adds the graph document's optional
 `builds` and `#/$defs/Build`, for withdrawal ([ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md);
-the vocabulary is unchanged). Earlier goldens still
+the vocabulary is unchanged); 1.10.0 (minor) is vocabulary 11: `succeeds` is narrowed to a statement about two
+configurations, and a machine's changes are its own `has_configuration` spans (rule 12;
+[ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §2). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 

@@ -42,6 +42,12 @@ from neptune_memory.consolidate.identity import (
     node_ref,
 )
 from neptune_memory.consolidate.runs import EVIDENCED_BY as RUNS_EVIDENCED_BY
+from neptune_memory.consolidate.snapshot import (
+    Registration,
+    consolidate,
+    default_registrations,
+    plan,
+)
 from neptune_memory.schema.interval import OPEN, CivilClock, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 
@@ -294,7 +300,10 @@ def test_an_id_two_event_records_declare_is_candidates_for_each() -> None:
 
 
 def test_an_id_an_event_record_only_possibly_declares_is_a_candidate() -> None:
-    possible = Known((ambiguous("downtime_log.csv", DOWNTIME, LogicalId("cmms.downtime", "X")),))
+    item: Knowledge[LogicalId] = ambiguous(
+        "downtime_log.csv", DOWNTIME, LogicalId("cmms.downtime", "X")
+    )
+    possible: Knowledge[tuple[Knowledge[LogicalId], ...]] = Known((item,))
     packages, built = cell(downtime_ids=possible)
     packages["assertions"] = [
         assertion("ASR-STOP", SAME, (DOWNTIME, built["pstop"]), authored_at=authored())
@@ -489,3 +498,30 @@ def test_a_padded_declared_id_names_nothing_and_the_records_other_ids_still_do()
     assert finding.code == "identity.malformed_identifier"
     assert finding.records == (built["stop"],)
     assert finding.details == {"refused": 1}
+
+
+def test_the_default_plan_runs_identity_after_events_without_a_cycle() -> None:
+    registered = {r.consolidator_id: r for r in default_registrations()}
+    assert registered["memory.identity"].after == (EVENTS_CONSOLIDATOR_ID,)
+    assert registered[EVENTS_CONSOLIDATOR_ID].after == ()  # events reads no claims at all
+    order = [r.consolidator_id for r in plan(default_registrations())]
+    assert order.index(EVENTS_CONSOLIDATOR_ID) < order.index("memory.identity")
+    # Nothing identity's output feeds may be read by events: no registration reads identity.
+    assert not [r for r in registered.values() if "memory.identity" in r.after]
+
+
+def test_the_snapshot_plan_joins_the_stop_as_rebuild_does() -> None:
+    packages, built = cell()
+    packages["assertions"] = [
+        assertion("ASR-STOP", SAME, (DOWNTIME, built["pstop"]), authored_at=authored())
+    ]
+    registrations = [
+        Registration(EventConsolidator(), resolve_config(_config())),
+        Registration(IdentityConsolidator(), after=(EVENTS_CONSOLIDATOR_ID,)),
+    ]
+    run_ = consolidate(ledger(packages), registrations, TX)
+    (identity,) = [
+        r for r in run_.consolidations if r.transform.consolidator_id == "memory.identity"
+    ]
+    (claim,) = of(identity, SAME_AS)
+    assert {claim.subject, claim.object} == set(stop_nodes(built))
