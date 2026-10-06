@@ -62,7 +62,7 @@ from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.codec import GraphDocument
 from neptune_memory.schema.interval import CivilClock, ledger_tx
 from neptune_memory.schema.predicates import CORE_PREDICATES
-from neptune_memory.schema.supersede import resolve, resolver_config
+from neptune_memory.schema.supersede import Build, build_order, resolve, resolver_config
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -367,15 +367,18 @@ def build_golden(packages: Mapping[str, Sequence[Mapping[str, object]]]) -> Grap
     inputs.update(ledger_overlay(inputs))
     landed: dict[str, tuple[int, Sequence[Mapping[str, object]]]] = {}
     claims: list[Claim] = []
+    builds: list[Build] = []
     for tx, names in TRANSACTIONS:
         landed.update({name: (1, inputs[name]) for name in names})
         for result in rebuild(StubLedger(landed), plan(), recorded_at=ledger_tx(tx)):
             if result.findings:
                 raise ValueError(_findings(result.findings))
             claims.extend(result.claims)
-    resolution = resolve(claims, CORE_PREDICATES, PRIORITIES)
+            builds.append(result.build)
+    resolution = resolve(claims, CORE_PREDICATES, PRIORITIES, builds)
     head = ledger_tx(TRANSACTIONS[-1][0])
-    return GraphDocument(resolution, resolver_config(CORE_PREDICATES, PRIORITIES), head)
+    config = resolver_config(CORE_PREDICATES, PRIORITIES)
+    return GraphDocument(resolution, config, head, build_order(builds))
 
 
 def _findings(findings: Sequence[ConsolidationFinding]) -> str:

@@ -1,7 +1,7 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.8.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.9.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -12,7 +12,9 @@ episode predicates ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md) �
 `event` node type, the event predicates and `EventKind` ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §6); 1.7.0 (minor) adds the
 calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
 §4, §6); 1.8.0 (minor) adds the coverage and health predicates
-([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6). Earlier goldens still
+([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6); 1.9.0 (minor) adds the graph document's optional
+`builds` and `#/$defs/Build`, for withdrawal ([ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md);
+the vocabulary is unchanged). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -154,7 +156,10 @@ edge (`parent`, `child`), in the `representation` both declare, with the transfo
   - `overridden_on_arrival`: winners covered the arriving claim entirely, so no part of it was ever current.
 - A **graph document** (`#/$defs/Graph`) is one resolved history: every claim version and every finding, the
   `resolver_config` whose hash is its `generation`, and its `head`: the latest Ledger transaction it covers. The
-  head may be later than every `recorded_at`, because a transaction can produce no claim.
+  head may be later than every `recorded_at`, because a transaction can produce no claim. From 1.9.0 it may hold
+  `builds` (`#/$defs/Build`), ordered by `(recorded_at, consolidator_id)`: each consolidator run it was resolved
+  with, its lineage (consolidator id, version, config hash), its transaction and every claim id it emitted, possibly
+  none. A document without builds writes no `builds` key and reads exactly as 1.8.0.
 
 ## Reading: `MemoryReader`
 
@@ -189,7 +194,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.8.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.9.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -202,8 +207,10 @@ def test_graph_schema_contract(check):
    An inferred claim names its model, and an observed or stated claim never does. Confidence is `not_applicable`
    for deterministic claims.
 2. **Deterministic.** The same Ledger snapshot, consolidators, versions and configs give byte-identical claims and
-   graph documents (ADR 0003 §4). `resolve` is order-free and idempotent (ADR 0005, P1–P8).
-3. **Nothing deleted.** Superseding sets `superseded_at` and adds closure versions. Content never changes.
+   graph documents (ADR 0003 §4). `resolve` is order-free and idempotent (ADR 0005, P1–P8; with builds, P9 and
+   P10 too). `memory consolidate`, `rebuild` and `dump` make this a tested guarantee ([guarantees](guarantees.md)).
+3. **Nothing deleted.** Superseding and withdrawal set `superseded_at` and add resolver versions (closures and
+   restatements, `provenance.consolidator_id = memory.supersede`). Content never changes.
 4. **As-of is a true snapshot.** A result at `as_of = tx` holds exactly the claims and findings active at `tx`
    (`recorded_at ≤ tx < superseded_at`). Each is presented as known then, with `superseded_at` masked to `open`, so
    no later knowledge leaks in. This equals resolving only what was recorded by `tx`.
@@ -290,6 +297,20 @@ def test_graph_schema_contract(check):
     `rate_declared` and `rate_observed` stand side by side; nothing judges a tolerance. `integrity_finding` carries
     the compiler's severity verbatim. A configured sensor is `sensor_not_recorded` only when nothing in the run could
     be its data and the recording is closed and unflagged; otherwise `sensor_presence_unknown`, never absent.
+19. **A build is a complete statement of its lineage** ([ADR 0007](adr/0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md)
+    §5, [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md) §2). In a document with builds, a
+    version is current at `tx` only if its assertion was emitted by the latest build of its consolidator by `tx`
+    (P9). A claim the next build does not emit is withdrawn at that build: `superseded_at` is set, valid time is not
+    cut, and `as_of` before it answers as before. This ends a retracted `same_as`, a clock mapping a revision
+    re-states, and every claim of a lineage an upgrade replaces, even by an empty build. A claim emitted again after
+    a withdrawal is *restated*: a resolver version recorded at that build, over the assertion's interval, that
+    `supersedes` the assertion (P10: every emitted `many` claim is current).
+
+    With builds, every `one` fact a transaction touches is placed order-free from the assertions still standing.
+    Each holds its interval minus that of every stronger contradicting assertion, by `(rank, valid_from, priority,
+    id)`. So what a withdrawn winner had cut is held again, a full tie goes the same way in every run, and an
+    incremental graph holds what a rebuild holds. An assertion whose pieces and grounds do not change keeps its
+    versions.
 
 ## Caveat: a resolver configuration is a store generation
 
@@ -310,15 +331,12 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
   (`clock_mismatch`). A consumer relates them with `schema.clocks.convert`; no claim is ever re-timed.
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,
   masks `superseded_at`, joins findings and runs this suite.
-- Withdrawal ([ADR 0007](adr/0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) §5, MVL-132).
-  Until it lands, a claim a consolidator stops emitting stays current: an operator cannot retract a `many`
-  fact such as `same_as`, and an upgrade that emits nothing retires nothing. A `one` fact is corrected by a new
-  stated claim, which supersedes it. The identity consolidator already stops emitting a retracted `same_as`
-  (ADR 0008 §3); withdrawal makes that end it. Likewise a revised clock mapping: the build after the revision
-  emits the old mapping's claims closed at the revision, but the version emitted open before stays current
-  beside them until withdrawal ends it (ADR 0011 §5).
-- Evidence status beside claims (ADR 0007 §6, MVL-132): a `Knowledge[EvidenceStatus]` for every cited source,
-  `NotCovered` until the Ledger catalog emits a retention signal. v1 results carry no status map, which never
-  means "available".
+- Withdrawal without builds: a document that carries no `builds` (every 1.0.0 to 1.8.0 document) resolves as
+  before, so a claim a consolidator stops emitting stays current there. Builds landed in 1.9.0 (guarantee 19).
+- Package-scoped builds (ADR 0007 §5.3): every build is complete over its whole snapshot (ADR 0016 §2), because
+  consolidators read across packages; a build that read only some packages is not representable yet.
+- Evidence status beside claims (ADR 0007 §6): a `Knowledge[EvidenceStatus]` for every cited source, `NotCovered`
+  until the Ledger catalog emits a retention signal. catalog-api 1.7.0 still has none, so v1 results carry no
+  status map, which never means "available".
 
 Each lands as a minor version: the shapes above do not change.
