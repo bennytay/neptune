@@ -8,6 +8,7 @@ the package's own revision table and symlink findings, so anyone holding the pac
 
 import importlib.util
 import shutil
+from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -72,7 +73,7 @@ def proposals(package: IngestPackage) -> list[SessionProposal]:
     return [r for r in read_derived(package.derived) if isinstance(r, SessionProposal)]
 
 
-def layout_from_package(records: tuple[Any, ...]) -> Layout:
+def layout_from_package(records: Iterable[Any]) -> Layout:
     """The layout the job grouped, rebuilt from the package alone: each location's latest
     revision, and every link discovery recorded with its target."""
     chain = [r for r in records if isinstance(r, (SourceRevision, SourceAbsence))]
