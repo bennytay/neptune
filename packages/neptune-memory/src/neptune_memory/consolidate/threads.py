@@ -21,6 +21,7 @@ contribute nothing, and the stand-in path decides alone.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
@@ -56,6 +57,16 @@ UNTHREADED_KINDS: Final = frozenset(
 
 def ref_key(ref: EvidenceRef) -> bytes:
     return canonical_json.dumps(ref.to_json())
+
+
+def anchored_node(node_type: NodeType, anchor: EvidenceRef) -> NodeRef:
+    """The node of the anchored thread ``(node_type, anchor)``: ``thread:<thread id>``, with the
+    thread id as Ledger ADR 0003 §1.3 publishes it, ``"sha256:" + hex(sha256(canonical JSON of
+    {"key": anchor, "kind": node_type}))``. The same node ``membership_node`` gives when the
+    catalog answers that thread (ADR 0022 §1)."""
+    key = canonical_json.dumps({"key": anchor.to_json(), "kind": str(node_type)})
+    thread_id = "sha256:" + hashlib.sha256(key).hexdigest()
+    return node_ref(node_type, LogicalId(THREAD_NAMESPACE, thread_id))
 
 
 def membership_node(membership: Membership, record: str) -> NodeRef | None:

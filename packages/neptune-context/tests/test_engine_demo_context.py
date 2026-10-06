@@ -26,10 +26,11 @@ from neptune_memory.schema.reference import ReferenceReader
 import retrieve_fixtures_context as F
 from neptune_context.answer import answer_problems
 from neptune_context.engine import LocalEngine, read_graph
+from neptune_context.explain import render_markdown
 from neptune_context.mcp import build_server
 from neptune_context.mcp.__main__ import main
 from neptune_context.packets.codec import canonical_bytes
-from neptune_context.packets.model import ClaimItem, GapCode
+from neptune_context.packets.model import ClaimItem
 from neptune_context.query import Budget, Direction, GraphClause, Query, Subject, to_json
 from neptune_context.render.agent import render_answer
 from neptune_context.render.citations import parse_citations, render_text
@@ -88,7 +89,9 @@ def test_why_did_the_arm_cell_incident_happen_and_what_changed() -> None:
     assert "[E1]" in text and parse_citations(text) == packet.evidence_refs()
 
 
-def test_the_lift_amr_names_what_is_newer_than_the_pin() -> None:
+def test_the_lift_amr_carries_its_calibration_claims_inside_the_pin() -> None:
+    # calibrated_with and calibrated_by are graph-schema 2.0.0 vocabulary (ADR 0012): carried as
+    # items, never reported as newer than the pin.
     query = Query(
         include_inferred=False,
         budget=Budget(items=80),
@@ -96,11 +99,34 @@ def test_the_lift_amr_names_what_is_newer_than_the_pin() -> None:
         graph=GraphClause(None, 2, Direction.BOTH),
     )
     packet = ask(query)
-    beyond = [g for g in packet.gaps if g.code is GapCode.NOT_COVERED and "1.6.0" in g.detail]
-    assert any("calibrated_with" in g.detail for g in beyond)
+    assert not [g for g in packet.gaps if "not in Context's pinned" in g.detail]
     carried = {i.claim.predicate for i in packet.items if isinstance(i, ClaimItem)}
-    assert "calibrated_with" not in carried
+    assert "calibrated_with" in carried
     assert answer_problems(query, packet) == ()
+
+
+def test_a_calibration_drift_renders_its_declared_delta() -> None:
+    # The snapshot's drift claims hold graph-schema 2.0.0 delta values: both renderers state the
+    # declared numbers, form and unit, and nothing about their size.
+    query = Query(
+        include_inferred=False,
+        budget=Budget(items=40),
+        subjects=frozenset({Subject("sensor", "asset-tag:WCAM-3A")}),
+    )
+    packet = ask(query)
+    drifts = [i for i in packet.items if isinstance(i, ClaimItem) and i.claim.predicate == "drift"]
+    assert drifts and answer_problems(query, packet) == ()
+    text = render_answer(packet)
+    lines = [ln for ln in text.split("\n") if " drift delta {" in ln]
+    assert len(lines) == len(drifts)
+    for line in lines:
+        assert '"quantity":"parameter"' in line and '(unit "m", as declared)' in line
+        for adjective in ("large", "small", "significant", "high", "low", "exceeds", "within"):
+            assert adjective not in line.split()
+    assert parse_citations(text) == packet.evidence_refs()
+    markdown = [ln for ln in render_markdown(packet).split("\n") if " *drift* " in ln]
+    assert len(markdown) == len(drifts)
+    assert all('"quantity":"parameter"' in ln and '"value":"m"' in ln for ln in markdown)
 
 
 def test_the_legged_robot_answers_too() -> None:
@@ -161,6 +187,28 @@ def test_the_cli_serves_a_memory_graph_over_stdio(tmp_path: Path) -> None:
     assert not result.isError
     first = result.content[0]
     assert isinstance(first, types.TextContent) and "[E1]" in first.text
+
+
+def test_a_2x_document_names_its_release_and_the_packet_its_major(tmp_path: Path) -> None:
+    # graph-schema 2.0.0 documents carry the full release string; a 1.x document (the demo
+    # snapshot) is read as written and stays major 1 (Memory ADR 0019 §3, Context ADR 0012).
+    current = tmp_path / "current.json"
+    data = F.document().to_json()
+    assert data["graph_schema"] == "2.0.0" and data["graph_schema_version"] == 2
+    current.write_text(json.dumps(data), encoding="utf-8")
+    query = Query(
+        include_inferred=False,
+        budget=Budget(items=20),
+        subjects=frozenset({Subject("machine", "asset-tag:AMR-07")}),
+    )
+    packet = Client(LocalEngine(read_graph(current))).query(query)
+    assert packet.memory.graph_schema_version == 2 and packet.items
+    assert ask(WHY_THE_ARM_CELL).memory.graph_schema_version == 1
+    for release in ("3.0.0", "2.0", "1.6.0"):
+        wrong = tmp_path / f"release-{release}.json"
+        wrong.write_text(json.dumps({**data, "graph_schema": release}), encoding="utf-8")
+        with pytest.raises(ValueError, match="graph_schema"):
+            read_graph(wrong)
 
 
 def test_the_cli_refuses_an_unreadable_graph(

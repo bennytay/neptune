@@ -6,7 +6,7 @@ down to the evidence it cites) and *what changed* about one subject between two 
 opened, closed and superseded, by predicate). A trail records that structure by naming claims by
 id; the claims themselves are ``ClaimItem``s in the same packet whenever they are current at the
 packet's snapshot. A claim a trail names but the packet does not carry (one no longer current,
-cut by the budget, or newer than the pinned graph-schema) is named, never described: the packet
+cut by the budget, or not in the pinned graph-schema) is named, never described: the packet
 says why in a gap at the clause's pointer.
 
 Trails add no fact of their own. Every relation is one Memory already states: equal assertions

@@ -102,7 +102,7 @@ def test_drone_co_declared_identity_link_is_same_as_citing_the_register_row() ->
     assert {ref.source for ref in claim.provenance.evidence} == {source(REGISTER_ROW)}
     assert len(claim.provenance.evidence) == 2
     assert claim.provenance.consolidator_id == "memory.identity"
-    assert claim.provenance.consolidator_version == "2"
+    assert claim.provenance.consolidator_version == "3"
     assert (claim.valid_from, claim.valid_to) == (at(100), OPEN)  # no window: subject's thread
     assert not _of(result, SAME_AS_CANDIDATE) and not result.findings
     assert len(nodes(ledger(_drone()))) == 2  # linked, never merged

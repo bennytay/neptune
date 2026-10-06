@@ -6,12 +6,12 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 1`, published as `contracts/graph-schema/v1.9.0/` (1.0.0 to 1.8.0 stay)
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.0.0/` (1.0.0 to 1.9.0 stay; major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
   - `neptune_memory.schema`: `NodeRef`/`NodeType`/`Tier`, `Claim` and its objects and provenance (with `ModelRef`),
-    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 10`), the
+    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 11`), the
     superseding resolver (`resolve`, `as_of`, `ResolutionFinding`, `resolver_config`, and from 1.9.0 `Build` for
     withdrawal), `codec` (strict JSON) and `export.graph_schema`. Claim model:
     [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md); superseding:
@@ -30,8 +30,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
-    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **1.9.0**
-    document (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.0.0**
+    document (`graph_schema_version: 2`, `graph_schema: "2.0.0"`, with `builds`), head 2, written by Memory's codec. It is what
     `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
     1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
        Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
@@ -80,8 +80,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       records. There are 11 `has_configuration` spans, on the machine id each system states:
       - `cmms.asset:ARM-3A` is on `firmware:5.6.0`; WO-26-0911 is among the eight work orders that span cites.
       - `servicenow.ci:ARM-3A` goes from `5.6.0` to `TCP z=145.5 mm`, via `servicenow.u_after`.
-    - Two `succeeds`: AMR-07's `firmware:4.3.1` after `firmware:4.2.0` (CMMS), and ARM-3A's ServiceNow
-      `TCP z=145.5 mm` after `5.6.0`.
+    - No `succeeds` (ADR 0019 §2). The changes are each machine's own abutting `has_configuration` spans:
+      AMR-07's `firmware:4.2.0` to `firmware:4.3.1` (CMMS), and ARM-3A's ServiceNow `5.6.0` to `TCP z=145.5 mm`.
     - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
       The 13th run states no first instant (`untimeable_window`).
   - What it lacks:
@@ -97,7 +97,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
         `servicenow.ci:ARM-3A`, and the register declares `asset:ARM-3A`. These are four nodes until an
         `identity_link` or an operator assertion joins them, and the corpus has neither.
     - No `authorised_configuration`: no envelope places a configuration on its site.
-    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
+    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events. INC-C3-0011's stops are not
+      events here, and the corpus assertion names `plant-2.cmms.downtime:…` and `plant-2.syslog.log-p2:4182`.
+      No record declares either id (ADR 0019 §1).
 
     This file is regenerated as those land, never edited.
 ## Consumes
@@ -110,7 +112,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
-  compiler's own strict readers (ADR 0008 §1). The configuration lineage consolidator reads
+  compiler's own strict readers (ADR 0008 §1), and the `identifiers` of `incident_record` and `intervention`
+  records `memory.events` placed (ADR 0019 §1). The configuration lineage consolidator reads
   `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`, `authorisation_envelope`
   (lifecycle records, root ADR 0051), `run`, `snapshot_binding` (root ADR 0050 §8) and the snapshot kinds a binding
   names, the same way ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §1); the time-domain registry
