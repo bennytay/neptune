@@ -37,9 +37,12 @@ gives an agent no way to find the declared ids its query needs. Three more force
      `[I<n>][E<k>]...`. Claims read `subject predicate object, valid from tick T on clock C,
      until tick U | open-ended`. Literals are typed: text quoted, quantities with their declared
      unit, instants on their clock. Knowledge states are words ("not covered by the source").
-   - **Quantities**: per predicate and declared unit with two or more values, the count, minimum
-     and maximum, citing every item summarised. Units are never converted and values in
-     different units are never pooled. A series window is described by what the packet
+   - **Quantities**: per predicate and known declared unit with two or more values, the count,
+     minimum and maximum, citing every item summarised. Units are never converted and values in
+     different units are never pooled. A value whose unit is unknown or ambiguous is never
+     summarised, because two unknown units may differ. A non-finite value the source wrote
+     (`inf`) is counted, not ranked, and is rendered as `non-finite inf`, never as a quoted
+     string. A series window is described by what the packet
      declares: stream, clock, `[start, end)` and its tick span. The packet declares no window
      statistics, and the sentence says so. No adjective is ever generated.
    - **Resolver findings**, **Not answered** (each gap: code, query pointer, channel, quoted
@@ -103,7 +106,9 @@ gives an agent no way to find the declared ids its query needs. Three more force
    plan with `model_unavailable`, never a guess. For Demo v1 the resolver is `sdk.entity_index`
    (graph document) (ADR 0005 §3: the catalog cannot list declared ids yet). It is an in-memory
    `DeclaredIdentifierIndex` over the declared ids a Memory graph document names. Content
-   addresses are left out; an id under two kinds keeps the first.
+   addresses are left out. An id the graph declares under two kinds is two identities memory has
+   not told apart, so it is offered as neither: it is listed as a conflict by
+   `neptune_entities`.
 6. **Launching it.** The CLI is `python -m neptune_context.mcp --memory GRAPH.json`, with an
    optional `--planner anthropic` or `--planner-recordings FILE`.
    - The local client is `local_client(document, channels=graph_channels, model=...)`. Its

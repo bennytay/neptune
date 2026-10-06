@@ -38,6 +38,7 @@ from neptune_context.packets.schema import packet_schema
 from neptune_context.query.decode import from_json
 from neptune_context.query.findings import Refused
 from neptune_context.query.model import MAX_TEXT_CHARS
+from neptune_context.query.plan import Mention
 from neptune_context.query.schema import query_schema
 from neptune_context.render.agent import (
     render_answer,
@@ -519,11 +520,16 @@ async def _entities(client: AsyncClient, arguments: Mapping[str, Any]) -> str:
         raise _bad(f"kind is one of {', '.join(kinds)}")
     if text is not None:
         mentions = await client.find(text)
-        if kind is not None:
-            mentions = tuple(m for m in mentions if any(c.kind == kind for c in m.candidates))
+        if kind is not None:  # only candidates of that kind, and only names that keep one
+            narrowed = (
+                Mention(m.text, tuple(c for c in m.candidates if c.kind == kind)) for m in mentions
+            )
+            mentions = tuple(m for m in narrowed if m.candidates)
         return render_mentions(text, mentions)
     found = await client.entities(kind)
-    return render_entities(found[:MAX_ENTITIES_LISTED], total=len(found), kind=kind)
+    return render_entities(
+        found[:MAX_ENTITIES_LISTED], total=len(found), kind=kind, conflicts=client.conflicts()
+    )
 
 
 def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]:
@@ -538,10 +544,10 @@ def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]
     @server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]
     async def call_tool(tool: str, arguments: dict[str, Any]) -> types.CallToolResult:
         try:
-            check_shape(arguments)
-            if tool in (TOOL_QUERY, TOOL_WHY, TOOL_DIFF):
+            if tool in (TOOL_QUERY, TOOL_WHY, TOOL_DIFF):  # query_from_arguments checks shape
                 packet = await client.query(query_from_arguments(tool, arguments))
                 return types.CallToolResult(content=packet_content(packet), isError=False)
+            check_shape(arguments)
             if tool == TOOL_HYDRATE:
                 _only(arguments, {"evidence"}, {"as_of"})
                 try:

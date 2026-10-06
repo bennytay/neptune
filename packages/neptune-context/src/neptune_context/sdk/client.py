@@ -352,6 +352,10 @@ class Client:
         planner, words = _planner(self._planner), _question(text)
         return _planned(lambda: planner.find(words))
 
+    def conflicts(self) -> tuple[str, ...]:
+        """Identifiers the planner's resolver declines to offer as names."""
+        return () if self._planner is None else self._planner.conflicts
+
     def __repr__(self) -> str:
         return f"Client({self._engine!r})"
 
@@ -477,11 +481,15 @@ class AsyncClient:
 
     async def entities(self, kind: str | None = None) -> tuple[Entity, ...]:
         planner = _planner(self._planner)
-        return _planned(lambda: planner.entities(kind))
+        return await asyncio.to_thread(_planned, lambda: planner.entities(kind))
 
     async def find(self, text: str) -> tuple[Mention, ...]:
         planner, words = _planner(self._planner), _question(text)
-        return _planned(lambda: planner.find(words))
+        return await asyncio.to_thread(_planned, lambda: planner.find(words))
+
+    def conflicts(self) -> tuple[str, ...]:
+        """Identifiers the planner's resolver declines to offer as names."""
+        return () if self._planner is None else self._planner.conflicts
 
     def __repr__(self) -> str:
         return f"AsyncClient({self._engine!r})"

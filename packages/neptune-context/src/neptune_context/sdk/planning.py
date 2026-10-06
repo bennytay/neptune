@@ -9,8 +9,9 @@ beside the packet, and runs the planned query only when the plan is ``ready``.
 declared identifiers a Memory graph document names (``asset-tag:ARM-3A``, ``site-code:PLANT-2``),
 because the catalog API cannot list declared identifiers yet (ADR 0005 §3). Content-addressed
 node ids (runs, events, clocks: ``record:rec:sha256:...``) are not names anyone types and are left
-out. ``NoModel`` stands in when no model is configured: every plan is then a visible ``failed``
-plan with ``model_unavailable``, never a guess.
+out, and so is an identifier the graph declares under two kinds (never settled silently).
+``NoModel`` stands in when no model is configured: every plan is then a visible ``failed`` plan
+with ``model_unavailable``, never a guess.
 """
 
 from __future__ import annotations
@@ -87,6 +88,11 @@ class Planner:
         """Every declared name in ``text`` with all its candidates; ambiguity is never settled."""
         return tuple(self.resolver.find(text, as_of=None))
 
+    @property
+    def conflicts(self) -> tuple[str, ...]:
+        """Identifiers the resolver declines to offer as names (declared under several kinds)."""
+        return tuple(getattr(self.resolver, "conflicts", ()))
+
     def entities(self, kind: str | None = None) -> tuple[Entity, ...]:
         """The declared identities the resolver can list (by kind, then id); ``()`` when it
         cannot list (a resolver backed by a store with no listing call)."""
@@ -119,30 +125,35 @@ def entity_index(document: GraphDocument) -> ListingIndex:
     """The declared identities a Memory graph document names, as an in-memory resolver.
 
     Every node that is a claim's subject or object counts, whatever the claim's kind: a
-    declared identifier is a name, not a fact. At most ``MAX_ENTITIES``; beyond that is
-    ``ValueError`` (a graph that size needs the Ledger's listing call, not a scan).
+    declared identifier is a name, not a fact. An identifier under several node kinds is left
+    out and named in ``conflicts``. At most ``MAX_ENTITIES``; beyond that is ``ValueError`` (a
+    graph that size needs the Ledger's listing call, not a scan).
     """
-    found: dict[str, Entity] = {}
+    kinds: dict[str, set[str]] = {}
     for claim in document.resolution.claims:
         for node in (claim.subject, claim.object):
             if isinstance(node, NodeRef) and (entity := _declared(node)) is not None:
-                # One identifier under two kinds keeps the first (claim order); the planner's
-                # lookup then refuses a subject of the other kind (entity_kind_mismatch).
-                found.setdefault(entity.declared_id, entity)
-    if len(found) > MAX_ENTITIES:
+                kinds.setdefault(entity.declared_id, set()).add(entity.kind)
+    if len(kinds) > MAX_ENTITIES:
         raise ValueError(f"more than {MAX_ENTITIES} declared identities; use a Ledger listing")
-    return ListingIndex(found[k] for k in sorted(found))
+    # One identifier under two kinds is two identities memory has not told apart: offering
+    # either would settle that silently, so neither is a name (they are listed as conflicts).
+    conflicts = tuple(sorted(i for i, k in kinds.items() if len(k) > 1))
+    single = (Entity(next(iter(k)), i) for i, k in sorted(kinds.items()) if len(k) == 1)
+    return ListingIndex(single, conflicts=conflicts)
 
 
 class ListingIndex(DeclaredIdentifierIndex):
-    """A ``DeclaredIdentifierIndex`` that can also list what it holds (``neptune_entities``)."""
+    """A ``DeclaredIdentifierIndex`` that can also list what it holds (``neptune_entities``),
+    and the identifiers it left out because the graph declares them under several kinds."""
 
-    def __init__(self, entities: Iterable[Entity]) -> None:
+    def __init__(self, entities: Iterable[Entity], *, conflicts: Iterable[str] = ()) -> None:
         listed = tuple(entities)
         super().__init__(listed)
         self._listed: tuple[Entity, ...] = tuple(
             sorted(listed, key=lambda e: (e.kind, e.declared_id))
         )
+        self.conflicts: tuple[str, ...] = tuple(sorted(conflicts))
 
     def entities(self) -> tuple[Entity, ...]:
         return self._listed

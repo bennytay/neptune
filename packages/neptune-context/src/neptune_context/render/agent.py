@@ -44,6 +44,7 @@ from neptune_memory.schema.nodes import NodeRef
 
 from neptune.identity.canonical_json import dumps
 from neptune.model.knowledge import Ambiguous, Known, KnownAbsent, NotApplicable, NotCovered
+from neptune.model.scalars import NonFinite
 from neptune_context.packets.model import (
     ClaimItem,
     ContextPacket,
@@ -208,12 +209,22 @@ def _unit(literal: TypedLiteral) -> str:
     return _knowledge(literal.unit, lambda u: f"unit {quote(u.to_json())}")
 
 
+def _number(value: object) -> str:
+    """A number as canonical JSON; a non-finite value the source wrote, as words, never as a
+    quoted string an agent would take for text."""
+    if isinstance(value, NonFinite):
+        return f"non-finite {value.value}"
+    return quote(value)  # type: ignore[arg-type]
+
+
 def _literal(literal: TypedLiteral) -> str:
     value = literal.value
     if literal.datatype is ValueType.TEXT:
         return f"text {quote(value)}"  # type: ignore[arg-type]
     if literal.datatype is ValueType.QUANTITY:
-        return f"{quote(value)} ({_unit(literal)}, as declared)"  # type: ignore[arg-type]
+        return f"{_number(value)} ({_unit(literal)}, as declared)"
+    if literal.datatype is ValueType.REAL:
+        return _number(value)
     if literal.datatype is ValueType.INSTANT:
         return _instant(value)  # type: ignore[arg-type]
     if literal.datatype is ValueType.CLOCK_MAP:
@@ -357,9 +368,17 @@ def render_answer(packet: ContextPacket) -> str:
     if quantities:
         lines += ["", QUANTITIES]
         for (predicate, unit), members, values in quantities:
+            finite = [v for v in values if not isinstance(v, NonFinite)]
+            others = len(values) - len(finite)
+            stated = f", {others} of them non-finite" if others else ""
+            spread = (
+                f"; finite minimum {quote(min(finite))}, maximum {quote(max(finite))}"
+                if finite
+                else ""
+            )
             lines.append(
-                f"- {predicate} ({unit}): {len(values)} values, minimum"
-                f" {quote(min(values))}, maximum {quote(max(values))}. {cite(list(members))}"
+                f"- {predicate} ({unit}): {len(values)} values{stated}{spread}."
+                f" {cite(list(members))}"
             )
     if packet.findings:
         lines += ["", FINDINGS]
@@ -383,20 +402,27 @@ def render_answer(packet: ContextPacket) -> str:
     return "\n".join(lines) + "\n"
 
 
-_Group = tuple[tuple[str, str], list[Item], list[float]]
+_Group = tuple[tuple[str, str], list[Item], list[float | NonFinite]]
 
 
 def _quantities(packet: ContextPacket) -> list[_Group]:
-    """Quantity claims grouped by predicate and declared unit; groups of two or more."""
-    groups: dict[tuple[str, str], tuple[list[Item], list[float]]] = {}
+    """Quantity claims grouped by predicate and one known declared unit; groups of two or more.
+
+    A value whose unit is unknown or ambiguous is never summarised: two unknown units may be
+    different units, and pooling them would assume they are not."""
+    groups: dict[tuple[str, str], tuple[list[Item], list[float | NonFinite]]] = {}
     for item in packet.items:
         if not isinstance(item, ClaimItem):
             continue
         obj = item.claim.object
-        if isinstance(obj, TypedLiteral) and obj.datatype is ValueType.QUANTITY:
+        if (
+            isinstance(obj, TypedLiteral)
+            and obj.datatype is ValueType.QUANTITY
+            and isinstance(obj.unit, Known)
+        ):
             members, values = groups.setdefault((item.claim.predicate, _unit(obj)), ([], []))
             members.append(item)
-            values.append(obj.value)  # type: ignore[arg-type]  # int or float for a quantity
+            values.append(obj.value)  # type: ignore[arg-type]  # int, float or NonFinite
     return [(key, m, v) for key, (m, v) in sorted(groups.items()) if len(m) > 1]
 
 
@@ -577,7 +603,11 @@ def render_plan(planned: PlannedQuery) -> str:
 
 
 def render_entities(
-    entities: Sequence[Entity], *, total: int | None = None, kind: str | None = None
+    entities: Sequence[Entity],
+    *,
+    total: int | None = None,
+    kind: str | None = None,
+    conflicts: Sequence[str] = (),
 ) -> str:
     """Declared identities, one per line: names to use as subjects, not facts."""
     scope = f" of kind {kind}" if kind is not None else ""
@@ -586,7 +616,14 @@ def render_entities(
     if not entities:
         lines.append("- none")
     if total is not None and total > len(entities):
-        lines.append(f"{len(entities)} of {total} listed; pass kind to narrow the list.")
+        narrow = "pass text to find names" if kind is not None else "pass kind or text to narrow"
+        lines.append(f"{len(entities)} of {total} listed; {narrow}.")
+    if conflicts:
+        lines.append(
+            "Declared under several kinds, so not offered as names: "
+            + ", ".join(quote(c) for c in conflicts)
+            + "."
+        )
     return "\n".join(lines) + "\n"
 
 

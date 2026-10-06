@@ -209,6 +209,16 @@ def test_deep_nesting_is_invalid_argument_not_recursion_error() -> None:
         check_shape(wide)
 
 
+def test_planner_flags_need_a_memory_graph() -> None:
+    for argv in (
+        ["--packets", ".", "--planner", "anthropic"],
+        ["--url", "https://x", "--planner-recordings", "r.jsonl"],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            main(argv)
+        assert raised.value.code == 2
+
+
 def test_the_cli_refuses_a_bad_recordings_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

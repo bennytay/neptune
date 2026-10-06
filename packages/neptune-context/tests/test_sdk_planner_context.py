@@ -133,7 +133,7 @@ def test_the_entity_index_holds_declared_names_only() -> None:
     assert index.lookup("asset-tag:ARM-3A", as_of=None) == Entity("machine", "asset-tag:ARM-3A")
 
 
-def test_one_identifier_under_two_kinds_keeps_the_first() -> None:
+def test_one_identifier_under_two_kinds_is_never_offered_as_a_name() -> None:
     clash = [
         F.claim(NodeRef(NodeType.MACHINE, "tag:X1"), "located_at", F.SITE_A, F.FEB_1),
         F.claim(NodeRef(NodeType.SENSOR, "tag:X1"), "mounted_on", F.ARM, F.FEB_1, tx=2),
@@ -141,4 +141,8 @@ def test_one_identifier_under_two_kinds_keeps_the_first() -> None:
     claims = sorted(clash, key=lambda c: (c.recorded_at, c.id))
     document = GraphDocument(History(tuple(claims), ()), F.RESOLVER_CONFIG, F.HEAD)
     index = entity_index(document)
-    assert index.lookup("tag:X1", as_of=None) == Entity("machine", "tag:X1")
+    assert index.lookup("tag:X1", as_of=None) is None
+    assert index.find("is X1 ok?", as_of=None) == ()
+    assert index.conflicts == ("tag:X1",)
+    planner = Planner(index, AGENT_DEFAULTS)
+    assert Client(golden_stub(), planner=planner).conflicts() == ("tag:X1",)

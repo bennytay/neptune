@@ -23,6 +23,7 @@ from neptune_memory.schema.supersede import Resolution as History
 
 import retrieve_fixtures_context as F
 from agent_goldens_context import AGENT, answer_path
+from neptune.model.scalars import NonFinite
 from neptune.model.units import unit_from_text
 from neptune_context.engine import LocalEngine
 from neptune_context.packets.codec import canonical_bytes, decode
@@ -158,12 +159,22 @@ def test_the_demo_answer_cites_every_fact() -> None:
 def hostile_document() -> GraphDocument:
     """The retrieval fixture graph plus quantities and prompt injections in document text."""
     kg = unit_from_text("kg")
-    grams = unit_from_text("g")
+    grams = unit_from_text("g")  # ambiguous: gram or the standard gravity
+    none = unit_from_text(None)  # the source gave no unit: Unknown
     extra = [
         F.claim(F.AMR, "rated_payload", TypedLiteral(ValueType.QUANTITY, 150, kg), F.FEB_1),
         F.claim(F.AMR_8, "rated_payload", TypedLiteral(ValueType.QUANTITY, 120.5, kg), F.FEB_1),
         F.claim(F.UAV, "rated_payload", TypedLiteral(ValueType.QUANTITY, 2500, grams), F.FEB_1),
         F.claim(F.ARM, "rated_payload", TypedLiteral(ValueType.QUANTITY, 12, kg), F.FEB_1),
+        # A source that wrote "unlimited" as infinity, and two values with no unit at all.
+        F.claim(
+            F.AMR_8,
+            "rated_payload",
+            TypedLiteral(ValueType.QUANTITY, NonFinite.POSITIVE_INFINITY, kg),
+            F.MAR_1,
+        ),
+        F.claim(F.AMR, "rated_payload", TypedLiteral(ValueType.QUANTITY, 350, none), F.MAR_1),
+        F.claim(F.UAV, "rated_payload", TypedLiteral(ValueType.QUANTITY, 0.35, none), F.MAR_1),
     ]
     extra += [
         F.claim(F.INCIDENT, "has_description", text, F.MAR_15 + n, records=(F.EVENT,))
@@ -193,10 +204,15 @@ def hostile_answer() -> ContextPacket:
 def test_quantities_are_summarised_by_declared_unit_and_never_pooled() -> None:
     text = check(hostile_answer())
     section = text.split(f"\n{QUANTITIES}\n", 1)[1].split("\n\n", 1)[0].splitlines()
-    assert len(section) == 1  # kg has two values; the single gram value is not summarised
+    # Only the known unit is summarised: grams-or-gravity (ambiguous) and the two values with no
+    # unit (which may be millimetres and metres) are never pooled.
     (line,) = section
-    assert line.startswith('- rated_payload (unit "kg"): 2 values, minimum 120.5, maximum 150.')
-    assert "2500" not in line
+    assert line.startswith(
+        '- rated_payload (unit "kg"): 3 values, 1 of them non-finite;'
+        " finite minimum 120.5, maximum 150."
+    )
+    assert "2500" not in line and "350" not in line
+    assert "rated_payload non-finite inf (unit" in text  # never the quoted text "inf"
 
 
 def test_a_series_window_is_described_by_what_the_packet_declares() -> None:

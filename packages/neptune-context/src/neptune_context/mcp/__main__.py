@@ -117,7 +117,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.memory is None and (args.planner != "none" or args.planner_recordings is not None):
+        parser.error("--planner and --planner-recordings need --memory (the planner's names)")
     try:
         if args.url is not None:
             client = AsyncClient(args.url, token=os.environ.get(TOKEN_ENV) or None)
