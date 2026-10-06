@@ -21,12 +21,14 @@ Subcommands:
   regenerate the matrix (stdlib only; ``scripts/new-package.sh`` runs it).
 - ``matrix [--check]``: write ``contracts/compatibility.md`` from the registry and lock.toml
   (``--check``: fail if the committed file differs).
-- ``bump CONTRACT VERSION [--post]``: write ``v<VERSION>/`` from the owner's export and golden
-  generator, refusing a minor/patch that rejects an earlier stable golden of its major; the first
-  stable version, and every later major, sets the contract's lock entry of every in-repo consumer
-  (a package with a lock.toml section); the matrix is regenerated. Then print the announcement
-  comments for the consumers' gate issues; ``--post`` sends them through the Linear GraphQL API,
-  and needs ``LINEAR_API_KEY`` before anything is written.
+- ``bump CONTRACT VERSION [--golden-only] [--post]``: write ``v<VERSION>/`` from the owner's
+  export and golden generator, refusing a minor/patch that rejects an earlier stable golden of its
+  major; the first stable version, and every later major, sets the contract's lock entry of every
+  in-repo consumer (a package with a lock.toml section); the matrix is regenerated. Then print the
+  announcement comments for the consumers' gate issues; ``--post`` sends them through the Linear
+  GraphQL API, and needs ``LINEAR_API_KEY`` before anything is written. ``--golden-only``
+  (platform ADR 0010) publishes new goldens over a byte-identical schema as a minor or patch
+  version recorded with ``"release": "golden-only"``.
 
 Stdlib plus ``jsonschema`` (already a dev dependency). Output files are canonical JSON: sorted
 keys, two-space indent, UTF-8, one trailing newline, so the same inputs give the same bytes.
@@ -58,6 +60,8 @@ DEFAULT_ROOT: Final = REPO / "contracts"
 LINEAR_API: Final = "https://api.linear.app/graphql"
 CONTRACT_STATUSES: Final = frozenset({"active", "planned"})
 VERSION_STATUSES: Final = frozenset({"draft", "stable"})
+GOLDEN_ONLY: Final = "golden-only"  # version.json "release": same schema, new goldens (ADR 0010)
+RELEASES: Final = frozenset({GOLDEN_ONLY})
 _SEMVER: Final = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _PACKAGE: Final = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 LOCK_HEADER: Final = """\
@@ -132,10 +136,19 @@ class Version:
     goldens: Mapping[str, str]
     note: str | None
     path: Path
+    release: str | None = None  # GOLDEN_ONLY, or None for a schema release
 
     @property
     def schema_text(self) -> str:
         return (self.path / "schema.json").read_text(encoding="utf-8")
+
+    def golden_texts(self) -> dict[str, tuple[str, str | None]]:
+        """Each published golden's schema pointer and file text (None while the file is missing)."""
+        texts: dict[str, tuple[str, str | None]] = {}
+        for name, target in sorted(self.goldens.items()):
+            path = self.path / "golden" / name
+            texts[name] = (target, path.read_text("utf-8") if path.is_file() else None)
+        return texts
 
 
 @dataclass
@@ -245,6 +258,7 @@ class Registry:
             goldens=goldens,
             note=_str(meta, "note", where, optional=True),
             path=path,
+            release=_str(meta, "release", where, optional=True),
         )
 
     def latest(self, contract_id: str, *, stable: bool = False) -> Version | None:
@@ -321,6 +335,8 @@ def _check_version(contract: Contract, version: Version) -> list[str]:
         problems.append(f"{where}/version.json is not canonical JSON")
     if version.status not in VERSION_STATUSES:
         problems.append(f"{where}: status must be one of {sorted(VERSION_STATUSES)}")
+    if version.release is not None and version.release not in RELEASES:
+        problems.append(f"{where}: release must be absent or one of {sorted(RELEASES)}")
     if isinstance(version.owner_version, int) and version.owner_version != version.version[0]:
         problems.append(
             f"{where}: an integer owner version ({version.owner_version}) must equal the major"
@@ -384,6 +400,29 @@ def compatibility_breaks(
     return breaks
 
 
+def golden_only_problems(prior: Version | None, version: Version) -> list[str]:
+    """Why ``version``, recorded as a golden-only release over ``prior``, is not one.
+
+    A golden-only release keeps its predecessor's major and its schema bytes and changes at least
+    one golden (platform ADR 0010); ``check`` re-verifies what ``bump --golden-only`` enforced.
+    """
+    where = f"contracts/{version.contract}/{version.path.name}"
+    if prior is None:
+        return [f"{where}: a golden-only release needs an earlier version"]
+    if prior.version[0] != version.version[0]:
+        return [f"{where}: a golden-only release must keep the major of {show(prior.version)}"]
+    problems: list[str] = []
+    if version.schema_sha256 != prior.schema_sha256:
+        problems.append(
+            f"{where}: a golden-only release must keep the schema of {show(prior.version)}"
+        )
+    if version.golden_texts() == prior.golden_texts():
+        problems.append(
+            f"{where}: a golden-only release must change a golden of {show(prior.version)}"
+        )
+    return problems
+
+
 def _schema_error() -> type[SchemaError]:
     from jsonschema.exceptions import SchemaError
 
@@ -417,8 +456,11 @@ def check_registry(registry: Registry) -> Report:
             report.problems.append(f"{contract_id}: a planned contract has no versions")
         if contract.status == "active" and not versions:
             report.problems.append(f"{contract_id}: an active contract needs a version")
-        for version in versions:
+        for index, version in enumerate(versions):
             report.problems += _check_version(contract, version)
+            if version.release == GOLDEN_ONLY:
+                prior = versions[index - 1] if index else None
+                report.problems += golden_only_problems(prior, version)
             try:
                 schema = json.loads(version.schema_text)
             except (OSError, json.JSONDecodeError):
@@ -688,6 +730,17 @@ def _matrix_cell(registry: Registry, contract: Contract, package: str, lock: Any
     return "not declared" if package in lock else "not declared (no package yet)"
 
 
+def _matrix_version(registry: Registry, version: Version | None) -> str:
+    """A version cell; a golden-only release names the version whose schema it keeps."""
+    if version is None:
+        return "—"
+    if version.release != GOLDEN_ONLY:
+        return show(version.version)
+    earlier = [v for v in registry.versions(version.contract) if v.version < version.version]
+    base = f", schema of {show(earlier[-1].version)}" if earlier else ""
+    return f"{show(version.version)} (golden-only{base})"
+
+
 def render_matrix(registry: Registry) -> str:
     """The text of ``contracts/compatibility.md``: a pure function of the registry's files.
 
@@ -723,16 +776,16 @@ def render_matrix(registry: Registry) -> str:
         owner = f"`{contract.owner.package}`"
         if contract.part_of is not None:
             owner += f" (part of `{contract.part_of}`)"
-        consumers = (
+        readers = (
             ", ".join(f"`{c}`" for c in sorted(contract.consumers)) or "none in this repository"
         )
         cells = [
             f"`{contract.id}`",
             owner,
             contract.status,
-            show(stable.version) if stable else "—",
-            show(draft.version) if draft else "—",
-            consumers,
+            _matrix_version(registry, stable),
+            _matrix_version(registry, draft),
+            readers,
         ]
         lines.append("| " + " | ".join(cells) + " |")
     columns = [c for c in contracts if c.part_of is None and c.consumers]
@@ -849,6 +902,7 @@ def write_version(
     schema: Any,
     goldens: Mapping[str, tuple[str, Any]],
     note: str | None = None,
+    release: str | None = None,
 ) -> None:
     """Write ``v<version>/``: schema, goldens and version.json, all canonical."""
     schema_text = canonical(schema)
@@ -866,6 +920,8 @@ def write_version(
     }
     if note is not None:
         meta["note"] = note
+    if release is not None:
+        meta["release"] = release
     (path / "version.json").write_text(canonical(meta), encoding="utf-8")
 
 
@@ -874,8 +930,13 @@ def announcements(
     contract: Contract,
     version: SemVer,
     before: Mapping[str, Mapping[str, str]],
+    *,
+    golden_only_over: SemVer | None = None,
 ) -> list[Announcement]:
-    """One comment per consumer; ``before`` is the lock as it was before the bump."""
+    """One comment per consumer; ``before`` is the lock as it was before the bump.
+
+    ``golden_only_over`` names the version whose schema a golden-only release keeps.
+    """
     packages = registry.packages()
     lock = registry.lock()
     new = show(version)
@@ -886,6 +947,11 @@ def announcements(
             f"Contract `{contract.id}` {new} is published by {contract.owner.package} "
             f"(`contracts/{contract.id}/v{new}/`). "
         )
+        if golden_only_over is not None:
+            body += (
+                f"It is a golden-only release: the schema is byte-identical to "
+                f"{show(golden_only_over)} and only the goldens changed. "
+            )
         if declared == new:
             body += f"`{package}` already declares it in `contracts/lock.toml`; nothing to do."
         elif declared is None and lock.get(package, {}).get(contract.id) == new:
@@ -916,8 +982,13 @@ def bump(
     text: str,
     *,
     status: str = "stable",
+    golden_only: bool = False,
 ) -> list[Announcement]:
-    """Publish a new version from the owner's export and golden generator."""
+    """Publish a new version from the owner's export and golden generator.
+
+    ``golden_only`` publishes new goldens over the latest version's byte-identical schema as a
+    minor or patch version (platform ADR 0010); published versions are never rewritten.
+    """
     contract = registry.contract(contract_id)
     version = parse_semver(text)
     if status not in VERSION_STATUSES:
@@ -927,16 +998,31 @@ def bump(
     latest = registry.latest(contract_id)
     if latest is not None and version <= latest.version:
         raise ContractError(f"{text} is not newer than {show(latest.version)}")
+    if golden_only and latest is None:
+        raise ContractError(f"{contract_id} has no published version for a golden-only release")
+    if golden_only and latest is not None and version[0] != latest.version[0]:
+        raise ContractError(
+            f"a golden-only release is a minor or patch over {show(latest.version)}; "
+            f"{text} is a major version, which needs a schema change and a normal bump"
+        )
     if not _installed(contract.owner.module):
         raise ContractError(f"{contract.owner.package} is not installed; cannot export")
     schema, constant = owner_export(contract)
+    if golden_only and latest is not None and canonical(schema) != latest.schema_text:
+        raise ContractError(
+            f"the exported schema differs from {show(latest.version)}, so this is not a "
+            f"golden-only release; run scripts/contracts.py bump {contract_id} {text} without "
+            "--golden-only"
+        )
     if (
-        latest is not None
+        not golden_only
+        and latest is not None
         and canonical(schema) == latest.schema_text
         and constant == latest.owner_version
     ):
         raise ContractError(
-            f"the exported schema and constant equal {show(latest.version)}; nothing to bump"
+            f"the exported schema and constant equal {show(latest.version)}; nothing to bump "
+            "(if only the goldens changed, publish them with --golden-only)"
         )
     if isinstance(constant, int) and constant != version[0]:
         raise ContractError(
@@ -950,6 +1036,12 @@ def bump(
         errors = validate_golden(schema, target, value)
         if errors:
             raise ContractError(f"golden {name} does not validate: {errors[0]}")
+    if golden_only and latest is not None:
+        texts = {name: (target, canonical(value)) for name, (target, value) in goldens.items()}
+        if texts == latest.golden_texts():
+            raise ContractError(
+                f"the generated goldens equal {show(latest.version)}'s; nothing to release"
+            )
     breaks = compatibility_breaks(registry, contract_id, version, schema)
     if breaks:
         raise ContractError(
@@ -959,7 +1051,14 @@ def bump(
     before = registry.lock()
     stable = registry.latest(contract_id, stable=True)
     write_version(
-        contract.path / f"v{text}", contract_id, version, status, constant, schema, goldens
+        contract.path / f"v{text}",
+        contract_id,
+        version,
+        status,
+        constant,
+        schema,
+        goldens,
+        release=GOLDEN_ONLY if golden_only else None,
     )
     if status == "stable" and (stable is None or version[0] > stable.version[0]):
         # The first stable version adds, and a major version raises, the lock entry of every
@@ -973,7 +1072,8 @@ def bump(
         }
         registry.write_lock(raised)
     write_matrix(registry)
-    return announcements(registry, contract, version, before)
+    base = latest.version if golden_only and latest is not None else None
+    return announcements(registry, contract, version, before, golden_only_over=base)
 
 
 def post_comment(
@@ -1035,6 +1135,11 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     bumper.add_argument("version")
     bumper.add_argument("--status", default="stable", choices=sorted(VERSION_STATUSES))
     bumper.add_argument("--post", action="store_true", help="post comments (LINEAR_API_KEY)")
+    bumper.add_argument(
+        "--golden-only",
+        action="store_true",
+        help="new goldens over the latest version's unchanged schema (minor or patch)",
+    )
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
     registry = Registry(args.root.resolve())
@@ -1056,7 +1161,13 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
         key = environ.get("LINEAR_API_KEY")
         if args.post and not key:
             raise ContractError("--post needs LINEAR_API_KEY; nothing was written")
-        notes = bump(registry, args.contract, args.version, status=args.status)
+        notes = bump(
+            registry,
+            args.contract,
+            args.version,
+            status=args.status,
+            golden_only=args.golden_only,
+        )
         _print([f"wrote contracts/{args.contract}/v{args.version}/ and contracts/compatibility.md"])
         for note in notes:
             target = note.issue or f"<no gate issue for {note.package} in packages.toml>"
