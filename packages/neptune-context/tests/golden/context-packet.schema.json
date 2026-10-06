@@ -371,6 +371,255 @@
       ],
       "type": "object"
     },
+    "ClockAnchor": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "target": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "type": "object"
+    },
+    "ClockMap": {
+      "additionalProperties": false,
+      "description": "a clock mapping onto target as the evidence states it: target(t) = anchor.target + rate * (t - anchor.source), within residual_bound target ticks; or, composed, the chain of mapping records it follows (via: the clocks between) and no parameters of its own (ADR 0011 §2)",
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/ClockAnchor"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "$ref": "#/$defs/ClockAnchor"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "chain": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        },
+        "method": {
+          "enum": [
+            "co_sampled",
+            "composed",
+            "stated"
+          ]
+        },
+        "rate": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/Fraction"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "$ref": "#/$defs/Fraction"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "residual_bound": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/Duration"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "$ref": "#/$defs/Duration"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "via": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "anchor",
+        "chain",
+        "method",
+        "rate",
+        "residual_bound",
+        "target",
+        "via"
+      ],
+      "type": "object"
+    },
     "Confidence": {
       "anyOf": [
         {
@@ -736,6 +985,22 @@
       ],
       "type": "object"
     },
+    "Duration": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "ticks": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain_id",
+        "ticks"
+      ],
+      "type": "object"
+    },
     "EvidenceItem": {
       "additionalProperties": false,
       "description": "source bytes and what the Ledger's resolve said at the snapshot",
@@ -975,6 +1240,24 @@
         "config_hash",
         "resolver_id",
         "resolver_version"
+      ],
+      "type": "object"
+    },
+    "Fraction": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "numerator": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "denominator",
+        "numerator"
       ],
       "type": "object"
     },
@@ -1696,9 +1979,12 @@
     "NodeType": {
       "enum": [
         "asset",
+        "clock",
         "configuration",
         "deployment",
+        "document",
         "episode",
+        "event",
         "fleet",
         "machine",
         "model_version",
@@ -1709,6 +1995,7 @@
         "sensor",
         "site",
         "software_version",
+        "stream",
         "task",
         "zone"
       ]
@@ -2389,6 +2676,30 @@
             },
             "value": {
               "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "clock_map"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "$ref": "#/$defs/NotApplicable"
+            },
+            "value": {
+              "$ref": "#/$defs/ClockMap"
             }
           },
           "required": [
