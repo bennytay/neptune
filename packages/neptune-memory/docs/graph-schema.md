@@ -1,7 +1,7 @@
 # Graph schema v2
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v2.0.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.0.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v2.1.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.1.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -15,7 +15,9 @@ calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-c
 ([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6); 1.9.0 (minor) adds the graph document's optional
 `builds` and `#/$defs/Build`, for withdrawal ([ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md);
 the vocabulary is unchanged). **2.0.0 (major)** narrows `succeeds` and names the release in every document
-(below; [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3). Within major 1, earlier goldens still
+(below; [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3); 2.1.0 (minor,
+golden-only) republishes the goldens under identity v4 ([ADR 0021](adr/0021-a-machine-records-declared-ids-are-same-as.md),
+[ADR 0023](adr/0023-event-table-rows-declare-ids-in-their-at-id-column.md); schema and vocabulary unchanged). Within major 1, earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 

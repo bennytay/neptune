@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 REPO: Final = Path(__file__).resolve().parents[3]
 REGISTRY: Final = REPO / "contracts" / "graph-schema"
-PUBLISHED: Final = REGISTRY / "v2.0.0"  # the latest: what this code must reproduce
+PUBLISHED: Final = REGISTRY / "v2.1.0"  # the latest: what this code must reproduce
 FIRST: Final = REGISTRY / "v1.0.0"  # still read by consumers pinned to 1.0.0
 # Every stable version of major 1: a 2.x reader refuses their documents (ADR 0019 §3).
 MAJOR_1: Final = (
@@ -35,7 +35,7 @@ MAJOR_1: Final = (
     REGISTRY / "v1.8.0",
     REGISTRY / "v1.9.0",
 )
-EARLIER: Final[tuple[Path, ...]] = ()  # every earlier stable minor of major 2
+EARLIER: Final[tuple[Path, ...]] = (REGISTRY / "v2.0.0",)  # every earlier stable minor of major 2
 
 
 @cache

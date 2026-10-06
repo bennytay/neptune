@@ -16,7 +16,7 @@ statement.
 | `assertion-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `catalog-api` | `neptune-ledger` | active | 1.7.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
-| `graph-schema` | `neptune-memory` | active | 2.0.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
+| `graph-schema` | `neptune-memory` | active | 2.1.0 (golden-only, schema of 2.0.0) | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
 | `query-packet` | `neptune-context` | active | 1.3.0 | — | `neptune-deploy`, `neptune-learn` |
 | `dataset-manifest` | `neptune-learn` | planned | — | — | none in this repository |
 
@@ -32,6 +32,6 @@ is part of another rides on its version and has no column.
 |---|---|---|---|---|
 | `neptune-ledger` | 10.0.0 current |  |  |  |
 | `neptune-memory` |  | 1.7.0 current |  |  |
-| `neptune-context` |  | 1.7.0 current | 2.0.0 current |  |
-| `neptune-deploy` | 10.0.0 current | 1.7.0 current | 2.0.0 current | 1.0.0 behind |
+| `neptune-context` |  | 1.7.0 current | 2.0.0 behind |  |
+| `neptune-deploy` | 10.0.0 current | 1.7.0 current | 2.0.0 behind | 1.0.0 behind |
 | `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) |
