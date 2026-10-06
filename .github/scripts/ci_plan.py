@@ -25,7 +25,9 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
   adapter, the acceptance corpus under ``harness/acceptance/``, its imported generators, the
   harness stages that compile and map it, and the deploy stage's code) also runs
   ``neptune-memory``, whose snapshot test rebuilds from the harness's compiled and mapped packages
-  (platform ADR 0009); only Memory, not its dependents: its code did not change;
+  (platform ADR 0009); only Memory, not its dependents: its code did not change. ``main`` asks for
+  it (``snapshots=True``); ``scripts/merge_freshness.py`` does not, so it leaves that overlap to the
+  ``push`` run on ``main``, as it leaves the platform's harness overlap (platform ADR 0005);
 * the template smoke runs when ``packages/_template/**`` or ``scripts/new-package.sh`` changed.
 
 Writes ``compiler``, ``packages`` (a JSON list) and ``template`` to ``$GITHUB_OUTPUT`` when set, and
@@ -145,10 +147,13 @@ def plan(
     changed: list[str] | None,
     members: dict[str, frozenset[str]],
     owners: dict[str, str] | None = None,
+    *,
+    snapshots: bool = False,
 ) -> Plan:
     """The jobs to run; ``changed=None`` means unfiltered (every job).
 
-    ``owners`` maps contract ids to owner packages (``contract_owners``).
+    ``owners`` maps contract ids to owner packages (``contract_owners``). ``snapshots`` adds the
+    jobs whose committed snapshots a change can move (``MEMORY_SNAPSHOT_INPUTS``); CI asks for it.
     """
     if changed is None or any(p in PLUMBING_FILES or p.startswith(".github/") for p in changed):
         return Plan(compiler=True, packages=tuple(sorted(members)), template=True)
@@ -184,8 +189,10 @@ def plan(
                 affected.add(name)
                 grew = True
     # After the propagation: Memory's snapshot moved, not its code, so its dependents need not run.
-    if MEMORY_MEMBER in members and any(
-        p.startswith(MEMORY_SNAPSHOT_INPUTS) or p in CORPUS_INPUTS for p in changed
+    if (
+        snapshots
+        and MEMORY_MEMBER in members
+        and any(p.startswith(MEMORY_SNAPSHOT_INPUTS) or p in CORPUS_INPUTS for p in changed)
     ):
         affected.add(MEMORY_MEMBER)
     template = any(p.startswith(TEMPLATE_DIR) or p == "scripts/new-package.sh" for p in changed)
@@ -210,7 +217,7 @@ def main(argv: list[str]) -> int:
         changed_paths(argv[1], argv[2]) if argv[0] == "pull_request" and len(argv) == 3 else None
     )
     root = Path.cwd()
-    result = plan(changed, workspace_members(root), contract_owners(root)).outputs()
+    result = plan(changed, workspace_members(root), contract_owners(root), snapshots=True).outputs()
     sys.stdout.write(result)
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a", encoding="utf-8") as handle:

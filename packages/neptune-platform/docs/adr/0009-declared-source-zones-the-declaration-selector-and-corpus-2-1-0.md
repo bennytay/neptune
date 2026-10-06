@@ -78,7 +78,10 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
    runs (`stages.py`, `run.py`, `corpus.py`, `contracts.py`) and the deploy stage's inputs. With
    `CORPUS_INPUTS`, a change to any of them also runs `neptune-memory`. It is added after the
    dependency propagation: the snapshot moved, not Memory's code, so Memory's dependents (Context)
-   do not run for it. `harness.yml` already covers these paths (`src/neptune/**`, `harness/**`), and
+   do not run for it. CI's entry point asks for it (`plan(..., snapshots=True)`), and
+   `scripts/merge_freshness.py` does not. A PR and `main` therefore never overlap only through the
+   snapshot, and that overlap is left to `main`'s push run, as ADR 0005 leaves the platform's
+   harness overlap. `harness.yml` already covers these paths (`src/neptune/**`, `harness/**`), and
    a workflow test keeps it so.
 
 6. **No dangling same-event links** (`"require_assertion_scopes": true` in `deploy.json`, optional,
