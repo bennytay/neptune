@@ -3,8 +3,9 @@
 ``catalog(packages)`` holds every record and answers, for each, the subject memberships the
 Ledger's thread table gives the kinds Memory's configuration and calibration consolidators read:
 a ``run`` opens a run thread (declared when its ``logical_id`` is ``Known``, else anchored on its
-record-level evidence); a ``hardware_configuration``, ``software_configuration`` or ``calibration``
-opens an anchored configuration thread. Every other kind is held in no thread, lifecycle records
+record-level evidence); a ``hardware_configuration``, ``software_configuration``, ``calibration``
+or ``configuration_snapshot`` (Ledger ADR 0017) opens an anchored configuration thread, when its
+evidence source is a content id. Every other kind is held in no thread, lifecycle records
 included, as the real catalog holds them (the acceptance snapshot's generator asks a real one).
 Thread ids are computed as the Ledger computes them: sha256 of the key's canonical JSON.
 """
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
 Record = dict[str, object]
 CONFIGURATION_KINDS: Final = frozenset(
-    {"calibration", "hardware_configuration", "software_configuration"}
+    {"calibration", "configuration_snapshot", "hardware_configuration", "software_configuration"}
 )
 
 
@@ -63,6 +64,9 @@ def _subject_keys(record: Record) -> list[ThreadKey]:
             return [declared("run", logical_id_from_json(logical["value"]))]
         return [anchored("run", record)]
     if kind in CONFIGURATION_KINDS:
+        provenance = record["provenance"]
+        if not isinstance(provenance["evidence"]["source"], str):  # type: ignore[index]
+            return []  # the Ledger anchors a thread only on a content id
         return [anchored("configuration", record)]
     return []
 
