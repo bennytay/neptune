@@ -2,7 +2,7 @@
   "schema": "neptune-deploy.document-template/1",
   "id": "incident.report",
   "version": "1",
-  "description": "An incident report form: labelled header fields, a Time | Event timeline table and two free-text sections (Description, Root cause) copied verbatim under their spans, never summarised. Every time is a date and a time of day as the form writes it, to the minute or the second, on the document's own clock: on a cell's report that is the HMI alarm log the description names, which may disagree with a recording PC's clock. The form states no zone, so none is declared. A time of day without a date is never completed: it stays Unknown with a finding (ADR 0016).",
+  "description": "An incident report form: labelled header fields (Incident no, Site, Zone, Location, Machine, Assets, Occurred at, Severity, Related records), a Time | Event timeline table and two free-text sections (Description, Root cause) copied verbatim under their spans, never summarised. Times are a date and a time of day as the form writes them, to the minute or to the second, on the document's own clock, with the precision written. The form states no zone, so none is declared. A time of day without a date is never completed: it stays Unknown with a finding (ADR 0016).",
   "kind": "incident_record",
   "formats": [
     "pdf"
