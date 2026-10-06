@@ -4,7 +4,9 @@ One node per Ledger thread, keyed by its declared logical id; equal logical ids 
 packages are one thread, so one node. ``same_as`` only on three declared grounds, each cited: the
 compiler's ``IdentityLink`` with a ``Known`` right side (two ids co-declared, or one identifier
 both sides declare verbatim), configuration-lineage continuity, and a person's ``same_identity``
-assertion that no effective ``retract`` withdraws. Everything else plausible is a
+assertion that no effective ``retract`` withdraws; and since version 3, a ``Machine`` record that
+declares one machine by several ids (a manifest entry's id and its aliases: ADR 0021). Everything
+else plausible is a
 ``same_as_candidate`` pair, one claim each way: every candidate of a link the compiler marked
 ``Ambiguous``, with that candidate's own evidence; every window of a statement whose validity (or
 a bound of it, or an assertion's ``authored_at``) is ``Ambiguous``, with that window's evidence;
@@ -17,15 +19,17 @@ contradictory input is a finding and never a claim, and the rest of the build is
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.model.assertion import AssertionType
 from neptune.model.finding import Severity
-from neptune.model.knowledge import AssertionKind
+from neptune.model.knowledge import AssertionKind, Known
 from neptune.model.time import Timestamp
 from neptune_memory.consolidate import identity_records as parse
+from neptune_memory.consolidate import run_records
 from neptune_memory.consolidate.base import (
     IDENTITY_CONSOLIDATOR_ID,
     ClaimDraft,
@@ -37,6 +41,7 @@ from neptune_memory.consolidate.identity_records import (
     ASSERTION,
     CONFIGURATION_LINEAGE,
     IDENTITY_LINK,
+    MACHINE,
     THREAD,
     TIMESTAMP_DOMAIN,
     Link,
@@ -56,7 +61,9 @@ if TYPE_CHECKING:
 
     from neptune.model.ids import LogicalId, RecordId
     from neptune.model.jsonvalue import JsonValue
+    from neptune.model.knowledge import Knowledge
     from neptune.model.provenance import EvidenceRef
+    from neptune.model.run import Run, RunDeclaration
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim
 
@@ -424,6 +431,238 @@ def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[
     return links, distinct
 
 
+# --- Machine declarations (ADR 0021) ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Origin:
+    """Where a machine's ids are first placed in time, and what places them there."""
+
+    start: Timestamp
+    records: tuple[RecordId, ...]
+    evidence: tuple[EvidenceRef, ...]
+
+
+def _read_machines(view: _View, ledger: LedgerReader) -> list[parse.Declaration]:
+    """Every ``machine`` record, de-duplicated by record id; refused ones are findings."""
+    admitted = _Admitted(view.findings)
+    found: dict[RecordId, parse.Declaration] = {}
+    for ref in ledger.list_packages():
+        for index, record in enumerate(ledger.read_records(ref.package_id, MACHINE) or ()):
+            try:
+                parsed = parse.machine(record)
+            except parse.Inferred:
+                continue  # an inferred machine is a derived/ record: never a ground
+            except parse.Malformed as exc:
+                view.findings.append(_malformed(MACHINE, ref.package_id, index, str(exc)))
+                continue
+            if admitted.admit(parsed.record, parsed):
+                found[parsed.record] = parsed
+    return [found[r] for r in sorted(found.keys() - admitted.conflicted)]
+
+
+def _run_origins(ledger: LedgerReader) -> dict[Key, list[_Origin]]:
+    """Each machine id a run names (its ``Run.machine``, or a ``run_declaration`` of it), with
+    that run's ``Known`` first instant. Records others' parsers refuse are theirs to report, and a
+    run id with two contents places nothing."""
+    runs: dict[RecordId, Run | None] = {}
+    declarations: list[RunDeclaration] = []
+    for ref in ledger.list_packages():
+        for record in ledger.read_records(ref.package_id, run_records.RUN) or ():
+            try:
+                run = run_records.run(record)
+            except (run_records.Inferred, parse.Malformed):
+                continue
+            runs[run.id] = run if runs.setdefault(run.id, run) == run else None
+        for record in ledger.read_records(ref.package_id, run_records.RUN_DECLARATION) or ():
+            try:
+                declarations.append(run_records.declaration(record))
+            except (run_records.Inferred, parse.Malformed):
+                continue
+    origins: dict[Key, list[_Origin]] = {}
+
+    def place(run: Run | None, node: Knowledge[LogicalId], via: RunDeclaration | None) -> None:
+        if run is None or not isinstance(run.first, Known) or not isinstance(node, Known):
+            return
+        records: tuple[RecordId, ...] = (run.id,)
+        cited: tuple[EvidenceRef, ...] = (run.provenance.evidence,)
+        if via is not None:
+            records, cited = (run.id, via.id), (*cited, via.provenance.evidence)
+        origins.setdefault(_key(node.value), []).append(_Origin(run.first.value, records, cited))
+
+    for entry in runs.values():
+        if entry is not None:
+            place(entry, entry.machine, None)
+    for declaration in declarations:
+        place(runs.get(declaration.run), declaration.machine, declaration)
+    return origins
+
+
+def _origin(
+    view: _View, ids: Sequence[LogicalId], runs: Mapping[Key, Sequence[_Origin]]
+) -> _Origin | None:
+    """A declaration states no time, so it holds from its machine's first placement (ADR 0021
+    §2): the first thread record of any of its ids (ADR 0008 §2), else the first run naming one,
+    each by record id. A convention, not a lifetime."""
+    threads = [t for i in ids if _key(i) in view.nodes for t in view.nodes[_key(i)].threads]
+    if threads:
+        first = min(threads, key=lambda t: t.record)
+        return _Origin(first.valid_from, (first.record,), ())
+    placed = [o for i in ids for o in runs.get(_key(i), ())]
+    return min(placed, key=lambda o: o.records) if placed else None
+
+
+class _Conflicts:
+    """Machine declarations joined through a shared id that cannot all be one machine (ADR 0021
+    §3): two of them cite one document (which lists them as two), or the join puts two ids of one
+    namespace together that no one declaration gives one machine."""
+
+    def __init__(self, declarations: Sequence[parse.Declaration]) -> None:
+        components = _Components()
+        for d in declarations:
+            for side in d.known[1:]:
+                components.union(_key(d.known[0].node), _key(side.node))
+        groups: dict[Key, list[parse.Declaration]] = {}
+        for d in declarations:
+            if d.known:
+                groups.setdefault(components.find(_key(d.known[0].node)), []).append(d)
+        self.groups = [g for g in groups.values() if len(g) > 1 and _clash(g)]
+        self.records = {d.record for g in self.groups for d in g}
+
+
+def _clash(group: Sequence[parse.Declaration]) -> bool:
+    documents = [_ref_key_of(d.document) for d in group]
+    if len(set(documents)) < len(documents):
+        return True
+    together = {frozenset(_key(s.node) for s in d.known) for d in group}
+    by_namespace: dict[str, set[Key]] = {}
+    for d in group:
+        for side in d.known:
+            by_namespace.setdefault(side.node.namespace, set()).add(_key(side.node))
+    return any(
+        not any({a, b} <= ids for ids in together)
+        for keys in by_namespace.values()
+        for a in keys
+        for b in keys
+        if a < b
+    )
+
+
+def _ref_key_of(source: object) -> bytes:
+    return canonical_json.dumps(source if isinstance(source, str) else source.to_json())  # type: ignore[attr-defined]
+
+
+def _from_machines(view: _View, ledger: LedgerReader) -> list[Link]:
+    """One decided link per ``Machine`` record joining its ``Known`` ids to the lowest, and one
+    undecided link per ``Ambiguous`` identifier: its candidates against that id (ADR 0021)."""
+    declarations = _read_machines(view, ledger)
+    if not declarations:
+        return []
+    runs = _run_origins(ledger)
+    usable: list[parse.Declaration] = []
+    for d in declarations:
+        if d.refused:
+            view.findings.append(
+                _finding(
+                    "machine_identifier_unrepresentable",
+                    "a machine record declares ids Memory keys no node by (blank, padded, or in "
+                    f"the reserved {parse.RESERVED_NAMESPACE!r} namespace); its other ids still"
+                    " count",
+                    (d.record,),
+                    ids=[i.to_json() for i in d.refused],
+                )
+            )
+        typed = [s for s in d.known if _machine_node(view, d, s.node)]
+        alternatives = [
+            tuple(s for s in sides if _machine_node(view, d, s.node)) for sides in d.ambiguous
+        ]
+        known = tuple(sorted(typed, key=lambda s: _key(s.node)))
+        usable.append(
+            dataclasses.replace(d, known=known, ambiguous=tuple(a for a in alternatives if a))
+        )
+    conflicts = _Conflicts(usable)
+    for group in conflicts.groups:
+        view.findings.append(
+            _finding(
+                "machine_conflict",
+                "machine records joined by a shared id cannot all be one machine (one document "
+                "lists two of them, or the join gives one machine two ids no declaration pairs); "
+                "their ids are candidates, never same_as",
+                sorted(d.record for d in group),
+                ids=sorted({s.node.namespace + ":" + s.node.value for d in group for s in d.known}),
+            )
+        )
+    links: list[Link] = []
+    for d in usable:
+        if len(d.known) + len(d.ambiguous) < 2:
+            continue
+        if not d.known:
+            view.findings.append(
+                _finding(
+                    "machine_undecided",
+                    "a machine record states none of its ids as Known; no id to join the "
+                    "candidates to",
+                    (d.record,),
+                )
+            )
+            continue
+        origin = _origin(view, [s.node for s in d.known], runs)
+        if origin is None:
+            view.findings.append(
+                _finding(
+                    "machine_unplaced",
+                    "no thread or run places this machine's ids in time; its ids are joined "
+                    "once one does",
+                    (d.record,),
+                    Severity.INFO,
+                )
+            )
+            continue
+        if len(d.known) > 1:
+            decided = d.record not in conflicts.records
+            links.append(_declaration_link(d, origin, d.known[1:], decided))
+        links.extend(_declaration_link(d, origin, sides, False) for sides in d.ambiguous)
+    return links
+
+
+def _declaration_link(
+    d: parse.Declaration, origin: _Origin, right: tuple[Side, ...], decided: bool
+) -> Link:
+    """A machine record's lowest ``Known`` id against ``right``, from the machine's origin."""
+    hub = d.known[0]
+    return Link(
+        record=d.record,
+        ground="machine_declaration",
+        assertion_kind=d.assertion_kind,
+        left=hub.node,
+        right=right,
+        decided=decided,
+        windows=(Window(origin.start, OPEN, origin.evidence),),
+        evidence=(*d.evidence, *hub.evidence),
+        also=origin.records,
+    )
+
+
+def _machine_node(view: _View, declaration: parse.Declaration, node: LogicalId) -> bool:
+    """Key a machine node for ``node`` unless a Ledger thread keys it as another type."""
+    key = _key(node)
+    existing = view.nodes.get(key)
+    if existing is None:
+        view.nodes[key] = _Node(node_ref(NodeType.MACHINE, node), ())
+        return True
+    if existing.ref.node_type is NodeType.MACHINE:
+        return True
+    view.findings.append(
+        _finding(
+            "type_mismatch",
+            "a machine record declares an id a Ledger thread keys as another node type",
+            (declaration.record, *(t.record for t in existing.threads)),
+            node_types=[str(existing.ref.node_type), str(NodeType.MACHINE)],
+        )
+    )
+    return False
+
+
 # --- The policy ---------------------------------------------------------------------------------
 
 
@@ -449,11 +688,12 @@ class IdentityConsolidator:
     """Deterministic ``same_as`` / ``same_as_candidate`` claims. Takes no configuration.
 
     Version 2 (ADR 0008) reads the compiler's ``identity_link`` and ``assertion`` kinds; version 1
-    read ADR 0003's stand-ins, so its claims are another lineage.
+    read ADR 0003's stand-ins, so its claims are another lineage. Version 3 (ADR 0021) also reads
+    ``machine`` records: the ids one declaration gives one machine are ``same_as``.
     """
 
     consolidator_id: Final = IDENTITY_CONSOLIDATOR_ID
-    version: Final = "2"
+    version: Final = "3"
     model: Final[ModelRef | None] = None
 
     def consolidate(
@@ -472,7 +712,8 @@ class IdentityConsolidator:
                 )
             )
         stated, distinct = _from_statements(view)
-        links = sorted((*view.links, *stated), key=lambda link: link.record)
+        machines = _from_machines(view, ledger)
+        links = sorted((*view.links, *stated, *machines), key=lambda link: link.record)
         for link in (link for link in links if not link.windows):
             view.findings.append(
                 _link_finding(
@@ -581,6 +822,10 @@ def _interval(
     end = OPEN if isinstance(window.end, Open) else view.place(window.end)
     records: tuple[RecordId, ...] = ()
     if window.start is None:
+        if not subject.threads:  # a machine record's id, with no thread to start from
+            return _link_finding(
+                "untimeable_window", link, "states no start and its subject has no thread"
+            )
         first = subject.threads[0]
         start, records = view.place(first.valid_from), (first.record,)
     else:
@@ -613,7 +858,7 @@ def _same_as(view: _View, link: Link, side: Side) -> ClaimDraft | None:
         valid_to=timed.end,
         assertion_kind=link.assertion_kind,
         evidence=(*link.evidence, *side.evidence, *timed.evidence),
-        records=(link.record, *timed.records),
+        records=(link.record, *link.also, *timed.records),
     )
 
 

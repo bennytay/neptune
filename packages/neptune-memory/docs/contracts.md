@@ -82,7 +82,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
-  compiler's own strict readers (ADR 0008 §1). The configuration lineage consolidator reads
+  compiler's own strict readers (ADR 0008 §1), and `machine` (with `run` and `run_declaration` to place it)
+  the same way (ADR 0021). The configuration lineage consolidator reads
   `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`, `authorisation_envelope`
   (lifecycle records, root ADR 0051), `run`, `snapshot_binding` (root ADR 0050 §8) and the snapshot kinds a binding
   names, the same way ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §1); the time-domain registry

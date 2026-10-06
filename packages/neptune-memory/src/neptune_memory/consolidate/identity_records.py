@@ -15,6 +15,8 @@ package-schema shape (``identity_link`` since 3, ``assertion`` since 5, ``timest
   names the assertion it withdraws by that assertion's declared ``identifier``.
 - ``timestamp_domain``: read only to place a stated instant on a shared civil clock when the
   domain declares its timescale, epoch and resolution (Memory ADR 0002 §3).
+- ``machine`` (root ADR 0019 §1, ADR 0072 §1): the ids one declaration gives one machine, a
+  manifest entry's id and its aliases among them (Memory ADR 0021).
 
 Two kinds are Ledger stand-ins until Memory reads the catalog API (MVL-85) and the compiler emits
 configuration lineage (MVL-38): ``ledger_thread {id, logical_id, node_type, valid_from, evidence}``
@@ -29,7 +31,8 @@ from typing import TYPE_CHECKING, Final, Literal, TypeVar
 from neptune.model.alignment import identity_link_from_json
 from neptune.model.assertion import AssertionType, assertion_from_json
 from neptune.model.ids import LogicalId, RecordId, logical_id_from_json, parse_record_id
-from neptune.model.knowledge import Ambiguous, AssertionKind, Known
+from neptune.model.knowledge import Ambiguous, AssertionKind, Candidate, Known
+from neptune.model.machine import machine_from_json
 from neptune.model.provenance import EvidenceRef, Provenance, evidence_ref_from_json
 from neptune.model.reference import timestamp_domain_from_json
 from neptune.model.time import Timestamp, timestamp_from_json
@@ -54,9 +57,16 @@ IDENTITY_LINK: Final = "identity_link"
 CONFIGURATION_LINEAGE: Final = "configuration_lineage"
 ASSERTION: Final = "assertion"
 TIMESTAMP_DOMAIN: Final = "timestamp_domain"
+MACHINE: Final = "machine"
 
-# What grounds a ``same_as`` (ADR 0003 §1.2): the record kind it rests on.
-Ground = Literal["identity_link", "configuration_lineage", "operator_assertion"]
+# What grounds a ``same_as`` (ADR 0003 §1.2, ADR 0021): the record kind it rests on.
+Ground = Literal[
+    "identity_link", "configuration_lineage", "operator_assertion", "machine_declaration"
+]
+
+# Node ids in this namespace are Memory's own record-keyed nodes (``record:<record id>``: runs,
+# streams, events), so a declared id in it would name one of them (ADR 0021 §4).
+RESERVED_NAMESPACE: Final = "record"
 
 
 class Malformed(ValueError):
@@ -342,6 +352,66 @@ def assertion(record: Mapping[str, object]) -> Statement:
         else tuple(Window(start, OPEN, cited) for start, cited in starts),
         timed=not isinstance(parsed.authored_at, Ambiguous),
         evidence=(parsed.provenance.evidence,),
+    )
+
+
+# --- Machine declarations -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Declaration:
+    """A ``Machine`` record, as far as identity reads it (ADR 0021).
+
+    ``known`` are its ``Known`` ids in canonical order, each with its own citation; ``ambiguous``
+    one tuple per ``Ambiguous`` identifier, its candidates. ``refused`` are ids Memory cannot key a
+    node by (blank or padded, or in ``RESERVED_NAMESPACE``), with every other id still read.
+    ``document`` is the source the declaration cites: two machines one document lists are two.
+    """
+
+    record: RecordId
+    assertion_kind: AssertionKind
+    known: tuple[Side, ...]
+    ambiguous: tuple[tuple[Side, ...], ...]
+    refused: tuple[LogicalId, ...]
+    evidence: tuple[EvidenceRef, ...]
+    document: object
+
+
+def _usable(node: LogicalId) -> bool:
+    return is_declared_value(node.value) and node.namespace != RESERVED_NAMESPACE
+
+
+def machine(record: Mapping[str, object]) -> Declaration:
+    """The compiler's ``Machine``, read by the compiler's strict reader."""
+    provenance = record.get("provenance")
+    if isinstance(provenance, dict) and provenance.get("assertion_kind") == "inferred":
+        raise Inferred("an inferred machine is a derived/ record")
+    parsed = _strict(machine_from_json, record)
+    known: list[Side] = []
+    ambiguous: list[tuple[Side, ...]] = []
+    refused: list[LogicalId] = []
+    for item in parsed.identifiers:
+        readings = item.candidates if isinstance(item, Ambiguous) else (item,)
+        sides = tuple(
+            Side(c.value, _cited(c.provenance))
+            for c in readings
+            if isinstance(c, Known | Candidate)
+        )
+        refused.extend(s.node for s in sides if not _usable(s.node))
+        usable = tuple(s for s in sides if _usable(s.node))
+        if isinstance(item, Ambiguous):
+            if usable:
+                ambiguous.append(usable)
+        else:
+            known.extend(usable)
+    return Declaration(
+        record=parsed.id,
+        assertion_kind=parsed.provenance.assertion_kind,
+        known=tuple(known),
+        ambiguous=tuple(ambiguous),
+        refused=tuple(refused),
+        evidence=(parsed.provenance.evidence,),
+        document=parsed.provenance.evidence.source,
     )
 
 
