@@ -119,7 +119,7 @@ major version (ADR 0002 §5).
 | `sensor_recorded` | run | sensor | many | a sensor of a configuration bound to the run recorded in it: a run's file declares its identifier |
 | `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
 | `stated_severity` | event | text, integer | one | the severity a record states, verbatim; never ranked or compared |
-| `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
+| `succeeds` | configuration | configuration | many | a source states the subject replaces the object as configurations, wherever they appear; never read from one machine's chain (ADR 0019 §2) |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 `EventKind` (`#/$defs/EventKind`) lists the registered event kinds, the only objects of `event_kind`:
@@ -237,11 +237,20 @@ def test_graph_schema_contract(check):
     reported as `identity.retraction_ambiguous`. A `same_identity` of that kind becomes `same_as_candidate` pairs
     that cite the retracts leaving it in doubt, and a `distinct_identity` of that kind suppresses nothing. A
     `same_identity` whose own `identifier` is `Ambiguous` is always candidates, never `same_as`.
+    An assertion may name an `event` node ([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md)
+    §1): by the record `memory.events` keyed it by, or by an id its `incident_record` or `intervention` declares
+    (a Ledger thread's node first). An id several event records declare, or one only possibly does, is
+    `identity.scope_ambiguous` and candidates, never `same_as`; a record id that names no event is not read.
 12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
     places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
     the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
-    nearest configuration in time; where records disagree, every reading is a `configuration_candidate`. No
-    `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
+    nearest configuration in time; where records disagree, every reading is a `configuration_candidate`.
+    Configuration nodes are shared by every machine that names them, so a change is the machine's own: two
+    `memory.configuration` claims `has_configuration(m → A)` ending at `t` and `has_configuration(m → B)` starting
+    at the same `t` (one `Timestamp`, so one clock), `A ≠ B`. Nothing else is a change: an unknown or candidate span
+    between them, or another clock, breaks the adjacency, so no change is read across a gap
+    ([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §2;
+    `consolidate.configuration.transitions` reads it). `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
     made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
     envelope end is never read as open.
 13. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run

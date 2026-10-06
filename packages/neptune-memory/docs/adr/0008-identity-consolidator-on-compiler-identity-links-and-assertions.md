@@ -1,6 +1,6 @@
 # 0008 — The identity consolidator on compiler identity links and assertions
 
-- Status: Accepted
+- Status: Accepted; §2's logical-id-only scope and §3's "record ids in a scope are not read" superseded by 0019 §1
 - Date: 2026-10-05
 - Issue: MVL-126
 - Amends: ADR 0003 §1 (the consumed record shapes: `identity_link` and `operator_assertion` give way to the
