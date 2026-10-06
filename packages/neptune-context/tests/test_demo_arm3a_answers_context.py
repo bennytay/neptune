@@ -16,6 +16,7 @@ and the two z offsets (each run's own copy of a configuration's value). Pinned b
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import Any, Final
 
@@ -54,7 +55,7 @@ def _run_id(listing: str, name: str) -> dict[str, Any]:
     of one recording alike; either is that run)."""
     ids = re.findall(rf'- run "([^"]+)" named "{re.escape(name)}"', listing)
     assert ids, f"no run named {name}"
-    return {"kind": "run", "declared_id": sorted(ids)[0], "same_as_depth": 0}
+    return {"kind": "run", "declared_id": sorted(ids)[0]}
 
 
 def _text(result: Any) -> str:
@@ -144,3 +145,42 @@ def test_unchanged_values_are_not_carried(answers: dict[str, list[str]]) -> None
     changed = answers["what changed on ARM-3A since the last good run"][-1]
     # Both calibrations name the same frames: the base frame did not change, so it is no item.
     assert '"robot_base_frame"' not in changed
+
+
+SKILL: Final = (
+    F.ROOT / "packages" / "neptune-context" / "claude" / "skills" / "neptune" / "SKILL.md"
+)
+
+
+def test_the_skills_literal_calls_are_accepted() -> None:
+    """Each call the skill writes out, with its placeholders filled, is a valid tool call."""
+    from neptune_context.mcp.server import query_from_arguments
+
+    text = SKILL.read_text(encoding="utf-8")
+    run = "record:rec:sha256:" + "a" * 64
+    other = "record:rec:sha256:" + "b" * 64
+    assert '`neptune_entities {"kind": "run", "include_inferred": false}`' in text
+    assert '`{"kind": "run", "declared_id": "<id from the listing>"}`' in text
+    compare = {
+        "before": json.loads(
+            '{"kind": "run", "declared_id": "<id from the listing>"}'.replace(
+                "<id from the listing>", run
+            )
+        ),
+        "after": json.loads(
+            '{"kind": "run", "declared_id": "<id from the listing>"}'.replace(
+                "<id from the listing>", other
+            )
+        ),
+        "include_inferred": False,
+    }
+    assert query_from_arguments("neptune_compare_runs", compare).explain
+    incident = {
+        "include_inferred": False,
+        "query": {
+            "budget": {"items": 50, "tokens": 20000},
+            "subjects": [{"kind": "event", "declared_id": run}],
+            "graph": {"hops": 1, "direction": "both", "predicates": "any"},
+        },
+    }
+    assert query_from_arguments("neptune_query", incident).subjects

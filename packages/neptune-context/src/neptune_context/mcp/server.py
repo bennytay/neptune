@@ -244,7 +244,16 @@ def input_schemas() -> dict[str, dict[str, Any]]:
                 "include_inferred": _INFERRED_PARAM,
                 "as_of": _AS_OF,
                 "max_items": {"type": "integer", "minimum": 1, "maximum": 10000},
-                "max_tokens": {"type": "integer", "minimum": 1, "maximum": 1000000},
+                "max_tokens": {
+                    "description": (
+                        "Budget in Context's estimated units (the answer items' JSON bytes / 4), "
+                        "not the rendered text: the default 60000 holds the Demo v1 comparison "
+                        "(67 items), about 12000 tokens of answer text."
+                    ),
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000000,
+                },
             },
             ["before", "after", "include_inferred"],
         ),
@@ -459,9 +468,13 @@ def _decoded(document: dict[str, Any]) -> Query:
     subjects = [*document["subjects"]] if isinstance(document["subjects"], list) else []
     subjects += (
         [
-            item["subject"]
+            item[key]
             for item in document["explain"]
-            if isinstance(item, dict) and isinstance(item.get("subject"), dict)
+            if isinstance(item, dict)
+            for key in (
+                ("before", "after") if item.get("kind") == "compare_runs" else ("subject",)
+            )  # a diff's subject; a comparison's two runs
+            if isinstance(item.get(key), dict)
         ]
         if isinstance(document["explain"], list)
         else []
