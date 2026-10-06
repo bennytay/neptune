@@ -12,9 +12,9 @@
 
 The snapshot is whatever ``retrieve_fixtures_context.demo_document`` reads (one constant,
 ``DEMO_SNAPSHOT``); when Memory publishes its pipeline-built graph, that constant moves and these
-goldens are regenerated. Steps marked ``"exact": false`` (``neptune_why``, ``neptune_diff``) are
-answered by MVL-149's explain work; the transcript keeps their calls and checks their citations,
-not their bytes, so that work lands without rewriting this file.
+goldens are regenerated. ``neptune_why`` and ``neptune_diff`` answer with the packet's trails
+(MVL-149, ADR 0010) rendered by ``render_answer`` (ADR 0011), so their bytes are recorded too. The
+one step marked ``"exact": false`` is the second ``neptune_query``, checked for citations only.
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def steps(packet_query_text: str) -> list[dict[str, Any]]:
         {
             "tool": "neptune_why",
             "arguments": {"claim_id": involves, "include_inferred": True},
-            "exact": False,
+            "exact": True,
         },
         {
             "tool": "neptune_diff",
@@ -149,8 +149,9 @@ def steps(packet_query_text: str) -> list[dict[str, Any]]:
                 "before": 1,
                 "after": int(F.demo_document().head),
                 "include_inferred": True,
+                "max_items": 20,  # the diff names 12 claims; the default 10 would cut two
             },
-            "exact": False,
+            "exact": True,
         },
         {"tool": "neptune_hydrate", "arguments": {"evidence": evidence}, "exact": True},
         {
