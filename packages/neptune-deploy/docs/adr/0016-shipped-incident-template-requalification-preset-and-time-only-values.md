@@ -81,6 +81,22 @@ mistake a template can make, so the rule is fixed here before any template needs
    PLANT-2's CMMS export. It ingests them with `--no-plugins`, as a subprocess, and commits the package
    (ADR 0004 §3, §4). A test checks every source against `harness/acceptance/corpus.lock.json`, so a
    corpus change fails until the fixture is regenerated.
+7. **`cmms_downtime` (`cmms.downtime`, version 1) maps each downtime-log row to an `intervention`.**
+   - `Downtime ID` is the identifier under `cmms.downtime`. `Stop Type` is the `mode`, verbatim.
+     `Reason` is the `reason`, `Stopped` the `start` (required) and `Restarted` the `end`. A blank
+     `Restarted` is `Unknown`, never "still stopped". `Related` is split on `;`. `Location` and
+     `Reported By` are ignored on purpose: the kind has no place or reporter field.
+   - Times follow §1: the log's own civil clock, the zone `unstated`, never UTC. A stop that crosses
+     midnight reads the dates it states. A time-only restart is `Unknown` with `value_unreadable`,
+     and the next day is never inferred.
+   - An `incident_record` would make a planned stop an incident, and it has no end time. An
+     intervention has a start, an end, a mode and a reason, and Memory's event index already maps
+     an intervention's stated mode to its event kinds. The CMMS stop and the controller's syslog
+     stop are kept as each source states them (14:33:10 and 14:32:38 for INC-C3-0011). Only a
+     stated same-event assertion joins them, and that is Memory's job.
+   - The fixture is corpus 2.0.0's `downtime_log.csv` (harness PR #143), committed as a source and
+     ingested into `tests/fixtures/demo_corpus/downtime_package/`. It is pinned by content id until
+     2.0.0's lock is on main, which then binds it.
 
 ## Alternatives considered
 
@@ -98,7 +114,7 @@ mistake a template can make, so the rule is fixed here before any template needs
 ## Consequences
 
 - Platform's Deploy map stage can run with shipped names only: `-p cmms_generic -p
-  requalification_csv -T incident_report`, plus the other presets it already uses.
+  requalification_csv -p cmms_downtime -T incident_report`, plus the other presets it already uses.
 - On the corpus, every one of INC-C3-0011's five HMI times and INC-0007's four reads. Four
   requalification records map (three PLANT-2, one S-007), and all 16 CMMS rows of the two sites
   (10 at PLANT-2, 6 at S-007) are maintenance events, WO-26-0709 among them.
