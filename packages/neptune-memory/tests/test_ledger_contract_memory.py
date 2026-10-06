@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 
-from neptune_memory.ledger import LedgerReader, PackageRef, StubLedger
+from neptune_memory.ledger import LedgerReader, PackageRef, StubLedger, ThreadsOf
 
 
 def _stub() -> StubLedger:
@@ -17,7 +17,21 @@ def _stub() -> StubLedger:
     )
 
 
-READERS: list[Callable[[], LedgerReader]] = [_stub]
+def _answering_stub() -> StubLedger:
+    """The same Ledger, answering thread queries (catalog-api ``threads_of``, ADR 0018)."""
+    found = ThreadsOf("rec-1", "found", (), ())
+    return StubLedger(
+        {
+            "pkg-b": (1, [{"kind": "observation", "n": 1}, {"kind": "frame", "n": 2}]),
+            "pkg-a": (1, [{"kind": "observation", "n": 3}, {"kind": "observation", "n": 4}]),
+            "pkg-empty": (1, []),
+        },
+        "1.7.0",
+        {"rec-1": found},
+    )
+
+
+READERS: list[Callable[[], LedgerReader]] = [_stub, _answering_stub]
 
 
 @pytest.fixture(params=READERS, ids=lambda f: f.__name__)
@@ -54,3 +68,9 @@ def test_records_filtered_by_kind_in_file_order(ledger: LedgerReader) -> None:
 def test_reads_are_deterministic(ledger: LedgerReader) -> None:
     assert ledger.list_packages() == ledger.list_packages()
     assert ledger.read_records("pkg-b", "frame") == ledger.read_records("pkg-b", "frame")
+
+
+def test_thread_answers_are_none_or_a_threads_of_and_deterministic(ledger: LedgerReader) -> None:
+    answer = ledger.threads_of("no-such-record")
+    assert answer is None or (answer.status, answer.memberships) == ("unknown_record", ())
+    assert ledger.threads_of("rec-1") == ledger.threads_of("rec-1")
