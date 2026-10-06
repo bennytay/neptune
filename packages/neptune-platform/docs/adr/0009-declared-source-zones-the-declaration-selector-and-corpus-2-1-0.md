@@ -1,4 +1,4 @@
-# 0009 — Declared source zones in the Deploy declaration, the declaration selector, and corpus 2.1.0
+# 0009 — Declared source zones in the Deploy declaration, the declaration selector, no dangling same-event links, and corpus 2.1.0
 
 - Status: Accepted
 - Date: 2026-10-06
@@ -81,6 +81,21 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
    do not run for it. `harness.yml` already covers these paths (`src/neptune/**`, `harness/**`), and
    a workflow test keeps it so.
 
+6. **No dangling same-event links** (`"require_assertion_scopes": true` in `deploy.json`, optional,
+   default false). Memory joins a stated same-event assertion's scope entries to the records that
+   declare those identifiers. With the key set, after the map the case is red when:
+   - the compiled package holds no stated `same_identity` assertion whose payload's `relation` is
+     `same_event`;
+   - or any scope entry's `(namespace, value)` pair is not declared by the mapped package.
+
+   What counts as declared:
+   - a lifecycle record's own `identifiers` (a bare list or a `Known` list);
+   - or a typed table row's cell in an `@id:<namespace>` column (Deploy ADR 0017 §1).
+
+   The pair is compared field by field and exactly as the cell text reads: it is never joined into
+   one string, padded or reformatted. The acceptance corpus sets the key when its `cmms_downtime`
+   and `syslog_csv` presets are wired. The report row says `assertion_scopes: declared | dangling`.
+
 ## Alternatives considered
 
 - **A `Timezone` column in each CSV.** Lost: a collector's export does not carry one, and ADR 0061 §3
@@ -96,6 +111,9 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
   the ids of the others. The locator keeps the position for people, and the id keeps the content.
 - **`plant-2.`-prefixed namespaces kept, with Memory mapping them.** Lost: every consumer would need a
   translation table. One generic spelling, the one Deploy writes, joins without one.
+- **Checking assertion scopes on every declaring case.** Lost: a case without same-event
+  assertions (the worked examples) would be red for nothing, and the acceptance corpus cannot pass
+  until Deploy's presets ship. An explicit key states which cases owe the join.
 - **A major version for the namespace change.** Lost: ADR 0007 §3 ties major to gold meaning and moved
   evidence, and neither changes. Consumers that match scope namespaces are named in the PR.
 

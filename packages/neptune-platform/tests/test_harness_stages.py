@@ -456,3 +456,133 @@ def test_a_declared_zone_the_map_did_not_apply_is_red(
     assert stages._zone_problems(
         stages.DeployPlan(("syslog_csv",), (), {}, (absent,)), compiled, mapped, labels, applied
     ) == ["sources names nope.csv, which the compiled package does not hold"]
+
+
+def _known(value: object) -> dict[str, object]:
+    return {"knowledge": "known", "value": value}
+
+
+def _assertion(scope: list[dict[str, str]], relation: str = "same_event") -> dict[str, object]:
+    payload = json.dumps({"incident": "INC-1", "relation": relation}, indent=2)  # text, as read
+    return {
+        "assertion_type": _known("same_identity"),
+        "id": "a",
+        "identifier": _known({"namespace": "ops.review", "value": "ASR-1"}),
+        "payload": _known(payload),
+        "provenance": {"assertion_kind": "stated", "evidence": {"locator": [], "source": "s"}},
+        "scope": _known(scope),
+    }
+
+
+def _write(root: Path, kind: str, records: list[dict[str, object]]) -> None:
+    (root / "records").mkdir(parents=True, exist_ok=True)
+    lines = "".join(json.dumps(record) + "\n" for record in records)
+    (root / "records" / f"{kind}.jsonl").write_text(lines)
+
+
+DOWNTIME: Final = {"namespace": "cmms.downtime", "value": "DT-26-0914-01"}
+SYSLOG: Final = {"namespace": "syslog", "value": "4182"}
+
+
+def _mapped(root: Path, *, known_list: bool = False) -> Path:
+    """A mapped package declaring the downtime stop on an intervention (a bare list, or a
+    ``Known`` list with its own provenance) and the syslog stop in a typed table's ``@id`` column.
+    """
+    identifiers: object = [_known(DOWNTIME)]
+    if known_list:
+        identifiers = {**_known([DOWNTIME]), "provenance": {"assertion_kind": "stated"}}
+    _write(root, "intervention", [{"id": "i", "identifiers": identifiers}])
+    header = ["Seq", "MsgID", "@id:syslog"]
+    _write(root, "structured_table", [{"header": _known(header), "id": "t"}])
+    row: dict[str, object] = {
+        "cells": [_known("4182"), _known("PSTOP"), _known("4182")],
+        "table": "t",
+    }
+    _write(root, "structured_record", [row, {"cells": [_known("x")], "table": "other"}])
+    return root
+
+
+@pytest.mark.parametrize("known_list", [False, True])
+def test_every_same_event_scope_entry_is_an_identifier_the_mapped_package_declares(
+    tmp_path: Path, known_list: bool
+) -> None:
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    _write(compiled, "assertion", [_assertion([DOWNTIME, SYSLOG])])
+    mapped = _mapped(tmp_path / "mapped", known_list=known_list)
+    assert stages._dangling_scopes(compiled, mapped) == []
+
+
+@pytest.mark.parametrize(
+    ("entry", "shown"),
+    [
+        ({"namespace": "plant-2.syslog.log-p2", "value": "4182"}, "(plant-2.syslog.log-p2, 4182)"),
+        ({"namespace": "syslog", "value": "04182"}, "(syslog, 04182)"),  # never padded or read
+        ({"namespace": "MsgID", "value": "PSTOP"}, "(MsgID, PSTOP)"),  # only @id columns declare
+        ({"namespace": "syslog:4182", "value": ""}, "(syslog:4182, )"),  # a pair, never joined
+    ],
+)
+def test_a_scope_entry_no_mapped_record_declares_is_a_dangling_link(
+    tmp_path: Path, entry: dict[str, str], shown: str
+) -> None:
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    _write(compiled, "assertion", [_assertion([DOWNTIME, entry])])
+    mapped = _mapped(tmp_path / "mapped")
+    assert stages._dangling_scopes(compiled, mapped) == [
+        f"assertion ops.review/ASR-1: scope {shown} is no identifier the mapped package declares"
+        " (a dangling link)"
+    ]
+
+
+def test_the_scope_check_is_never_green_on_nothing(tmp_path: Path) -> None:
+    """Only stated same-event assertions count; a case that requires the check needs one."""
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    other = _assertion([{"namespace": "nowhere", "value": "1"}], relation="supersedes")
+    inferred = {**_assertion([{"namespace": "nowhere", "value": "2"}]), "provenance": {}}
+    _write(compiled, "assertion", [other, inferred])
+    mapped = _mapped(tmp_path / "mapped")
+    assert stages._dangling_scopes(compiled, mapped) == [
+        "require_assertion_scopes, but the package holds no stated same-event assertion"
+    ]
+    _write(compiled, "assertion", [_assertion(["not a pair"])])  # type: ignore[list-item]
+    assert stages._dangling_scopes(compiled, mapped) == [
+        "assertion ops.review/ASR-1: a scope entry is not a namespace and value"
+    ]
+
+
+def test_a_case_that_requires_assertion_scopes_runs_the_check_after_the_map(
+    tmp_path: Path,
+) -> None:
+    declaration = {
+        "deploy_format": 1,
+        "presets": ["cmms_generic"],
+        "require_assertion_scopes": True,
+    }
+    ctx = _declaring(tmp_path, declaration)
+    entry = run_stage(DEPLOY, ctx, services_up=False, upstream_ok=True)
+    (row,) = entry["output"]["cases"]
+    assert row["assertion_scopes"] == "dangling"
+    assert (
+        "manipulator: require_assertion_scopes, but the package holds no stated same-event"
+        " assertion" in entry["problems"]
+    )
+    (tmp_path / "deploy.json").write_text(
+        json.dumps({**declaration, "require_assertion_scopes": 1})
+    )
+    assert (
+        _read_problem(tmp_path / "deploy.json") == "require_assertion_scopes is not true or false"
+    )
+
+
+def _read_problem(path: Path) -> str:
+    from harness.stages import read_deploy
+
+    plan, problems = read_deploy(path)
+    assert plan is None
+    (problem,) = problems
+    return problem

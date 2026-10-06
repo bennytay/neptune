@@ -55,7 +55,9 @@ nothing more for one that does not), and for one that does the `presets` and `te
 It fails when the map exits non-zero, a declared preset is not shipped, the package does not verify or validate,
 it holds no lifecycle record, a declaration mapped none, an `at_least` count is not met, or a declared source
 zone (`sources`, `zones` in the row; ADR 0009) did not come back as that preset's `civil_time_zone` for that
-source. The mapped package is `work/packages/<case>.deploy`.
+source, or, with `require_assertion_scopes`, a stated same-event assertion's scope entry is no `(namespace,
+value)` the mapped package declares (`assertion_scopes: dangling`). The mapped package is
+`work/packages/<case>.deploy`.
 
 The ledger's `output.cases[]` has, per registered package (each compiled one, then each mapped one, labelled
 `<case>.deploy`; `stage` says which): `registration` (must be `registered`), `reregistration` (must be

@@ -101,6 +101,14 @@ preset's `civil_time_zone` for that source stating that zone. Gold cites an entr
 selector `{path, preset, field: "civil_time_zone", equals}`. The two entries above join `deploy.json` with the
 `cmms_downtime` and `syslog_csv` presets, once Deploy ships them and `--source-zone` on main.
 
+### No dangling same-event links
+
+`"require_assertion_scopes": true` makes the stage check that every scope entry of every stated same-event
+assertion (`INC-C3-0011.assertions.json`) is an identifier the mapped package declares, compared as a
+`(namespace, value)` pair. `{cmms.downtime, DT-26-0914-01}` is declared by `cmms_downtime`'s intervention, and
+`{syslog, 4182}` by `syslog_csv`'s `@id:syslog` column (the raw Seq cell: never pad or reformat it in
+`generate.py`). It is set together with those two presets.
+
 ## Change it
 
 1. Edit `harness/acceptance/generate.py` (or `gold.json`, `deploy.json`). Keep every file under 512 KB and every

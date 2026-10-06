@@ -295,6 +295,9 @@ class DeployPlan:
     templates: tuple[str, ...]
     at_least: dict[str, int]
     sources: tuple[SourceZone, ...] = ()
+    # Every scope entry of every stated same-event assertion must be an identifier the mapped
+    # package declares (``require_assertion_scopes``; ADR 0009).
+    require_assertion_scopes: bool = False
 
 
 def _plain_path(path: str) -> bool:
@@ -370,6 +373,9 @@ def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
         at_least = {}
     if not names["presets"] and not names["templates"]:
         problems.append("the deploy declaration names no preset and no template")
+    scopes = document.get("require_assertion_scopes", False)
+    if type(scopes) is not bool:
+        problems.append("require_assertion_scopes is not true or false")
     presets_read = not any(problem.startswith("presets ") for problem in problems)
     sources, refused = _read_sources(
         document.get("sources", []), names["presets"] if presets_read else None
@@ -377,7 +383,9 @@ def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
     problems += refused
     if problems:
         return None, problems
-    plan = DeployPlan(tuple(names["presets"]), tuple(names["templates"]), dict(at_least), sources)
+    plan = DeployPlan(
+        tuple(names["presets"]), tuple(names["templates"]), dict(at_least), sources, scopes
+    )
     return plan, []
 
 
@@ -462,6 +470,104 @@ def _zone_problems(
                 f"preset:{zone.preset} did not apply the declared zone {zone.civil_time_zone}"
                 f" to every clock of {zone.source}"
             )
+    return problems
+
+
+Pair = tuple[str, str]
+
+
+def _pair(value: Any) -> Pair | None:
+    """An identifier's ``(namespace, value)``, kept as two fields and never joined."""
+    if not isinstance(value, dict):
+        return None
+    namespace, text = value.get("namespace"), value.get("value")
+    return (namespace, text) if isinstance(namespace, str) and isinstance(text, str) else None
+
+
+def _declared_identifiers(root: Path) -> set[Pair]:
+    """Every ``(namespace, value)`` the mapped package declares: each lifecycle record's own
+    ``identifiers`` (a bare list or a ``Known`` list; ADR 0061 §5), and each row's cell of a typed
+    table's ``@id:<namespace>`` column (Deploy ADR 0017 §1), as the cell's text."""
+    from harness.acceptance.resolve import Package, _known
+    from neptune.model.lifecycle import LIFECYCLE_KINDS
+
+    package = Package(root)
+    out: set[Pair] = set()
+    for kind in sorted(k.kind for k in LIFECYCLE_KINDS):
+        for record in package.kind(kind):
+            listed = record.get("identifiers")
+            items = _known(listed) if isinstance(listed, dict) else listed
+            for item in items if isinstance(items, list) else []:
+                pair = _pair(
+                    _known(item) if isinstance(item, dict) and "knowledge" in item else item
+                )
+                if pair is not None:
+                    out.add(pair)
+    columns: dict[str, dict[int, str]] = {}
+    for table in package.kind("structured_table"):
+        header = _known(table.get("header"))
+        ids = {
+            i: name.removeprefix("@id:")
+            for i, name in enumerate(header if isinstance(header, list) else [])
+            if isinstance(name, str) and name.startswith("@id:") and len(name) > 4
+        }
+        if ids:
+            columns[str(table["id"])] = ids
+    for row in package.kind("structured_record"):
+        cells = row.get("cells", [])
+        for i, namespace in columns.get(str(row.get("table")), {}).items():
+            text = _known(cells[i]) if i < len(cells) else None
+            if isinstance(text, str):
+                out.add((namespace, text))
+    return out
+
+
+def _same_event_scopes(root: Path) -> list[tuple[Pair | None, list[Any]]]:
+    """Each stated same-event assertion of the compiled package (root ADR 0062: ``same_identity``
+    whose payload's ``relation`` is ``same_event``): its own identifier and its scope entries."""
+    from harness.acceptance.resolve import Package, _known
+
+    out = []
+    for record in Package(root).kind("assertion"):
+        if record.get("provenance", {}).get("assertion_kind") != "stated":
+            continue
+        if _known(record.get("assertion_type")) != "same_identity":
+            continue
+        payload = _known(record.get("payload"))
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(payload, dict) or payload.get("relation") != "same_event":
+            continue
+        scope = _known(record.get("scope"))
+        out.append(
+            (_pair(_known(record.get("identifier"))), scope if isinstance(scope, list) else [])
+        )
+    return out
+
+
+def _dangling_scopes(compiled: Path, mapped: Path) -> list[str]:
+    """Why a same-event link would dangle: a scope entry whose ``(namespace, value)`` no record of
+    the mapped package declares, so Memory has nothing to join it to (ADR 0009). Never green on
+    nothing: a case that requires the check and holds no such assertion is a problem too."""
+    assertions = _same_event_scopes(compiled)
+    if not assertions:
+        return ["require_assertion_scopes, but the package holds no stated same-event assertion"]
+    declared = _declared_identifiers(mapped)
+    problems = []
+    for ident, scope in assertions:
+        name = "/".join(ident) if ident else "an assertion without an identifier"
+        for entry in scope:
+            pair = _pair(entry)
+            if pair is None:
+                problems.append(f"assertion {name}: a scope entry is not a namespace and value")
+            elif pair not in declared:
+                problems.append(
+                    f"assertion {name}: scope ({pair[0]}, {pair[1]}) is no identifier the mapped"
+                    " package declares (a dangling link)"
+                )
     return problems
 
 
@@ -554,6 +660,10 @@ def _map(
         ]
         zones = _zone_problems(plan, ctx.package_root(case.id), out, labels, applied)
         problems.extend(f"{case.id}: {problem}" for problem in zones)
+    if plan.require_assertion_scopes:
+        dangling = _dangling_scopes(ctx.package_root(case.id), out)
+        row["assertion_scopes"] = "declared" if not dangling else "dangling"
+        problems.extend(f"{case.id}: {problem}" for problem in dangling)
 
 
 def deploy_real(ctx: Context) -> Outcome:
