@@ -14,7 +14,7 @@ flowchart LR
     STO["store/: MemoryStore"]
     SPA["spatial/"]
     EPI["episodes/"]
-    CLI["cli/"]
+    CLI["cli/: memory consolidate, rebuild, dump"]
   end
   OUT[("Context / Deploy / Learn")]
   LED --> SEAM --> CON --> SCH --> STO
@@ -22,8 +22,9 @@ flowchart LR
   SCH --> SPA & EPI
   SCH --> RD --> OUT
   CON --> CT --> RD
-  CT --> REG[("contracts/graph-schema v1.8.0")]
+  CT --> REG[("contracts/graph-schema v1.9.0")]
   STO --> OUT
+  CLI --> CON
   CLI --> STO
   STO --> PG
 
@@ -40,9 +41,9 @@ flowchart LR
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1 built
   class K2 partial
-  class SPA,EPI,CLI,K3 todo
+  class SPA,EPI,K3 todo
   class CON,DER,SCH,STO partial
-  class SEAM,RD,CT built
+  class SEAM,RD,CT,CLI built
   class LED,OUT,PG,REG ext
   style M fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

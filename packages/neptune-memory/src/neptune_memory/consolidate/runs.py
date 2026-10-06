@@ -41,7 +41,7 @@ from neptune.model.knowledge import (
     Unknown,
 )
 from neptune.model.provenance import Provenance
-from neptune.model.run import Run
+from neptune.model.run import Run, RunDeclaration
 from neptune.model.source import SourceRevision
 from neptune.model.time import INT64_MAX, Timestamp
 from neptune.model.world import Site
@@ -164,7 +164,7 @@ class _View:
     mappings: dict[RecordId, list[ClockMapping]] = field(default_factory=dict)  # by source clock
     sites: set[bytes] = field(default_factory=set)  # every id the site register declares
     site_register: bool = False  # whether any site record is in the Ledger
-    declarations: list[parse.Declaration] = field(default_factory=list)  # by record id
+    declarations: list[RunDeclaration] = field(default_factory=list)  # by record id
     findings: list[ConsolidationFinding] = field(default_factory=list)
     civil: set[RecordId] = field(default_factory=set)  # the civil clocks' domain ids
 
@@ -220,9 +220,11 @@ _PARSERS: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
 
 
 def _record_id(parsed: object) -> RecordId:
-    if isinstance(parsed, parse.Declaration | parse.Clock):
+    if isinstance(parsed, parse.Clock):
         return parsed.record
-    assert isinstance(parsed, Run | RunAssembly | SourceRevision | ClockMapping | Site)
+    assert isinstance(
+        parsed, Run | RunAssembly | SourceRevision | ClockMapping | Site | RunDeclaration
+    )
     return parsed.id
 
 
@@ -285,11 +287,11 @@ def _read(ledger: LedgerReader) -> _View:
             for identifier in parsed.identifiers:
                 if isinstance(identifier, Known):
                     view.sites.add(_key(identifier.value))
-        elif isinstance(parsed, parse.Declaration):
+        elif isinstance(parsed, RunDeclaration):
             view.declarations.append(parsed)
     view.civil = {clock.domain_id for clock in view.clocks.values()}
     view.assemblies.sort(key=lambda item: (item[1].id, item[0]))
-    view.declarations.sort(key=lambda d: d.record)
+    view.declarations.sort(key=lambda d: d.id)
     for found in view.mappings.values():
         found.sort(key=lambda m: m.id)
     return view
@@ -622,10 +624,14 @@ class _Build:
 
 
 class RunConsolidator:
-    """Deterministic run-thread claims (ADR 0009). Takes no configuration."""
+    """Deterministic run-thread claims (ADR 0009). Takes no configuration.
+
+    Version 2 (ADR 0020) reads the compiler's ``run_declaration`` (package-schema 9); version 1 read
+    ADR 0009's stand-in, so its claims are another lineage.
+    """
 
     consolidator_id: Final = RUNS_CONSOLIDATOR_ID
-    version: Final = "1"
+    version: Final = "2"
     model: Final[ModelRef | None] = None
 
     def consolidate(
@@ -814,20 +820,20 @@ def _roles(
     """``recorded_by``, ``at_site`` and ``executes_task`` per run node, from what its records
     and manifest declarations state; a run with no machine of its own takes its parts'."""
     view = build.view
-    declared: dict[NodeRef, list[parse.Declaration]] = {}
+    declared: dict[NodeRef, list[RunDeclaration]] = {}
     for declaration in view.declarations:
-        node = node_ref(NodeType.RUN, declaration.run)
-        if node not in nodes:
+        named = view.runs.get(declaration.run)
+        if named is None:  # never guessed from its logical id: a finding, not a run
             view.findings.append(
                 _finding(
                     "dangling_declaration",
-                    "a run declaration names a run no run record declares",
-                    (declaration.record,),
-                    run=declaration.run.to_json(),
+                    "a run declaration names a run record that is not an admitted run",
+                    (declaration.id,),
+                    run=declaration.run,
                 )
             )
             continue
-        declared.setdefault(node, []).append(declaration)
+        declared.setdefault(run_node(named), []).append(declaration)
     for node in sorted(nodes, key=lambda n: n.node_id):
         runs = nodes[node]
         over = [p for run in runs for p in build.placements[run.id]]
@@ -848,7 +854,7 @@ def _roles(
                         if role == "machine"
                     ),
                     *(
-                        _ground(getattr(d, role), (d.record,), d.evidence, STATED)
+                        _ground(getattr(d, role), (d.id,), (d.provenance.evidence,), STATED)
                         for d in declared.get(node, ())
                     ),
                 )

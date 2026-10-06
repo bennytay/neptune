@@ -19,7 +19,6 @@ from memory_identity_records import STATED, Record, at, ledger
 from memory_run_records import (
     NS,
     assembly,
-    by_record,
     declaration,
     domain,
     mapping,
@@ -112,7 +111,7 @@ def _warehouse() -> tuple[dict[str, list[Record]], dict[int, RecordId], RecordId
         packages.setdefault(f"{day}-manifest", []).append(
             declaration(
                 f"amr-0{k}",
-                by_record(rid),
+                rid,
                 site=NORTH if k <= 3 else SOUTH,
                 task=LogicalId("task", "pick-wave-1"),
             )
@@ -301,7 +300,7 @@ def _rid() -> RecordId:
 def test_a_manifest_naming_a_site_absent_from_the_register_is_stated_and_flagged() -> None:
     east = LogicalId("site", "WH-EAST")
     result, subject = _one_run(
-        declaration("cell", by_record(_rid()), site=east),
+        declaration("cell", _rid(), site=east),
         registers=[site("site register", NORTH, SOUTH)],
     )
     assert involvement(result.claims, subject, "at_site") == known(node(SITE, east))
@@ -311,16 +310,14 @@ def test_a_manifest_naming_a_site_absent_from_the_register_is_stated_and_flagged
 
 
 def test_without_a_site_register_an_undeclared_site_is_not_flagged() -> None:
-    result, subject = _one_run(
-        declaration("cell", by_record(_rid()), site=LogicalId("site", "WH-EAST"))
-    )
+    result, subject = _one_run(declaration("cell", _rid(), site=LogicalId("site", "WH-EAST")))
     assert codes(result) == []
     assert isinstance(involvement(result.claims, subject, "at_site"), Known)
 
 
 def test_a_record_and_a_manifest_that_disagree_give_candidates_not_a_winner() -> None:
     arm_5, arm_6 = LogicalId("asset-tag", "ARM-05"), LogicalId("asset-tag", "ARM-06")
-    result, subject = _one_run(declaration("cell", by_record(_rid()), machine=arm_6), machine=arm_5)
+    result, subject = _one_run(declaration("cell", _rid(), machine=arm_6), machine=arm_5)
     assert of(result, "recorded_by") == []
     reading = involvement(result.claims, subject, "recorded_by")
     assert readings(reading) == {(node(MACHINE, arm_5),), (node(MACHINE, arm_6),)}
@@ -341,8 +338,8 @@ def test_an_ambiguous_field_gives_one_candidate_per_reading_each_citing_its_own_
 def test_a_run_attempting_two_tasks_holds_both_and_nothing_disagrees() -> None:
     pick, place = LogicalId("task", "pick"), LogicalId("task", "place")
     result, subject = _one_run(
-        declaration("cell pick", by_record(_rid()), task=pick),
-        declaration("cell place", by_record(_rid()), task=place),
+        declaration("cell pick", _rid(), task=pick),
+        declaration("cell place", _rid(), task=place),
     )
     assert codes(result) == [] and of(result, "executes_task_candidate") == []
     assert involvement(result.claims, subject, "executes_task") == known(
@@ -352,7 +349,7 @@ def test_a_run_attempting_two_tasks_holds_both_and_nothing_disagrees() -> None:
 
 def test_agreeing_grounds_are_known_once_per_ground() -> None:
     arm = LogicalId("asset-tag", "ARM-05")
-    result, subject = _one_run(declaration("cell", by_record(_rid()), machine=arm), machine=arm)
+    result, subject = _one_run(declaration("cell", _rid(), machine=arm), machine=arm)
     claims = of(result, "recorded_by", subject)
     assert {c.object for c in claims} == {node(MACHINE, arm)}
     assert {c.assertion_kind for c in claims} == {"observed", "stated"}
@@ -360,9 +357,7 @@ def test_agreeing_grounds_are_known_once_per_ground() -> None:
 
 def test_an_ambiguous_declaration_consistent_with_a_known_one_stays_known() -> None:
     arm, other = LogicalId("asset-tag", "ARM-05"), LogicalId("asset-tag", "ARM-07")
-    result, subject = _one_run(
-        declaration("cell", by_record(_rid()), machine=[arm, other]), machine=arm
-    )
+    result, subject = _one_run(declaration("cell", _rid(), machine=[arm, other]), machine=arm)
     assert involvement(result.claims, subject, "recorded_by") == known(node(MACHINE, arm))
 
 

@@ -25,6 +25,7 @@ def test_graph_schema_v1_is_published_and_active() -> None:
     # 1.3.0: run thread predicates (ADR 0009); 1.4.0: clocks and their mappings (ADR 0011);
     # 1.5.0: episode predicates (ADR 0012); 1.6.0: events (ADR 0013).
     # 1.7.0: calibration history and the delta (ADR 0014); 1.8.0: coverage and health (ADR 0015).
+    # 1.9.0: the graph document's builds, for withdrawal (ADR 0016).
     for published in (
         "1.0.0",
         "1.1.0",
@@ -35,6 +36,7 @@ def test_graph_schema_v1_is_published_and_active() -> None:
         "1.6.0",
         "1.7.0",
         "1.8.0",
+        "1.9.0",
     ):
         version = json.loads(
             (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")
@@ -45,8 +47,11 @@ def test_graph_schema_v1_is_published_and_active() -> None:
         )
 
 
-def test_catalog_pin_is_pending() -> None:
-    assert pins.CATALOG_API_VERSION.startswith("pending")
+def test_catalog_pin_is_the_locked_published_version() -> None:
+    lock = tomllib.loads((ROOT.parents[1] / "contracts" / "lock.toml").read_text(encoding="utf-8"))
+    assert lock["neptune-memory"]["catalog-api"] == pins.CATALOG_API_VERSION == "1.7.0"
+    published = ROOT.parents[1] / "contracts" / "catalog-api" / f"v{pins.CATALOG_API_VERSION}"
+    assert (published / "schema.json").is_file()
 
 
 def test_docs_state_the_same_pins() -> None:
@@ -56,7 +61,7 @@ def test_docs_state_the_same_pins() -> None:
         ROOT / "docs" / "adr" / "0006-graph-schema-v1-contract-surface-and-memory-reader.md"
     ).read_text(encoding="utf-8")
     assert f"SCHEMA_VERSION = {pins.COMPILER_SCHEMA_VERSION}" in contracts
-    assert 'CATALOG_API_VERSION = "pending' in contracts
+    assert f'CATALOG_API_VERSION = "{pins.CATALOG_API_VERSION}"' in contracts
     # ADR 0001 recorded the graph pin as 0 before v1; ADR 0006 sets it, and ADRs are not edited.
     for text in (contracts, graph_adr):
         assert f"GRAPH_SCHEMA_VERSION = {pins.GRAPH_SCHEMA_VERSION}" in text

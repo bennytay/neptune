@@ -286,8 +286,10 @@ def findings(results: Sequence[Consolidation]) -> list[str]:
 
 
 def reader(*builds: Sequence[Consolidation]) -> ReferenceReader:
+    """Resolve the claims of every build with the builds themselves (ADR 0007 §5)."""
     every = [c for results in builds for c in claims(results)]
-    resolution = resolve(every, CORE_PREDICATES, PRIORITIES)
+    runs = [r.build for results in builds for r in results]
+    resolution = resolve(every, CORE_PREDICATES, PRIORITIES, runs)
     head = max((c.recorded_at for c in every), default=0)
     config = resolver_config(CORE_PREDICATES, PRIORITIES)
     return ReferenceReader(GraphDocument(resolution, config, ledger_tx(head)))

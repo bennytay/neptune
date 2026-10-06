@@ -63,14 +63,14 @@ def _base(
     *, last: int | None = 1_000, machine: LogicalId | Sequence[LogicalId] = QUAD
 ) -> tuple[list[Record], RecordId]:
     boot_record, boot = domain("quad boot", civil=False)
-    record, _ = run(
+    record, run_id = run(
         "quad/patrol.mcap",
         first=at(100, boot),
         last=at(last, boot) if last is not None else None,
         machine=machine,
         logical_id=RUN_ID,
     )
-    return [boot_record, record, declaration("R-1", RUN_ID, task=TASK)], boot
+    return [boot_record, record, declaration("R-1", run_id, task=TASK)], boot
 
 
 def _episode(claims: Sequence[Claim]) -> NodeRef:
@@ -225,9 +225,11 @@ def test_records_of_one_run_widen_its_span_and_cite_what_states_each_end() -> No
 
 def test_a_recording_split_in_two_parts_is_one_episode_over_both() -> None:
     boot_record, boot = domain("quad boot", civil=False)
-    first, _ = run("quad/part-0.mcap", first=at(100, boot), last=at(500, boot), logical_id=RUN_ID)
+    first, first_id = run(
+        "quad/part-0.mcap", first=at(100, boot), last=at(500, boot), logical_id=RUN_ID
+    )
     second, _ = run("quad/part-1.mcap", first=at(500, boot), last=at(900, boot), logical_id=RUN_ID)
-    manifest = declaration("R-1", RUN_ID, task=TASK)
+    manifest = declaration("R-1", first_id, task=TASK)
     runs, episodes = build({"a": [boot_record, first, manifest], "b": [second]})
     claims = every(runs, episodes)
     episode = _episode(claims)
@@ -245,9 +247,11 @@ def test_an_open_part_leaves_the_end_unstated() -> None:
 
 def test_a_stop_at_a_part_boundary_never_rekeys_the_episode() -> None:
     boot_record, boot = domain("quad boot", civil=False)
-    first, _ = run("quad/part-0.mcap", first=at(100, boot), last=at(500, boot), logical_id=RUN_ID)
+    first, first_id = run(
+        "quad/part-0.mcap", first=at(100, boot), last=at(500, boot), logical_id=RUN_ID
+    )
     second, _ = run("quad/part-1.mcap", first=at(600, boot), last=at(900, boot), logical_id=RUN_ID)
-    records = [boot_record, first, second, declaration("R-1", RUN_ID, task=TASK)]
+    records = [boot_record, first, second, declaration("R-1", first_id, task=TASK)]
     halt, _ = incident("I-1", related=[RUN_ID], occurred=at(501, boot))
     before = _episode(every(*build({"p": records})))
     runs, episodes = build({"p": [*records, halt]})
@@ -260,7 +264,7 @@ def test_a_clock_with_two_contents_is_civil_for_neither_consolidator() -> None:
     base, _ = _base()
     civil_record, civil = domain("site ntp", civil=True)
     unset = {**civil_record, "epoch": {"knowledge": "unknown"}}
-    on_civil, _ = run(
+    on_civil, on_civil_id = run(
         "quad/civil.mcap",
         first=Timestamp(0, civil),
         last=Timestamp(800, civil),
@@ -274,7 +278,7 @@ def test_a_clock_with_two_contents_is_civil_for_neither_consolidator() -> None:
         *base,
         civil_record,
         on_civil,
-        declaration("R-2", LogicalId("site-a.run", "R-2"), task=TASK),
+        declaration("R-2", on_civil_id, task=TASK),
         assist,
     ]
     _, episodes = build({"p": records, "q": [unset]})

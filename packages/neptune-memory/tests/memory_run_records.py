@@ -1,11 +1,10 @@
 """Compiler-shaped run records for tests, built with the compiler's own types.
 
-Every ``run``, ``run_assembly``, ``source_revision``, ``clock_mapping``, ``timestamp_domain`` and
-``site`` here is constructed as the compiler model class and serialised with its ``to_json``, so a
-test can never feed the run consolidator a shape the compiler would not write (root ADRs 0018,
-0050, 0066). ``run_declaration`` is the Ledger stand-in for what a manifest says a run involved
-(Memory ADR 0009 §1). A file's bytes are named by a string: ``source(name)`` is its content id,
-and the run a recording declares cites that content.
+Every ``run``, ``run_assembly``, ``source_revision``, ``clock_mapping``, ``timestamp_domain``,
+``site`` and ``run_declaration`` here is constructed as the compiler model class and serialised
+with its ``to_json``, so a test can never feed the run consolidator a shape the compiler would not
+write (root ADRs 0018, 0050, 0066, 0072). A file's bytes are named by a string: ``source(name)`` is
+its content id, and the run a recording declares cites that content.
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ from neptune.model.knowledge import (
 )
 from neptune.model.provenance import Provenance
 from neptune.model.reference import TimestampDomain
-from neptune.model.run import Run
+from neptune.model.run import Run, RunDeclaration
 from neptune.model.source import LocalPath, SourceRevision
 from neptune.model.time import Duration, Epoch, Timescale, Timestamp
 from neptune.model.world import Site
@@ -187,34 +186,23 @@ def site(name: str, *ids: LogicalId) -> Record:
     ).to_json()
 
 
-def _knowledge(value: LogicalId | Sequence[LogicalId] | None) -> Record:
-    if value is None:
-        return {"knowledge": "unknown"}
-    if isinstance(value, LogicalId):
-        return {"knowledge": "known", "value": value.to_json()}
-    return {"knowledge": "ambiguous", "candidates": [{"value": v.to_json()} for v in value]}
-
-
 def declaration(
     name: str,
-    run_id: LogicalId,
+    run_id: RecordId,
     *,
     machine: LogicalId | Sequence[LogicalId] | None = None,
     site: LogicalId | Sequence[LogicalId] | None = None,
     task: LogicalId | Sequence[LogicalId] | None = None,
+    logical_id: LogicalId | None = None,
 ) -> Record:
-    """A ``run_declaration`` stand-in: a manifest's run entry ``name``."""
-    return {
-        "kind": "run_declaration",
-        "id": rid("run_declaration", cite(f"manifest {name}")),
-        "run": run_id.to_json(),
-        "machine": _knowledge(machine),
-        "site": _knowledge(site),
-        "task": _knowledge(task),
-        "evidence": [cite(f"manifest {name}").to_json()],
-    }
-
-
-def by_record(run_id: RecordId) -> LogicalId:
-    """How a declaration names a run that declares no logical id."""
-    return LogicalId("record", run_id)
+    """The ``RunDeclaration`` a manifest's run entry ``name`` makes about the run ``run_id``."""
+    declared = provenance(cite(f"manifest {name}"), STATED)
+    return RunDeclaration(  # type: ignore[return-value]
+        id=rid("run_declaration", declared.evidence),
+        provenance=declared,
+        run=run_id,
+        logical_id=_ids(logical_id, name),
+        machine=_ids(machine, name),
+        site=_ids(site, name),
+        task=_ids(task, name),
+    ).to_json()
