@@ -62,8 +62,9 @@ interpretation); identities are never merged; one canonical record has one recor
    `hardware_configuration`, `calibration`) is bound to every run record the entry covers by a
    canonical `snapshot_binding`, `stated`, evidence `[{json_pointer: /runs/N/snapshots/K},
    {kind: "neptune.manifest:binding", run, snapshot}]`, validity `Unknown` (the manifest says
-   which, not when; ADR 0064 §8). One snapshot pinned twice for a run (by path and by content) is
-   bound once, by the first pin; a pin is resolved even when its entry covers no run record, so
+   which, not when; ADR 0064 §8). One snapshot pinned twice for a run (by path and by content, or
+   by two entries covering the run) is bound once, by the first pin in manifest order, and each
+   later pin is a `pin_repeated` finding (§5) naming the pin that binds it; a pin is resolved even when its entry covers no run record, so
    a wrong pin is always a finding. The bindings pass (ADR 0064 §1) reads these as it reads any
    canonical binding: the kind is bound, so no `snapshot_unresolved` for it, and its transform's
    upstream gains the manifest transform. Nearest-session inference is unchanged, so a pinned run
@@ -78,13 +79,29 @@ interpretation); identities are never merged; one canonical record has one recor
    | `neptune.manifest.machine_contradicts_run` | inconsistent | the run states its machine in a namespace the declared machine has ids in (an alias), and none is that id; both stand |
    | `neptune.manifest.pin_unresolved` | missing | no file the job read is at the pinned path (missing, a directory, a symlink the walk does not follow) or holds the pinned content |
    | `neptune.manifest.pin_not_a_snapshot` | missing | the pinned bytes hold no snapshot record (another kind of file, or one its adapter could not read: that adapter's finding says why) |
+   | `neptune.manifest.pin_repeated` | skipped (info) | an earlier pin, of this entry or another covering the same run, already binds the run to this snapshot; the binding cites the first pin |
+   | `neptune.manifest.alias_namespace_unrepresentable` | unrepresentable | an alias namespace version 1 accepts is no record namespace; the alias is not among the entity's identifiers and stays in the transform's config |
 
    What ADR 0047 §1–§2 refuses stays refused whole, before anything is read (exit 6): an id a run
    names that no entry declares, a run name or a pin given twice, an absolute or `..` pin path, a
-   malformed content id, and an alias namespace that is not a record namespace (a lowercase
-   token). A typo applied anyway would become a stated fact.
+   malformed content id. A typo applied anyway would become a stated fact.
+
+   **Alias namespaces stay as version 1 accepts them.** ADR 0047 made a namespace an id
+   (`[A-Za-z0-9][A-Za-z0-9._:-]*`, so `Serial:` and `px4:uuid:` are valid), but an identifier on a
+   record needs a lowercase token (`[a-z][a-z0-9_.-]*`). Refusing the rest would break manifests
+   that were valid before this change, and rewriting them (lowercasing, `:` to `.`) is an assumed
+   identity. So the manifest is accepted as before, a token namespace becomes an identifier, and
+   any other alias is left off the record with an `alias_namespace_unrepresentable` finding that
+   states the rule. The alias stays in the manifest transform's config, so it is still in the
+   lineage.
 6. **Lineage and versions.** The manifest transform is `neptune.manifest` 0.2.0 (its output
-   grew; 0.1.0 packages are not rewritten). Its records are made at assembly, after run assembly
+   grew; 0.1.0 packages are not rewritten). Machines and sites, and the alias findings, read the
+   manifest alone and are that transform's. Run declarations, pins and the findings about applying
+   them also read the adapters' `run` and snapshot records, so they are a second transform with the
+   same id, version and config whose `upstream` is the ids of every transform those records name,
+   sorted (ADR 0016 §4). An adapter upgrade is then a new lineage for them, as for any transform
+   over adapter output. With no such records, its upstream is empty and it is the manifest
+   transform itself. Its records are made at assembly, after run assembly
    and before snapshot binding, from records only: no source byte is read and no adapter called.
    A package holding a `run_declaration` is schema version 9 and package-schema 9.0.0 (ADR 0037
    §1); packages made without a manifest keep their bytes, and those whose manifest declares no

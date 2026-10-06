@@ -45,21 +45,21 @@
     {
       "category": "missing",
       "code": "neptune.bindings.no_software_identity",
-      "id": "rec:sha256:a517090a70b0d5689dc8f31a79905e3647b89df40dc663a3f18b799b09bffa36",
+      "id": "rec:sha256:e984ba849b407ee0e645c2b7d01b13fe04c2c61aa499ae5c748572eea200e790",
       "message": "the run has no software identity: no software, build, firmware or checkpoint record is bound to it",
       "severity": "warning"
     },
     {
       "category": "missing",
       "code": "neptune.bindings.snapshot_unresolved",
-      "id": "rec:sha256:2a52059359041d9f10a16b6a594b8ee35d0223bab1924b343696b82c0cce4fd0",
+      "id": "rec:sha256:5a619dbdf9249bd075ab55fd7e7a7ce386df142f6860d1d3845903733e4db22e",
       "message": "no hardware_configuration record is bound to the run: the binding is unresolved",
       "severity": "info"
     },
     {
       "category": "missing",
       "code": "neptune.bindings.snapshot_unresolved",
-      "id": "rec:sha256:83a0f2c7535e219a752c794c313a3a7eb78b1ca8372fa2575526e68d27ad200b",
+      "id": "rec:sha256:bc396960c375ae597eae4b4e206ff5281e3349cd876a70fa043dfaf511584677",
       "message": "no calibration record is bound to the run: the binding is unresolved",
       "severity": "info"
     },
@@ -85,7 +85,7 @@
       "severity": "info"
     }
   ],
-  "id": "rec:sha256:10d1691579bc9d8a26fe7bcce1e1a0e18b0d25c4c479ca40b65add57a5eb1907",
+  "id": "rec:sha256:52e699e5847e0865b37708ccec56ae7ae060ae383e94f528c2f4b3078a9b20b7",
   "kind": "ingest_receipt",
   "records": {
     "assertion": 0,
@@ -215,6 +215,7 @@
       },
       "read_by": [
         "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+        "rec:sha256:7475a9ff23600f9c01fa7f8fee983852888f272f5fd938348609d2c79353ba10",
         "rec:sha256:abad4478a34e5b9abeb03583fdec1a67c69d030fbb6870d4dc0de109e7a1c88f"
       ],
       "size": 380
@@ -325,6 +326,17 @@
       "upstream": []
     },
     {
+      "adapter_id": "neptune.manifest",
+      "adapter_version": "0.2.0",
+      "config_hash": "sha256:2978b218633c176f2fafd039e6734681cfa300de4dc6da4e5e98cb240124c71c",
+      "id": "rec:sha256:7475a9ff23600f9c01fa7f8fee983852888f272f5fd938348609d2c79353ba10",
+      "libraries": {},
+      "upstream": [
+        "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+        "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d"
+      ]
+    },
+    {
       "adapter_id": "neptune.grouping",
       "adapter_version": "0.2.0",
       "config_hash": "sha256:140634f142b0d83d2125ac4960614fb87b35f2f9308767e246e02968d86839d2",
@@ -356,24 +368,14 @@
       "adapter_id": "neptune.bindings",
       "adapter_version": "0.1.0",
       "config_hash": "sha256:dbfdd73f0250888d3e9f966626216c926f6aa846c09f87a64c941c9e108ffe33",
-      "id": "rec:sha256:ae25c1bc8c697dca58cb070f0a01dbe59ab0a05f83db50f86d6063c8bbfc6d9e",
+      "id": "rec:sha256:d39307de3fec679035ff0f84903bea94cd453741b88e9a4bf88701a5ce6129c0",
       "libraries": {},
       "upstream": [
         "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+        "rec:sha256:7475a9ff23600f9c01fa7f8fee983852888f272f5fd938348609d2c79353ba10",
         "rec:sha256:7493209b782c6c8b2496578d662952647b0d323d03e4b458867c4ff3d9177f0d",
-        "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d",
-        "rec:sha256:abad4478a34e5b9abeb03583fdec1a67c69d030fbb6870d4dc0de109e7a1c88f"
+        "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d"
       ]
-    },
-    {
-      "adapter_id": "neptune.plugins",
-      "adapter_version": "0.1.0",
-      "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-      "id": "rec:sha256:c97e342638795ea640eb76f1df6c225a2b83d731726250968e9561cafa2a5107",
-      "libraries": {
-        "neptune-deploy": "0.0.1"
-      },
-      "upstream": []
     }
   ]
 }

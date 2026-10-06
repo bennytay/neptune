@@ -42,8 +42,6 @@ SCHEMA_ID: Final = "https://neptune.dev/schema/manifest/v1.json"
 
 _ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}")
 _CONTENT: Final = re.compile(r"sha256:[0-9a-f]{64}")
-# An alias's namespace becomes a ``LogicalId`` namespace (ADR 0072 §1): the model's token.
-_NAMESPACE: Final = re.compile(r"[a-z][a-z0-9_.\-]{0,127}")
 _OPTION: Final = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _MAX_TEXT: Final = 1000
 EMBODIMENTS: Final = (
@@ -185,13 +183,10 @@ def _aliases(node: Node | None, pointer: str) -> tuple[tuple[str, str, str], ...
     found: dict[tuple[str, str], str] = {}
     for namespace, value in node.items:
         here = _pointer(pointer, namespace)
-        if not _NAMESPACE.fullmatch(namespace):
-            raise _fail(
-                here,
-                node,
-                f"{namespace!r} is not a namespace: a lowercase letter, then lowercase letters, "
-                "digits and . _ - (as an id's namespace in the records it becomes)",
-            )
+        # Version 1's namespace is an id. Only a lowercase token becomes an identifier on the
+        # entity's record; the rest stay in the config, with a finding (ADR 0072 §5).
+        if not _ID.fullmatch(namespace):
+            raise _fail(here, node, f"{namespace!r} is not a namespace id")
         values = (
             [(_text(v, _pointer(here, n)), _pointer(here, n)) for n, v in enumerate(value.items)]
             if isinstance(value, Seq)
@@ -606,7 +601,7 @@ def json_schema() -> JsonObject:
     aliases: JsonObject = {
         "type": "object",
         "description": "Other identifiers the evidence uses for this entity, by namespace.",
-        "propertyNames": {"pattern": f"^{_NAMESPACE.pattern}$"},
+        "propertyNames": {"pattern": f"^{_ID.pattern}$"},
         "additionalProperties": {"oneOf": [text, {"type": "array", "items": text, "minItems": 1}]},
     }
 

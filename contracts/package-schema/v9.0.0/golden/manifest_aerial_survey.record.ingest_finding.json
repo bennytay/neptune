@@ -8,7 +8,7 @@
     ],
     "snapshot_kind": "hardware_configuration"
   },
-  "id": "rec:sha256:2a52059359041d9f10a16b6a594b8ee35d0223bab1924b343696b82c0cce4fd0",
+  "id": "rec:sha256:5a619dbdf9249bd075ab55fd7e7a7ce386df142f6860d1d3845903733e4db22e",
   "kind": "ingest_finding",
   "message": "no hardware_configuration record is bound to the run: the binding is unresolved",
   "records": [
@@ -30,5 +30,5 @@
       "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
     }
   },
-  "transform": "rec:sha256:ae25c1bc8c697dca58cb070f0a01dbe59ab0a05f83db50f86d6063c8bbfc6d9e"
+  "transform": "rec:sha256:d39307de3fec679035ff0f84903bea94cd453741b88e9a4bf88701a5ce6129c0"
 }

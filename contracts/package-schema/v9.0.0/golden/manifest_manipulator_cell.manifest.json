@@ -2,13 +2,13 @@
   "files": [
     {
       "path": "receipt.json",
-      "sha256": "sha256:e8f06eb6873c5b3010453315c5f1d3137960e853001cbfd999e849cc13d1af7a",
-      "size": 8809
+      "sha256": "sha256:76a7c5e9eedeceba78d37410c3dabf7ad36b6fec83173214d31592e4444b6203",
+      "size": 9019
     },
     {
       "path": "receipt.md",
-      "sha256": "sha256:c088f3e711f75f872dbdf3d1a38b2e530ef2f96fb072fad02f3ed78ec96be5d6",
-      "size": 3445
+      "sha256": "sha256:edd27f3ff1200409a37d156868391c4b2412ecc3bc2df293f83e7a4ea162589c",
+      "size": 3454
     },
     {
       "path": "records/assertion.jsonl",
@@ -132,7 +132,7 @@
     },
     {
       "path": "records/ingest_finding.jsonl",
-      "sha256": "sha256:8bd141281be125e92fa39cf0756892ffbfe79dc7c5c9e764ec1ea5b62674a9c8",
+      "sha256": "sha256:4780253a8ed401ad74d541e5430d02a341e9052b97f591cfaa74b9f89a6b99ec",
       "size": 4777
     },
     {
@@ -177,7 +177,7 @@
     },
     {
       "path": "records/run_declaration.jsonl",
-      "sha256": "sha256:3697f6ba987767257c92590599287c13da18ecc45ce69c5ceab63646eead154d",
+      "sha256": "sha256:a4dab6dd073243afef9d93845d7b2d29a12df59644e16dc3aa95163dfd186436",
       "size": 2109
     },
     {
@@ -187,7 +187,7 @@
     },
     {
       "path": "records/snapshot_binding.jsonl",
-      "sha256": "sha256:4f77ddd3196eedf948f0d414c054ceb0d9e1a41dcadc49f84c00b55252155f0a",
+      "sha256": "sha256:3488a118fe510eaca1adac6e473c5a8ce5193b3c56b497ec2a8b043ce83d85cf",
       "size": 883
     },
     {
@@ -247,8 +247,8 @@
     },
     {
       "path": "records/transform_record.jsonl",
-      "sha256": "sha256:c57d8e3ea78d50e93593856f50d6cfdf9addb04bf5fb60a789fb2dea22646937",
-      "size": 4648
+      "sha256": "sha256:7de2545a81437c8aac0cd053826cce654f3a7ac1c9c54b56c4e85578c63cdf78",
+      "size": 5351
     },
     {
       "path": "records/video.jsonl",
@@ -262,7 +262,7 @@
     }
   ],
   "kind": "package_manifest",
-  "receipt": "rec:sha256:e3d9aef4ab5a387b4b6d60c95da1ab46ce528bec3cb0736a4e662cb574fb71be",
+  "receipt": "rec:sha256:7ca2b717efc01cdb65c325cb99b71b0e9f4a035466cdb5c73aff5b51a8377a2c",
   "schema_version": 9,
   "sources": [
     {

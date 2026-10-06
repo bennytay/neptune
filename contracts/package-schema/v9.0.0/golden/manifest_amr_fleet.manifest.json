@@ -2,13 +2,13 @@
   "files": [
     {
       "path": "receipt.json",
-      "sha256": "sha256:202989e35a42b08999faf86736c73c0368ffb469f226018481815f22cbd52274",
-      "size": 14185
+      "sha256": "sha256:0f62af218266f989810db469bf90010518956740801e51ebad6ae85338e8ff2d",
+      "size": 14395
     },
     {
       "path": "receipt.md",
-      "sha256": "sha256:79c92bf791c3b5cfb4bb2b83a517fedd1f2eba4be1755cbdabeef47a5b54cb56",
-      "size": 5726
+      "sha256": "sha256:4ea8eb352f4ebb85bf3242a5b35a5d3352fbe1cdf8a315eb3394e7e51225a9dd",
+      "size": 5735
     },
     {
       "path": "records/assertion.jsonl",
@@ -132,7 +132,7 @@
     },
     {
       "path": "records/ingest_finding.jsonl",
-      "sha256": "sha256:717e2f4543ce979c40e89783f3c8af3dc3352582fca6bcf96494eb9d24abc1fc",
+      "sha256": "sha256:7bae977815f8b1dbc3cdf60ac7c709217a742bd01d6fd92ada9c10740d8cd262",
       "size": 15007
     },
     {
@@ -177,7 +177,7 @@
     },
     {
       "path": "records/run_declaration.jsonl",
-      "sha256": "sha256:b776bc1204eb07bfbd523c2ec551e1a7138b3585713ec116c95e737856ea15ed",
+      "sha256": "sha256:f0b26424e3aa8a31f5426d6c4862ab8160c99703e44861789eb9db44e9e16516",
       "size": 3522
     },
     {
@@ -187,7 +187,7 @@
     },
     {
       "path": "records/snapshot_binding.jsonl",
-      "sha256": "sha256:34aba068efd049b2ac505b9b94199280abe4c7b2de38e2887d0b3681981b70bd",
+      "sha256": "sha256:6169e6be1b4b4978414eaa38a007e9ff6536024067c35cec29c2bfa2fe19357a",
       "size": 1766
     },
     {
@@ -247,8 +247,8 @@
     },
     {
       "path": "records/transform_record.jsonl",
-      "sha256": "sha256:28606e1a7e4b4319d83c3a11e06521842a831433988f7c0d63d797c07ebb3a2b",
-      "size": 4747
+      "sha256": "sha256:65c1d2e3ec812cc9a310a3e9632a9a30fb49cd5c5dfe9953616c1ab897c4d872",
+      "size": 5493
     },
     {
       "path": "records/video.jsonl",
@@ -262,7 +262,7 @@
     }
   ],
   "kind": "package_manifest",
-  "receipt": "rec:sha256:fa1275c10ddf4e4f65af6e22c678b12dcd1fdab3f4b7611753d11aa05681ebd0",
+  "receipt": "rec:sha256:f660931bfc1776d0ab0e7a690c9ef71f2515bdf8244113bdcec2a3d669dada5c",
   "schema_version": 9,
   "sources": [
     {

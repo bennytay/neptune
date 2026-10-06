@@ -144,7 +144,8 @@ def materialise(name: str, root: Path) -> Path:
 def ingest(source: Path, destination: Path, workspace: Path) -> None:
     from neptune.sdk import Neptune
 
-    result = Neptune(workspace).ingest(source, destination)
+    # No installed plugin: a workspace plugin must not change the compiler's goldens (ADR 0058).
+    result = Neptune(workspace, plugins=False).ingest(source, destination)
     if not result.committed:
         raise RuntimeError(f"{source} was not ingested: {result}")
 

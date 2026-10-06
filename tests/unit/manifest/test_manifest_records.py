@@ -19,10 +19,13 @@ from neptune.discovery.layout import Layout, LayoutFile, LayoutLink, layout_of
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.manifest import LoadedManifest, parse_bytes
+from neptune.manifest.load import MANIFEST_ID, MANIFEST_VERSION
 from neptune.manifest.records import (
+    ALIAS_NAMESPACE_UNREPRESENTABLE,
     BINDING_STEP,
     MACHINE_CONTRADICTS_RUN,
     PIN_NOT_A_SNAPSHOT,
+    PIN_REPEATED,
     PIN_UNRESOLVED,
     RUN_DECLARED_TWICE,
     RUN_STEP,
@@ -36,7 +39,7 @@ from neptune.model.ids import LogicalId
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import AssertionKind, Known, NotCovered, Unknown
 from neptune.model.machine import Machine
-from neptune.model.provenance import AdapterLocator, JsonPointer, Provenance
+from neptune.model.provenance import AdapterLocator, JsonPointer, Provenance, TransformRecord
 from neptune.model.run import Run, RunDeclaration
 from neptune.model.source import LocalPath, SourceRevision
 from neptune.model.world import Site
@@ -94,10 +97,9 @@ def codes(found: ManifestRecords) -> list[str]:
 def test_the_goldens_tables_are_what_their_manifests_declare_in_any_order(name: str) -> None:
     records = golden(name)
     manifest = loaded(MAKER.FOLDERS[name]["neptune.yaml"])
-    expected = [
-        r for r in records if r.kind in KINDS and r.provenance.transform == manifest.transform.id
-    ]
     first = declared_records(manifest, records, layout(records))
+    own = {transform.id for transform in first.transforms}
+    expected = [r for r in records if r.kind in KINDS and r.provenance.transform in own]
     assert sorted(first.records, key=lambda r: r.id) == sorted(expected, key=lambda r: r.id)
     assert first.findings == ()
     shuffled = list(records)
@@ -109,10 +111,14 @@ def test_the_goldens_tables_are_what_their_manifests_declare_in_any_order(name: 
 def test_every_record_is_stated_and_cites_the_manifest() -> None:
     found = made("amr_fleet")
     manifest = loaded(MAKER.FOLDERS["amr_fleet"]["neptune.yaml"])
+    declarations = declarations_transform(found, manifest.transform)
     for record in found.records:
         assert record.provenance.assertion_kind is AssertionKind.STATED
         assert record.provenance.evidence.source == manifest.content_id
-        assert record.provenance.transform == manifest.transform.id
+        reads_runs = isinstance(record, RunDeclaration | SnapshotBinding)
+        assert record.provenance.transform == (
+            declarations.id if reads_runs else manifest.transform.id
+        )
     machines = [r for r in found.records if isinstance(r, Machine)]
     identifiers = set()
     for machine in machines:
@@ -125,6 +131,40 @@ def test_every_record_is_stated_and_cites_the_manifest() -> None:
     (site,) = [r for r in found.records if isinstance(r, Site)]
     assert isinstance(site.name, Known) and site.name.value == "Northgate distribution centre"
     assert site.parent == NotCovered() and site.location == NotCovered()
+
+
+def declarations_transform(found: ManifestRecords, manifest: TransformRecord) -> TransformRecord:
+    (transform,) = [t for t in found.transforms if t.id != manifest.id]
+    return transform
+
+
+@pytest.mark.parametrize("name", MAKER.NAMES)
+def test_declarations_name_the_adapters_whose_runs_and_snapshots_they_read(name: str) -> None:
+    # ADR 0016 §4: a transform over adapter output names those transforms upstream, sorted, so
+    # an adapter upgrade is a new lineage for the declarations; machines and sites read only the
+    # manifest and keep its transform (no upstream).
+    records = golden(name)
+    manifest = loaded(MAKER.FOLDERS[name]["neptune.yaml"])
+    found = declared_records(manifest, records, layout(records))
+    read = {
+        r.provenance.transform
+        for r in records
+        if isinstance(r, Run) or r.kind in {"configuration_snapshot", "calibration"}
+    }
+    declarations = declarations_transform(found, manifest.transform)
+    assert manifest.transform.upstream == ()
+    assert declarations.upstream == tuple(sorted(read)) and read
+    assert (declarations.adapter_id, declarations.adapter_version) == (
+        MANIFEST_ID,
+        MANIFEST_VERSION,
+    )
+    assert declarations.config == manifest.transform.config
+    for record in found.records:
+        if isinstance(record, Machine | Site):
+            assert record.provenance.transform == manifest.transform.id
+    # Without any adapter output the declarations transform is the manifest transform itself.
+    bare = declared_records(manifest, [], layout(records))
+    assert [t.id for t in bare.transforms] == [manifest.transform.id]
 
 
 def test_one_declaration_per_run_and_one_binding_per_run_and_pin() -> None:
@@ -234,9 +274,10 @@ def test_findings_are_the_manifest_transforms_and_cite_its_bytes() -> None:
     text = flight(b"  - {name: a, paths: [flights], snapshots: [{path: gone.yaml}]}")
     manifest = loaded(text)
     records = golden("aerial_survey")
-    (finding,) = declared_records(manifest, records, layout(records)).findings
+    found = declared_records(manifest, records, layout(records))
+    (finding,) = found.findings
     assert isinstance(finding, IngestFinding)
-    assert finding.transform == manifest.transform.id
+    assert finding.transform == declarations_transform(found, manifest.transform).id
     assert finding.subject == manifest.cite("/runs/0/snapshots/0")
 
 
@@ -261,10 +302,34 @@ def test_one_snapshot_pinned_by_path_and_by_content_is_bound_once() -> None:
         b"{content: '%s'}]}" % params.encode()
     )
     found = made("aerial_survey", text)
-    assert found.findings == ()
     (binding,) = [r for r in found.records if isinstance(r, SnapshotBinding)]
     pointer, _ = binding.provenance.evidence.locator
     assert pointer == JsonPointer("/runs/0/snapshots/0")
+    (finding,) = found.findings  # the second pin is said, not dropped silently
+    assert finding.code == PIN_REPEATED and finding.severity is Severity.INFO
+    assert finding.category is FindingCategory.SKIPPED
+    assert finding.details["manifest_pointer"] == "/runs/0/snapshots/1"
+    assert finding.details["bound_by"] == ["/runs/0/snapshots/0"]
+    assert finding.records == (binding.run,)
+
+
+def test_two_entries_covering_one_run_and_pinning_one_snapshot_bind_it_once_and_say_so() -> None:
+    pin = b"snapshots: [{path: params/survey_quad_7.yaml}]"
+    text = flight(
+        b"  - {name: a, paths: [flights], machine: quad, %s}" % pin,
+        b"  - {name: b, paths: [flights/flight.ulg], %s}" % pin,
+    )
+    found = made("aerial_survey", text)
+    assert codes(found) == [PIN_REPEATED, RUN_DECLARED_TWICE]
+    (binding,) = [r for r in found.records if isinstance(r, SnapshotBinding)]
+    pointer, _ = binding.provenance.evidence.locator
+    assert pointer == JsonPointer("/runs/0/snapshots/0")
+    (repeated,) = [f for f in found.findings if f.code == PIN_REPEATED]
+    assert repeated.subject == loaded(text).cite("/runs/1/snapshots/0")
+    assert repeated.details["bound_by"] == ["/runs/0/snapshots/0"]
+    assert repeated.details["pairs"] == 1 and repeated.records == (binding.run,)
+    # Both declarations stand; the repeat is said, and the binding is the same either way.
+    assert len([r for r in found.records if isinstance(r, RunDeclaration)]) == 2
 
 
 def test_a_pin_on_an_entry_with_no_run_is_still_resolved() -> None:
@@ -278,3 +343,38 @@ def test_an_alias_equal_to_the_manifest_id_cites_the_id() -> None:
     (ident,) = machine.identifiers
     assert isinstance(ident, Known) and isinstance(ident.provenance, Provenance)
     assert ident.provenance.evidence.locator == (JsonPointer("/machines/0/id"),)
+
+
+@pytest.mark.parametrize("namespace", [b"Serial", b"'px4:uuid'", b"0x"])
+def test_an_alias_namespace_version_1_accepts_but_no_record_holds_is_a_finding(
+    namespace: bytes,
+) -> None:
+    # Version 1 accepted any id as a namespace; such a manifest still applies (ADR 0072 §5), and
+    # only an alias whose namespace is a record namespace becomes an identifier.
+    text = (
+        b"neptune: 1\nmachines:\n  - {id: quad, aliases: {%s: abc, serial: s1}}\n"
+        b"runs:\n  - {name: a, paths: [flights], machine: quad}\n" % namespace
+    )
+    manifest = loaded(text)
+    found = made("aerial_survey", text)
+    (finding,) = found.findings
+    written = namespace.strip(b"'").decode()
+    assert finding.code == ALIAS_NAMESPACE_UNREPRESENTABLE
+    assert finding.category is FindingCategory.UNREPRESENTABLE
+    assert finding.severity is Severity.WARNING
+    assert finding.transform == manifest.transform.id
+    assert finding.subject == manifest.cite(f"/machines/0/aliases/{written}")
+    assert finding.details == {
+        "manifest_pointer": f"/machines/0/aliases/{written}",
+        "namespace": written,
+        "value": "abc",
+    }
+    (machine,) = [r for r in found.records if isinstance(r, Machine)]
+    assert {i.value for i in machine.identifiers if isinstance(i, Known)} == {
+        LogicalId("manifest", "quad"),
+        LogicalId("serial", "s1"),
+    }
+    # The alias is still in the manifest transform's config: nothing is dropped from lineage.
+    config: Any = manifest.transform.config
+    assert config["declarations"]["machines"][0]["aliases"][written] == ["abc"]
+    assert any(isinstance(r, RunDeclaration) for r in found.records)

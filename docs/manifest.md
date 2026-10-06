@@ -86,9 +86,9 @@ pointer) as its provenance. Nothing it declares overrides the evidence silently.
 | `sources` adapter its probe declines | **not applied**; `pin_refused` (warning); the probe's selection stands | |
 | `sources` rule matching nothing | `rule_unmatched` (warning) | |
 | `sources` rules disagreeing on one file's copies | none applied; `rules_conflict` (warning) | |
-| `machines`, `sites` | a stated `machine` / `site` record each, identified as `("manifest", id)` plus its aliases, every id citing where it is written (ADR 0072) | |
+| `machines`, `sites` | a stated `machine` / `site` record each, identified as `("manifest", id)` plus its aliases, every id citing where it is written (ADR 0072) | an alias namespace that is not a record namespace (a lowercase letter, then lowercase letters, digits and `. _ -`; version 1 still accepts `Serial` or `px4:uuid`): left off the record, `alias_namespace_unrepresentable` |
 | a run's `machine`, `site`, `task` | a stated `run_declaration` for every run record the files in its `paths` declare | a run record a second entry also covers: both stand, `run_declared_twice`; paths holding files but no recording: `run_unrecorded`; a run stating its machine in a namespace the declared machine has aliases in, as none of them: `machine_contradicts_run` |
-| a run's `snapshots` | a stated `snapshot_binding` from every run record it covers to every snapshot record of the pinned bytes | nothing at the path (missing, a directory, a symlink), no file holding the content: `pin_unresolved`; bytes that hold no snapshot: `pin_not_a_snapshot` |
+| a run's `snapshots` | a stated `snapshot_binding` from every run record it covers to every snapshot record of the pinned bytes | nothing at the path (missing, a directory, a symlink), no file holding the content: `pin_unresolved`; bytes that hold no snapshot: `pin_not_a_snapshot`; a snapshot an earlier pin already binds to the run: bound once, `pin_repeated` (info) |
 | `tasks`, `software`, a machine's `name` and `embodiment` | recorded, stated, in the `neptune.manifest` transform's config | |
 
 The last rule matching a path applies to it. Rule `options` are resolved per rule, so a rule with
@@ -105,6 +105,8 @@ transform as its upstream. The manifest's own records (machines, sites, run decl
 made at assembly from the records the adapters committed, under `neptune.manifest` 0.2.0, citing the
 manifest by JSON pointer; one entry covering several recordings gives one record per recording, its
 citation made finer by a step naming the run (`neptune.manifest:run`, `neptune.manifest:binding`).
+Run declarations and pins read the adapters' runs and snapshots, so their transform (same id,
+version and config) names those adapters' transforms as its upstream.
 A package holding a run declaration is schema version 9.
 
 ## Limits and refusals

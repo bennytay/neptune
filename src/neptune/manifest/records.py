@@ -18,8 +18,14 @@ byte: it reads the manifest, the scan's layout and the records the adapters comm
   ``neptune.manifest:binding`` step naming the run and the snapshot, once per run and snapshot
   however many pins name it. Validity stays ``Unknown``: the manifest says which, not when. A pin
   is resolved even when its entry covers no run, so a wrong pin is always a finding.
+- **Lineage.** Machines and sites read the manifest alone, so they are the manifest transform's.
+  Run declarations and pins also read the adapters' runs and snapshots, so they (and the findings
+  about applying them) are a transform with the same id, version and config naming those
+  adapters' transforms as its ``upstream``, sorted (ADR 0016 §4): an adapter upgrade is a new
+  lineage for them, as for any transform over adapter output.
 
-What cannot be applied is a finding of the manifest transform, citing the declaration:
+What cannot be applied is a finding, citing the declaration (of the run declarations' transform,
+but for alias findings, which are the manifest transform's):
 
 - ``run_unrecorded`` (missing, warning): a run's paths hold files, but none declares a run, so
   what the entry declares is said of no run record (paths that hold no file at all are the
@@ -32,6 +38,13 @@ What cannot be applied is a finding of the manifest transform, citing the declar
   file, a directory, a symlink the walk does not follow), or holds the pinned content.
 - ``pin_not_a_snapshot`` (missing, warning): the pinned bytes hold no snapshot record (not a
   configuration file, or one its adapter could not read: that adapter's own finding says why).
+- ``pin_repeated`` (skipped, info): an earlier pin, of this entry or of another covering the same
+  run, already binds the run to this snapshot, so this pin adds no second binding of the pair; the
+  binding stands, citing the first pin, and this says which.
+- ``alias_namespace_unrepresentable`` (unrepresentable, warning): an alias namespace version 1
+  accepts (an id: capitals, ``:``) is not a record namespace (a lowercase letter, then lowercase
+  letters, digits and ``. _ -``), so the alias is not among the entity's identifiers. It stays in
+  the manifest transform's config; nothing renames it.
 """
 
 from collections import defaultdict
@@ -41,13 +54,13 @@ from typing import Final, TypeAlias
 
 from neptune.discovery.layout import Layout
 from neptune.identity.findings import ingest_finding
-from neptune.identity.provenance import evidence_record_id
-from neptune.manifest.load import MANIFEST_ID, LoadedManifest
+from neptune.identity.provenance import evidence_record_id, transform_record
+from neptune.manifest.load import MANIFEST_ID, MANIFEST_VERSION, LoadedManifest
 from neptune.manifest.schema import Entity, RunDecl, SnapshotPin
 from neptune.model.alignment import SnapshotBinding, SnapshotKind
 from neptune.model.configuration import ConfigurationSnapshot
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
-from neptune.model.ids import ContentId, LogicalId, RecordId
+from neptune.model.ids import ContentId, LogicalId, RecordId, check_token
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered, Unknown
 from neptune.model.machine import (
@@ -56,7 +69,7 @@ from neptune.model.machine import (
     Machine,
     SoftwareConfiguration,
 )
-from neptune.model.provenance import EvidenceRef, Provenance, adapter_locator
+from neptune.model.provenance import EvidenceRef, Provenance, TransformRecord, adapter_locator
 from neptune.model.run import Run, RunDeclaration
 from neptune.model.world import Site
 
@@ -68,9 +81,13 @@ RUN_DECLARED_TWICE: Final = f"{MANIFEST_ID}.run_declared_twice"
 MACHINE_CONTRADICTS_RUN: Final = f"{MANIFEST_ID}.machine_contradicts_run"
 PIN_UNRESOLVED: Final = f"{MANIFEST_ID}.pin_unresolved"
 PIN_NOT_A_SNAPSHOT: Final = f"{MANIFEST_ID}.pin_not_a_snapshot"
+PIN_REPEATED: Final = f"{MANIFEST_ID}.pin_repeated"
+ALIAS_NAMESPACE_UNREPRESENTABLE: Final = f"{MANIFEST_ID}.alias_namespace_unrepresentable"
 FINDING_CODES: Final = (
+    ALIAS_NAMESPACE_UNREPRESENTABLE,
     MACHINE_CONTRADICTS_RUN,
     PIN_NOT_A_SNAPSHOT,
+    PIN_REPEATED,
     PIN_UNRESOLVED,
     RUN_DECLARED_TWICE,
     RUN_UNRECORDED,
@@ -96,10 +113,13 @@ _LISTED: Final = 64
 @dataclass(frozen=True)
 class ManifestRecords:
     """What one manifest gives a package: canonical records and the findings of what it could not
-    apply. ``records`` are sorted by kind, then id; ``findings`` by id."""
+    apply. ``records`` are sorted by kind, then id; ``findings`` by id. ``transforms`` are the
+    producers they name, by id: the manifest transform, and the run declarations' transform when
+    it has upstream transforms."""
 
     records: tuple[Machine | Site | RunDeclaration | SnapshotBinding, ...]
     findings: tuple[IngestFinding, ...]
+    transforms: tuple[TransformRecord, ...]
 
     @property
     def bindings(self) -> tuple[SnapshotBinding, ...]:
@@ -112,24 +132,43 @@ class ManifestRecords:
         return {"findings": len(self.findings), "records": dict(sorted(counts.items()))}
 
 
+def _namespace_ok(namespace: str) -> bool:
+    try:
+        check_token("namespace", namespace)
+    except ValueError:
+        return False
+    return True
+
+
 class _Builder:
-    def __init__(self, loaded: LoadedManifest) -> None:
+    def __init__(self, loaded: LoadedManifest, upstream: Iterable[RecordId]) -> None:
         self.loaded = loaded
+        # Machines and sites read the manifest alone; run declarations and pins also read the
+        # adapters' runs and snapshots, so their transform names those adapters (ADR 0016 §4).
         self.transform = loaded.transform
+        self.declarations = transform_record(
+            adapter_id=MANIFEST_ID,
+            adapter_version=MANIFEST_VERSION,
+            config=loaded.transform.config,
+            upstream=sorted(set(upstream)),
+        )
         self.records: dict[RecordId, Machine | Site | RunDeclaration | SnapshotBinding] = {}
         self.findings: dict[RecordId, IngestFinding] = {}
-        self.pinned: set[tuple[RecordId, RecordId]] = set()
+        # (run, snapshot) -> the pointer of the pin that bound it, across every entry.
+        self.pinned: dict[tuple[RecordId, RecordId], str] = {}
 
     def cite(self, pointer: str, *steps: tuple[str, Mapping[str, str]]) -> EvidenceRef:
         cited = self.loaded.cite(pointer)
         finer = tuple(adapter_locator(kind, fields) for kind, fields in steps)
         return EvidenceRef(cited.source, (*cited.locator, *finer))
 
-    def stated(self, evidence: EvidenceRef) -> Provenance:
-        return Provenance(evidence, self.transform.id, AssertionKind.STATED)
+    def stated(self, evidence: EvidenceRef, transform: TransformRecord | None = None) -> Provenance:
+        return Provenance(evidence, (transform or self.transform).id, AssertionKind.STATED)
 
     def declared(self, value: str, pointer: str) -> Known[LogicalId]:
-        return Known(LogicalId(NAMESPACE, value), self.stated(self.cite(pointer)))
+        return Known(
+            LogicalId(NAMESPACE, value), self.stated(self.cite(pointer), self.declarations)
+        )
 
     def add(self, record: Machine | Site | RunDeclaration | SnapshotBinding) -> None:
         self.records[record.id] = record
@@ -144,13 +183,15 @@ class _Builder:
         *,
         related: Sequence[EvidenceRef] = (),
         records: Iterable[RecordId] = (),
+        severity: Severity = Severity.WARNING,
+        transform: TransformRecord | None = None,
     ) -> None:
         found = ingest_finding(
             code=code,
             category=category,
-            severity=Severity.WARNING,
+            severity=severity,
             subject=subject,
-            transform=self.transform,
+            transform=transform or self.declarations,
             message=message,
             details=details,
             related=related,
@@ -161,16 +202,24 @@ class _Builder:
     # --- entities -------------------------------------------------------------------------------
 
     def identifiers(self, entity: Entity) -> tuple[Knowledge[LogicalId], ...]:
-        """The entity's manifest id and every alias, each citing where it is written, sorted."""
-        found = [
-            (LogicalId(NAMESPACE, entity.id), f"{entity.pointer}/id"),
-            *(
-                (LogicalId(namespace, value), at)
-                for (namespace, value), at in zip(
-                    entity.aliases, entity.alias_pointers, strict=True
-                )
-            ),
-        ]
+        """The entity's manifest id and every alias, each citing where it is written, sorted. An
+        alias whose namespace is no record namespace is left out, and a finding says so."""
+        found = [(LogicalId(NAMESPACE, entity.id), f"{entity.pointer}/id")]
+        for (namespace, value), at in zip(entity.aliases, entity.alias_pointers, strict=True):
+            if _namespace_ok(namespace):
+                found.append((LogicalId(namespace, value), at))
+                continue
+            self.finding(
+                ALIAS_NAMESPACE_UNREPRESENTABLE,
+                FindingCategory.UNREPRESENTABLE,
+                self.cite(at),
+                f"the manifest's {entity.section[:-1]} {entity.id!r} has an alias in namespace "
+                f"{namespace!r}, which is no record namespace (a lowercase letter, then lowercase "
+                "letters, digits and . _ -), so it is not among its identifiers; it stays in the "
+                "manifest transform's config. Write the namespace in that form to make it one",
+                {"manifest_pointer": at, "namespace": namespace, "value": value},
+                transform=self.transform,
+            )
         unique: dict[LogicalId, str] = {}
         for ident, at in found:  # an alias equal to the manifest id cites the id
             unique.setdefault(ident, at)
@@ -216,6 +265,7 @@ class _Builder:
 
     def declaration(self, decl: RunDecl, run: Run) -> None:
         evidence = self.cite(decl.pointer, (RUN_STEP, {"run": run.id}))
+        transform = self.declarations
 
         def field(name: str) -> Knowledge[LogicalId]:
             value = getattr(decl, name)
@@ -225,8 +275,8 @@ class _Builder:
 
         self.add(
             RunDeclaration(
-                id=evidence_record_id(RunDeclaration.kind, evidence, self.transform),
-                provenance=self.stated(evidence),
+                id=evidence_record_id(RunDeclaration.kind, evidence, transform),
+                provenance=self.stated(evidence, transform),
                 run=run.id,
                 logical_id=self.declared(decl.name, f"{decl.pointer}/name"),
                 machine=field("machine"),
@@ -241,7 +291,10 @@ class _Builder:
         if not isinstance(run.machine, Known):
             return
         own = run.machine.value
-        declared = {LogicalId(NAMESPACE, machine.id), *(LogicalId(*a) for a in machine.aliases)}
+        declared = {
+            LogicalId(NAMESPACE, machine.id),
+            *(LogicalId(*alias) for alias in machine.aliases if _namespace_ok(alias[0])),
+        }
         if own in declared or own.namespace not in {ident.namespace for ident in declared}:
             return
         self.finding(
@@ -318,24 +371,59 @@ class _Builder:
                 {**details, "content": content},
             )
             return
+        repeated: dict[tuple[RecordId, RecordId], str] = {}  # (run, snapshot) -> the first pin
         for run in runs:
             for snapshot, kind in found:
-                if (run.id, snapshot.id) in self.pinned:
-                    continue  # pinned again (by path and by content): bound once, by the first
-                self.pinned.add((run.id, snapshot.id))
+                first = self.pinned.get((run.id, snapshot.id))
+                if first is not None:  # pinned again: bound once, by the first pin, and said
+                    repeated[(run.id, snapshot.id)] = first
+                    continue
+                self.pinned[(run.id, snapshot.id)] = pin.pointer
                 evidence = self.cite(
                     pin.pointer, (BINDING_STEP, {"run": run.id, "snapshot": snapshot.id})
                 )
                 self.add(
                     SnapshotBinding(
-                        id=evidence_record_id(SnapshotBinding.kind, evidence, self.transform),
-                        provenance=self.stated(evidence),
+                        id=evidence_record_id(SnapshotBinding.kind, evidence, self.declarations),
+                        provenance=self.stated(evidence, self.declarations),
                         run=run.id,
                         snapshot=snapshot.id,
                         snapshot_kind=kind,
                         validity=Unknown(),
                     )
                 )
+        if repeated:
+            self.repeated(decl, pin, subject, details, repeated)
+
+    def repeated(
+        self,
+        decl: RunDecl,
+        pin: SnapshotPin,
+        subject: EvidenceRef,
+        details: Mapping[str, JsonValue],
+        pairs: Mapping[tuple[RecordId, RecordId], str],
+    ) -> None:
+        """``pin`` names snapshots an earlier pin already bound to these runs: no second binding of
+        a pair, and this finding instead of silence (the binding cites the first pin)."""
+        first = sorted(set(pairs.values()))
+        runs = sorted({run for run, _ in pairs})
+        self.finding(
+            PIN_REPEATED,
+            FindingCategory.SKIPPED,
+            subject,
+            f"the manifest pins {pin.path or pin.content!r} for run {decl.name!r}, but "
+            f"{' and '.join(first)} already bind(s) the same {len(pairs)} run and snapshot "
+            "pair(s): each is bound once, citing the first pin",
+            {
+                **details,
+                "bound_by": list(first),
+                "pairs": len(pairs),
+                "runs": list(runs[:_LISTED]),
+            },
+            related=tuple(self.cite(pointer) for pointer in first),
+            records=runs[:_LISTED],
+            severity=Severity.INFO,
+        )
 
 
 def _covers(paths: Sequence[bytes], path: bytes) -> bool:
@@ -349,22 +437,25 @@ def declared_records(
     (only runs and snapshots are read) and the scan's ``layout``. The same inputs give the same
     result in any order."""
     manifest = loaded.manifest
-    builder = _Builder(loaded)
-    for entity in manifest.section("machines"):
-        builder.machine(entity)
-    for entity in manifest.section("sites"):
-        builder.site(entity)
     runs_of: dict[ContentId, list[Run]] = defaultdict(list)
     snapshots: dict[ContentId, list[tuple[Snapshot, SnapshotKind]]] = defaultdict(list)
+    upstream: set[RecordId] = set()  # the transforms of every run and snapshot read
     for record in records:
         if isinstance(record, Run):
+            upstream.add(record.provenance.transform)
             source = record.provenance.evidence.source
             if isinstance(source, str):
                 runs_of[ContentId(source)].append(record)
         elif (kind := SNAPSHOT_KINDS.get(type(record))) is not None:
+            upstream.add(record.provenance.transform)  # type: ignore[attr-defined]
             source = record.provenance.evidence.source  # type: ignore[attr-defined]
             if isinstance(source, str):
                 snapshots[ContentId(source)].append((record, kind))  # type: ignore[arg-type]
+    builder = _Builder(loaded, upstream)
+    for entity in manifest.section("machines"):
+        builder.machine(entity)
+    for entity in manifest.section("sites"):
+        builder.site(entity)
     for found in snapshots.values():
         found.sort(key=lambda entry: entry[0].id)
     files = {file.path: file.content_id for file in layout.files}
@@ -427,4 +518,10 @@ def declared_records(
             for key in sorted(builder.records, key=lambda k: (builder.records[k].kind, k))
         ),
         findings=tuple(builder.findings[key] for key in sorted(builder.findings)),
+        transforms=tuple(
+            sorted(
+                {t.id: t for t in (builder.transform, builder.declarations)}.values(),
+                key=lambda t: t.id,
+            )
+        ),
     )

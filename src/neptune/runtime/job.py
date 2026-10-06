@@ -2490,6 +2490,8 @@ class IngestJob:
             cited = {finding.transform for finding in self._findings.values()}
             if self._declared is not None:  # a package made under a manifest names it
                 cited.add(self._declared.loaded.transform.id)
+            if stated is not None:  # and its records name their transforms
+                cited.update(record.provenance.transform for record in stated.records)
             if self._lost_guarantees:
                 cited.add(self.transform.id)
             if self._plugins.loaded:  # which plugins could change this package (ADR 0058 §5)
@@ -2713,8 +2715,10 @@ class IngestJob:
         self._check_cancel()
         loaded = self._declared.loaded
         found = declared_records(loaded, self._binding_inputs, self._layout)
+        for transform in found.transforms:  # the declarations' names the adapters it read
+            self._producers[transform.id] = transform
         for finding in found.findings:
-            self._record(finding, loaded.transform)
+            self._record(finding, self._producers[finding.transform])
         return found
 
     def _bind_snapshots(self, grouping: Grouping, assembled: Sequence[object]) -> Bindings | None:

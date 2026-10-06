@@ -178,8 +178,8 @@ def test_json_and_yaml_give_the_same_declarations() -> None:
             "pinned twice",
         ),
         ("neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: {path: c}}\n", "a list"),
-        ("neptune: 1\nmachines:\n  - {id: a, aliases: {Serial: b}}\n", "not a namespace"),
-        ("neptune: 1\nmachines:\n  - {id: a, aliases: {'px4:uuid': b}}\n", "not a namespace"),
+        ("neptune: 1\nmachines:\n  - {id: a, aliases: {'-x': b}}\n", "not a namespace id"),
+        ("neptune: 1\nmachines:\n  - {id: a, aliases: {'a b': b}}\n", "not a namespace id"),
     ],
 )
 def test_refused_declarations(text: str, says: str) -> None:
@@ -220,3 +220,11 @@ def test_the_editor_schema_agrees_with_the_reader() -> None:
     assert yaml.section("software")[0].to_json() == {"id": "7", "version": "1.10"}
     assert not validator.is_valid({"neptune": 1, "robots": []})
     assert not validator.is_valid({"neptune": 2})
+
+
+def test_a_version_1_alias_namespace_that_is_no_record_namespace_still_reads() -> None:
+    # Version 1 accepted any id as a namespace; ADR 0072 §5 keeps that: the records pass says
+    # which aliases cannot become identifiers, rather than the manifest being refused.
+    text = b"neptune: 1\nmachines:\n  - {id: a, aliases: {Serial: b, 'px4:uuid': c}}\n"
+    (machine,) = parse_manifest(text).section("machines")
+    assert machine.aliases == (("Serial", "b"), ("px4:uuid", "c"))

@@ -1,22 +1,22 @@
 {
   "category": "missing",
-  "code": "neptune.bindings.no_software_identity",
+  "code": "neptune.bindings.snapshot_unresolved",
   "details": {
     "run": "rec:sha256:fecd699331854a745187c71ffb0bcc1315028ff7746cfc3a050292502ae09f74",
     "sessions": [
       "rec:sha256:0cff056b651a66dbc153ea4007637b8101f8efc8dffc41c61a6a78b9dfef8845"
     ],
-    "snapshot_kind": "software_configuration"
+    "snapshot_kind": "calibration"
   },
-  "id": "rec:sha256:64786a2ed0274a6619da8029453ee11cb08876668088e22a5479158244b26c62",
+  "id": "rec:sha256:1a484d7832cb3b439f98a79a8a91306de712a60bc164fd876229c99f2f100ee7",
   "kind": "ingest_finding",
-  "message": "the run has no software identity: no software, build, firmware or checkpoint record is bound to it",
+  "message": "no calibration record is bound to the run: the binding is unresolved",
   "records": [
     "rec:sha256:fecd699331854a745187c71ffb0bcc1315028ff7746cfc3a050292502ae09f74"
   ],
   "related": [],
   "schema_version": 1,
-  "severity": "warning",
+  "severity": "info",
   "subject": {
     "kind": "evidence",
     "ref": {
@@ -30,5 +30,5 @@
       "source": "sha256:0a35978d52fc40d9e9373fe0aeb61647d80c070ec7b41bd9463cbb48c3251efb"
     }
   },
-  "transform": "rec:sha256:6651fbb0d4461f0af9312d4b3a17062a59c33b78c45b720e60cb02d3fbcab5ec"
+  "transform": "rec:sha256:8ba393cc87927d282f5d0875db841504ad00e032dc13571f56d8276c0d107ba6"
 }
