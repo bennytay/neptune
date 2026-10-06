@@ -1,0 +1,30 @@
+{
+  "category": "missing",
+  "code": "ulog.software_identity_missing",
+  "details": {
+    "key": "ver_sw_release"
+  },
+  "id": "rec:sha256:4a7d4fd664185f86af44dab72fad094ce0f7a1044eede9125a0a34815ea76d2a",
+  "kind": "ingest_finding",
+  "message": "the log states no ver_sw_release, so the PX4 release that ran is unknown",
+  "records": [
+    "rec:sha256:d58311a8b201fe4ec72d731ae135c51e962ae3e77ab7796541476727a24a5539"
+  ],
+  "related": [],
+  "schema_version": 1,
+  "severity": "warning",
+  "subject": {
+    "kind": "evidence",
+    "ref": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 165,
+          "offset": 253
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    }
+  },
+  "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+}

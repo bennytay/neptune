@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="quadrotor">
+  <!-- Properties, arithmetic on constants and math functions. -->
+  <xacro:property name="arm_x" value="0.13"/>
+  <xacro:property name="arm_y" value="${arm_x * 1.6923}"/>
+  <xacro:property name="rotor_radius" value="0.1"/>
+  <xacro:property name="body_mass" value="1.5"/>
+  <xacro:property name="tilt" value="${radians(5)}"/>
+  <xacro:arg name="namespace" default="uav0"/>
+  <xacro:arg name="with_camera" default="true"/>
+  <xacro:property name="cylinder_inertia">
+    <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="4.17041e-05" iyz="0" izz="4.26041e-05"/>
+  </xacro:property>
+  <xacro:macro name="rotor" params="index x y direction mass:=0.005 *joint_origin">
+    <link name="rotor_${index}">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="${mass}"/>
+        <xacro:insert_block name="cylinder_inertia"/>
+      </inertial>
+      <visual>
+        <geometry>
+          <cylinder radius="${rotor_radius}" length="${rotor_radius / 20}"/>
+        </geometry>
+      </visual>
+    </link>
+    <joint name="rotor_${index}_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="rotor_${index}"/>
+      <xacro:insert_block name="joint_origin"/>
+      <xacro:if value="${direction == 'cw'}">
+        <axis xyz="0 0 -1"/>
+      </xacro:if>
+      <xacro:unless value="${direction == 'cw'}">
+        <axis xyz="0 0 1"/>
+      </xacro:unless>
+    </joint>
+  </xacro:macro>
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${body_mass}"/>
+      <inertia ixx="${body_mass * (0.47**2 + 0.11**2) / 12}" ixy="0" ixz="0"
+               iyy="${body_mass * (0.47**2 + 0.11**2) / 12}" iyz="0"
+               izz="${body_mass * (0.47**2 + 0.47**2) / 12}"/>
+    </inertial>
+    <collision>
+      <geometry>
+        <box size="0.47 0.47 0.11"/>
+      </geometry>
+    </collision>
+  </link>
+  <xacro:rotor index="0" x="${arm_x}" y="${-arm_y}" direction="ccw">
+    <origin xyz="${arm_x} ${-arm_y} 0.023" rpy="0 ${tilt} 0"/>
+  </xacro:rotor>
+  <xacro:rotor index="1" x="${-arm_x}" y="${arm_y}" direction="ccw">
+    <origin xyz="${-arm_x} ${arm_y} 0.023" rpy="0 ${-tilt} 0"/>
+  </xacro:rotor>
+  <xacro:rotor index="2" x="${arm_x}" y="${arm_y}" direction="cw" mass="0.006">
+    <origin xyz="${arm_x} ${arm_y} 0.023" rpy="0 ${tilt} 0"/>
+  </xacro:rotor>
+  <xacro:rotor index="3" x="${-arm_x}" y="${-arm_y}" direction="cw">
+    <origin xyz="${-arm_x} ${-arm_y} 0.023" rpy="0 ${-tilt} 0"/>
+  </xacro:rotor>
+  <link name="$(arg namespace)_imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="$(arg namespace)_imu_link"/>
+  </joint>
+  <xacro:if value="$(arg with_camera)">
+    <link name="camera_link"/>
+    <joint name="camera_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="camera_link"/>
+      <origin xyz="0.1 0 ${-0.05}" rpy="0 ${pi / 2} 0"/>
+    </joint>
+    <gazebo reference="camera_link">
+      <sensor name="down_camera" type="camera">
+        <update_rate>${10 * 2}</update_rate>
+        <plugin name="camera_driver" filename="libgazebo_ros_camera.so"/>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+  <gazebo>
+    <plugin name="multirotor" filename="libgazebo_multirotor_base_plugin.so">
+      <robotNamespace>$(arg namespace)</robotNamespace>
+      <linkName>base_link</linkName>
+    </plugin>
+  </gazebo>
+</robot>

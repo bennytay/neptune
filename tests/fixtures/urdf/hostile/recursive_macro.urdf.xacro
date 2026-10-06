@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="recursion">
+  <xacro:macro name="forever" params="n">
+    <xacro:forever n="${n + 1}"/>
+  </xacro:macro>
+  <link name="base_link"/>
+  <xacro:forever n="0"/>
+</robot>

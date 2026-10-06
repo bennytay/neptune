@@ -1,0 +1,198 @@
+{
+ "joints": [
+  {
+   "axis": null,
+   "child": "base_link",
+   "limit": null,
+   "name": "base_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.0,
+     0.0,
+     0.0102
+    ]
+   },
+   "parent": "base_footprint",
+   "type": "fixed"
+  },
+  {
+   "axis": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "child": "left_wheel_link",
+   "limit": {
+    "effort": 10.0,
+    "lower": 0,
+    "upper": 0,
+    "velocity": 20.0
+   },
+   "name": "left_wheel_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.0,
+     0.1755,
+     0.0508
+    ]
+   },
+   "parent": "base_link",
+   "type": "continuous"
+  },
+  {
+   "axis": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "child": "right_wheel_link",
+   "limit": {
+    "effort": 10.0,
+    "lower": 0,
+    "upper": 0,
+    "velocity": 20.0
+   },
+   "name": "right_wheel_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.0,
+     -0.1755,
+     0.0508
+    ]
+   },
+   "parent": "base_link",
+   "type": "continuous"
+  },
+  {
+   "axis": null,
+   "child": "caster_link",
+   "limit": null,
+   "name": "caster_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     -0.15,
+     0.0,
+     0.025
+    ]
+   },
+   "parent": "base_link",
+   "type": "fixed"
+  },
+  {
+   "axis": null,
+   "child": "laser_link",
+   "limit": null,
+   "name": "laser_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.1,
+     0.0,
+     0.2
+    ]
+   },
+   "parent": "base_link",
+   "type": "fixed"
+  },
+  {
+   "axis": null,
+   "child": "imu_link",
+   "limit": null,
+   "name": "imu_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.0,
+     0.0,
+     0.1
+    ]
+   },
+   "parent": "base_link",
+   "type": "fixed"
+  },
+  {
+   "axis": null,
+   "child": "camera_link",
+   "limit": null,
+   "name": "camera_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.1,
+     0.0
+    ],
+    "xyz": [
+     0.2,
+     0.0,
+     0.15
+    ]
+   },
+   "parent": "base_link",
+   "type": "fixed"
+  },
+  {
+   "axis": null,
+   "child": "camera_optical_link",
+   "limit": null,
+   "name": "camera_optical_joint",
+   "origin": {
+    "rpy": [
+     -1.5708,
+     0.0,
+     -1.5708
+    ],
+    "xyz": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "parent": "camera_link",
+   "type": "fixed"
+  }
+ ],
+ "links": [
+  "base_footprint",
+  "base_link",
+  "left_wheel_link",
+  "right_wheel_link",
+  "caster_link",
+  "laser_link",
+  "imu_link",
+  "camera_link",
+  "camera_optical_link"
+ ],
+ "materials": [
+  "orange",
+  "black"
+ ],
+ "name": "diffbot"
+}

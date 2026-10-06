@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="bomb">
+  <xacro:macro name="m0"><link name="l"/></xacro:macro>
+  <xacro:macro name="m1"><xacro:m0/><xacro:m0/><xacro:m0/><xacro:m0/><xacro:m0/><xacro:m0/><xacro:m0/><xacro:m0/><xacro:m0/><xacro:m0/></xacro:macro>
+  <xacro:macro name="m2"><xacro:m1/><xacro:m1/><xacro:m1/><xacro:m1/><xacro:m1/><xacro:m1/><xacro:m1/><xacro:m1/><xacro:m1/><xacro:m1/></xacro:macro>
+  <xacro:macro name="m3"><xacro:m2/><xacro:m2/><xacro:m2/><xacro:m2/><xacro:m2/><xacro:m2/><xacro:m2/><xacro:m2/><xacro:m2/><xacro:m2/></xacro:macro>
+  <xacro:macro name="m4"><xacro:m3/><xacro:m3/><xacro:m3/><xacro:m3/><xacro:m3/><xacro:m3/><xacro:m3/><xacro:m3/><xacro:m3/><xacro:m3/></xacro:macro>
+  <xacro:macro name="m5"><xacro:m4/><xacro:m4/><xacro:m4/><xacro:m4/><xacro:m4/><xacro:m4/><xacro:m4/><xacro:m4/><xacro:m4/><xacro:m4/></xacro:macro>
+  <xacro:macro name="m6"><xacro:m5/><xacro:m5/><xacro:m5/><xacro:m5/><xacro:m5/><xacro:m5/><xacro:m5/><xacro:m5/><xacro:m5/><xacro:m5/></xacro:macro>
+  <xacro:macro name="m7"><xacro:m6/><xacro:m6/><xacro:m6/><xacro:m6/><xacro:m6/><xacro:m6/><xacro:m6/><xacro:m6/><xacro:m6/><xacro:m6/></xacro:macro>
+  <xacro:macro name="m8"><xacro:m7/><xacro:m7/><xacro:m7/><xacro:m7/><xacro:m7/><xacro:m7/><xacro:m7/><xacro:m7/><xacro:m7/><xacro:m7/></xacro:macro>
+  <xacro:macro name="m9"><xacro:m8/><xacro:m8/><xacro:m8/><xacro:m8/><xacro:m8/><xacro:m8/><xacro:m8/><xacro:m8/><xacro:m8/><xacro:m8/></xacro:macro>
+  <link name="base_link"/>
+  <xacro:m9/>
+</robot>
