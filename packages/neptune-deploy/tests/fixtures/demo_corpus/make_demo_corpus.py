@@ -2,11 +2,13 @@
 
 The acceptance corpus (``harness/acceptance``, Platform ADR 0007) is the Demo v1 hand-over. Deploy
 maps five of its files with shipped presets and templates only: both sites' incident report PDFs,
-both requalification sheets and PLANT-2's CMMS export (with the INSP work order WO-26-0709). This
-script takes those files byte for byte from the corpus generator, ingests them as a subprocess
-(a member never imports the compiler's runtime; root ``test_merge_freshness``) and commits the
-package without ``volatile/`` as ``package/``, the precedent of Deploy ADR 0004 §3 and §4. Deploy's
-tests run only the mapper over it, and check every source's bytes against ``corpus.lock.json``.
+both requalification sheets and PLANT-2's CMMS export (with the INSP work order WO-26-0709). Two
+sibling PLANT-2 PDFs that no shipped template reads (SOP-CELL-021 rev C, the commissioning report)
+come too, so a test shows they stay unmatched. This script takes those files byte for byte from the
+corpus generator, ingests them as a subprocess (a member never imports the compiler's runtime; root
+``test_merge_freshness``) and commits the package without ``volatile/`` as ``package/``, the
+precedent of Deploy ADR 0004 §3 and §4. Deploy's tests run only the mapper over it, and check every
+source's bytes against ``corpus.lock.json``.
 
 ``downtime/downtime_log.csv`` is PLANT-2's CMMS downtime log from corpus 2.0.0 (``CORPUS_2``,
 harness PR #143), committed as a source because that corpus version is not on main yet. It is
@@ -35,6 +37,8 @@ DOWNTIME_PATH: Final = "sites/PLANT-2/cmms/downtime_log.csv"
 # Its content id in acceptance 2.0.0's corpus.lock.json.
 CORPUS_2: Final = "sha256:3dc72a6d8664f88e5197d03dc16b955a7b439302b609e6d9b30114035bb3ba58"
 FILES: Final = (
+    "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_C.pdf",
+    "sites/PLANT-2/cell3/documents/commissioning_CR-C3-2026-02.pdf",
     "sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf",
     "sites/PLANT-2/cell3/requalification/requalification_tests.csv",
     "sites/PLANT-2/cmms/work_orders.csv",

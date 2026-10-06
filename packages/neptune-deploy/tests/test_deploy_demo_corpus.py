@@ -44,6 +44,10 @@ FLEET_REPORT: Final = "sites/S-007/incidents/INC-0007.pdf"
 CELL_REQUAL: Final = "sites/PLANT-2/cell3/requalification/requalification_tests.csv"
 FLEET_REQUAL: Final = "sites/S-007/requalification/requalification_tests.csv"
 CELL_CMMS: Final = "sites/PLANT-2/cmms/work_orders.csv"
+SIBLINGS: Final = (
+    "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_C.pdf",
+    "sites/PLANT-2/cell3/documents/commissioning_CR-C3-2026-02.pdf",
+)
 HMI_TIMES: Final = (
     "2026-09-14 14:28:00",
     "2026-09-14 14:32:38",
@@ -208,7 +212,15 @@ def test_the_template_reads_the_same_form_at_both_sites_and_leaves_nothing_unrea
     assert len(matched) == 2
     assert {f.details["template"] for f in matched} == {"incident.report"}
     codes = _codes(package)
-    assert not {"text_unread", "document_unmatched", "label_absent"} & set(codes), codes.keys()
+    paths = _paths(BASE)
+    reports = {CELL_REPORT, FLEET_REPORT}
+    about = {
+        code
+        for code, found in codes.items()
+        for f in found
+        if paths.get(f.subject.source) in reports
+    }
+    assert not {"text_unread", "document_unmatched", "label_absent"} & about, about
     cell = _incident(package)
     assert [i.value.value for i in cell.identifiers.value] == ["INC-C3-0011"]
     assert [m.value.value for m in cell.machines.value] == ["ARM-3A"]
@@ -271,7 +283,7 @@ def test_a_report_missing_its_date_field_is_unmatched_and_never_given_a_date() -
     assert len(_from(package, "incident_record", FLEET_REPORT)) == 1
     paths = _paths(BASE)
     unmatched = _codes(package)["document_unmatched"]
-    assert [paths[f.subject.source] for f in unmatched] == [CELL_REPORT]
+    assert sorted(paths[f.subject.source] for f in unmatched) == sorted([CELL_REPORT, *SIBLINGS])
 
 
 def test_rows_across_midnight_read_the_dates_they_state() -> None:
@@ -304,7 +316,9 @@ def test_both_requalification_sheets_map_with_their_place_column() -> None:
     assert {r.site.value.namespace for r in cell} == {"requalification.cell"}
     assert {r.site.value.value for r in cell} == {"CELL-3"}
     assert fleet[0].site.value.namespace == "requalification.site"
-    assert "table_unmapped" not in _codes(package)
+    paths = _paths(BASE)
+    unmapped = {paths[f.subject.source] for f in _codes(package)["table_unmapped"]}
+    assert unmapped == set(SIBLINGS)  # the requalification sheets are all mapped
 
 
 def test_requalification_values_are_verbatim_and_a_blank_decision_time_is_unknown() -> None:
@@ -404,3 +418,34 @@ def test_no_lifecycle_time_is_an_instant_or_carries_a_zone() -> None:
     package = _mapped()
     assert all(isinstance(d.timescale, Unknown) for d in _of(package, "timestamp_domain"))
     assert all(isinstance(z.zone, Unknown | NotCovered) for z in _of(package, "civil_time_zone"))
+
+
+# --- Review follow-ups: what the shipped names leave alone ---------------------------------------
+
+
+def test_sibling_plant_documents_stay_unmatched_and_give_no_incident() -> None:
+    package = _mapped()
+    paths = _paths(BASE)
+    unmatched = {paths[f.subject.source] for f in _codes(package)["document_unmatched"]}
+    assert unmatched == set(SIBLINGS)
+    for path in SIBLINGS:
+        assert not _from(package, "incident_record", path)
+        assert not any(
+            _from(package, kind, path) for kind in ("maintenance_event", "commissioning_baseline")
+        )
+    assert len(_of(package, "incident_record")) == 2
+
+
+def test_a_requalification_sheet_with_both_site_and_cell_is_rule_ambiguous() -> None:
+    def both(record: Any) -> Any:
+        if record.kind != "structured_table" or not isinstance(record.header, Known):
+            return record
+        header = tuple("Site" if c == "Inspector" else c for c in record.header.value)
+        if "Cell" not in header or "Site" not in header:
+            return record
+        return replace(record, header=Known(header, record.header.provenance))
+
+    package = _mapped(replace(BASE, records=tuple(both(r) for r in BASE.records)))
+    assert not _from(package, "requalification_record", CELL_REQUAL)
+    (ambiguous,) = _codes(package)["rule_ambiguous"]
+    assert ambiguous.details["count"] == 3

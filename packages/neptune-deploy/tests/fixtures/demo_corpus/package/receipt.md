@@ -1,10 +1,10 @@
 # Ingest receipt
 
-Receipt `rec:sha256:a747fe95abacd8f88c41857469a18d25ba854ac9e164ff448c071760a98e9ca8`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:d2083c7317f3dfdfc21aa076ea5c7e99e3d9242591fd7f2acca8dc4ec8542920`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
-- Sources: 6 seen, 6 read, 0 not read, 0 gone
+- Sources: 8 seen, 8 read, 0 not read, 0 gone
 - Runs: 0; streams: 0; entities: 10
 - Findings: 0 errors, 2 warnings, 3 info; ambiguous fields: 0
 
@@ -13,6 +13,8 @@ Receipt `rec:sha256:a747fe95abacd8f88c41857469a18d25ba854ac9e164ff448c071760a98e
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
 | `neptune.yaml` | 67 | `sha256:f4b6ca124fd7` | config 0.1.0 |
+| `sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_C.pdf` | 7609 | `sha256:1f82a1d7d16f` | pdf 0.1.0 |
+| `sites/PLANT-2/cell3/documents/commissioning_CR-C3-2026-02.pdf` | 12618 | `sha256:5e9fde08afd8` | pdf 0.1.0 |
 | `sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf` | 7915 | `sha256:bfc3c2e8e1d2` | pdf 0.1.0 |
 | `sites/PLANT-2/cell3/requalification/requalification_tests.csv` | 987 | `sha256:30be864d249a` | tabular 0.2.0 |
 | `sites/PLANT-2/cmms/work_orders.csv` | 2044 | `sha256:f4e37e7d8863` | neptune.declared 0.1.0, tabular 0.2.0 |
@@ -38,13 +40,13 @@ Receipt `rec:sha256:a747fe95abacd8f88c41857469a18d25ba854ac9e164ff448c071760a98e
 | `asset` | 10 |
 | `configuration_snapshot` | 1 |
 | `configuration_value` | 6 |
-| `document_block` | 32 |
-| `document_record` | 2 |
+| `document_block` | 66 |
+| `document_record` | 4 |
 | `ingest_finding` | 5 |
-| `source_artifact` | 6 |
-| `source_revision` | 6 |
-| `structured_record` | 23 |
-| `structured_table` | 5 |
+| `source_artifact` | 8 |
+| `source_revision` | 8 |
+| `structured_record` | 35 |
+| `structured_table` | 9 |
 | `transform_record` | 7 |
 
 ## Runs
