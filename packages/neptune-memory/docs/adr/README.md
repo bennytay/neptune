@@ -16,7 +16,7 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0007](0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) | G1 gate: withdrawal, names, evidence status, and the final store decision | Accepted; §5.3 (package-scoped builds) superseded by 0016 |
 | [0008](0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) | The identity consolidator on compiler identity links and assertions | Accepted; §2's logical-id-only scope and §3's "record ids in a scope are not read" superseded by 0019 §1 |
 | [0009](0009-run-threads-and-cross-package-continuation.md) | Run threads and cross-package continuation from RunAssembly records | Accepted |
-| [0010](0010-configuration-lineage-consolidator.md) | The configuration lineage consolidator | Accepted; §2's `succeeds` at each chain change and §6's reading of `succeeds` superseded by 0019 §2 |
+| [0010](0010-configuration-lineage-consolidator.md) | The configuration lineage consolidator | Accepted; §2's `succeeds` at each chain change and §6's reading of `succeeds` superseded by 0019 §2; §3's `configuration_unknown` for a bound `configuration_snapshot` no thread holds superseded by 0022 |
 | [0011](0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md) | The time-domain registry: clocks, mappings and chains, never estimated | Accepted |
 | [0012](0012-episodes-from-stated-task-evidence.md) | Episodes from stated task evidence: one attempt per tasked run, stated boundaries, no inferred outcome | Accepted |
 | [0013](0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) | Event index: evidence-linked event claims and co-occurrence that is never cause | Accepted |
@@ -27,3 +27,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0018](0018-thread-membership-from-the-catalog-api.md) | Thread membership from the catalog API | Accepted |
 | [0019](0019-events-in-identity-and-machine-scoped-configuration-changes.md) | Events in identity, and configuration changes scoped to a machine | Accepted |
 | [0020](0020-runs-read-the-compilers-run-declaration.md) | The run consolidator reads the compiler's run_declaration | Accepted |
+| [0022](0022-pinned-configuration-snapshots-name-their-anchored-configuration.md) | Pinned configuration snapshots name their anchored configuration | Accepted |
