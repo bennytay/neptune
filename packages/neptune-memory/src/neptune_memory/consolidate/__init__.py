@@ -13,5 +13,7 @@ mappings and chains of them, never estimated) and ``time_records`` parses what i
 interventions and stops, and ``event_records`` parses the stated events both it and ``events``
 read (ADR 0012); ``events`` holds events (nodes per stated record, registered kinds through
 declared vendor mappings, co-occurrence that is never cause), and ``event_records`` also parses
-its tables and config (ADR 0013).
+its tables and config (ADR 0013); ``calibration`` holds calibration history per sensor, drift
+between consecutive calibrations in declared units and ``calibrated_by``, and
+``calibration_records`` parses what it reads (ADR 0014).
 """
