@@ -37,8 +37,10 @@ Deploy's `contracts/lock.toml` entry, `docs/contracts.md` and `snapshot.GRAPH_SC
   minor than the pin gets ADR 0015's treatment: its unknown keys are reported once per key path as
   `snapshot_key_unread`, and never read or rendered. Optional `builds` are checked (claim ids unique and
   pattern-valid, recorded no later than the head, a non-empty list) and kept, but they are never rendered.
-- **1.x**: unchanged (ADR 0015). The flag declares a newer 1.x minor. A `graph_schema` key in a 1.x document is
-  an unknown key.
+- **1.x**: as ADR 0015, with two refusals. The flag declares a newer 1.x minor. A declaration of any other major
+  contradicts the document and is `snapshot_unsupported` at `/graph_schema_version`, with or without unknown keys;
+  it is never dropped. A `graph_schema` key on a major-1 document is `snapshot_malformed` at `/graph_schema`
+  whatever is declared, never a newer-minor key reported as `snapshot_key_unread`.
 - The pack's `snapshot` block carries `graph_schema_version` (the major) and, for 2.x, `graph_schema`. The PDF
   header shows the release for 2.x and `graph-schema 1` for 1.x, as before.
 
@@ -49,13 +51,20 @@ A template section of kind `changes` reads each scope node's boundaries from the
 
 - A **boundary** is a `(node, Stamp)` where some spans of that node end and others start. A single `Stamp` means
   a single clock, as in Memory's `transitions`.
-- Each pair of `known` spans there with different objects is one **change** entry, `knowledge: known`. This is
-  exactly what `transitions` reads, including pairs from concurrent configurations, because `has_configuration`
-  is `many`.
-- If a candidate or unknown span meets the boundary, there is one more entry for it, holding every span at that
-  boundary: `unknown` if any span is unknown, otherwise `ambiguous`. No change is read across it.
-- Spans that do not meet (a gap, two clocks) form no boundary. Nothing is ever read from `succeeds` or from another
-  node's claims, so a change is attributed only to the node whose spans it is.
+- A span is **decided** when its predicate's role is `known` and the claim is not `inferred`. An inferred span is
+  never decided, even under `inference: include`: it may show, marked `[INFERRED]`, but never forms a change.
+- Each pair of decided spans there with different objects is one **change** entry, `knowledge: known`. This is
+  Memory's `transitions` over the claims the section selects, with two differences: inferred claims are left out
+  as above, and there is no consolidator filter (see Alternatives). Concurrent configurations pair as
+  `transitions` pairs them, because `has_configuration` is `many`, and a restated configuration is no change.
+- If a candidate, inferred or unknown span meets the boundary, there is one more entry for it, holding every span
+  at that boundary: `unknown` if any span is unknown, otherwise `ambiguous`. With no change at that instant, no
+  change is read across it. If two decided spans also meet there (decided A ends while decided B and candidate C
+  start), the A→B change stands, as `transitions` reads it, and the boundary entry carries `beside_change: true`.
+  Its caption says that another reading also starts or ends there, beside the change, so the two entries never
+  contradict each other.
+- Spans that do not meet (a gap, two clocks, two open ends) form no boundary. Nothing is ever read from
+  `succeeds` or from another node's claims, so a change is attributed only to the node whose spans it is.
 - An entry carries `change: {at, before, after}` (claim ids) in place of `valid`. A boundary on the pack clock
   inside the interval (`start ≤ at < end`) is an entry, one outside it is counted in `outside_interval`, and one
   on another clock is listed under `other_clocks`. A section with no boundary is `not_covered`, and its reason

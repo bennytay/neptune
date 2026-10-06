@@ -363,6 +363,22 @@ def _release(document: JsonValue, major: int, declared: str | None) -> str:
     return release
 
 
+def _major_1(document: JsonValue, declared: str | None) -> None:
+    """A major-1 document never names a release, and a caller may not declare it one of another
+    major (ADR 0018 §2): both are refused whatever else is declared."""
+    if isinstance(document, Mapping) and "graph_schema" in document:
+        raise _R.fail(
+            "a graph-schema 1 document names no graph_schema release (graph_schema_version is 1)",
+            "/graph_schema",
+        )
+    if declared is not None and _version(declared, "graph-schema version")[0] != 1:
+        raise PackError(
+            "snapshot_unsupported",
+            f"the snapshot is graph-schema 1; the caller declares {declared}",
+            "/graph_schema_version",
+        )
+
+
 def read_snapshot(document: JsonValue, *, schema_version: str | None = None) -> Snapshot:
     """Read a parsed graph document; refuse anything outside the contract's shapes.
 
@@ -372,7 +388,8 @@ def read_snapshot(document: JsonValue, *, schema_version: str | None = None) -> 
 
     A 1.x document names only its major, so ``schema_version`` is the release its producer
     declares (ADR 0015): under a newer minor than the 1.x pin, unknown keys are reported the same
-    way; under the 1.x pin, an older minor or another major they are refused, as before.
+    way; under the 1.x pin or an older minor they are refused, as before. A declaration of another
+    major contradicts the document and is refused, as is a 1.x document naming a release.
     """
     major = _major(document)
     if major == 2:
@@ -382,6 +399,7 @@ def read_snapshot(document: JsonValue, *, schema_version: str | None = None) -> 
         tolerant = _newer_minor(release, GRAPH_SCHEMA_PIN)
     else:
         release, declared = None, schema_version
+        _major_1(document, schema_version)
         tolerant = tolerates_unknown_keys(schema_version)
     if not tolerant:
         return _read(document, None, major, release)

@@ -47,12 +47,24 @@ STATE_CAPTIONS: Final[Mapping[str, str]] = {
 CHANGE_CAPTIONS: Final[Mapping[str, str]] = {
     "known": "CHANGE - one decided configuration ends where another begins, on this node only",
     "ambiguous": (
-        "AMBIGUOUS BOUNDARY - a candidate span meets it; every reading below, none is chosen, and"
-        " no change is read across it"
+        "AMBIGUOUS BOUNDARY - a candidate or inferred span meets it; every reading below, none is"
+        " chosen, and no change is read across it"
     ),
     "unknown": (
         "UNKNOWN BOUNDARY - an unknown span meets it; the cited claim names the record leaving it"
         " open, and no change is read across it"
+    ),
+}
+# A boundary beside a decided change at the same instant (ADR 0018 §3): the change stands, listed
+# separately, and these say what else starts or ends there.
+BESIDE_CHANGE_CAPTIONS: Final[Mapping[str, str]] = {
+    "ambiguous": (
+        "AMBIGUOUS BOUNDARY - a candidate or inferred configuration also starts or ends here,"
+        " beside the decided change listed with it; every reading below, none is chosen"
+    ),
+    "unknown": (
+        "UNKNOWN BOUNDARY - an unknown span also starts or ends here, beside the decided change"
+        " listed with it; the cited claim names the record leaving it open"
     ),
 }
 TIME_CONFLICT: Final = (
@@ -142,7 +154,8 @@ def _inferred_mark(statement: Statement) -> str:
 def _change(out: _Layout, entry: Entry, indent: int) -> None:
     change = entry.change
     assert change is not None
-    caption = CHANGE_CAPTIONS.get(entry.knowledge, entry.knowledge.upper())
+    captions = BESIDE_CHANGE_CAPTIONS if change.beside_change else CHANGE_CAPTIONS
+    caption = captions.get(entry.knowledge, entry.knowledge.upper())
     out.line(f"[{caption}] {entry.node.node_type} {entry.node.node_id}", font="F3", indent=indent)
     out.line(f"at {t.stamp(change.at)}", indent=indent + 2)
     for statement in entry.statements:

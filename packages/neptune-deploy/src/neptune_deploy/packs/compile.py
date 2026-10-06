@@ -104,14 +104,24 @@ class Difference:
 class Change:
     """A boundary on one node's spans: ``before`` end and ``after`` start at ``at``, one instant on
     one clock. Known when both are decided spans of different objects (a change, rule 12);
-    ambiguous or unknown when a candidate or unknown span meets it (no change is read)."""
+    ambiguous or unknown when a candidate, inferred or unknown span meets it."""
 
     at: Stamp
     before: tuple[str, ...]  # claim ids of the spans ending at ``at``
     after: tuple[str, ...]  # claim ids of the spans starting at ``at``
+    # An ambiguous or unknown boundary at an instant where a decided change is also read: another
+    # reading also starts or ends here, beside that change (ADR 0018 §3).
+    beside_change: bool = False
 
     def to_json(self) -> JsonObject:
-        return {"after": list(self.after), "at": self.at.to_json(), "before": list(self.before)}
+        out: dict[str, JsonValue] = {
+            "after": list(self.after),
+            "at": self.at.to_json(),
+            "before": list(self.before),
+        }
+        if self.beside_change:
+            out["beside_change"] = True
+        return out
 
 
 @dataclass(frozen=True)
@@ -767,10 +777,14 @@ def _changes(
     """``changes`` sections: each node's boundaries, as graph-schema 2.x rule 12 reads them.
 
     A boundary is an instant (one ``Stamp``, so one clock) where spans of one node end and others
-    start. Each pair of ``known`` spans of different objects there is a change (``known``), exactly
-    Memory's ``transitions``; a boundary that an ``unknown`` or ``ambiguous`` span meets is one
-    entry in that state (unknown first), holding every span there, and no change is read across
-    it. Spans that do not meet, a gap or two clocks, are no boundary. Changes are never read from
+    start. A span is decided when its role is ``known`` and it is not inferred: an inferred span
+    never forms a change, even when the spec includes inference. Each pair of decided spans of
+    different objects there is a change (``known``): Memory's ``transitions`` over the claims the
+    section selects, with no consolidator filter and without inferred claims. A boundary that an
+    ``unknown``, ``ambiguous`` or inferred span meets is one more entry in that state (unknown
+    first), holding every span there. With no change beside it, no change is read across it;
+    beside a change (``beside_change``) it says another reading also starts or ends there. Spans
+    that do not meet (a gap, two clocks) are no boundary. Changes are never read from
     ``succeeds``. Returns the boundaries in the pack interval, those on other clocks, and how many
     on the pack clock fall outside the interval."""
     ending: dict[tuple[Node, Stamp], list[Statement]] = defaultdict(list)
@@ -779,18 +793,29 @@ def _changes(
         starting[(s.claim.subject, s.claim.valid.start)].append(s)
         if isinstance(s.claim.valid.end, Stamp):
             ending[(s.claim.subject, s.claim.valid.end)].append(s)
+
+    def role(s: Statement) -> str:
+        return "ambiguous" if s.role == "known" and s.claim.inferred else s.role
+
     found: list[Entry] = []
     for boundary in sorted(ending.keys() & starting.keys()):
         node, at = boundary
         before, after = _order(ending[boundary]), _order(starting[boundary])
+        changes = 0
         for b in before:
             for a in after:
-                if b.role == a.role == "known" and b.claim.object_key != a.claim.object_key:
+                if role(b) == role(a) == "known" and b.claim.object_key != a.claim.object_key:
                     change = Change(at, (b.claim.id,), (a.claim.id,))
                     found.append(Entry(node, Interval(at, at), "known", (b, a), change=change))
-        roles = {s.role for s in (*before, *after)}
+                    changes += 1
+        roles = {role(s) for s in (*before, *after)}
         if roles != {"known"}:
-            change = Change(at, tuple(s.claim.id for s in before), tuple(s.claim.id for s in after))
+            change = Change(
+                at,
+                tuple(s.claim.id for s in before),
+                tuple(s.claim.id for s in after),
+                beside_change=changes > 0,
+            )
             knowledge = "unknown" if "unknown" in roles else "ambiguous"
             found.append(Entry(node, Interval(at, at), knowledge, (*before, *after), change=change))
     inside: list[Entry] = []

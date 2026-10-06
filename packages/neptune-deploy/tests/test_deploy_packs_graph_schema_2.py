@@ -57,13 +57,13 @@ NODE = {
 }
 # Digests of the 2.x packs. A change means what these packs say changed: explain it in the PR.
 GOLDEN = {
-    "incident.json": "sha256:844c068245d9fcacbe061d15a9dec2d396bfff43895f377aab191380bbb8dd51",
-    "incident.pdf": "sha256:4e301026dbf1e7c26ad6a05f78615d6075cdde835f0ef8d6166c7c22d64b9d53",
+    "incident.json": "sha256:de5e3dd6c3f76943a9142f17601d1b963777442a22712b30eb56f3f37e823b59",
+    "incident.pdf": "sha256:fb20a1695cf9096d198389b2150874089892d01dc511e5b5e9c9dc9d4b02beed",
     "lineage.claims": "sha256:b5dfcf92986308b57409fcfab2aeb37ee5940588d052c841655f1186f3d02831",
-    "lineage.json": "sha256:4bb4779cc74ac251abca93d723c9d94d9485d5e994c2407602e1f8e3bddc4050",
-    "lineage.pdf": "sha256:dd326ea0d0cfdcc1635b098c6b6b43b25fe75a75570781632141cc5c945c4210",
-    "amr05.json": "sha256:9ca2d65865d8ae5b5cff48d71f1f4571a7bcdd4deb3153b412eb566f1523b4a7",
-    "amr05.pdf": "sha256:4fbb95b1debb1f32f093447e5940f0acbf02d59b5ef2b0dbf9119546ad7bf08b",
+    "lineage.json": "sha256:dcab7c4414ece6e7c4063672b0a0c9d24aecc273d973372a50543f7578320633",
+    "lineage.pdf": "sha256:b5981329d81808f477afbde4ab72b40b49a266aabf1012e9f680f45490e098f2",
+    "amr05.json": "sha256:1bd019a4143c5426afc5697b7a49a58f7c5958bfbe9a0220abb4fa6670fe99a3",
+    "amr05.pdf": "sha256:73ecf3d69baa203f97fc0a8ffa271936b6fe8259eefd9492fb7a284ab25d23dc",
 }
 
 
@@ -193,15 +193,6 @@ def test_a_build_lists_each_claim_once() -> None:
     build["claims"] = [build["claims"][0], build["claims"][0]]
     with pytest.raises(PackError, match="unique"):
         read_snapshot(document)
-
-
-def test_a_1x_document_naming_a_release_is_refused() -> None:
-    document = json.loads(fixture_path("arm_cell_configuration").read_bytes())
-    document["graph_schema"] = "1.6.0"
-    with pytest.raises(PackError) as caught:
-        read_snapshot(document)
-    assert caught.value.code == "snapshot_malformed"
-    assert "graph_schema" in str(caught.value)
 
 
 def test_a_newer_2x_minor_reports_the_keys_it_adds() -> None:

@@ -70,7 +70,7 @@
     {
       "id": "configuration-changes",
       "title": "Configuration changes",
-      "description": "Each change of configuration of a machine the incident involves, attributed to that machine only: a decided span ending at the instant a decided span of another configuration begins, on one clock (graph-schema 2 rule 12). A boundary that an ambiguous or unknown span meets is shown as such, every reading with it, and no change is read across it. A change is the machine's own: configuration nodes are shared by every machine naming them, so nothing here is read from succeeds or from another machine.",
+      "description": "Each change of configuration of a machine the incident involves, attributed to that machine only: a decided span ending at the instant a decided span of another configuration begins, on one clock (graph-schema 2 rule 12). A boundary that an ambiguous, inferred or unknown span meets is shown as such, every reading with it: no change is read across it, and where two decided spans also meet there their change stands beside it. A change is the machine's own: configuration nodes are shared by every machine naming them, so nothing here is read from succeeds or from another machine.",
       "kind": "changes",
       "graph_schema_majors": [2],
       "about": [

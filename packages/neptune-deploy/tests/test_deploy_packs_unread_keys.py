@@ -98,17 +98,37 @@ def test_a_snapshot_without_unknown_keys_is_unchanged_by_a_newer_declaration() -
     assert "findings" not in json.loads(render_json(pack))
 
 
-@pytest.mark.parametrize(
-    "declared", [None, GRAPH_SCHEMA_1X_PIN, "1.2.0", "1.6.9", "2.0.0", "2.1.0", "0.9.0"]
-)
-def test_the_pin_an_older_minor_and_another_major_refuse_the_same_keys(
-    declared: str | None,
-) -> None:
+@pytest.mark.parametrize("declared", [None, GRAPH_SCHEMA_1X_PIN, "1.2.0", "1.6.9"])
+def test_the_pin_and_an_older_minor_refuse_the_same_keys(declared: str | None) -> None:
     with pytest.raises(PackError) as caught:
         read_snapshot(_newer_minor(), schema_version=declared)
     assert caught.value.code == "snapshot_malformed"
     assert caught.value.pointer == ""
     assert "builds" in str(caught.value)
+
+
+@pytest.mark.parametrize("declared", ["2.0.0", "2.1.0", "0.9.0", "3.0.0"])
+def test_a_declaration_of_another_major_is_refused(declared: str) -> None:
+    """Deploy ADR 0018 §2 (review): a 1.x document declared as another major is refused, even
+    with no unknown key to report, never read with the declaration dropped."""
+    for document in (_document(), _newer_minor()):
+        with pytest.raises(PackError) as caught:
+            read_snapshot(document, schema_version=declared)
+        assert caught.value.code == "snapshot_unsupported"
+        assert caught.value.pointer == "/graph_schema_version"
+
+
+@pytest.mark.parametrize("declared", [None, GRAPH_SCHEMA_1X_PIN, NEWER])
+def test_a_1x_document_naming_a_release_is_refused_whatever_is_declared(
+    declared: str | None,
+) -> None:
+    """Deploy ADR 0018 §2 (review): ``graph_schema`` on a major-1 document is malformed, never a
+    key a newer 1.x minor may add and have reported as unread."""
+    document = _document()
+    document["graph_schema"] = "1.9.0"
+    with pytest.raises(PackError) as caught:
+        read_snapshot(document, schema_version=declared)
+    assert (caught.value.code, caught.value.pointer) == ("snapshot_malformed", "/graph_schema")
 
 
 def test_a_known_key_stays_strict_under_a_newer_minor() -> None:
