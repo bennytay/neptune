@@ -34,9 +34,10 @@ if TYPE_CHECKING:
 # time-domain registry's ``has_clock``, ``maps_to`` and ``clock_map`` joined, and the predicates
 # that hold for every node type widened to ``clock`` (ADR 0011 §1). 7: the episode predicates
 # joined (ADR 0012 §5). 8: the event predicates joined, ``at_site`` widened to events, and the
-# predicates that hold for every node type widened to ``event`` (ADR 0013 §6). The vocabulary is
-# part of graph-schema (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 8
+# predicates that hold for every node type widened to ``event`` (ADR 0013 §6). 9: the calibration
+# history predicates joined (ADR 0014 §6). 10: the coverage and health predicates joined (ADR 0015
+# §6). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 10
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
@@ -125,6 +126,23 @@ EPISODE_CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
         INTERVENED: "intervened_candidate",
     }
 )
+
+# Calibration history predicates (ADR 0014). ``drift`` states a difference, never a judgement.
+CALIBRATED_WITH: Final = "calibrated_with"
+CALIBRATION_CANDIDATE: Final = "calibration_candidate"
+CALIBRATED_BY: Final = "calibrated_by"
+DRIFT: Final = "drift"
+
+# Coverage and health (ADR 0015). Sensor presence is three predicates, one per state: a claim
+# object cannot be ``KnownAbsent`` or ``Unknown`` (ADR 0002 §2), so the state is the predicate.
+RECORDED: Final = "recorded"
+GAP: Final = "gap"
+RATE_DECLARED: Final = "rate_declared"
+RATE_OBSERVED: Final = "rate_observed"
+INTEGRITY_FINDING: Final = "integrity_finding"
+SENSOR_RECORDED: Final = "sensor_recorded"
+SENSOR_NOT_RECORDED: Final = "sensor_not_recorded"
+SENSOR_PRESENCE_UNKNOWN: Final = "sensor_presence_unknown"
 
 
 class Cardinality(StrEnum):
@@ -413,6 +431,34 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         "observed: no authorisation envelope in the Ledger names the configuration then",
     ),
     _p(
+        CALIBRATED_WITH,
+        {_N.SENSOR},
+        {_N.CONFIGURATION},
+        _MANY,
+        "a calibration of the sensor, from its valid_from to its stated end or the next one",
+    ),
+    _p(
+        CALIBRATION_CANDIDATE,
+        {_N.SENSOR},
+        {_N.CONFIGURATION},
+        _MANY,
+        "ambiguous: the calibration could be the sensor's over the interval; one claim per reading",
+    ),
+    _p(
+        CALIBRATED_BY,
+        {_N.CONFIGURATION},
+        {_V.RECORD},
+        _MANY,
+        "the maintenance or requalification record that states the calibration resulted from it",
+    ),
+    _p(
+        DRIFT,
+        {_N.SENSOR},
+        {_V.DELTA},
+        _MANY,
+        "observed: two consecutive calibrations' declared values differ by the delta; no judgement",
+    ),
+    _p(
         "governed_by",
         {_N.MACHINE, _N.SITE, _N.DEPLOYMENT, _N.FLEET},
         {_N.POLICY},
@@ -476,6 +522,70 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_N.RUN},
         _MANY,
         "ambiguous: may be a later part of the same recording; the evidence does not order them",
+    ),
+    _p(
+        RECORDED,
+        {_N.STREAM},
+        {_N.RUN},
+        _MANY,
+        "the stream's series holds samples over this interval: its first to last known sample"
+        " on one clock (the Ledger's series coverage)",
+    ),
+    _p(
+        GAP,
+        {_N.STREAM},
+        {_N.RUN},
+        _MANY,
+        "the stream's declared first or last instant predicts samples here and its series holds"
+        " none",
+    ),
+    _p(
+        RATE_DECLARED,
+        {_N.STREAM},
+        {_V.QUANTITY},
+        _MANY,
+        "the mean sample rate the source's index declares: (count - 1) over its first-to-last"
+        " span, on a clock with a stated resolution",
+    ),
+    _p(
+        RATE_OBSERVED,
+        {_N.STREAM},
+        {_V.QUANTITY},
+        _MANY,
+        "the mean sample rate the series holds: (known rows - 1) over its first-to-last known"
+        " span, on a clock with a stated resolution",
+    ),
+    _p(
+        INTEGRITY_FINDING,
+        {_N.RUN, _N.STREAM},
+        {_V.TEXT},
+        _MANY,
+        "a compiler finding about the evidence (truncation, corruption, a dropout); the object"
+        " is its severity, verbatim",
+    ),
+    _p(
+        SENSOR_RECORDED,
+        {_N.RUN},
+        {_N.SENSOR},
+        _MANY,
+        "a sensor of a configuration bound to the run recorded in it: a run's file declares the"
+        " sensor's identifier",
+    ),
+    _p(
+        SENSOR_NOT_RECORDED,
+        {_N.RUN},
+        {_N.SENSOR},
+        _MANY,
+        "known absent: a sensor of a configuration bound to the run recorded nothing in it, and"
+        " the recording covers the run",
+    ),
+    _p(
+        SENSOR_PRESENCE_UNKNOWN,
+        {_N.RUN},
+        {_N.SENSOR},
+        _MANY,
+        "unknown: whether a sensor of a configuration bound to the run recorded in it is not"
+        " decided by the evidence",
     ),
     _p(
         EVENT_KIND,
