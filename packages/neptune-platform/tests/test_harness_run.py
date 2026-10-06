@@ -22,9 +22,7 @@ def _stage(report: dict[str, Any], stage: str) -> dict[str, Any]:
     return next(entry for entry in report["stages"] if entry["stage"] == stage)
 
 
-def test_today_the_compiler_deploy_and_ledger_are_real_and_the_rest_are_stubs(
-    tmp_path: Path,
-) -> None:
+def test_today_every_stage_is_real(tmp_path: Path) -> None:
     report, code = run(tmp_path / "run", owner_tests=False, corpus_name=WORKED)
     assert code == 0 and report["ok"] is True
     modes = {stage["stage"]: (stage["mode"], stage["status"]) for stage in report["stages"]}
@@ -32,8 +30,8 @@ def test_today_the_compiler_deploy_and_ledger_are_real_and_the_rest_are_stubs(
         "compiler": ("real", "ok"),
         "deploy": ("real", "ok"),
         "ledger": ("real", "ok"),
-        "memory": ("stub", "ok"),
-        "context": ("stub", "ok"),
+        "memory": ("real", "ok"),
+        "context": ("real", "ok"),
     }
     assert [stage["stage"] for stage in report["stages"]] == [
         "compiler",
@@ -48,7 +46,7 @@ def test_today_the_compiler_deploy_and_ledger_are_real_and_the_rest_are_stubs(
     assert catalog is not None
     assert _stage(report, "ledger")["contract_version"] == ".".join(map(str, catalog.version))
     assert report["smoke"]["ok"] is True
-    assert report["smoke"]["packet_source"].startswith("golden query-packet packet.q01-")
+    assert report["smoke"]["packet_source"].startswith("context LocalEngine over the memory stage")
     assert report["corpus"] == {"name": "worked-examples", "cases": list(corpus.EXAMPLE_NAMES)}
 
 
@@ -94,9 +92,10 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
     }
     ids = {case["package"] for case in cases}
     assert len(ids) == 4  # four robots, four packages
-    # query-packet 1.0.0 is published (MVL-111): the smoke query reads its first golden packet.
+    # The smoke query is answered by Context's local engine over the graph Memory built.
     packet = report["smoke"]["packet"]
     assert (packet["kind"], packet["packet_version"]) == ("context_packet", 1)
+    assert packet["id"].startswith("packet:sha256:") and packet["items"] > 0
 
 
 def test_two_runs_give_byte_identical_reports_with_no_path_in_them(tmp_path: Path) -> None:

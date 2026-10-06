@@ -54,6 +54,24 @@ class Context:
     work: Path
     cases: Sequence[Case]
     upstream: dict[str, Json] = field(default_factory=dict)
+    # The real ledger stage's catalog database, kept for the stages after it: Memory reads its
+    # thread membership and Context hydrates evidence through it (Platform ADR 0011). ``close``
+    # stops its server.
+    ledger_uri: str | None = None
+    # Rewrite the case's pinned agent answers from this run instead of checking them (``make
+    # demo-pin``; ADR 0011).
+    pin_answers: bool = False
+    _closers: list[Callable[[], None]] = field(default_factory=list)
+
+    def on_close(self, closer: Callable[[], None]) -> None:
+        """Run ``closer`` when the run ends (``close``), last registered first."""
+        self._closers.append(closer)
+
+    def close(self) -> None:
+        """Release what the stages kept for each other (the ledger's server); idempotent."""
+        while self._closers:
+            self._closers.pop()()
+        self.ledger_uri = None
 
     def package_root(self, case_id: str) -> Path:
         """Where the compiler stage writes, and the ledger stage registers, a case's package."""
@@ -823,6 +841,11 @@ def _catalog_database(server: Any) -> str:
     return uri
 
 
+def package_roots(ctx: Context) -> tuple[Path, ...]:
+    """Where the catalog finds the packages it registers (and Context hydrates evidence from)."""
+    return (ctx.work / "packages",)
+
+
 def _known(slot: Any) -> Any:
     """The value of a ``Known`` slot, else ``None`` (the slot's state is the catalog's answer)."""
     from neptune.model.knowledge import Known
@@ -879,10 +902,10 @@ def ledger_real(ctx: Context) -> Outcome:
         )
     cases: list[Json] = []
     server = _embedded_postgres(ctx)
+    kept = False
     try:
         uri = _catalog_database(server)
-        roots = (ctx.work / "packages",)
-        with PostgresCatalog(uri, LEDGER_TENANT, package_roots=roots) as catalog:
+        with PostgresCatalog(uri, LEDGER_TENANT, package_roots=package_roots(ctx)) as catalog:
             for case, stage, root, package in _to_register(ctx):
                 row: Json = {"case": case, "stage": stage}
                 cases.append(row)
@@ -896,8 +919,13 @@ def ledger_real(ctx: Context) -> Outcome:
                     # The type only: a message can carry the server's socket path.
                     row["error"] = type(error).__name__
                     check.problems.append(f"{case}: the catalog raised {type(error).__name__}")
+        # The catalog outlives the stage: Memory and Context read it (ADR 0011 §2).
+        ctx.ledger_uri = uri
+        ctx.on_close(server.cleanup)
+        kept = True
     finally:
-        server.cleanup()
+        if not kept:
+            server.cleanup()
     output: Json = {"cases": cases, "locked_package_schema": locked, "tenant": LEDGER_TENANT}
     return Outcome(output, tuple(check.problems))
 
@@ -1046,6 +1074,20 @@ def context_stub(ctx: Context) -> Outcome:
     return Outcome({**base, "smoke": {"query": query, "packet_source": source, "packet": packet}})
 
 
+def memory_real(ctx: Context) -> Outcome:
+    """Memory consolidates what the Ledger holds (``harness.consolidate``, ADR 0011)."""
+    from harness.consolidate import memory_real as run
+
+    return run(ctx)
+
+
+def context_real(ctx: Context) -> Outcome:
+    """Context answers over Memory's graph through its agent tools (``harness.agent``, ADR 0011)."""
+    from harness.agent import context_real as run
+
+    return run(ctx)
+
+
 STAGES: Final[tuple[Stage, ...]] = (
     Stage(
         "compiler",
@@ -1066,6 +1108,22 @@ STAGES: Final[tuple[Stage, ...]] = (
         built_against="neptune_deploy:PACKAGE_SCHEMA_VERSION",
     ),
     Stage("ledger", "neptune-ledger", "catalog-api", False, ledger_real, ledger_stub),
-    Stage("memory", "neptune-memory", "graph-schema", True, None, memory_stub),
-    Stage("context", "neptune-context", "query-packet", True, None, context_stub),
+    Stage(
+        "memory",
+        "neptune-memory",
+        "graph-schema",
+        False,
+        memory_real,
+        memory_stub,
+        entry="neptune_memory.cli",
+    ),
+    Stage(
+        "context",
+        "neptune-context",
+        "query-packet",
+        False,
+        context_real,
+        context_stub,
+        entry="neptune_context.mcp",
+    ),
 )

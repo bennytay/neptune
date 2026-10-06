@@ -367,3 +367,46 @@ def test_the_memory_snapshot_inputs_exist() -> None:
     root = Path(__file__).parents[2]
     assert all((root / path).exists() for path in ci_plan.MEMORY_SNAPSHOT_INPUTS)
     assert ci_plan.MEMORY_MEMBER in ci_plan.workspace_members(root)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "packages/neptune-memory/src/neptune_memory/consolidate/runs.py",
+        "packages/neptune-memory/pyproject.toml",
+        "packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz",
+        "packages/neptune-memory/tests/fixtures/acceptance_corpus.memory_config.json",
+        "packages/neptune-context/src/neptune_context/render/agent.py",
+        "packages/neptune-context/pyproject.toml",
+        "packages/neptune-context/claude/mcp.sample.json",
+        "packages/neptune-context/claude/skills/neptune/SKILL.md",
+        "README.md",
+        "scripts/quickstart.sh",
+    ],
+)
+def test_what_demo_v1_runs_runs_the_platform_tests(path: str) -> None:
+    """The memory and context stages, Memory's committed snapshot of the corpus and the quickstart
+    are what the platform's Demo v1 tests run and pin (platform ADR 0011)."""
+    members = {
+        **MEMBERS,
+        "neptune-memory": frozenset({"neptune"}),
+        "neptune-context": frozenset({"neptune-memory"}),
+    }
+    assert "neptune-platform" in ci_plan.plan([path], members).packages
+
+
+def test_memory_and_context_tests_and_docs_do_not_run_the_platform() -> None:
+    members = {**MEMBERS, "neptune-memory": frozenset(), "neptune-context": frozenset()}
+    for path in (
+        "packages/neptune-memory/tests/test_x.py",
+        "packages/neptune-memory/tests/fixtures/other.json",
+        "packages/neptune-context/docs/adr/0001-x.md",
+        "docs/architecture.md",
+    ):
+        assert "neptune-platform" not in ci_plan.plan([path], members).packages
+
+
+def test_the_agent_stage_and_quickstart_inputs_exist() -> None:
+    root = Path(__file__).parents[2]
+    assert all(any(root.glob(path + "*")) for path in ci_plan.AGENT_STAGE_INPUTS)
+    assert all((root / path).is_file() for path in ci_plan.QUICKSTART_INPUTS)

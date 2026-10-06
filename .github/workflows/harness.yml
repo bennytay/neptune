@@ -3,8 +3,11 @@ name: harness
 # The integration harness (MVL-123, packages/neptune-platform ADR 0004): contracts check, the corpus
 # (the acceptance corpus, ADR 0007) through compiler -> deploy -> ledger -> memory -> context
 # (ADR 0008), a smoke query, one report. It needs no Docker while every real stage runs in process
-# (the ledger on an embedded PostgreSQL, platform ADR 0006). It is not a required status yet:
-# `ci.yml`'s `check` is the only one.
+# (the ledger on an embedded PostgreSQL, platform ADR 0006; memory and context over its catalog,
+# ADR 0011). It is not a required status yet: `ci.yml`'s `check` is the only one.
+#
+# The `quickstart` job is Demo v1 (ADR 0011): the README's 15-minute quickstart
+# (scripts/quickstart.sh) on a clean runner, which installs uv, sets up and runs `make demo`.
 #
 # - merge_group and the nightly schedule run it unconditionally (a merge group has no path filter);
 # - pull_request runs it for contracts, the harness and any package's exported-schema paths. If
@@ -26,6 +29,9 @@ on:
       - "harness/**"
       - "scripts/contracts.py"
       - ".github/workflows/harness.yml"
+      # Demo v1 (platform ADR 0011): `make demo` and the README's quickstart script
+      - "Makefile"
+      - "scripts/quickstart.sh"
       # the acceptance corpus's imported generators (ADR 0007 section 3): a change here changes
       # the corpus bytes, which its lock test catches
       - "packages/neptune-deploy/tests/fixtures/archetypes/make_archetypes.py"
@@ -55,6 +61,16 @@ on:
       # DEPLOY_STAGE_INPUTS is the same set
       - "packages/neptune-deploy/src/**"
       - "packages/neptune-deploy/pyproject.toml"
+      # the memory stage runs `python -m neptune_memory.cli rebuild` with Memory's declaration for
+      # the corpus and compares Memory's committed snapshot; the context stage runs Context's local
+      # engine and MCP server, and the quickstart wires Claude Code with its sample config and skill
+      # (platform ADR 0011); ci_plan.py's AGENT_STAGE_INPUTS is the same set
+      - "packages/neptune-memory/src/**"
+      - "packages/neptune-memory/pyproject.toml"
+      - "packages/neptune-memory/tests/fixtures/acceptance_corpus*"
+      - "packages/neptune-context/src/**"
+      - "packages/neptune-context/pyproject.toml"
+      - "packages/neptune-context/claude/**"
       # every contract's owner tests (`contract_tests` in contracts/*/contract.toml), which
       # `check --all` runs; a unit test fails until a new one is listed here
       - "tests/unit/model/test_schema.py"
@@ -116,6 +132,34 @@ jobs:
         # Without LINEAR_API_KEY it posts nothing. A nightly green run stays quiet
         # (--only-failed); a manual run always reports.
         run: uv run --all-packages python -m harness.publish --report "$RUNNER_TEMP/harness/report.json" --link "$RUN_URL" $ONLY_FAILED
+
+  quickstart:
+    # The README's quickstart as a new user runs it, on a runner with nothing installed for it:
+    # scripts/quickstart.sh installs uv, sets the workspace up and runs `make demo` (the corpus
+    # through every real stage, the gold questions through the MCP tools, the PDFs). The timeout is
+    # the README's promise: fifteen minutes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: The 15-minute quickstart
+        run: bash scripts/quickstart.sh
+      - name: Show the demo summary
+        if: always()
+        run: cat demo/demo.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the demo's PDFs, answers and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo
+          path: |
+            demo/*.pdf
+            demo/*.md
+            demo/answers.json
+            demo/report.json
+          if-no-files-found: ignore
 
   comment:
     # Same-repository pull requests only: a fork's token cannot write, and its report is not ours.

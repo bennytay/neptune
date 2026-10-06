@@ -21,6 +21,11 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
 * the code the harness's deploy stage runs (``DEPLOY_STAGE_INPUTS``: Deploy's source, whose command
   line imports its lifecycle mapper, presets, templates and pack commands, and its project file)
   also runs ``neptune-platform``, whose tests map the acceptance corpus with it (platform ADR 0008);
+* the code the harness's memory and context stages run (``AGENT_STAGE_INPUTS``: Memory's and
+  Context's source and project files, Memory's declaration and committed snapshot of the acceptance
+  corpus, Context's Claude Code config and skill) and the quickstart (``QUICKSTART_INPUTS``: the
+  README and its script) also run ``neptune-platform``, whose tests run Demo v1 with them and pin
+  the gold answers' cited claims (platform ADR 0011);
 * what Memory's acceptance snapshot is built through (``MEMORY_SNAPSHOT_INPUTS``: every format
   adapter, the acceptance corpus under ``harness/acceptance/``, its imported generators, the
   harness stages that compile and map it, and the deploy stage's code) also runs
@@ -75,6 +80,20 @@ DEPLOY_STAGE_INPUTS = (
     "packages/neptune-deploy/src/",
     "packages/neptune-deploy/pyproject.toml",
 )
+# What the harness's memory and context stages run (platform ADR 0011): Memory's consolidation over
+# the Ledger's packages with its declaration for the corpus, compared byte for byte with its
+# committed snapshot; Context's engine and MCP server answering the pinned gold questions; and the
+# sample config and skill the quickstart wires into Claude Code. The platform's tests run it all.
+AGENT_STAGE_INPUTS = (
+    "packages/neptune-memory/src/",
+    "packages/neptune-memory/pyproject.toml",
+    "packages/neptune-memory/tests/fixtures/acceptance_corpus",
+    "packages/neptune-context/src/",
+    "packages/neptune-context/pyproject.toml",
+    "packages/neptune-context/claude/",
+)
+# The README's quickstart block and the script CI runs: the platform's test keeps them equal.
+QUICKSTART_INPUTS = frozenset({"README.md", "scripts/quickstart.sh"})
 # Memory's acceptance snapshot is built from the harness's compiled and mapped packages of the
 # acceptance corpus: any adapter, the corpus itself, the writers it imports or the deploy stage's
 # code can change it, so Memory's job (its snapshot test) must run on them (platform ADR 0009).
@@ -177,6 +196,8 @@ def plan(
         or (compiler and not core and name == HARNESS_MEMBER)
         or (name == HARNESS_MEMBER and any(p in CORPUS_INPUTS for p in changed))
         or (name == HARNESS_MEMBER and any(p.startswith(DEPLOY_STAGE_INPUTS) for p in changed))
+        or (name == HARNESS_MEMBER and any(p.startswith(AGENT_STAGE_INPUTS) for p in changed))
+        or (name == HARNESS_MEMBER and any(p in QUICKSTART_INPUTS for p in changed))
     }
     projects = {_normalise(name): name for name in members}
     grew = True

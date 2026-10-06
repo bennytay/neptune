@@ -1,0 +1,579 @@
+{
+  "answers_format": 1,
+  "corpus": "acceptance",
+  "corpus_version": "2.1.0",
+  "graph": {
+    "generation": "sha256:32b50ae8b8adabe87158a3ed86b92f9e8f8a2f2aabae639e6677bb54fa9b99f1",
+    "graph_schema": "2.1.0"
+  },
+  "questions": [
+    {
+      "asked_as": "why did the arm-cell incident happen",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "text": "Why did the arm-cell incident INC-C3-0011 on ARM-3A in CELL-3 happen?"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "incident_report.machine:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "incident_report.zone:CELL-3",
+                  "kind": "zone"
+                },
+                {
+                  "declared_id": "cmms.asset:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "syslog.host:ARM-3A",
+                  "kind": "machine"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        },
+        {
+          "arguments": {
+            "claim_id": "$support:Q1.C7",
+            "include_inferred": false
+          },
+          "tool": "neptune_why"
+        }
+      ],
+      "gaps": {
+        "Q1.C2": {
+          "in_graph": false,
+          "reason": "The residual warnings are rows of the incident bag's /diagnostics stream, which the compiler does not yet emit as diagnostic records (MVL-204, Demo v2), and cell_config.yaml's residual action is a configuration value Memory does not consolidate: no claim cites either."
+        },
+        "Q1.C5": {
+          "in_graph": false,
+          "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
+        }
+      },
+      "id": "Q1",
+      "supported": {
+        "Q1.C1": [
+          "claim:sha256:03610d43bbc48f792d5ba3efec9dfd04ef8c4393025597240968cff095308801",
+          "claim:sha256:2a6ac0412ffd773cae002b65d22f85c8ec72b85a3a4efc83475183e3c50c0b4f",
+          "claim:sha256:2a6ca3dea23045157716740f654d54a18a94679167448a2a394231086363c2df",
+          "claim:sha256:2b56d5abcf469239d65417d389816eb19d947c901cbad42298845b4b87241aab",
+          "claim:sha256:3379f059fcf05ecfb2bd5b8113933b38be6e57e3c23eb1a6dfd51ce0e720a47b",
+          "claim:sha256:723f94ad6389530fa66905046d99bdda12c93ce899552e5d50682051d6ad60a7",
+          "claim:sha256:96fc6af9a29ed1ca61b934c41c7cbf325ae35a437b36ecc6fbeb6ae98f3c9bbd",
+          "claim:sha256:afbf7d78a4fe6a42b36b086af94807c548770767a55e053d43d7c8c39e2a947d",
+          "claim:sha256:c56efe5b1566853bac109310df7b66473c45ca77f31a3f29c89e3443c256c7f7",
+          "claim:sha256:e29b171184f5948171987e063bfd2ce7b724a16786d3c3df20db222bededceb3"
+        ],
+        "Q1.C3": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ],
+        "Q1.C4": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ],
+        "Q1.C6": [
+          "claim:sha256:cfb3c7240e5251b57d74d82f0937e76820f041079854a8d01c68cf90e5c7319d"
+        ],
+        "Q1.C7": [
+          "claim:sha256:c56efe5b1566853bac109310df7b66473c45ca77f31a3f29c89e3443c256c7f7"
+        ]
+      }
+    },
+    {
+      "asked_as": "what changed since the last good run",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": true,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "manifest:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "cmms.asset:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "servicenow.ci:ARM-3A",
+                  "kind": "machine"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        },
+        {
+          "arguments": {
+            "claim_id": "$support:Q2.C3",
+            "include_inferred": false
+          },
+          "tool": "neptune_why"
+        }
+      ],
+      "gaps": {
+        "Q2.C4": {
+          "in_graph": false,
+          "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
+        },
+        "Q2.C5": {
+          "in_graph": false,
+          "reason": "Both residual readings are rows of the runs' /diagnostics streams, which the compiler does not yet emit as diagnostic records (MVL-204, Demo v2): no claim cites them."
+        },
+        "Q2.C6": {
+          "in_graph": true,
+          "reason": "Memory holds the cell PC's estimated clock fits as inferred maps_to and clock_map claims, but they are about clock nodes: no claim links a run or a machine to its clock and a clock is no declared subject, so no query from a declared id reaches them."
+        }
+      },
+      "id": "Q2",
+      "supported": {
+        "Q2.C1": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ],
+        "Q2.C2": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ],
+        "Q2.C3": [
+          "claim:sha256:0b4cf10006c4d0e7cbdd98829c2e6ee611d78dbd003e8546c6498678e909ed5c",
+          "claim:sha256:405e7bdbf9bfea6927f6d9d8effc79f59114cfd91bc831eb35dff4e1806b217c",
+          "claim:sha256:41089d42462026ad3454e2d2b87cec20654d5e0d5290a41d290b0f9ff1d545d2",
+          "claim:sha256:7e8b94eb7e3ca46cc49a5828b4bd49c7d15879feef6b4e569ad44064a7d9fc40",
+          "claim:sha256:853763fca7fcd201382dfddc245b4524e936073316e72c13ef954c6e4a8ad2f6",
+          "claim:sha256:ee7dd1ffd6b0f2e904febbb332abbe716f76143d91d48ad3ed1b2c20837a0d46"
+        ],
+        "Q2.C7": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ],
+        "Q2.C8": [
+          "claim:sha256:d5d4f083492d7398356090c19cbcb94575386bc9fd0627cf2bba73f931a352a9"
+        ]
+      }
+    },
+    {
+      "asked_as": "which configuration was active",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "manifest:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "cmms.asset:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "manifest:LEG-01",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "cmms.asset:LEG-01",
+                  "kind": "machine"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        }
+      ],
+      "gaps": {
+        "Q3.C3": {
+          "in_graph": false,
+          "reason": "The software, collision limit and residual action are configuration values of cell_config.yaml, which Memory does not consolidate (the stale export is never pinned to a run, ADR 0009 §4), and the bag's start and collision lines await MVL-204: no claim cites them."
+        },
+        "Q3.C4": {
+          "in_graph": false,
+          "reason": "cell_config.yaml's values are configuration_value records Memory does not consolidate, and the stale export is deliberately pinned to no run (Platform ADR 0009 §4): no claim cites them."
+        },
+        "Q3.C5": {
+          "in_graph": false,
+          "reason": "The asset register is a table no Deploy preset maps: its GRP-3A row stays an untyped structured_record, and no claim cites it."
+        }
+      },
+      "id": "Q3",
+      "supported": {
+        "Q3.C1": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ],
+        "Q3.C2": [
+          "claim:sha256:0b4cf10006c4d0e7cbdd98829c2e6ee611d78dbd003e8546c6498678e909ed5c",
+          "claim:sha256:405e7bdbf9bfea6927f6d9d8effc79f59114cfd91bc831eb35dff4e1806b217c",
+          "claim:sha256:41089d42462026ad3454e2d2b87cec20654d5e0d5290a41d290b0f9ff1d545d2",
+          "claim:sha256:853763fca7fcd201382dfddc245b4524e936073316e72c13ef954c6e4a8ad2f6"
+        ],
+        "Q3.C6": [
+          "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f",
+          "claim:sha256:840fd00331692fd60ce1614cc4dda3d878b10461acf7c9dd887a64b90a1cd2f2"
+        ]
+      }
+    },
+    {
+      "asked_as": "what is unknown",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": true,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "manifest:LEG-01",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "cmms.asset:LEG-01",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "incident_report.machine:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "cmms.asset:ARM-3A",
+                  "kind": "machine"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        }
+      ],
+      "gaps": {
+        "Q4.C4": {
+          "in_graph": false,
+          "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
+        }
+      },
+      "id": "Q4",
+      "supported": {
+        "Q4.C1": [
+          "claim:sha256:0d146d21c85725458bbb99496d5850866940d1492a15988f2a3c5dae89104459",
+          "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f",
+          "claim:sha256:4d4ce46800347a2a9b31de8af35f2c371c05c101fed07791bae6326a13d74186"
+        ],
+        "Q4.C2": [
+          "claim:sha256:c56efe5b1566853bac109310df7b66473c45ca77f31a3f29c89e3443c256c7f7"
+        ],
+        "Q4.C3": [
+          "claim:sha256:c56efe5b1566853bac109310df7b66473c45ca77f31a3f29c89e3443c256c7f7"
+        ],
+        "Q4.C5": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ],
+        "Q4.C6": [
+          "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f"
+        ]
+      }
+    },
+    {
+      "asked_as": "build the incident timeline",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": true,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "incident_report.zone:CELL-3",
+                  "kind": "zone"
+                },
+                {
+                  "declared_id": "syslog.host:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "syslog.host:PLC-C3",
+                  "kind": "machine"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        }
+      ],
+      "gaps": {
+        "Q5.C3": {
+          "in_graph": false,
+          "reason": "The site survey's warning is PDF text (document_block records) that no Deploy template maps, and Memory consolidates no claim from document text: no claim cites it."
+        }
+      },
+      "id": "Q5",
+      "supported": {
+        "Q5.C1": [
+          "claim:sha256:03610d43bbc48f792d5ba3efec9dfd04ef8c4393025597240968cff095308801",
+          "claim:sha256:2a6ac0412ffd773cae002b65d22f85c8ec72b85a3a4efc83475183e3c50c0b4f",
+          "claim:sha256:2a6ca3dea23045157716740f654d54a18a94679167448a2a394231086363c2df",
+          "claim:sha256:2b56d5abcf469239d65417d389816eb19d947c901cbad42298845b4b87241aab",
+          "claim:sha256:3379f059fcf05ecfb2bd5b8113933b38be6e57e3c23eb1a6dfd51ce0e720a47b",
+          "claim:sha256:723f94ad6389530fa66905046d99bdda12c93ce899552e5d50682051d6ad60a7",
+          "claim:sha256:96fc6af9a29ed1ca61b934c41c7cbf325ae35a437b36ecc6fbeb6ae98f3c9bbd",
+          "claim:sha256:afbf7d78a4fe6a42b36b086af94807c548770767a55e053d43d7c8c39e2a947d",
+          "claim:sha256:c56efe5b1566853bac109310df7b66473c45ca77f31a3f29c89e3443c256c7f7",
+          "claim:sha256:e29b171184f5948171987e063bfd2ce7b724a16786d3c3df20db222bededceb3"
+        ],
+        "Q5.C2": [
+          "claim:sha256:c56efe5b1566853bac109310df7b66473c45ca77f31a3f29c89e3443c256c7f7"
+        ]
+      }
+    },
+    {
+      "asked_as": "why did the AMR hit the rack",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "incident_report.machine:AMR-07",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "cmms.asset:AMR-07",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "requalification.robot:AMR-07",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "manifest:AMR-07",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "servicenow.ci:AMR-07",
+                  "kind": "machine"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        }
+      ],
+      "gaps": {},
+      "id": "Q6",
+      "supported": {
+        "Q6.C1": [
+          "claim:sha256:e290b6d7261c60af0299f5c201e4945318c4102ad688ba7d896ab775c7b994d1"
+        ],
+        "Q6.C2": [
+          "claim:sha256:90ecd96d77e4ea40621bb6cdb2f893384a921af4310cfbfe37ece053d00b42f7",
+          "claim:sha256:a9bed2d47c9f2e37ae2cf509a88e03bd54c10f21901ebbd0d7b950e5631bbed8"
+        ],
+        "Q6.C3": [
+          "claim:sha256:7ac2e1c1163338dc745409332595389643c5ba5c3a9b3670ee67f5cf0265af97"
+        ]
+      }
+    },
+    {
+      "asked_as": "do the CMMS and syslog times of the stop agree",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "cmms.asset:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "syslog.host:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "syslog.host:PLC-C3",
+                  "kind": "machine"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        },
+        {
+          "arguments": {
+            "claim_id": "$support:Q7.C3",
+            "include_inferred": false
+          },
+          "tool": "neptune_why"
+        }
+      ],
+      "gaps": {},
+      "id": "Q7",
+      "supported": {
+        "Q7.C1": [
+          "claim:sha256:0218bc10bd9ed609a2078d9c21dfecc291b3b75e7ae3038629e4ee8667f75b0d",
+          "claim:sha256:26eba433dc9fe83f396f633231c5c06fbd03470f53a4cb95333c860d4eb848da",
+          "claim:sha256:3296e8fbd55d146096d79656c3f40d1a9dcf7d6f04a6f4cb563f555fe95b1cf4",
+          "claim:sha256:450ea37b6ede7bb69a8beb6165e503f8f4c2f12119fb6d4b47d0d7008f1d3039",
+          "claim:sha256:65297f1a00f7b7be21dddf9d1727c94d9f9244ec8d59aab3a60f02aa44be519a",
+          "claim:sha256:79209eb49219d6b440977f7a367f4509deb14001e2e3307fec51289756f1a8e2",
+          "claim:sha256:874862c50f9ac572e8753d0e66c964f31be6447ee18797966b46d6f32a282844",
+          "claim:sha256:8d2b2813bc1332880b6470c5aea707de0d4d7b3c64015696d0ed6f54c01547f9",
+          "claim:sha256:8fb8f3792e0dab042a7a7a89198787491cfa07db81d206aca6827269c53ba30f",
+          "claim:sha256:a9101dbf998fa2cd280eb6d66cce0eaa6764d7ce7bb75d23237d88257c616013",
+          "claim:sha256:e5c74d7130aa93efe8b79129cf6ce2f7fb454ab582acfbd0b238a12871f12814",
+          "claim:sha256:f55cae3665da11d8f43974c60c164acaecce98b644d10dc6aed82380e7f4a2a9"
+        ],
+        "Q7.C2": [
+          "claim:sha256:07d727d0d9a99bfd4fc95845f6b96168f946164265ae8b8accae007e94b06ff7",
+          "claim:sha256:456aac4b891b2a66e48aef87f4c35c1b9e69cbb9460b67953344748707824518",
+          "claim:sha256:5fbcb468095fc34825c63cc96c6ef41cef3712014678251a20db7df2c8bea7f5",
+          "claim:sha256:8749690a8bde2dafb1593c4b3c843b2be429d65f66630b0f88a1ffeae055923d",
+          "claim:sha256:8dfc7d44db5704c4bf6141b26fb087f5ee99c8509149ff33eef06973e718bfd5",
+          "claim:sha256:d3b110edf2ff9e37aa098f45765bbb87b14d089f9ce8f8c5e0f71e610f86ff55"
+        ],
+        "Q7.C3": [
+          "claim:sha256:884baccb7df2526412dba009bd431f4e04dba24768d03e1e4cc7e661fb6b913f"
+        ],
+        "Q7.C4": [
+          "claim:sha256:0218bc10bd9ed609a2078d9c21dfecc291b3b75e7ae3038629e4ee8667f75b0d",
+          "claim:sha256:07d727d0d9a99bfd4fc95845f6b96168f946164265ae8b8accae007e94b06ff7",
+          "claim:sha256:3296e8fbd55d146096d79656c3f40d1a9dcf7d6f04a6f4cb563f555fe95b1cf4",
+          "claim:sha256:456aac4b891b2a66e48aef87f4c35c1b9e69cbb9460b67953344748707824518",
+          "claim:sha256:5fbcb468095fc34825c63cc96c6ef41cef3712014678251a20db7df2c8bea7f5",
+          "claim:sha256:65297f1a00f7b7be21dddf9d1727c94d9f9244ec8d59aab3a60f02aa44be519a",
+          "claim:sha256:79209eb49219d6b440977f7a367f4509deb14001e2e3307fec51289756f1a8e2",
+          "claim:sha256:874862c50f9ac572e8753d0e66c964f31be6447ee18797966b46d6f32a282844",
+          "claim:sha256:8749690a8bde2dafb1593c4b3c843b2be429d65f66630b0f88a1ffeae055923d",
+          "claim:sha256:884baccb7df2526412dba009bd431f4e04dba24768d03e1e4cc7e661fb6b913f",
+          "claim:sha256:8dfc7d44db5704c4bf6141b26fb087f5ee99c8509149ff33eef06973e718bfd5",
+          "claim:sha256:d3b110edf2ff9e37aa098f45765bbb87b14d089f9ce8f8c5e0f71e610f86ff55",
+          "claim:sha256:f55cae3665da11d8f43974c60c164acaecce98b644d10dc6aed82380e7f4a2a9"
+        ]
+      }
+    },
+    {
+      "asked_as": "was the arm authorised to run",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 200,
+                "tokens": 200000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 2,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "manifest:ARM-3A",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "manifest:LEG-01",
+                  "kind": "machine"
+                },
+                {
+                  "declared_id": "manifest:PLANT-2",
+                  "kind": "site"
+                },
+                {
+                  "declared_id": "cmms.site:PLANT-2",
+                  "kind": "site"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        }
+      ],
+      "gaps": {
+        "Q8.C1": {
+          "in_graph": false,
+          "reason": "Deploy maps ENV-P2-01 as an authorisation_envelope whose approved configuration is not covered (the envelope register names none), and Memory states an envelope only as a configuration approved at a site, so no claim cites it."
+        },
+        "Q8.C2": {
+          "in_graph": false,
+          "reason": "Deploy maps ENV-P2-02 and ENV-P2-03 as authorisation_envelope records whose approved configuration is not covered, and Memory states an envelope only as a configuration approved at a site, so no claim cites them."
+        }
+      },
+      "id": "Q8",
+      "supported": {
+        "Q8.C3": [
+          "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+        ]
+      }
+    }
+  ]
+}

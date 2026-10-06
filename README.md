@@ -14,8 +14,40 @@ one morphology.
 
 ## Status
 
-Pre-alpha. The canonical contract (M1) is being built; nothing is usable yet. Execution plan lives in Linear
-(`Neptune — Robotics Ingestion Fabric`, milestones M1–M10). Decisions live in `docs/adr/`.
+**Demo v1 works.** `make demo` runs a messy two-site hand-over (an arm cell, an AMR fleet, a legged
+inspector; corpus `acceptance 2.1.0`) through every layer and answers its gold questions with cited claims.
+
+- **Real:** compiler ingest · Deploy's lifecycle and event-log mapping · the Ledger's catalog (embedded
+  PostgreSQL) · Memory's consolidation (byte-identical to its committed snapshot) · Context's local engine
+  and the `neptune` MCP server · Deploy's evidence-pack PDFs. CI runs all of it.
+- **Answered with citations:** "why did the arm-cell incident happen", "what changed since the last good
+  run" and the other six gold questions: 28 of 40 gold claims, each checked by the claim ids it cites.
+- **Not yet:** the other 12, pinned as gaps with the reason (`harness/acceptance/answers.json`): e-stops and
+  warnings inside bags (MVL-204), SOP and survey text, the stale config export's values, the envelope register.
+  No spatial baseline (MVL-135), no LeRobot export, no hosted service; pre-alpha APIs.
+
+## 15-minute quickstart
+
+On a laptop with `git`, `make` and `curl`, paste this into a terminal (CI runs the same lines as
+`scripts/quickstart.sh` on a clean machine, with a 15-minute limit):
+
+```bash
+command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && . "$HOME/.local/bin/env"; }
+[ -f harness/acceptance/gold.json ] || { git clone https://github.com/bennytay/neptune.git && cd neptune; }
+make setup
+make demo
+ls demo/*.pdf
+cp packages/neptune-context/claude/mcp.sample.json .mcp.json
+mkdir -p .claude/skills && cp -R packages/neptune-context/claude/skills/neptune .claude/skills/
+export NEPTUNE_MEMORY_GRAPH=demo/graph.json
+```
+
+1. Open `demo/incident-timeline-INC-C3-0011.pdf` (and `demo/configuration-traceability-ARM-3A.pdf`). Every line
+   cites the claims it rests on; `demo/answers.md` shows the gold questions answered through the MCP tools.
+2. Run `claude` in the same folder and approve the `neptune` server (`.mcp.json`; the skill is
+   `.claude/skills/neptune`). Ask: **"Why did the arm-cell incident INC-C3-0011 happen?"** and
+   **"What changed on ARM-3A since its last good run?"** Each fact comes back as `[I…][E…]` citations;
+   `neptune_why` on a claim shows its evidence.
 
 ## Principles in one breath
 
