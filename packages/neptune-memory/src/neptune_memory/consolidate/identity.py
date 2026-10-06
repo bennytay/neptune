@@ -4,7 +4,7 @@ One node per Ledger thread, keyed by its declared logical id; equal logical ids 
 packages are one thread, so one node. ``same_as`` only on three declared grounds, each cited: the
 compiler's ``IdentityLink`` with a ``Known`` right side (two ids co-declared, or one identifier
 both sides declare verbatim), configuration-lineage continuity, and a person's ``same_identity``
-assertion that no effective ``retract`` withdraws; and since version 3, a ``Machine`` record that
+assertion that no effective ``retract`` withdraws; and since version 4, a ``Machine`` record that
 declares one machine by several ids (a manifest entry's id and its aliases: ADR 0021). Everything
 else plausible is a
 ``same_as_candidate`` pair, one claim each way: every candidate of a link the compiler marked
