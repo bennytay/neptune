@@ -434,6 +434,7 @@ def _decoded(document: dict[str, Any]) -> Query:
 
 def query_from_arguments(tool: str, arguments: Mapping[str, Any]) -> Query:
     """The ``Query`` a packet tool call asks, or ``SdkError`` saying what is wrong with the call."""
+    check_shape(arguments)
     if tool == TOOL_QUERY:
         _only(arguments, {"include_inferred", "query"}, set())
         document = arguments["query"]

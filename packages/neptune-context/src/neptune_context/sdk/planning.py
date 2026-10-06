@@ -115,7 +115,7 @@ def _declared(node: NodeRef) -> Entity | None:
     return Entity(str(node.node_type), node.node_id)
 
 
-def entity_index(document: GraphDocument) -> DeclaredIdentifierIndex:
+def entity_index(document: GraphDocument) -> ListingIndex:
     """The declared identities a Memory graph document names, as an in-memory resolver.
 
     Every node that is a claim's subject or object counts, whatever the claim's kind: a

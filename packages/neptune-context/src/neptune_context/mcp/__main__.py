@@ -92,7 +92,8 @@ def _model(args: argparse.Namespace) -> ModelClient | None:
     return None
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line (the sample ``.mcp.json`` is checked against it)."""
     parser = argparse.ArgumentParser(
         prog="neptune_context.mcp", description=(__doc__ or "Neptune MCP server").split("\n")[0]
     )
@@ -112,7 +113,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="replay recorded planner responses (JSON Lines) instead of a live model",
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     try:
         if args.url is not None:
             client = AsyncClient(args.url, token=os.environ.get(TOKEN_ENV) or None)
