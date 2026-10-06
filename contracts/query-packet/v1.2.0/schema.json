@@ -1,0 +1,3706 @@
+{
+  "$defs": {
+    "ContextPacket": {
+      "$defs": {
+        "AdapterLocator": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "properties": {
+            "kind": {
+              "pattern": "^[a-z][a-z0-9_.\\-]*:[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "ArrowHandle": {
+          "additionalProperties": false,
+          "properties": {
+            "package_id": {
+              "$ref": "#/$defs/ContentId"
+            },
+            "path": {
+              "pattern": "^series/[0-9a-f]{64}\\.parquet$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "package_id",
+            "path"
+          ],
+          "type": "object"
+        },
+        "BudgetUse": {
+          "additionalProperties": false,
+          "properties": {
+            "dropped": {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exhausted": {
+              "items": {
+                "enum": [
+                  "bytes",
+                  "items",
+                  "tokens"
+                ]
+              },
+              "type": "array"
+            },
+            "limits": {
+              "additionalProperties": false,
+              "properties": {
+                "bytes": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "items": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "latency_ms": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "tokens": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "items"
+              ],
+              "type": "object"
+            },
+            "tokenizer": {
+              "const": "neptune-context.utf8-bytes-div-4/1"
+            },
+            "used": {
+              "additionalProperties": false,
+              "properties": {
+                "bytes": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "items": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "tokens": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bytes",
+                "items",
+                "tokens"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "dropped",
+            "exhausted",
+            "limits",
+            "tokenizer",
+            "used"
+          ],
+          "type": "object"
+        },
+        "ByteRange": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "byte_range"
+            },
+            "length": {
+              "type": "integer"
+            },
+            "offset": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "length",
+            "offset"
+          ],
+          "type": "object"
+        },
+        "ChannelHit": {
+          "additionalProperties": false,
+          "properties": {
+            "channel": {
+              "enum": [
+                "catalog",
+                "graph",
+                "lexical",
+                "spatial",
+                "vector"
+              ]
+            },
+            "rank": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "score": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "channel",
+            "rank",
+            "score"
+          ],
+          "type": "object"
+        },
+        "Claim": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "else": {
+                "properties": {
+                  "confidence": {
+                    "$ref": "#/$defs/NotApplicable"
+                  },
+                  "provenance": {
+                    "not": {
+                      "required": [
+                        "model"
+                      ]
+                    }
+                  }
+                }
+              },
+              "if": {
+                "properties": {
+                  "assertion_kind": {
+                    "const": "inferred"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "confidence": {
+                    "not": {
+                      "$ref": "#/$defs/NotApplicable"
+                    }
+                  },
+                  "provenance": {
+                    "required": [
+                      "model"
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "description": "subject predicate object over a valid interval, recorded at a Ledger transaction (ADR 0002 §2). id hashes everything but recorded_at, superseded_at, supersedes. An inferred claim names its model in provenance; an observed or stated one has confidence not_applicable and no model (ADR 0006 §3).",
+          "properties": {
+            "assertion_kind": {
+              "$ref": "#/$defs/ClaimAssertionKind"
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "id": {
+              "$ref": "#/$defs/ClaimId"
+            },
+            "object": {
+              "$ref": "#/$defs/ClaimObject"
+            },
+            "predicate": {
+              "$ref": "#/$defs/Token"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ClaimProvenance"
+            },
+            "recorded_at": {
+              "$ref": "#/$defs/LedgerTx"
+            },
+            "subject": {
+              "$ref": "#/$defs/NodeRef"
+            },
+            "superseded_at": {
+              "$ref": "#/$defs/TxEnd"
+            },
+            "supersedes": {
+              "items": {
+                "$ref": "#/$defs/ClaimId"
+              },
+              "type": "array"
+            },
+            "valid": {
+              "$ref": "#/$defs/Interval"
+            }
+          },
+          "required": [
+            "assertion_kind",
+            "confidence",
+            "id",
+            "object",
+            "predicate",
+            "provenance",
+            "recorded_at",
+            "subject",
+            "superseded_at",
+            "supersedes",
+            "valid"
+          ],
+          "type": "object"
+        },
+        "ClaimAssertionKind": {
+          "enum": [
+            "inferred",
+            "observed",
+            "stated"
+          ]
+        },
+        "ClaimId": {
+          "pattern": "^claim:sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "ClaimItem": {
+          "additionalProperties": false,
+          "description": "a Memory claim as known at as_of; the envelope repeats the claim's epistemics",
+          "properties": {
+            "assertion_kind": {
+              "enum": [
+                "inferred",
+                "observed",
+                "stated"
+              ]
+            },
+            "claim": {
+              "$ref": "#/$defs/Claim"
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "id": {
+              "pattern": "^item:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "claim"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ItemProvenance"
+            },
+            "relevance": {
+              "$ref": "#/$defs/Relevance"
+            }
+          },
+          "required": [
+            "assertion_kind",
+            "claim",
+            "confidence",
+            "id",
+            "kind",
+            "provenance",
+            "relevance"
+          ],
+          "type": "object"
+        },
+        "ClaimObject": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRef"
+            },
+            {
+              "$ref": "#/$defs/TypedLiteral"
+            },
+            {
+              "$ref": "#/$defs/LedgerRecordRef"
+            }
+          ]
+        },
+        "ClaimProvenance": {
+          "additionalProperties": false,
+          "properties": {
+            "config_hash": {
+              "$ref": "#/$defs/ConfigHash"
+            },
+            "consolidator_id": {
+              "$ref": "#/$defs/Token"
+            },
+            "consolidator_version": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/EvidenceRef"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "model": {
+              "$ref": "#/$defs/ModelRef"
+            },
+            "records": {
+              "items": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "config_hash",
+            "consolidator_id",
+            "consolidator_version",
+            "evidence",
+            "records"
+          ],
+          "type": "object"
+        },
+        "ClockAnchor": {
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/Timestamp"
+            },
+            "target": {
+              "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "source",
+            "target"
+          ],
+          "type": "object"
+        },
+        "ClockMap": {
+          "additionalProperties": false,
+          "description": "a clock mapping onto target as the evidence states it: target(t) = anchor.target + rate * (t - anchor.source), within residual_bound target ticks; or, composed, the chain of mapping records it follows (via: the clocks between) and no parameters of its own (ADR 0011 §2)",
+          "properties": {
+            "anchor": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/ClockAnchor"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_applicable",
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/ClockAnchor"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "chain": {
+              "items": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "type": "array"
+            },
+            "method": {
+              "enum": [
+                "co_sampled",
+                "composed",
+                "stated"
+              ]
+            },
+            "rate": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/Fraction"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_applicable",
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/Fraction"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "residual_bound": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/Duration"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_applicable",
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/Duration"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "target": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "via": {
+              "items": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "anchor",
+            "chain",
+            "method",
+            "rate",
+            "residual_bound",
+            "target",
+            "via"
+          ],
+          "type": "object"
+        },
+        "Confidence": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "not_applicable"
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "unknown"
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "ConfigHash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "ConfigurationItem": {
+          "additionalProperties": false,
+          "description": "a configuration record and what it configures",
+          "properties": {
+            "assertion_kind": {
+              "enum": [
+                "inferred",
+                "observed",
+                "stated"
+              ]
+            },
+            "claims": {
+              "items": {
+                "$ref": "#/$defs/ClaimId"
+              },
+              "type": "array"
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "id": {
+              "pattern": "^item:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "configuration"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ItemProvenance"
+            },
+            "record": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "record_kind": {
+              "pattern": "^[a-z][a-z0-9_.-]*$",
+              "type": "string"
+            },
+            "relevance": {
+              "$ref": "#/$defs/Relevance"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/NodeRef"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/NodeRef"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "assertion_kind",
+            "claims",
+            "confidence",
+            "id",
+            "kind",
+            "provenance",
+            "record",
+            "record_kind",
+            "relevance",
+            "subject"
+          ],
+          "type": "object"
+        },
+        "ContentId": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "ContextPacket": {
+          "additionalProperties": false,
+          "properties": {
+            "findings": {
+              "items": {
+                "$ref": "#/$defs/ResolutionFinding"
+              },
+              "type": "array"
+            },
+            "gaps": {
+              "items": {
+                "$ref": "#/$defs/Gap"
+              },
+              "type": "array"
+            },
+            "header": {
+              "$ref": "#/$defs/Header"
+            },
+            "id": {
+              "pattern": "^packet:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/Item"
+              },
+              "maxItems": 10000,
+              "type": "array"
+            },
+            "kind": {
+              "const": "context_packet"
+            },
+            "packet_version": {
+              "const": 1
+            },
+            "superseded_since": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "by": {
+                    "items": {
+                      "$ref": "#/$defs/ClaimId"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "claim": {
+                    "$ref": "#/$defs/ClaimId"
+                  },
+                  "superseded_at": {
+                    "$ref": "#/$defs/LedgerTx"
+                  }
+                },
+                "required": [
+                  "by",
+                  "claim",
+                  "superseded_at"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "trails": {
+              "items": {
+                "$ref": "#/$defs/Trail"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "findings",
+            "gaps",
+            "header",
+            "id",
+            "items",
+            "kind",
+            "packet_version",
+            "superseded_since"
+          ],
+          "type": "object"
+        },
+        "DiffPoint": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "tx": {
+                  "$ref": "#/$defs/LedgerTx"
+                }
+              },
+              "required": [
+                "tx"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "clock": {
+                  "$ref": "#/$defs/RecordId"
+                },
+                "ticks": {
+                  "maximum": 9223372036854775807,
+                  "minimum": -9223372036854775808,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "clock",
+                "ticks"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "DiffTrail": {
+          "additionalProperties": false,
+          "description": "what changed about a subject between two points (ADR 0010)",
+          "properties": {
+            "after": {
+              "$ref": "#/$defs/DiffPoint"
+            },
+            "at": {
+              "$ref": "#/$defs/TrailAt"
+            },
+            "before": {
+              "$ref": "#/$defs/DiffPoint"
+            },
+            "changes": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "after": {
+                    "items": {
+                      "$ref": "#/$defs/ClaimId"
+                    },
+                    "type": "array"
+                  },
+                  "before": {
+                    "items": {
+                      "$ref": "#/$defs/ClaimId"
+                    },
+                    "maxItems": 1,
+                    "type": "array"
+                  },
+                  "change": {
+                    "enum": [
+                      "closed",
+                      "opened",
+                      "superseded"
+                    ]
+                  },
+                  "predicate": {
+                    "enum": [
+                      "at_site",
+                      "at_site_candidate",
+                      "authorised_configuration",
+                      "clock_map",
+                      "co_occurs_within",
+                      "configuration_active_during",
+                      "configuration_candidate",
+                      "configuration_unknown",
+                      "continues",
+                      "continues_candidate",
+                      "declared_kind",
+                      "deployed_at",
+                      "ends_at",
+                      "ends_at_candidate",
+                      "episode_of",
+                      "event_kind",
+                      "evidenced_by",
+                      "executes_task",
+                      "executes_task_candidate",
+                      "governed_by",
+                      "has_calibration",
+                      "has_clock",
+                      "has_configuration",
+                      "has_description",
+                      "has_member",
+                      "has_name",
+                      "has_summary",
+                      "in_zone",
+                      "in_zone_candidate",
+                      "intervened",
+                      "intervened_candidate",
+                      "involves",
+                      "involves_candidate",
+                      "located_at",
+                      "maintenance_state",
+                      "maps_to",
+                      "member_of_fleet",
+                      "mounted_on",
+                      "not_covered_by_authorisation",
+                      "operated_by",
+                      "outcome",
+                      "part_of_programme",
+                      "rated_payload",
+                      "recorded_by",
+                      "recorded_by_candidate",
+                      "runs_model",
+                      "runs_software",
+                      "same_as",
+                      "same_as_candidate",
+                      "starts_at",
+                      "stated_severity",
+                      "succeeds",
+                      "zone_of"
+                    ]
+                  }
+                },
+                "required": [
+                  "after",
+                  "before",
+                  "change",
+                  "predicate"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "diff"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/NodeRef"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
+            },
+            "subject": {
+              "$ref": "#/$defs/NodeRef"
+            }
+          },
+          "required": [
+            "after",
+            "at",
+            "before",
+            "changes",
+            "kind",
+            "nodes",
+            "subject"
+          ],
+          "type": "object"
+        },
+        "DocumentSpanItem": {
+          "additionalProperties": false,
+          "description": "a span of a document or table record and its extracted text",
+          "properties": {
+            "assertion_kind": {
+              "enum": [
+                "inferred",
+                "observed",
+                "stated"
+              ]
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "document": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "evidence": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "id": {
+              "pattern": "^item:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "document_span"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ItemProvenance"
+            },
+            "relevance": {
+              "$ref": "#/$defs/Relevance"
+            },
+            "text": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "assertion_kind",
+            "confidence",
+            "document",
+            "evidence",
+            "id",
+            "kind",
+            "provenance",
+            "relevance",
+            "text"
+          ],
+          "type": "object"
+        },
+        "Duration": {
+          "additionalProperties": false,
+          "properties": {
+            "domain_id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "ticks": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "domain_id",
+            "ticks"
+          ],
+          "type": "object"
+        },
+        "EvidenceItem": {
+          "additionalProperties": false,
+          "description": "source bytes and what the Ledger's resolve said at the snapshot",
+          "properties": {
+            "assertion_kind": {
+              "enum": [
+                "inferred",
+                "observed",
+                "stated"
+              ]
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "evidence": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "id": {
+              "pattern": "^item:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "evidence"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ItemProvenance"
+            },
+            "relevance": {
+              "$ref": "#/$defs/Relevance"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "maximum": 9223372036854775807,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "maximum": 9223372036854775807,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "status": {
+              "enum": [
+                "resolved",
+                "unresolvable"
+              ]
+            }
+          },
+          "required": [
+            "assertion_kind",
+            "confidence",
+            "evidence",
+            "id",
+            "kind",
+            "provenance",
+            "relevance",
+            "size",
+            "status"
+          ],
+          "type": "object"
+        },
+        "EvidenceRef": {
+          "additionalProperties": false,
+          "properties": {
+            "locator": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ByteRange"
+                  },
+                  {
+                    "$ref": "#/$defs/RecordRange"
+                  },
+                  {
+                    "$ref": "#/$defs/Page"
+                  },
+                  {
+                    "$ref": "#/$defs/PageRegion"
+                  },
+                  {
+                    "$ref": "#/$defs/Span"
+                  },
+                  {
+                    "$ref": "#/$defs/Row"
+                  },
+                  {
+                    "$ref": "#/$defs/RowCell"
+                  },
+                  {
+                    "$ref": "#/$defs/ImageRegion"
+                  },
+                  {
+                    "$ref": "#/$defs/VideoFrame"
+                  },
+                  {
+                    "$ref": "#/$defs/JsonPointer"
+                  },
+                  {
+                    "$ref": "#/$defs/FrameLocator"
+                  },
+                  {
+                    "$ref": "#/$defs/ObjectLocator"
+                  },
+                  {
+                    "$ref": "#/$defs/AdapterLocator"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContentId"
+                },
+                {
+                  "$ref": "#/$defs/ExternalObjectRef"
+                }
+              ]
+            }
+          },
+          "required": [
+            "locator",
+            "source"
+          ],
+          "type": "object"
+        },
+        "ExternalObjectRef": {
+          "additionalProperties": false,
+          "properties": {
+            "connector_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "external"
+            },
+            "object_id": {
+              "type": "string"
+            },
+            "revision_token": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "connector_id",
+            "kind",
+            "object_id",
+            "revision_token"
+          ],
+          "type": "object"
+        },
+        "FindingCode": {
+          "enum": [
+            "clock_mismatch",
+            "overridden_on_arrival"
+          ]
+        },
+        "FindingId": {
+          "pattern": "^finding:sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "FindingProvenance": {
+          "additionalProperties": false,
+          "properties": {
+            "config_hash": {
+              "$ref": "#/$defs/ConfigHash"
+            },
+            "resolver_id": {
+              "$ref": "#/$defs/Token"
+            },
+            "resolver_version": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "config_hash",
+            "resolver_id",
+            "resolver_version"
+          ],
+          "type": "object"
+        },
+        "Fraction": {
+          "additionalProperties": false,
+          "properties": {
+            "denominator": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "numerator": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "denominator",
+            "numerator"
+          ],
+          "type": "object"
+        },
+        "FrameItem": {
+          "additionalProperties": false,
+          "description": "one sensor sample at one instant",
+          "properties": {
+            "assertion_kind": {
+              "enum": [
+                "inferred",
+                "observed",
+                "stated"
+              ]
+            },
+            "at": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/Timestamp"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/Timestamp"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "encoding": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "evidence": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "frame": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/FrameRef"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/FrameRef"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "id": {
+              "pattern": "^item:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "frame"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ItemProvenance"
+            },
+            "relevance": {
+              "$ref": "#/$defs/Relevance"
+            },
+            "stream": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/RecordId"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/RecordId"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "assertion_kind",
+            "at",
+            "confidence",
+            "encoding",
+            "evidence",
+            "frame",
+            "id",
+            "kind",
+            "provenance",
+            "relevance",
+            "stream"
+          ],
+          "type": "object"
+        },
+        "FrameLocator": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "frame"
+            },
+            "ref": {
+              "$ref": "#/$defs/FrameRef"
+            }
+          },
+          "required": [
+            "kind",
+            "ref"
+          ],
+          "type": "object"
+        },
+        "FrameRef": {
+          "additionalProperties": false,
+          "properties": {
+            "frame_graph_id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "frame_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "frame_graph_id",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "Gap": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "pattern": "^(/.*)?$",
+              "type": "string"
+            },
+            "channel": {
+              "enum": [
+                "catalog",
+                "graph",
+                "lexical",
+                "spatial",
+                "vector"
+              ]
+            },
+            "code": {
+              "enum": [
+                "ambiguous",
+                "inferred_withheld",
+                "not_covered",
+                "other_clock",
+                "unknown",
+                "unresolvable"
+              ]
+            },
+            "detail": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "refs": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "at",
+            "code",
+            "detail",
+            "refs"
+          ],
+          "type": "object"
+        },
+        "Header": {
+          "additionalProperties": false,
+          "properties": {
+            "as_of": {
+              "$ref": "#/$defs/LedgerTx"
+            },
+            "budget": {
+              "$ref": "#/$defs/BudgetUse"
+            },
+            "during": {
+              "additionalProperties": false,
+              "properties": {
+                "domain_id": {
+                  "$ref": "#/$defs/RecordId"
+                },
+                "end": {
+                  "anyOf": [
+                    {
+                      "maximum": 9223372036854775807,
+                      "minimum": -9223372036854775808,
+                      "type": "integer"
+                    },
+                    {
+                      "const": "open"
+                    }
+                  ]
+                },
+                "start": {
+                  "maximum": 9223372036854775807,
+                  "minimum": -9223372036854775808,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "domain_id",
+                "end",
+                "start"
+              ],
+              "type": "object"
+            },
+            "head": {
+              "$ref": "#/$defs/LedgerTx"
+            },
+            "inference_included": {
+              "type": "boolean"
+            },
+            "ledger_snapshot": {
+              "additionalProperties": false,
+              "properties": {
+                "catalog_api_version": {
+                  "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "catalog_api_version"
+              ],
+              "type": "object"
+            },
+            "memory_snapshot": {
+              "additionalProperties": false,
+              "properties": {
+                "as_of": {
+                  "$ref": "#/$defs/LedgerTx"
+                },
+                "generation": {
+                  "$ref": "#/$defs/ConfigHash"
+                },
+                "graph_schema_version": {
+                  "maximum": 9223372036854775807,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "as_of",
+                "generation",
+                "graph_schema_version"
+              ],
+              "type": "object"
+            },
+            "produced_by": {
+              "additionalProperties": false,
+              "properties": {
+                "config_hash": {
+                  "$ref": "#/$defs/ConfigHash"
+                },
+                "engine_id": {
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "engine_version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "config_hash",
+                "engine_id",
+                "engine_version"
+              ],
+              "type": "object"
+            },
+            "query_id": {
+              "pattern": "^query:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "as_of",
+            "budget",
+            "head",
+            "inference_included",
+            "ledger_snapshot",
+            "memory_snapshot",
+            "produced_by",
+            "query_id"
+          ],
+          "type": "object"
+        },
+        "ImageRegion": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "image_region"
+            },
+            "x0": {
+              "type": "integer"
+            },
+            "x1": {
+              "type": "integer"
+            },
+            "y0": {
+              "type": "integer"
+            },
+            "y1": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "x0",
+            "x1",
+            "y0",
+            "y1"
+          ],
+          "type": "object"
+        },
+        "Interval": {
+          "additionalProperties": false,
+          "properties": {
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Timestamp"
+                },
+                {
+                  "const": "open"
+                }
+              ]
+            },
+            "start": {
+              "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "end",
+            "start"
+          ],
+          "type": "object"
+        },
+        "Item": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ClaimItem"
+            },
+            {
+              "$ref": "#/$defs/ConfigurationItem"
+            },
+            {
+              "$ref": "#/$defs/DocumentSpanItem"
+            },
+            {
+              "$ref": "#/$defs/EvidenceItem"
+            },
+            {
+              "$ref": "#/$defs/FrameItem"
+            },
+            {
+              "$ref": "#/$defs/SceneItem"
+            },
+            {
+              "$ref": "#/$defs/SeriesWindowItem"
+            }
+          ]
+        },
+        "ItemProvenance": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/EvidenceRef"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "model": {
+              "$ref": "#/$defs/ModelRef"
+            },
+            "records": {
+              "items": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "type": "array"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "config_hash": {
+                  "$ref": "#/$defs/ConfigHash"
+                },
+                "producer_id": {
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "producer_version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "config_hash",
+                "producer_id",
+                "producer_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "evidence",
+            "records",
+            "transform"
+          ],
+          "type": "object"
+        },
+        "JsonPointer": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "json_pointer"
+            },
+            "pointer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pointer"
+          ],
+          "type": "object"
+        },
+        "LedgerRecordRef": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "record"
+            },
+            "record_id": {
+              "$ref": "#/$defs/RecordId"
+            }
+          },
+          "required": [
+            "kind",
+            "record_id"
+          ],
+          "type": "object"
+        },
+        "LedgerTx": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ModelRef": {
+          "additionalProperties": false,
+          "properties": {
+            "model_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "model_version": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "model_id",
+            "model_version"
+          ],
+          "type": "object"
+        },
+        "NodeRef": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "node"
+            },
+            "node_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "node_type": {
+              "$ref": "#/$defs/NodeType"
+            }
+          },
+          "required": [
+            "kind",
+            "node_id",
+            "node_type"
+          ],
+          "type": "object"
+        },
+        "NodeType": {
+          "enum": [
+            "asset",
+            "clock",
+            "configuration",
+            "deployment",
+            "document",
+            "episode",
+            "event",
+            "fleet",
+            "machine",
+            "model_version",
+            "person",
+            "policy",
+            "programme",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ]
+        },
+        "NonFinite": {
+          "additionalProperties": false,
+          "properties": {
+            "non_finite": {
+              "enum": [
+                "nan",
+                "inf",
+                "-inf"
+              ]
+            }
+          },
+          "required": [
+            "non_finite"
+          ],
+          "type": "object"
+        },
+        "NotApplicable": {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        "ObjectLocator": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "object"
+            },
+            "object_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "object_id"
+          ],
+          "type": "object"
+        },
+        "Page": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "type": "integer"
+            },
+            "kind": {
+              "const": "page"
+            }
+          },
+          "required": [
+            "index",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "PageRegion": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "page_region"
+            },
+            "page": {
+              "type": "integer"
+            },
+            "x0": {
+              "type": "number"
+            },
+            "x1": {
+              "type": "number"
+            },
+            "y0": {
+              "type": "number"
+            },
+            "y1": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "page",
+            "x0",
+            "x1",
+            "y0",
+            "y1"
+          ],
+          "type": "object"
+        },
+        "RecordId": {
+          "pattern": "^rec:sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "RecordRange": {
+          "additionalProperties": false,
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "domain_id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "end": {
+              "type": "integer"
+            },
+            "kind": {
+              "const": "record_range"
+            },
+            "start": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "channel",
+            "domain_id",
+            "end",
+            "kind",
+            "start"
+          ],
+          "type": "object"
+        },
+        "Relevance": {
+          "additionalProperties": false,
+          "properties": {
+            "hits": {
+              "items": {
+                "$ref": "#/$defs/ChannelHit"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "score": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "hits",
+            "score"
+          ],
+          "type": "object"
+        },
+        "ResolutionFinding": {
+          "additionalProperties": false,
+          "description": "a resolver finding, bi-temporal like a claim; id hashes code, claim, others and provenance (ADR 0006 §5)",
+          "properties": {
+            "claim": {
+              "$ref": "#/$defs/ClaimId"
+            },
+            "code": {
+              "$ref": "#/$defs/FindingCode"
+            },
+            "id": {
+              "$ref": "#/$defs/FindingId"
+            },
+            "others": {
+              "items": {
+                "$ref": "#/$defs/ClaimId"
+              },
+              "type": "array"
+            },
+            "provenance": {
+              "$ref": "#/$defs/FindingProvenance"
+            },
+            "recorded_at": {
+              "$ref": "#/$defs/LedgerTx"
+            },
+            "superseded_at": {
+              "$ref": "#/$defs/TxEnd"
+            }
+          },
+          "required": [
+            "claim",
+            "code",
+            "id",
+            "others",
+            "provenance",
+            "recorded_at",
+            "superseded_at"
+          ],
+          "type": "object"
+        },
+        "Row": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "row"
+            },
+            "row": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "row"
+          ],
+          "type": "object"
+        },
+        "RowCell": {
+          "additionalProperties": false,
+          "properties": {
+            "column": {
+              "type": "integer"
+            },
+            "column_name": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "row_cell"
+            },
+            "row": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "column",
+            "kind",
+            "row"
+          ],
+          "type": "object"
+        },
+        "SceneItem": {
+          "additionalProperties": false,
+          "description": "a spatial subgraph in one named frame",
+          "properties": {
+            "assertion_kind": {
+              "enum": [
+                "inferred",
+                "observed",
+                "stated"
+              ]
+            },
+            "claims": {
+              "items": {
+                "$ref": "#/$defs/ClaimId"
+              },
+              "type": "array"
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "frame": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "id": {
+              "pattern": "^item:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "scene"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/NodeRef"
+              },
+              "type": "array"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ItemProvenance"
+            },
+            "records": {
+              "items": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "type": "array"
+            },
+            "relevance": {
+              "$ref": "#/$defs/Relevance"
+            },
+            "site": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/NodeRef"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "enum": [
+                        "not_covered",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "knowledge"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "candidates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "$ref": "#/$defs/NodeRef"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "knowledge": {
+                      "const": "ambiguous"
+                    }
+                  },
+                  "required": [
+                    "candidates",
+                    "knowledge"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "assertion_kind",
+            "claims",
+            "confidence",
+            "frame",
+            "id",
+            "kind",
+            "nodes",
+            "provenance",
+            "records",
+            "relevance",
+            "site"
+          ],
+          "type": "object"
+        },
+        "SeriesWindowItem": {
+          "additionalProperties": false,
+          "description": "a window [start, end) of one stream on one of its clocks",
+          "properties": {
+            "arrow": {
+              "$ref": "#/$defs/ArrowHandle"
+            },
+            "assertion_kind": {
+              "enum": [
+                "inferred",
+                "observed",
+                "stated"
+              ]
+            },
+            "clock": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            },
+            "end": {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
+            },
+            "id": {
+              "pattern": "^item:sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "series_window"
+            },
+            "provenance": {
+              "$ref": "#/$defs/ItemProvenance"
+            },
+            "relevance": {
+              "$ref": "#/$defs/Relevance"
+            },
+            "start": {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
+            },
+            "stream": {
+              "$ref": "#/$defs/RecordId"
+            }
+          },
+          "required": [
+            "arrow",
+            "assertion_kind",
+            "clock",
+            "confidence",
+            "end",
+            "id",
+            "kind",
+            "provenance",
+            "relevance",
+            "start",
+            "stream"
+          ],
+          "type": "object"
+        },
+        "Span": {
+          "additionalProperties": false,
+          "properties": {
+            "end": {
+              "type": "integer"
+            },
+            "kind": {
+              "const": "span"
+            },
+            "start": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "end",
+            "kind",
+            "start"
+          ],
+          "type": "object"
+        },
+        "Timestamp": {
+          "additionalProperties": false,
+          "properties": {
+            "domain_id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "ticks": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "domain_id",
+            "ticks"
+          ],
+          "type": "object"
+        },
+        "Token": {
+          "pattern": "^[a-z][a-z0-9_.\\-]*$",
+          "type": "string"
+        },
+        "Trail": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DiffTrail"
+            },
+            {
+              "$ref": "#/$defs/WhyTrail"
+            }
+          ]
+        },
+        "TrailAt": {
+          "pattern": "^/explain/(0|[1-9][0-9]?)$",
+          "type": "string"
+        },
+        "TxEnd": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LedgerTx"
+            },
+            {
+              "const": "open"
+            }
+          ]
+        },
+        "TypedLiteral": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "datatype": {
+                  "const": "text"
+                },
+                "kind": {
+                  "const": "literal"
+                },
+                "unit": {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "datatype",
+                "kind",
+                "unit",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "datatype": {
+                  "const": "integer"
+                },
+                "kind": {
+                  "const": "literal"
+                },
+                "unit": {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                "value": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "datatype",
+                "kind",
+                "unit",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "datatype": {
+                  "const": "real"
+                },
+                "kind": {
+                  "const": "literal"
+                },
+                "unit": {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "$ref": "#/$defs/NonFinite"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "datatype",
+                "kind",
+                "unit",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "datatype": {
+                  "const": "boolean"
+                },
+                "kind": {
+                  "const": "literal"
+                },
+                "unit": {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                "value": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "datatype",
+                "kind",
+                "unit",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "datatype": {
+                  "const": "quantity"
+                },
+                "kind": {
+                  "const": "literal"
+                },
+                "unit": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "knowledge": {
+                          "const": "known"
+                        },
+                        "value": {
+                          "$ref": "#/$defs/Unit"
+                        }
+                      },
+                      "required": [
+                        "knowledge",
+                        "value"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "knowledge": {
+                          "const": "unknown"
+                        }
+                      },
+                      "required": [
+                        "knowledge"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "candidates": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "value": {
+                                "$ref": "#/$defs/Unit"
+                              }
+                            },
+                            "required": [
+                              "value"
+                            ],
+                            "type": "object"
+                          },
+                          "minItems": 2,
+                          "type": "array"
+                        },
+                        "knowledge": {
+                          "const": "ambiguous"
+                        }
+                      },
+                      "required": [
+                        "candidates",
+                        "knowledge"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "a quantity's unit exactly as declared; it inherits the claim's provenance"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "$ref": "#/$defs/NonFinite"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "datatype",
+                "kind",
+                "unit",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "datatype": {
+                  "const": "instant"
+                },
+                "kind": {
+                  "const": "literal"
+                },
+                "unit": {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                "value": {
+                  "$ref": "#/$defs/Timestamp"
+                }
+              },
+              "required": [
+                "datatype",
+                "kind",
+                "unit",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "datatype": {
+                  "const": "clock_map"
+                },
+                "kind": {
+                  "const": "literal"
+                },
+                "unit": {
+                  "$ref": "#/$defs/NotApplicable"
+                },
+                "value": {
+                  "$ref": "#/$defs/ClockMap"
+                }
+              },
+              "required": [
+                "datatype",
+                "kind",
+                "unit",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "Unit": {
+          "description": "a catalogued unit's canonical symbol (ADR 0013)",
+          "type": "string"
+        },
+        "VideoFrame": {
+          "additionalProperties": false,
+          "properties": {
+            "domain_id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "index": {
+              "type": "integer"
+            },
+            "kind": {
+              "const": "video_frame"
+            },
+            "pts": {
+              "type": "integer"
+            },
+            "track": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "domain_id",
+            "index",
+            "kind",
+            "pts",
+            "track"
+          ],
+          "type": "object"
+        },
+        "WhyTrail": {
+          "additionalProperties": false,
+          "description": "why memory holds one claim: a tree of claims and evidence (ADR 0010)",
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/TrailAt"
+            },
+            "claim": {
+              "$ref": "#/$defs/ClaimId"
+            },
+            "kind": {
+              "const": "why"
+            },
+            "steps": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "assertion_kind": {
+                    "enum": [
+                      "inferred",
+                      "observed",
+                      "stated"
+                    ]
+                  },
+                  "claim": {
+                    "$ref": "#/$defs/ClaimId"
+                  },
+                  "depth": {
+                    "maximum": 8,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "evidence": {
+                    "items": {
+                      "$ref": "#/$defs/EvidenceRef"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "finding": {
+                    "$ref": "#/$defs/FindingId"
+                  },
+                  "parent": {
+                    "$ref": "#/$defs/ClaimId"
+                  },
+                  "relation": {
+                    "enum": [
+                      "alternative",
+                      "conflicts",
+                      "corroborates",
+                      "root"
+                    ]
+                  },
+                  "repeat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "assertion_kind",
+                  "claim",
+                  "depth",
+                  "evidence",
+                  "relation",
+                  "repeat"
+                ],
+                "type": "object"
+              },
+              "maxItems": 256,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "at",
+            "claim",
+            "kind",
+            "steps"
+          ],
+          "type": "object"
+        }
+      },
+      "$id": "urn:neptune:schema:context-packet:1",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContextPacket"
+        }
+      ],
+      "description": "Neptune Context's context packet (neptune-context ADR 0003): a header, items, claims superseded since as_of, resolver findings, gaps and, for explain clauses, trails (ADR 0010). Claims, findings and the compiler types they reuse are copied from Memory's graph-schema export. Generated from neptune_context.packets; the Python reader in neptune_context.packets.codec is stricter (ids, budgets and cross-references are recomputed).",
+      "title": "Neptune Context packet, version 1"
+    },
+    "Query": {
+      "$defs": {
+        "Box": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "box"
+            },
+            "max": {
+              "$ref": "#/$defs/Vec3"
+            },
+            "min": {
+              "$ref": "#/$defs/Vec3"
+            }
+          },
+          "required": [
+            "kind",
+            "max",
+            "min"
+          ],
+          "type": "object"
+        },
+        "Budget": {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "maximum": 67108864,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "items": {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "latency_ms": {
+              "maximum": 600000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "tokens": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "items"
+          ],
+          "type": "object"
+        },
+        "CivilClock": {
+          "additionalProperties": false,
+          "properties": {
+            "epoch": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "civil"
+            },
+            "resolution": {
+              "$ref": "#/$defs/Resolution"
+            },
+            "timescale": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "epoch",
+            "kind",
+            "resolution",
+            "timescale"
+          ],
+          "type": "object"
+        },
+        "ClaimId": {
+          "pattern": "^claim:sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "Clock": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DomainClock"
+            },
+            {
+              "$ref": "#/$defs/CivilClock"
+            }
+          ]
+        },
+        "ClockBridge": {
+          "additionalProperties": false,
+          "properties": {
+            "mapping_id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "source": {
+              "$ref": "#/$defs/Clock"
+            },
+            "target": {
+              "$ref": "#/$defs/Clock"
+            }
+          },
+          "required": [
+            "mapping_id",
+            "source",
+            "target"
+          ],
+          "type": "object"
+        },
+        "DeclaredId": {
+          "pattern": "^[a-z][a-z0-9_.\\-]*:[\\s\\S]+$",
+          "type": "string"
+        },
+        "Diff": {
+          "additionalProperties": false,
+          "properties": {
+            "after": {
+              "$ref": "#/$defs/DiffPoint"
+            },
+            "before": {
+              "$ref": "#/$defs/DiffPoint"
+            },
+            "kind": {
+              "const": "diff"
+            },
+            "subject": {
+              "$ref": "#/$defs/Subject"
+            }
+          },
+          "required": [
+            "after",
+            "before",
+            "kind",
+            "subject"
+          ],
+          "type": "object"
+        },
+        "DiffPoint": {
+          "oneOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "$ref": "#/$defs/Instant"
+            }
+          ]
+        },
+        "DomainClock": {
+          "additionalProperties": false,
+          "properties": {
+            "domain_id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "kind": {
+              "const": "domain"
+            }
+          },
+          "required": [
+            "domain_id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "During": {
+          "additionalProperties": false,
+          "properties": {
+            "clock": {
+              "$ref": "#/$defs/Clock"
+            },
+            "end": {
+              "oneOf": [
+                {
+                  "maximum": 9223372036854775807,
+                  "minimum": -9223372036854775808,
+                  "type": "integer"
+                },
+                {
+                  "const": "open"
+                }
+              ]
+            },
+            "start": {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "clock",
+            "end",
+            "start"
+          ],
+          "type": "object"
+        },
+        "Explain": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Why"
+            },
+            {
+              "$ref": "#/$defs/Diff"
+            }
+          ]
+        },
+        "FrameBridge": {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "transform_id": {
+              "$ref": "#/$defs/RecordId"
+            }
+          },
+          "required": [
+            "child",
+            "parent",
+            "transform_id"
+          ],
+          "type": "object"
+        },
+        "FrameRef": {
+          "additionalProperties": false,
+          "properties": {
+            "frame_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "graph_id": {
+              "$ref": "#/$defs/RecordId"
+            }
+          },
+          "required": [
+            "frame_id",
+            "graph_id"
+          ],
+          "type": "object"
+        },
+        "Graph": {
+          "additionalProperties": false,
+          "properties": {
+            "direction": {
+              "enum": [
+                "both",
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            "hops": {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "predicates": {
+              "oneOf": [
+                {
+                  "const": "any"
+                },
+                {
+                  "items": {
+                    "enum": [
+                      "at_site",
+                      "at_site_candidate",
+                      "authorised_configuration",
+                      "clock_map",
+                      "co_occurs_within",
+                      "configuration_active_during",
+                      "configuration_candidate",
+                      "configuration_unknown",
+                      "continues",
+                      "continues_candidate",
+                      "declared_kind",
+                      "deployed_at",
+                      "ends_at",
+                      "ends_at_candidate",
+                      "episode_of",
+                      "event_kind",
+                      "evidenced_by",
+                      "executes_task",
+                      "executes_task_candidate",
+                      "governed_by",
+                      "has_calibration",
+                      "has_clock",
+                      "has_configuration",
+                      "has_description",
+                      "has_member",
+                      "has_name",
+                      "has_summary",
+                      "in_zone",
+                      "in_zone_candidate",
+                      "intervened",
+                      "intervened_candidate",
+                      "involves",
+                      "involves_candidate",
+                      "located_at",
+                      "maintenance_state",
+                      "maps_to",
+                      "member_of_fleet",
+                      "mounted_on",
+                      "not_covered_by_authorisation",
+                      "operated_by",
+                      "outcome",
+                      "part_of_programme",
+                      "rated_payload",
+                      "recorded_by",
+                      "recorded_by_candidate",
+                      "runs_model",
+                      "runs_software",
+                      "same_as",
+                      "same_as_candidate",
+                      "starts_at",
+                      "stated_severity",
+                      "succeeds",
+                      "zone_of"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 53,
+                  "minItems": 1,
+                  "type": "array",
+                  "uniqueItems": true
+                }
+              ]
+            }
+          },
+          "required": [
+            "direction",
+            "hops",
+            "predicates"
+          ],
+          "type": "object"
+        },
+        "Instant": {
+          "additionalProperties": false,
+          "properties": {
+            "clock": {
+              "$ref": "#/$defs/Clock"
+            },
+            "ticks": {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "clock",
+            "ticks"
+          ],
+          "type": "object"
+        },
+        "Query": {
+          "additionalProperties": false,
+          "properties": {
+            "as_of": {
+              "oneOf": [
+                {
+                  "const": "head"
+                },
+                {
+                  "maximum": 9223372036854775807,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ]
+            },
+            "budget": {
+              "$ref": "#/$defs/Budget"
+            },
+            "clock_bridges": {
+              "items": {
+                "$ref": "#/$defs/ClockBridge"
+              },
+              "maxItems": 16,
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "during": {
+              "$ref": "#/$defs/During"
+            },
+            "explain": {
+              "items": {
+                "$ref": "#/$defs/Explain"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            "frame_bridges": {
+              "items": {
+                "$ref": "#/$defs/FrameBridge"
+              },
+              "maxItems": 16,
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "graph": {
+              "$ref": "#/$defs/Graph"
+            },
+            "include_inferred": {
+              "type": "boolean"
+            },
+            "query_version": {
+              "const": 1
+            },
+            "regions": {
+              "items": {
+                "$ref": "#/$defs/Region"
+              },
+              "maxItems": 16,
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "site": {
+              "$ref": "#/$defs/Site"
+            },
+            "subjects": {
+              "items": {
+                "$ref": "#/$defs/Subject"
+              },
+              "maxItems": 64,
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "text": {
+              "$ref": "#/$defs/Text"
+            }
+          },
+          "required": [
+            "as_of",
+            "budget",
+            "clock_bridges",
+            "explain",
+            "frame_bridges",
+            "include_inferred",
+            "query_version",
+            "regions",
+            "subjects"
+          ],
+          "type": "object"
+        },
+        "QueryId": {
+          "pattern": "^query:sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "RecordId": {
+          "pattern": "^rec:sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "Region": {
+          "additionalProperties": false,
+          "properties": {
+            "frame": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "shape": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Box"
+                },
+                {
+                  "$ref": "#/$defs/Sphere"
+                }
+              ]
+            },
+            "unit": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "frame",
+            "shape",
+            "unit"
+          ],
+          "type": "object"
+        },
+        "Resolution": {
+          "additionalProperties": false,
+          "properties": {
+            "denominator": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "numerator": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "denominator",
+            "numerator"
+          ],
+          "type": "object"
+        },
+        "Site": {
+          "additionalProperties": false,
+          "properties": {
+            "site": {
+              "$ref": "#/$defs/DeclaredId"
+            },
+            "zones": {
+              "items": {
+                "$ref": "#/$defs/DeclaredId"
+              },
+              "maxItems": 64,
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "site",
+            "zones"
+          ],
+          "type": "object"
+        },
+        "Sphere": {
+          "additionalProperties": false,
+          "properties": {
+            "center": {
+              "$ref": "#/$defs/Vec3"
+            },
+            "kind": {
+              "const": "sphere"
+            },
+            "radius": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "center",
+            "kind",
+            "radius"
+          ],
+          "type": "object"
+        },
+        "Subject": {
+          "additionalProperties": false,
+          "properties": {
+            "declared_id": {
+              "$ref": "#/$defs/DeclaredId"
+            },
+            "kind": {
+              "enum": [
+                "asset",
+                "clock",
+                "configuration",
+                "deployment",
+                "document",
+                "episode",
+                "event",
+                "fleet",
+                "machine",
+                "model_version",
+                "person",
+                "policy",
+                "programme",
+                "run",
+                "sensor",
+                "site",
+                "software_version",
+                "stream",
+                "task",
+                "zone"
+              ],
+              "type": "string"
+            },
+            "same_as_depth": {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "same_as_depth"
+          ],
+          "type": "object"
+        },
+        "Text": {
+          "additionalProperties": false,
+          "properties": {
+            "channels": {
+              "items": {
+                "enum": [
+                  "lexical",
+                  "vector"
+                ],
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "fields": {
+              "items": {
+                "enum": [
+                  "claim_text",
+                  "declared_id",
+                  "document",
+                  "finding",
+                  "record"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "text": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "channels",
+            "fields",
+            "text"
+          ],
+          "type": "object"
+        },
+        "Vec3": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "Why": {
+          "additionalProperties": false,
+          "properties": {
+            "claim_id": {
+              "$ref": "#/$defs/ClaimId"
+            },
+            "kind": {
+              "const": "why"
+            }
+          },
+          "required": [
+            "claim_id",
+            "kind"
+          ],
+          "type": "object"
+        }
+      },
+      "$id": "urn:neptune:schema:query:1",
+      "$ref": "#/$defs/Query",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Neptune context query, query_version 1"
+    }
+  },
+  "$id": "urn:neptune:schema:query-packet:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Query"
+    },
+    {
+      "$ref": "#/$defs/ContextPacket"
+    }
+  ],
+  "description": "Neptune Context's query-packet contract: a query document (#/$defs/Query, neptune-context ADR 0002) or a context packet (#/$defs/ContextPacket, ADR 0003). Each half is its own schema resource, exported verbatim; the Python readers (neptune_context.contract.loads and decode_packet) are stricter.",
+  "title": "Neptune query-packet 1 (query_version 1, packet_version 1)"
+}
