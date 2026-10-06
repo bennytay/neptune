@@ -84,8 +84,9 @@ mistake a template can make, so the rule is fixed here before any template needs
    corpus change fails until the fixture is regenerated.
 7. **`cmms_downtime` (`cmms.downtime`, version 1) maps each downtime-log row to an `intervention`.**
    - `Downtime ID` is the identifier under `cmms.downtime`. `Stop Type` is the `mode`, verbatim.
-     `Reason` is the `reason`, `Stopped` the `start` (required) and `Restarted` the `end`. A blank
-     `Restarted` is `Unknown`, never "still stopped". `Related` is split on `;`. `Location` and
+     `Reason` is the `reason`, `Stopped` the `start` and `Restarted` the `end`, both required. A
+     blank `Restarted` (the open INC-C3-0011 stop) is `Unknown` with a `value_blank` finding, never
+     "still stopped". `Related` is split on `;`. `Location` and
      `Reported By` are ignored on purpose: the kind has no place or reporter field.
    - Times follow §1: the log's own civil clock, the zone `unstated`, never UTC. A stop that crosses
      midnight reads the dates it states. A time-only restart is `Unknown` with `value_unreadable`,
@@ -95,6 +96,12 @@ mistake a template can make, so the rule is fixed here before any template needs
      an intervention's stated mode to its event kinds. The CMMS stop and the controller's syslog
      stop are kept as each source states them (14:33:10 and 14:32:38 for INC-C3-0011). Only a
      stated same-event assertion joins them, and that is Memory's job.
+   - This stretches the kind. The compiler defines `Intervention` as a human intervention, but a
+     protective or safety stop is triggered by the machine: only the downtime entry and the restart
+     are human. No compiler kind states a stop or a downtime period, and a Deploy type is not
+     allowed (package non-negotiable 5), so `intervention` is the nearest kind for Demo v1.
+     Follow-up: a compiler stop/downtime kind (start, end, stop type, trigger as stated). When it
+     lands, this preset moves to it under a new version.
    - The fixture is corpus 2.0.0's `downtime_log.csv` (harness PR #143), committed as a source and
      ingested into `tests/fixtures/demo_corpus/downtime_package/`. It is pinned by content id until
      2.0.0's lock is on main, which then binds it.

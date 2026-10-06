@@ -18,7 +18,7 @@
         "mode": {"column": "Stop Type"},
         "reason": {"column": "Reason"},
         "start": {"column": "Stopped", "format": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"], "required": true},
-        "end": {"column": "Restarted", "format": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]}
+        "end": {"column": "Restarted", "format": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"], "required": true}
       }
     }
   ]

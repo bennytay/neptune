@@ -116,6 +116,9 @@ def test_every_stop_is_an_intervention_with_its_stated_times_and_mode() -> None:
     assert planned.mode.value == "Planned"
     assert planned.end.value.ticks - planned.start.value.ticks == 9000
     assert not {"row_unmatched", "column_unmapped", "value_unreadable"} & set(_codes(package))
+    # The open stop's blank restart is required, so the receipt says so (ADR 0016 §7).
+    (open_stop,) = _codes(package)["value_blank"]
+    assert open_stop.details["column"] == "Restarted" and open_stop.details["rows"] == [3]
 
 
 def test_the_clock_is_civil_with_no_zone_and_each_value_cites_its_cell() -> None:
@@ -150,8 +153,8 @@ def test_a_garbled_stop_time_is_unknown_with_a_finding_and_the_other_rows_read()
 def test_a_missing_stop_time_is_unknown_and_a_finding() -> None:
     package = _mapped(_with_cells({"2026-09-14 14:33:10": ""}.get))
     assert isinstance(_stops(package)["DT-26-0914-01"].start, Unknown)
-    (blank,) = _codes(package)["value_blank"]
-    assert blank.details["column"] == "Stopped"
+    blanks = {f.details["column"]: f.details["rows"] for f in _codes(package)["value_blank"]}
+    assert blanks == {"Stopped": [3], "Restarted": [3]}
 
 
 def test_a_stop_across_midnight_reads_the_dates_it_states() -> None:
