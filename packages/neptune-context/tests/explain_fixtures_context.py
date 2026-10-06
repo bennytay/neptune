@@ -33,7 +33,7 @@ from typing import Any, Final
 
 from neptune_ledger.api import QueryMeta, Resolution, from_json, query_table
 from neptune_memory.schema.claim import Claim, ClaimProvenance, ModelRef, TypedLiteral, ValueType
-from neptune_memory.schema.codec import GraphDocument
+from neptune_memory.schema.codec import GraphDocument, graph_from_json
 from neptune_memory.schema.interval import OPEN, CivilClock, LedgerTx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
@@ -52,6 +52,7 @@ CATALOG_GOLDEN: Final = ROOT / "contracts" / "catalog-api" / "v1.7.0" / "golden"
 UTC_NS: Final = CivilClock(Timescale.UTC, Epoch.UNIX, Fraction(1, 1_000_000_000))
 UTC: Final = str(UTC_NS.domain_id)
 HEAD: Final = LedgerTx(4)
+GRAPH: Final = Path(__file__).resolve().parent / "golden" / "explain-graph.json"
 
 
 def ns(year: int, month: int, day: int) -> int:
@@ -392,8 +393,8 @@ def drift() -> Claim:
     )
 
 
-@cache
-def document() -> GraphDocument:
+def build() -> GraphDocument:
+    """The history, resolved now by Memory's live resolver (only to regenerate ``GRAPH``)."""
     history = resolve(assertions(), CORE_PREDICATES, PRIORITIES)
     claims = sorted((*history.claims, drift()), key=lambda c: (c.recorded_at, c.id))
     return GraphDocument(
@@ -401,6 +402,15 @@ def document() -> GraphDocument:
         resolver_config(CORE_PREDICATES, PRIORITIES),
         HEAD,
     )
+
+
+@cache
+def document() -> GraphDocument:
+    """The frozen graph document (``GRAPH``), read by Memory's codec. Frozen, so a Memory
+    vocabulary release (which changes the resolver configuration, the generation and closure ids)
+    never changes Context's goldens (ADR 0006 §9). Regenerate with
+    ``python tests/explain_fixtures_context.py`` after editing ``assertions``."""
+    return graph_from_json(json.loads(GRAPH.read_bytes()))
 
 
 def find(subject: NodeRef, predicate: str, obj: Any = None, *, current: bool = True) -> Claim:
@@ -456,3 +466,10 @@ class Catalog:
 
     def threads_of(self, record_id: str, *, as_of: int | None = None) -> Any:
         raise NotImplementedError
+
+
+if __name__ == "__main__":
+    GRAPH.write_text(
+        json.dumps(build().to_json(), indent=1, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )

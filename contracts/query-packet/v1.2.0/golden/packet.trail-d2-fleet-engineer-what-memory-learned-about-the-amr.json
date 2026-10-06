@@ -30,7 +30,7 @@
       },
       "tokenizer": "neptune-context.utf8-bytes-div-4/1",
       "used": {
-        "bytes": 8688,
+        "bytes": 8685,
         "items": 7,
         "tokens": 2172
       }
@@ -42,7 +42,7 @@
     },
     "memory_snapshot": {
       "as_of": 4,
-      "generation": "sha256:07bcac9015d4bdcf8ff53e8ce7745271f95724ddad6065cd03ab769d55b5e13f",
+      "generation": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
       "graph_schema_version": 1
     },
     "produced_by": {
@@ -52,24 +52,74 @@
     },
     "query_id": "query:sha256:4eae86ef07cf1d4eae49e2843ad538042d2f9dc623b1642622746a801e323b03"
   },
-  "id": "packet:sha256:cbad2966eea9d5e3cf6e00d16e762242f2dd6beb19d6004ac80ec51c210d4e91",
+  "id": "packet:sha256:c9c53d297c1e2761b76272df7844e7a05d88328d93bd72c91bf27cfc068bd17b",
   "items": [
     {
       "assertion_kind": "stated",
+      "claim": {
+        "assertion_kind": "stated",
+        "confidence": {
+          "knowledge": "not_applicable"
+        },
+        "id": "claim:sha256:afdb48a78b80f876637d72cb80772072b9d9c19ace83d7e887a5b925e20a53d3",
+        "object": {
+          "kind": "node",
+          "node_id": "zone-code:DOCK-1",
+          "node_type": "zone"
+        },
+        "predicate": "located_at",
+        "provenance": {
+          "config_hash": "sha256:a08c14ef81fab08a7160c7332169b1d282c3c9ab262c2c9316588fc9aeb08a48",
+          "consolidator_id": "memory.supersede",
+          "consolidator_version": "2",
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 6
+                }
+              ],
+              "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+            },
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 7
+                }
+              ],
+              "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
+            }
+          ],
+          "records": []
+        },
+        "recorded_at": 2,
+        "subject": {
+          "kind": "node",
+          "node_id": "asset-tag:AMR-9",
+          "node_type": "machine"
+        },
+        "superseded_at": "open",
+        "supersedes": [
+          "claim:sha256:0330659fbc4c1f3d9c8e3b3abed5af5b2e121ffec76bf3ea891bc4f6e8c06d5d"
+        ],
+        "valid": {
+          "end": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1772323200000000000
+          },
+          "start": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1769904000000000000
+          }
+        }
+      },
       "confidence": {
         "knowledge": "not_applicable"
       },
-      "evidence": {
-        "locator": [
-          {
-            "kind": "row",
-            "row": 6
-          }
-        ],
-        "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
-      },
-      "id": "item:sha256:3b810dbc90f067281c7750ba005425fa8c6a0227961e923f9be8da85698c94fe",
-      "kind": "evidence",
+      "id": "item:sha256:0ae44b9c1e19134b1e55ed88ff83a935b4e881767c437fab58dac96bfb2aa84f",
+      "kind": "claim",
       "provenance": {
         "evidence": [
           {
@@ -80,11 +130,66 @@
               }
             ],
             "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+          },
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 7
+              }
+            ],
+            "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
           }
         ],
         "records": [],
         "transform": {
-          "config_hash": "sha256:67b4ee49cdd77dc843a92a1be6bd058df383bace9338e6156bbb8c2568f60b72",
+          "config_hash": "sha256:a08c14ef81fab08a7160c7332169b1d282c3c9ab262c2c9316588fc9aeb08a48",
+          "producer_id": "memory.supersede",
+          "producer_version": "2"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "graph",
+            "rank": 1,
+            "score": 1.0
+          }
+        ],
+        "score": 0.01639344262295082
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "row",
+            "row": 7
+          }
+        ],
+        "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
+      },
+      "id": "item:sha256:9185c4a3d1d6bc3856198e77984129f9b8fa4106ab05e2da3de56393dc511707",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 7
+              }
+            ],
+            "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:a08c14ef81fab08a7160c7332169b1d282c3c9ab262c2c9316588fc9aeb08a48",
           "producer_id": "memory.supersede",
           "producer_version": "2"
         }
@@ -182,11 +287,11 @@
         "hits": [
           {
             "channel": "graph",
-            "rank": 1,
+            "rank": 2,
             "score": 1.0
           }
         ],
-        "score": 0.01639344262295082
+        "score": 0.016129032258064516
       }
     },
     {
@@ -198,12 +303,12 @@
         "locator": [
           {
             "kind": "row",
-            "row": 7
+            "row": 1
           }
         ],
         "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
       },
-      "id": "item:sha256:7985bc398a9b86bc1fbb0afcf0ecf70ce5a64dc69407ed03f5cb96c288b1a916",
+      "id": "item:sha256:991af3bd14da451d8ece7901c814dc977fc22aa66fbcbeef68e290d6a5d6a8aa",
       "kind": "evidence",
       "provenance": {
         "evidence": [
@@ -211,13 +316,15 @@
             "locator": [
               {
                 "kind": "row",
-                "row": 7
+                "row": 1
               }
             ],
             "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
           }
         ],
-        "records": [],
+        "records": [
+          "rec:sha256:78d7ab1c1fc5daea7ebdc4fe228f8a3580718c0ed98ec563b93da466967840b7"
+        ],
         "transform": {
           "config_hash": "sha256:853547ce298710008f74f09ef14dc13f0bcb2274147eb914ba00df3c59ba99f9",
           "producer_id": "fixture.telemetry",
@@ -233,6 +340,57 @@
           }
         ],
         "score": 0.016129032258064516
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "row",
+            "row": 6
+          }
+        ],
+        "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+      },
+      "id": "item:sha256:ae646ecb0d49204d58c93e2ff31cbb18cd759412d1e9d68870bcabab65d8b8c9",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 6
+              }
+            ],
+            "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:a08c14ef81fab08a7160c7332169b1d282c3c9ab262c2c9316588fc9aeb08a48",
+          "producer_id": "memory.supersede",
+          "producer_version": "2"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 3,
+            "score": 0.5
+          }
+        ],
+        "score": 0.015873015873015872
       },
       "size": {
         "knowledge": "known",
@@ -340,164 +498,6 @@
         "hits": [
           {
             "channel": "graph",
-            "rank": 2,
-            "score": 1.0
-          }
-        ],
-        "score": 0.016129032258064516
-      }
-    },
-    {
-      "assertion_kind": "observed",
-      "confidence": {
-        "knowledge": "not_applicable"
-      },
-      "evidence": {
-        "locator": [
-          {
-            "kind": "row",
-            "row": 1
-          }
-        ],
-        "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
-      },
-      "id": "item:sha256:991af3bd14da451d8ece7901c814dc977fc22aa66fbcbeef68e290d6a5d6a8aa",
-      "kind": "evidence",
-      "provenance": {
-        "evidence": [
-          {
-            "locator": [
-              {
-                "kind": "row",
-                "row": 1
-              }
-            ],
-            "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
-          }
-        ],
-        "records": [
-          "rec:sha256:78d7ab1c1fc5daea7ebdc4fe228f8a3580718c0ed98ec563b93da466967840b7"
-        ],
-        "transform": {
-          "config_hash": "sha256:853547ce298710008f74f09ef14dc13f0bcb2274147eb914ba00df3c59ba99f9",
-          "producer_id": "fixture.telemetry",
-          "producer_version": "1"
-        }
-      },
-      "relevance": {
-        "hits": [
-          {
-            "channel": "catalog",
-            "rank": 3,
-            "score": 0.5
-          }
-        ],
-        "score": 0.015873015873015872
-      },
-      "size": {
-        "knowledge": "known",
-        "value": 744
-      },
-      "status": "resolved"
-    },
-    {
-      "assertion_kind": "stated",
-      "claim": {
-        "assertion_kind": "stated",
-        "confidence": {
-          "knowledge": "not_applicable"
-        },
-        "id": "claim:sha256:fdd8760dfc3998eb1e2e5869762085c4d34bbd2e30c6a45b9adaca4d9047f694",
-        "object": {
-          "kind": "node",
-          "node_id": "zone-code:DOCK-1",
-          "node_type": "zone"
-        },
-        "predicate": "located_at",
-        "provenance": {
-          "config_hash": "sha256:67b4ee49cdd77dc843a92a1be6bd058df383bace9338e6156bbb8c2568f60b72",
-          "consolidator_id": "memory.supersede",
-          "consolidator_version": "2",
-          "evidence": [
-            {
-              "locator": [
-                {
-                  "kind": "row",
-                  "row": 6
-                }
-              ],
-              "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
-            },
-            {
-              "locator": [
-                {
-                  "kind": "row",
-                  "row": 7
-                }
-              ],
-              "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
-            }
-          ],
-          "records": []
-        },
-        "recorded_at": 2,
-        "subject": {
-          "kind": "node",
-          "node_id": "asset-tag:AMR-9",
-          "node_type": "machine"
-        },
-        "superseded_at": "open",
-        "supersedes": [
-          "claim:sha256:0330659fbc4c1f3d9c8e3b3abed5af5b2e121ffec76bf3ea891bc4f6e8c06d5d"
-        ],
-        "valid": {
-          "end": {
-            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-            "ticks": 1772323200000000000
-          },
-          "start": {
-            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-            "ticks": 1769904000000000000
-          }
-        }
-      },
-      "confidence": {
-        "knowledge": "not_applicable"
-      },
-      "id": "item:sha256:f69afd8e18544123a0fc18f4262b6d48e1635fe4a506122a3077e534c8d95efb",
-      "kind": "claim",
-      "provenance": {
-        "evidence": [
-          {
-            "locator": [
-              {
-                "kind": "row",
-                "row": 6
-              }
-            ],
-            "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
-          },
-          {
-            "locator": [
-              {
-                "kind": "row",
-                "row": 7
-              }
-            ],
-            "source": "sha256:d045b3be7808f69e3b92a9643be87e03799cd5a80d0626e388ac61ffdb2799d1"
-          }
-        ],
-        "records": [],
-        "transform": {
-          "config_hash": "sha256:67b4ee49cdd77dc843a92a1be6bd058df383bace9338e6156bbb8c2568f60b72",
-          "producer_id": "memory.supersede",
-          "producer_version": "2"
-        }
-      },
-      "relevance": {
-        "hits": [
-          {
-            "channel": "graph",
             "rank": 3,
             "score": 1.0
           }
@@ -573,8 +573,8 @@
       "changes": [
         {
           "after": [
-            "claim:sha256:d87888736ecfc158aa4491287a8f5f4d248a070bd8aa231a224ba0e17d57e53c",
-            "claim:sha256:fdd8760dfc3998eb1e2e5869762085c4d34bbd2e30c6a45b9adaca4d9047f694"
+            "claim:sha256:afdb48a78b80f876637d72cb80772072b9d9c19ace83d7e887a5b925e20a53d3",
+            "claim:sha256:d87888736ecfc158aa4491287a8f5f4d248a070bd8aa231a224ba0e17d57e53c"
           ],
           "before": [
             "claim:sha256:0330659fbc4c1f3d9c8e3b3abed5af5b2e121ffec76bf3ea891bc4f6e8c06d5d"
