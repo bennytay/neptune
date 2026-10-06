@@ -4,8 +4,8 @@
 # `bump` raises every entry here in the same PR. Draft versions need not be declared.
 
 [neptune-context]
-catalog-api = "1.6.0"
-graph-schema = "1.0.0"
+catalog-api = "1.7.0"
+graph-schema = "1.6.0"
 
 [neptune-deploy]
 catalog-api = "1.6.0"

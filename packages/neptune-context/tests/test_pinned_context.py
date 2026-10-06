@@ -62,14 +62,18 @@ def test_main_writes_the_snapshot_and_checks_usage(tmp_path: Path) -> None:
 
 
 # Runs in a fresh interpreter: with "patched", Memory gains a predicate and a node type and the
-# Ledger a thread kind before Context is imported, as an upstream minor release would.
+# Ledger a thread kind before Context is imported, as an upstream minor release would. The node
+# type is added both to the exported schema and to Memory's ``NodeType`` enum itself, so a
+# Context module that read the live enum (``query/validate.py``'s ``SUBJECT_KINDS``, say) would
+# change what Context publishes even while live Memory is not ahead of the pin.
 _PROBE = """
-import hashlib, json, sys
+import enum, hashlib, json, sys
 from pathlib import Path
 from typing import Literal, get_args
 
 import neptune_ledger.api as ledger
 import neptune_memory.schema.export as export
+import neptune_memory.schema.nodes as nodes
 import neptune_memory.schema.predicates as predicates
 from neptune_memory.schema.nodes import NodeType
 
@@ -88,6 +92,10 @@ if sys.argv[1] == "patched":
         return schema
 
     export.graph_schema = widened
+    nodes.NodeType = enum.StrEnum(
+        "NodeType", {**{m.name: m.value for m in NodeType}, "NOVEL_NODE": "novel_node"}
+    )
+    assert "novel_node" in {str(m) for m in nodes.NodeType}
     ledger.ThreadKind = Literal[(*get_args(ledger.ThreadKind), "novel_thread")]
     assert "novel_predicate" in {s.name for s in predicates.CORE_PREDICATES.specs}
 

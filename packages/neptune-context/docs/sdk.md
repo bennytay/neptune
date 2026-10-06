@@ -37,8 +37,12 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
   does not retry unless you pass a `RetryPolicy`.
 - A token is sent only over `https` or to a loopback host, never followed through a redirect or a proxy,
   never printed. `timeout` bounds the whole answer.
-- Build against `StubEngine.from_directory(Path("tests/golden/packets"))` before the engine (C2) exists: it
-  answers exactly the queries it has recorded packets for and says `not_found` for anything else.
+- The in-process engine is `neptune_context.engine.LocalEngine(memory_reader, catalog=None)` (ADR 0007): it
+  runs the graph channel over a Memory reader (and the Ledger's indexes when a `CatalogApi` is given), fuses,
+  cuts to the budget and assembles the packet. `read_graph(path)` loads a Memory graph document into Memory's
+  reference reader. Lexical and vector channels join through `LocalEngine(..., channels=[...])`.
+- `StubEngine.from_directory(Path("tests/golden/packets"))` answers exactly the queries it has recorded
+  packets for and says `not_found` for anything else: for fixtures and offline builds.
 
 ## The ten worked queries in SDK form
 
@@ -261,12 +265,16 @@ packet = client.query(query)
 
 ## MCP server
 
-`python -m neptune_context.mcp --url https://neptune.example` (token from `$NEPTUNE_TOKEN`) or
-`--packets DIR` (recorded packets, for trying it out) serves four read-only tools over stdio. Claude Code:
+`python -m neptune_context.mcp --url https://neptune.example` (token from `$NEPTUNE_TOKEN`),
+`--memory GRAPH.json` (the local engine over a Memory graph document, ADR 0007) or `--packets DIR` (recorded
+packets, for trying it out) serves four read-only tools over stdio. Claude Code:
 
 ```
-claude mcp add neptune -- python -m neptune_context.mcp --url https://neptune.example
+claude mcp add neptune -- python -m neptune_context.mcp --memory graph.json
 ```
+
+With `--memory` and no Ledger catalog attached, series windows, frames and `neptune_hydrate` answer with gaps
+or `unavailable`; a catalog is attached in code (`build_server(AsyncClient(LocalEngine(reader, catalog)))`).
 
 | Tool | Asks | Arguments |
 |---|---|---|
