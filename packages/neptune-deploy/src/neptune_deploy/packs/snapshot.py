@@ -14,9 +14,11 @@ at one head differ. A snapshot's id is therefore the sha256 of the document's ca
 ``snapshot:sha256:<hex>``.
 """
 
+import re
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import Final, Literal, TypeAlias
 
@@ -36,6 +38,9 @@ from neptune_deploy.packs._read import (
 from neptune_deploy.packs.errors import PackError
 
 GRAPH_SCHEMA_MAJOR: Final = 1
+GRAPH_SCHEMA_PIN: Final = "1.6.0"  # contracts/lock.toml; a test holds the two together
+KEY_UNREAD: Final = "snapshot_key_unread"
+_VERSION: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 SNAPSHOT_PREFIX: Final = "snapshot:"
 MAX_SNAPSHOT_BYTES: Final = 512 * 1024 * 1024
 ASSERTION_KINDS: Final = ("inferred", "observed", "stated")
@@ -52,7 +57,8 @@ LITERAL_TYPES: Final = (
     "text",
 )
 
-_R: Final = Reader("snapshot_malformed")
+_UNREAD: Final[ContextVar[list[str] | None]] = ContextVar("snapshot_unread", default=None)
+_R: Final = Reader("snapshot_malformed", _UNREAD)
 
 
 @dataclass(frozen=True, order=True)
@@ -166,6 +172,24 @@ class ResolutionFinding:
 
 
 @dataclass(frozen=True)
+class UnreadKey:
+    """A key a newer minor adds that Deploy does not read (``snapshot_key_unread``, ADR 0015):
+    ``key_path`` has array indices as ``*``; ``pointer`` is the first place it occurs."""
+
+    key_path: str
+    pointer: str
+    occurrences: int
+
+    def to_json(self) -> JsonObject:
+        return {
+            "code": KEY_UNREAD,
+            "key_path": self.key_path,
+            "occurrences": self.occurrences,
+            "pointer": self.pointer,
+        }
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """A frozen graph document and what the compiler reads from it."""
 
@@ -176,6 +200,10 @@ class Snapshot:
     cardinality: Mapping[str, str]  # predicate -> "one" | "many", from the resolver's vocabulary
     claims: tuple[Claim, ...]  # every version, in document order
     findings: tuple[ResolutionFinding, ...]
+    # Keys the document holds that the pinned contract does not name, read only under a newer
+    # declared minor (ADR 0015); never rendered, and absent from every claim and finding read.
+    unread: tuple[UnreadKey, ...] = ()
+    declared_schema_version: str | None = None
 
     @cached_property
     def current(self) -> tuple[Claim, ...]:
@@ -237,13 +265,82 @@ def snapshot_id(document: JsonValue) -> str:
         ) from exc
 
 
-def load_snapshot(data: bytes, *, max_bytes: int = MAX_SNAPSHOT_BYTES) -> Snapshot:
+def load_snapshot(
+    data: bytes, *, max_bytes: int = MAX_SNAPSHOT_BYTES, schema_version: str | None = None
+) -> Snapshot:
     """Read a graph document (graph-schema 1.x ``#/$defs/Graph``) from its bytes."""
-    return read_snapshot(parse_document(data, "snapshot_malformed", max_bytes))
+    return read_snapshot(
+        parse_document(data, "snapshot_malformed", max_bytes), schema_version=schema_version
+    )
 
 
-def read_snapshot(document: JsonValue) -> Snapshot:
-    """Read a parsed graph document; refuse anything outside the contract's shapes."""
+def tolerates_unknown_keys(schema_version: str | None) -> bool:
+    """Whether a declared graph-schema version is a newer minor of the pinned major (ADR 0015).
+    ``None`` is the pin: strict. A malformed declaration is refused."""
+    if schema_version is None:
+        return False
+    declared = _VERSION.fullmatch(schema_version)
+    if declared is None:
+        raise PackError(
+            "snapshot_unsupported",
+            f"graph-schema version {schema_version!r} is not MAJOR.MINOR.PATCH",
+        )
+    pin = _VERSION.fullmatch(GRAPH_SCHEMA_PIN)
+    assert pin is not None
+    major, minor = int(declared[1]), int(declared[2])
+    return major == int(pin[1]) and minor > int(pin[2])
+
+
+def _key_path(pointer: str) -> str:
+    """A pointer with its array indices as ``*`` (graph-schema has no all-digit object keys)."""
+    return "/".join("*" if part.isdigit() else part for part in pointer.split("/"))
+
+
+def _prune(value: JsonValue, pointer: str, drop: frozenset[str]) -> JsonValue:
+    if isinstance(value, Mapping):
+        return {
+            key: _prune(item, child(pointer, key), drop)
+            for key, item in value.items()
+            if child(pointer, key) not in drop
+        }
+    if isinstance(value, list):
+        return [_prune(item, child(pointer, i), drop) for i, item in enumerate(value)]
+    return value
+
+
+def read_snapshot(document: JsonValue, *, schema_version: str | None = None) -> Snapshot:
+    """Read a parsed graph document; refuse anything outside the contract's shapes.
+
+    ``schema_version`` is the graph-schema version the document's producer declares (the document
+    names only the major). Under a newer minor of the pinned major, an unknown key is not refused:
+    it is dropped from what is read and reported once per key path as ``snapshot_key_unread``
+    (ADR 0015). Under the pin, an older minor or another major it is refused, as before.
+    """
+    if not tolerates_unknown_keys(schema_version):
+        return _read(document, None)
+    sink: list[str] = []
+    token = _UNREAD.set(sink)
+    try:
+        snapshot = _read(document, None)
+    finally:
+        _UNREAD.reset(token)
+    if not sink:
+        return snapshot
+    # Read again without the unknown keys, so that nothing downstream (a claim's raw JSON, an
+    # object's canonical bytes) holds them; the id still names the document as it was.
+    pruned = _prune(document, "", frozenset(sink))
+    by_path: dict[str, list[str]] = {}
+    for pointer in sink:
+        by_path.setdefault(_key_path(pointer), []).append(pointer)
+    unread = tuple(
+        UnreadKey(path, pointers[0], len(pointers)) for path, pointers in sorted(by_path.items())
+    )
+    return replace(
+        _read(pruned, snapshot.id), unread=unread, declared_schema_version=schema_version
+    )
+
+
+def _read(document: JsonValue, sid: str | None) -> Snapshot:
     graph = _R.obj(
         document,
         "",
@@ -279,7 +376,7 @@ def read_snapshot(document: JsonValue) -> Snapshot:
         for i, item in enumerate(_R.array(graph["findings"], "/findings"))
     )
     return Snapshot(
-        id=snapshot_id(document),
+        id=snapshot_id(document) if sid is None else sid,
         head=head,
         generation=generation,
         vocabulary_version=vocabulary_version,
