@@ -56,7 +56,7 @@ def document() -> GraphDocument:
 
 REGENERATE: Final = (
     "Regenerate it from the repository root, under the Python CI installs: uv run --all-packages "
-    "python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py"
+    "--all-groups python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py"
 )
 
 

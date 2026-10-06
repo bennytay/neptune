@@ -31,7 +31,7 @@ is part of another rides on its version and has no column.
 | Consumer | `package-schema` | `catalog-api` | `graph-schema` | `query-packet` |
 |---|---|---|---|---|
 | `neptune-ledger` | 7.0.0 current |  |  |  |
-| `neptune-memory` |  | 1.1.0 behind |  |  |
+| `neptune-memory` |  | 1.7.0 current |  |  |
 | `neptune-context` |  | 1.6.0 behind | 1.0.0 behind |  |
 | `neptune-deploy` | 7.0.0 current | 1.6.0 behind | 1.2.0 behind | no stable |
 | `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | no stable |

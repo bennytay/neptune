@@ -35,13 +35,16 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     1. The SDK compiles the corpus into one package, registered at tx 1.
     2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
        `servicenow_csv` presets into a lifecycle package, registered at tx 2.
-    3. Both are exported as the records the Ledger catalogs, plus the compiler's `derived/clock_mapping` fits.
-    4. The deterministic consolidators run, with `memory.time_estimates` alongside
+    3. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers both and
+       answers `threads_of` for every record ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)).
+    4. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
+       `derived/clock_mapping` fits.
+    5. The deterministic consolidators run, with `memory.time_estimates` alongside
        ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
 
     Copy the file byte for byte; do not edit it.
   - Regenerate it from the repository root with
-    `uv run --all-packages python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
+    `uv run --all-packages --all-groups python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
     makes it stale.
@@ -63,14 +66,28 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       `stated_severity`, `has_description` and `evidenced_by`.
     - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
       drop them with `include_inferred=False`. One is the cell PC's ≈ −96.7 s on 2026-09-14.
+    - Configuration chains from Deploy's lifecycle records, all `stated` and each citing its work orders:
+      - All 15 `maintenance_event`s are on chains, as `has_configuration` on the machine id the CMMS states.
+        `cmms.asset:ARM-3A` is on `firmware:5.6.0` from WO-26-0310 on, and WO-26-0911 is among the seven
+        work orders that span cites; its firmware did not change. AMR-05, AMR-06 and LEG-01 have one span each.
+      - One `succeeds`: AMR-07's `firmware:4.3.1` succeeds `firmware:4.2.0` at WO-26-0414.
+      - The 5 `change_record`s state no configuration (`NotCovered` in Deploy's mapping). So each gives
+        `configuration_unknown` on its `servicenow.ci:*` machine, plus a `chain_gap`.
+    - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
+      The 13th run states no first instant, so it is not placed (`untimeable_window`).
   - What it lacks:
     - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
       incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
       inferred mapping.
-    - No configuration lineage and no `authorisation_undecided`. Deploy's 5 `change_record`, 15
-      `maintenance_event` (WO-26-0911 among them) and 2 `authorisation_envelope` records are in the Ledger
-      export. Memory places them on Ledger thread nodes, which it reads today only from the `ledger_thread`
-      stand-in (ADR 0003 §1); no real Ledger export carries those. Runs also name no machine (MVL-205).
+    - No answer yet to "what changed since the last good run".
+      - Runs name no machine, so no run meets a chain (MVL-205).
+      - There is no `snapshot_binding`, so there is no `configuration_active_during` and no
+        `authorisation_undecided`.
+      - Each chain is keyed by the namespace that declares it. `cmms.asset:ARM-3A`, `servicenow.ci:ARM-3A` and
+        the register's `asset:ARM-3A` are three nodes until an `identity_link` or an operator assertion joins
+        them; the corpus has neither.
+    - No `authorised_configuration`. Both envelopes name no configuration (`envelope_unplaced`), and their
+      `valid_from` and `valid_until` are on two different clocks (`untimeable_window`).
     - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
 
     This file is regenerated as those land, never edited.
