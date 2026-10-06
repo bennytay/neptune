@@ -14,9 +14,14 @@ acceptance corpus. Nothing in it is hand-written:
 4. ``memory rebuild --snapshot 1`` consolidates it with the default consolidators and writes the
    graph document with the codec; that file is copied byte for byte.
 
-Deterministic: the corpus, the compiler and Memory read no clock, randomness or network, so the
-same code gives the same bytes on any host. ``tests/test_acceptance_snapshot_memory.py`` regenerates
-it and compares.
+Deterministic: the corpus, the compiler and Memory read no clock, randomness or network. The bytes
+also depend on the library versions the compiler's adapters record in their transform records
+(provenance): the calibration adapter records the expat that Python is built with, so another
+CPython patch release changes transform and finding record ids, and every claim citing them.
+``acceptance_corpus.environment.json`` records those libraries. Where they match, a regeneration is
+byte-identical; elsewhere it states the same facts under other record ids.
+``tests/test_acceptance_snapshot_memory.py`` checks both. The committed files are made under the
+Python CI installs (``uv python install`` from ``.python-version``).
 
 From the repository root, with ``G=packages/neptune-memory/tests/fixtures/<this file>``::
 
@@ -50,6 +55,7 @@ if TYPE_CHECKING:
 HERE: Final = Path(__file__).resolve().parent
 REPO: Final = HERE.parents[3]
 SNAPSHOT: Final = HERE / "acceptance_corpus.graph.json"
+ENVIRONMENT: Final = HERE / "acceptance_corpus.environment.json"
 TENANT: Final = "acceptance"
 REGISTERED_AT: Final = 1  # the first registration in a fresh catalog
 CATALOG_API: Final = "package-records"  # not a catalog-api version: the export is made here
@@ -90,17 +96,31 @@ def ledger_export(work: Path) -> LedgerExport:
     return LedgerExport(REGISTERED_AT, CATALOG_API, (exported,))
 
 
-def build(work: Path, export: Path | None = None) -> bytes:
-    """The snapshot's bytes: ``memory rebuild`` over the corpus's Ledger export, in ``work``."""
+def environment(export: LedgerExport) -> bytes:
+    """The corpus and every library the compiler's transforms recorded, by adapter and version:
+    what a byte-identical regeneration needs to match."""
+    transforms: dict[str, JsonValue] = {}
+    for package in export.packages:
+        for record in package.records:
+            if record.get("kind") == "transform_record":
+                key = f"{record['adapter_id']} {record['adapter_version']}"
+                transforms[key] = cast("JsonValue", record["libraries"])
+    document: JsonValue = {"corpus": corpus_label(), "transforms": transforms}
+    return canonical_json.dumps(document) + b"\n"
+
+
+def build(work: Path, export: Path | None = None) -> tuple[bytes, bytes]:
+    """The snapshot's bytes (``memory rebuild`` over the corpus's Ledger export, in ``work``) and
+    its environment's."""
     ledger = export if export is not None else work / "ledger.json"
-    exported = cast("JsonValue", ledger_export(work).to_json())
-    ledger.write_bytes(canonical_json.dumps(exported) + b"\n")
+    exported = ledger_export(work)
+    ledger.write_bytes(canonical_json.dumps(cast("JsonValue", exported.to_json())) + b"\n")
     graphs = work / "graphs"
     argv = ["--graphs", str(graphs), "--tenant", TENANT, "rebuild", "--ledger", str(ledger)]
     status = main([*argv, "--snapshot", str(REGISTERED_AT)], stdout=io.StringIO())
     if status != OK:
         raise RuntimeError(f"memory rebuild exited {status}")
-    return (graphs / TENANT / "graph.json").read_bytes()
+    return (graphs / TENANT / "graph.json").read_bytes(), environment(exported)
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -108,16 +128,20 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="compare, do not write")
     parser.add_argument("--export", type=Path, help="also write the Ledger export here")
     parser.add_argument("--out", type=Path, default=SNAPSHOT)
+    parser.add_argument("--environment-out", type=Path, default=ENVIRONMENT)
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as scratch:
-        data = build(Path(scratch), args.export)
-    if args.check:
-        same = args.out.is_file() and args.out.read_bytes() == data
-        sys.stdout.write(f"{args.out}: {'up to date' if same else 'differs from a regeneration'}\n")
-        return 0 if same else 1
-    args.out.write_bytes(data)
-    sys.stdout.write(f"{args.out}: {len(data)} bytes from {corpus_label()}\n")
-    return 0
+        built = build(Path(scratch), args.export)
+    status = 0
+    for path, data in zip((args.out, args.environment_out), built, strict=True):
+        if args.check:
+            same = path.is_file() and path.read_bytes() == data
+            sys.stdout.write(f"{path}: {'up to date' if same else 'differs from a regeneration'}\n")
+            status = status or (0 if same else 1)
+        else:
+            path.write_bytes(data)
+            sys.stdout.write(f"{path}: {len(data)} bytes from {corpus_label()}\n")
+    return status
 
 
 if __name__ == "__main__":
