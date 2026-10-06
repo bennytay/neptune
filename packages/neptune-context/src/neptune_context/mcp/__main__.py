@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING
 
 import anyio
 from mcp.server.stdio import stdio_server
-from neptune_memory.schema.reference import ReferenceReader
 
 from neptune_context.engine import LocalEngine, read_graph_document
+from neptune_context.explain.history import IndexedReader
 from neptune_context.mcp.server import build_server
 from neptune_context.query.model import Budget, Caller
 from neptune_context.query.plan import (
@@ -72,8 +72,9 @@ def local_client(
     defaults: Defaults = AGENT_DEFAULTS,
 ) -> AsyncClient:
     """The client ``--memory`` serves: ``LocalEngine`` over ``document`` with ``channels``, and
-    a planner over the document's declared identities (Demo v1's in-memory resolver)."""
-    reader = ReferenceReader(document)
+    a planner over the document's declared identities (Demo v1's in-memory resolver). The
+    reader is indexed by claim id, so ``neptune_why`` answers (ADR 0010)."""
+    reader = IndexedReader(document)
     planner = Planner(entity_index(document), defaults, model or NoModel())
     return AsyncClient(LocalEngine(reader, channels=channels(document, reader)), planner=planner)
 
