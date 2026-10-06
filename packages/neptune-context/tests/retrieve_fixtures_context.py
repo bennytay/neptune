@@ -6,7 +6,7 @@ Memory's), over four transactions and four embodiments:
 - site B (``site-code:S-007``): the lift AMR ``AMR-07`` with its configuration chain, a March run,
   an e-stop event in aisle 3, an identity link and an inferred identity candidate, a reading on
   its own device clock joined to UTC by a stated clock mapping, a renamed display name
-  (superseded at transaction 3), a value newer than the graph-schema pin, a resolver finding;
+  (superseded at transaction 3), a predicate newer than the graph-schema pin, a resolver finding;
   a second AMR and an inspection drone at the same site;
 - site A (``site-code:PLANT-2``): the arm ``ARM-3A`` in cell 3 and the legged robot ``LEG-01``.
 
@@ -70,6 +70,8 @@ CATALOG_GOLDEN: Final = ROOT / "contracts" / "catalog-api" / "v1.7.0" / "golden"
 UTC_NS: Final = CivilClock(Timescale.UTC, Epoch.UNIX, Fraction(1, 1_000_000_000))
 UTC: Final = str(UTC_NS.domain_id)
 HOUR: Final = 3600 * 10**9
+# A predicate no released graph-schema has: Memory running ahead of Context's pin.
+BEYOND_PIN: Final = "predicate_after_the_pin"
 
 
 def ns(year: int, month: int, day: int) -> int:
@@ -252,7 +254,7 @@ def claims() -> list[Claim]:
             records=(RecordId(MAPPING),),
         ),
         # A value newer than the graph-schema pin (a predicate Memory added later).
-        claim(AMR, "drift", "lidar yaw 0.4 deg", MAR_10),
+        claim(AMR, BEYOND_PIN, "lidar yaw 0.4 deg", MAR_10),
         # A renamed display name: the old version is superseded at transaction 3.
         old_name,
         claim(AMR, "has_name", "AMR-07 Lift", FEB_1, tx=3, supersedes=(old_name.id,)),
@@ -419,7 +421,7 @@ def demo_document() -> GraphDocument:
     The snapshot is hand-written in graph-schema's shape (Memory cannot build it from the corpus
     yet): its stored ids follow another scheme and some provenance record lists are unsorted, so
     the ids are recomputed and the record lists sorted; every other part of every claim is used as
-    written. Calibration-drift predicates in it are newer than graph-schema 1.6.0.
+    written. Its calibration-drift claims (``delta`` values) are inside the 2.0.0 pin.
     """
     from neptune_memory.schema.claim import CLAIM_ID_SCHEME
     from neptune_memory.schema.codec import graph_from_json
@@ -430,11 +432,9 @@ def demo_document() -> GraphDocument:
     # Normalising a non-conformant Deploy snapshot: the file is not a valid Memory graph
     # document (the coordinator raised it with Deploy and Platform). Each fix-up below exists only
     # so Memory's strict codec accepts it; drop them when the snapshot conforms.
-    # The two ``drift`` claims hold a ``delta`` value (graph-schema 1.7.0, unmerged); Memory's codec
-    # at this commit cannot read them at all, so they are left out. The snapshot's other values
-    # newer than Context's pin (``calibrated_with``, ``calibrated_by``) stay and must surface as
-    # gaps.
-    data["claims"] = [c for c in data["claims"] if c["object"].get("datatype") != "delta"]
+    # Its two ``drift`` claims hold a ``delta`` value and its calibration predicates
+    # (``calibrated_with``, ``calibrated_by``) are graph-schema 2.0.0 vocabulary, inside Context's
+    # pin since ADR 0012: they are read and carried as written.
     keys = ("assertion_kind", "confidence", "object", "predicate", "provenance", "subject", "valid")
     renamed: dict[str, str] = {}
     for item in data["claims"]:

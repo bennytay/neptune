@@ -19,6 +19,7 @@ from neptune_deploy.packs import text as t
 from neptune_deploy.packs.compile import (
     COMPILER_VERSION,
     PACK_PREFIX,
+    SECTION_NOT_COVERED,
     Entry,
     EvidencePack,
     Section,
@@ -42,6 +43,29 @@ STATE_CAPTIONS: Final[Mapping[str, str]] = {
     "ambiguous": "AMBIGUOUS - every reading below; none is chosen",
     "unknown": "UNKNOWN - stated as not known; the cited claim names the record leaving it open",
     "conflict": "CONFLICT - these statements disagree; none is chosen",
+}
+CHANGE_CAPTIONS: Final[Mapping[str, str]] = {
+    "known": "CHANGE - one decided configuration ends where another begins, on this node only",
+    "ambiguous": (
+        "AMBIGUOUS BOUNDARY - a candidate or inferred span meets it; every reading below, none is"
+        " chosen, and no change is read across it"
+    ),
+    "unknown": (
+        "UNKNOWN BOUNDARY - an unknown span meets it; the cited claim names the record leaving it"
+        " open, and no change is read across it"
+    ),
+}
+# A boundary beside a decided change at the same instant (ADR 0018 §3): the change stands, listed
+# separately, and these say what else starts or ends there.
+BESIDE_CHANGE_CAPTIONS: Final[Mapping[str, str]] = {
+    "ambiguous": (
+        "AMBIGUOUS BOUNDARY - a candidate or inferred configuration also starts or ends here,"
+        " beside the decided change listed with it; every reading below, none is chosen"
+    ),
+    "unknown": (
+        "UNKNOWN BOUNDARY - an unknown span also starts or ends here, beside the decided change"
+        " listed with it; the cited claim names the record leaving it open"
+    ),
 }
 TIME_CONFLICT: Final = (
     "CONFLICT - this event is placed at different times on the pack clock; every time is shown,"
@@ -127,7 +151,31 @@ def _inferred_mark(statement: Statement) -> str:
     return f"[INFERRED by {ref['model_id']} {ref['model_version']}, confidence {level}] "
 
 
+def _change(out: _Layout, entry: Entry, indent: int) -> None:
+    change = entry.change
+    assert change is not None
+    captions = BESIDE_CHANGE_CAPTIONS if change.beside_change else CHANGE_CAPTIONS
+    caption = captions.get(entry.knowledge, entry.knowledge.upper())
+    out.line(f"[{caption}] {entry.node.node_type} {entry.node.node_id}", font="F3", indent=indent)
+    out.line(f"at {t.stamp(change.at)}", indent=indent + 2)
+    for statement in entry.statements:
+        claim = statement.claim
+        side = "before" if claim.id in change.before else "after"
+        role = "" if statement.role == "known" else f" ({statement.role} reading)"
+        out.line(
+            f"- {side}: {_inferred_mark(statement)}{claim.predicate}:"
+            f" {t.claim_object(claim.object)} [{claim.assertion_kind}]{role}, valid"
+            f" {t.interval(claim.valid)}",
+            indent=indent + 2,
+        )
+        out.line(f"cites {claim.id}", font="F4", size=SMALL, indent=indent + 4)
+    out.space(2)
+
+
 def _entry(out: _Layout, entry: Entry, indent: int) -> None:
+    if entry.change is not None:
+        _change(out, entry, indent)
+        return
     caption = STATE_CAPTIONS.get(entry.knowledge, entry.knowledge.upper())
     if entry.differences:
         caption = TIME_CONFLICT
@@ -204,11 +252,20 @@ def _section(out: _Layout, number: int, section: Section, mark: Callable[[str], 
                 else "via " + ", ".join(mark(i) for i in node.via)
             )
             out.line(f"{node.node.node_type} {node.node.node_id} - {via}", indent=2)
+    reason = section.reason or {}
+    if reason.get("code") == SECTION_NOT_COVERED:
+        out.line(f"NOT COVERED ({SECTION_NOT_COVERED}) - {reason['reason']}.", font="F3")
+        return
     if section.knowledge == "not_covered":
-        reason = section.reason or {}
         missing = reason.get("missing_from_vocabulary")
+        what = (
+            "no boundary between spans of "
+            if section.template.kind == "changes"
+            else "no current claim of "
+        )
         out.line(
-            "NOT COVERED - the snapshot holds no current claim of "
+            "NOT COVERED - the snapshot holds "
+            + what
             + ", ".join(section.template.predicates)
             + " about the nodes in scope within the interval.",
             font="F3",
@@ -330,7 +387,8 @@ def _header(out: _Layout, pack: EvidencePack) -> None:
         ("Snapshot", pack.snapshot.id),
         (
             "Memory",
-            f"graph-schema 1, Ledger head tx {pack.snapshot.head}, generation"
+            f"graph-schema {pack.snapshot.release or pack.snapshot.major}, Ledger head tx"
+            f" {pack.snapshot.head}, generation"
             f" {pack.snapshot.generation}, vocabulary {pack.snapshot.vocabulary_version}",
         ),
         (
@@ -348,6 +406,10 @@ def _header(out: _Layout, pack: EvidencePack) -> None:
             f" graph-schema {pack.snapshot.declared_schema_version} this compiler does not read;"
             " its content is not shown"
         )
+    for number, section in enumerate(pack.sections, start=1):
+        reason = section.reason or {}
+        if reason.get("code") == SECTION_NOT_COVERED:
+            out.line(f"Not covered: section {number} ({section.template.id}), {reason['reason']}")
     out.space(4)
     out.line(pack.template.description, font="F4", size=SMALL)
     out.line(

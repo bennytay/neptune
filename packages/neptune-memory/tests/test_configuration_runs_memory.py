@@ -627,9 +627,9 @@ def test_rebuild_with_identity_is_deterministic_and_every_claim_conforms() -> No
         f for f in configuration.findings if f.code.startswith("consolidate.")
     ]
     predicates = {c.predicate for c in configuration.claims}
+    assert "succeeds" not in predicates  # a chain's change is the machine's spans (ADR 0019)
     assert {
         "has_configuration",
-        "succeeds",
         "configuration_active_during",
         "not_covered_by_authorisation",
         "authorised_configuration",

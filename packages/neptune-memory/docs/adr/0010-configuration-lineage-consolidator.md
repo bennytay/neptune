@@ -1,6 +1,6 @@
 # 0010 — The configuration lineage consolidator
 
-- Status: Accepted
+- Status: Accepted; §2's `succeeds` at each chain change and §6's reading of `succeeds` superseded by 0019 §2
 - Date: 2026-10-05
 - Issue: MVL-127
 

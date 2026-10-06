@@ -36,8 +36,9 @@ if TYPE_CHECKING:
 # joined (ADR 0012 §5). 8: the event predicates joined, ``at_site`` widened to events, and the
 # predicates that hold for every node type widened to ``event`` (ADR 0013 §6). 9: the calibration
 # history predicates joined (ADR 0014 §6). 10: the coverage and health predicates joined (ADR 0015
-# §6). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 10
+# §6). 11: ``succeeds`` is a statement about two configurations, never read from one machine's chain
+# (ADR 0019 §2). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 11
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
@@ -393,7 +394,8 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_N.CONFIGURATION},
         {_N.CONFIGURATION},
         _MANY,
-        "took over from the object on a machine's chain; valid while the subject is in force",
+        "a source states the subject replaces the object as configurations, wherever they appear;"
+        " never read from one machine's chain, whose changes are its has_configuration spans",
     ),
     _p(
         CONFIGURATION_ACTIVE_DURING,

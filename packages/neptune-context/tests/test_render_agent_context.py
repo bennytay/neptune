@@ -16,17 +16,29 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from neptune_memory.schema.claim import TypedLiteral, ValueType
+from neptune_memory.schema.claim import (
+    DeclaredTransform,
+    Delta,
+    DeltaAdjustment,
+    DeltaQuantity,
+    TypedLiteral,
+    ValueType,
+)
 from neptune_memory.schema.codec import GraphDocument
+from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.reference import ReferenceReader
 from neptune_memory.schema.supersede import Resolution as History
 
 import retrieve_fixtures_context as F
 from agent_goldens_context import AGENT, answer_path
+from neptune.model.frames import FrameRef, TransformDirection
+from neptune.model.knowledge import NotApplicable
 from neptune.model.scalars import NonFinite
 from neptune.model.units import unit_from_text
+from neptune_context import pinned
 from neptune_context.engine import LocalEngine
 from neptune_context.packets.codec import canonical_bytes, decode
+from neptune_context.packets.findings import PacketRefused
 from neptune_context.packets.model import (
     BudgetUse,
     ClaimItem,
@@ -292,6 +304,88 @@ def test_any_document_text_round_trips_and_never_breaks_the_grammar(text: str) -
 def test_each_injection_round_trips_through_a_document_span(text: str) -> None:
     rendered = check(span_packet(text))
     assert text in {v for line in _fact_lines(rendered) for v in literal_values(line)}
+
+
+# --- Calibration deltas (graph-schema 2.0.0) -------------------------------------------------
+
+
+def delta_answer() -> ContextPacket:
+    """A sensor's drift claims: one parameter delta per injected parameter name (metres), and a
+    quaternion delta, whose form has no unit."""
+    sensor = F.node(NodeType.SENSOR, "asset-tag:CAM-9")
+    earlier, later = F.rec("calibration one"), F.rec("calibration two")
+    metres = unit_from_text("m")
+    graph = F.rec("frame graph")
+    quaternion = Delta(
+        earlier,
+        later,
+        DeltaQuantity.ROTATION,
+        "quaternion",
+        (0.0, 0.0, 0.001, -0.0005),
+        edge=(FrameRef("base_link", graph), FrameRef("camera", graph)),
+        transform=DeclaredTransform("base_link", "camera", TransformDirection.PARENT_TO_CHILD),
+        adjustment=DeltaAdjustment.NONE,
+    )
+    extra = [
+        F.claim(
+            sensor,
+            "drift",
+            TypedLiteral(
+                ValueType.DELTA,
+                Delta(earlier, later, DeltaQuantity.PARAMETER, "values", (-0.0043,), name=text),
+                metres,
+            ),
+            F.MAR_1 + n,
+            records=(earlier, later),
+        )
+        for n, text in enumerate(INJECTIONS, start=1)
+    ]
+    extra.append(
+        F.claim(
+            sensor,
+            "drift",
+            TypedLiteral(ValueType.DELTA, quaternion, NotApplicable()),
+            F.MAR_1,
+            records=(earlier, later),
+        )
+    )
+    claims = sorted([*F.claims(), *extra], key=lambda c: (c.recorded_at, c.id))
+    document = GraphDocument(
+        History(tuple(claims), (F.finding(claims),)), F.RESOLVER_CONFIG, F.HEAD
+    )
+    query = Query(
+        include_inferred=False,
+        budget=Budget(items=200),
+        subjects=frozenset({Subject("sensor", "asset-tag:CAM-9")}),
+    )
+    return Client(LocalEngine(ReferenceReader(document))).query(query)
+
+
+def test_a_delta_is_stated_as_declared_and_its_names_stay_quoted_data() -> None:
+    packet = delta_answer()
+    assert not isinstance(decode(canonical_bytes(packet)), PacketRefused)
+    text = check(packet)
+    lines = [ln for ln in _fact_lines(text) if " drift delta {" in ln]
+    assert len(lines) == len(INJECTIONS) + 1
+    recovered = {v for ln in lines for v in literal_values(ln)}
+    for injected in INJECTIONS:
+        assert injected in recovered, injected[:40]
+    (rotation,) = [ln for ln in lines if '"representation":"quaternion"' in ln]
+    assert '"adjustment":"none"' in rotation and "(not applicable, as declared)" in rotation
+    for line in lines:
+        # The numbers as Memory wrote them, never a verdict on their size.
+        for word in ("large", "small", "significant", "drifted", "exceeds", "within", "ok"):
+            assert word not in line.split()
+    assert all('(unit "m", as declared)' in ln for ln in lines if ln is not rotation)
+
+
+def test_an_older_graph_is_stated_in_the_header_and_parses_back() -> None:
+    old = check(golden_packet("q01"))  # Memory's 1.x golden graph, read as written
+    notice = pinned.older_graph_notice(1)
+    assert notice is not None and notice in old.split("\n\n", 1)[0].split("\n")
+    assert "Graph read:" not in check(delta_answer())  # a 2.x document
+    with pytest.raises(CitationError):
+        parse_answer(old.replace(notice, notice.replace("1.x meaning", "no meaning")))
 
 
 def test_harden_escapes_only_inside_strings_and_reads_back() -> None:

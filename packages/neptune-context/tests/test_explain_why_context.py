@@ -9,6 +9,7 @@ import pytest
 from neptune_memory.schema.reference import ReferenceReader
 
 import explain_fixtures_context as X
+from neptune_context import pins
 from neptune_context.answer import answer_problems
 from neptune_context.engine import LocalEngine
 from neptune_context.explain import Caps, IndexedReader, render_markdown
@@ -76,12 +77,23 @@ def test_why_a_drift_claim_reaches_both_calibration_files() -> None:
     for item in resolved.values():
         assert item.provenance.records == tuple(sorted((X.CAL_MARCH_REC, X.CAL_APRIL_REC)))
         assert item.provenance.transform.producer_id == "fixture.calibration"
-    # drift is newer than graph-schema 1.6.0: named and cited, never carried as a claim item.
+    # drift is graph-schema 2.0.0 vocabulary, inside the pin: carried as a claim item.
+    assert drift.id in packet.claim_ids
+    assert not [g for g in gaps_at(packet) if drift.id in g.refs]
+    text = render_markdown(packet)
+    assert text.count("neptune://evidence/") >= 2 and "## Why do we believe" in text
+
+
+def test_a_root_beyond_the_pin_is_named_and_cited_never_carried() -> None:
+    drift = X.find(X.WCAM, "drift")
+    with X.pin_without("drift"):
+        packet = why(drift.id)
+    root = trail(packet).steps[0]
+    assert root.claim == drift.id and len(root.evidence) == 2
     assert drift.id not in packet.claim_ids
     (named,) = [g for g in gaps_at(packet) if drift.id in g.refs]
     assert named.code is GapCode.NOT_COVERED and "'drift'" in named.detail
-    text = render_markdown(packet)
-    assert text.count("neptune://evidence/") >= 2 and "## Why do we believe" in text
+    assert f"graph-schema {pins.GRAPH_SCHEMA_VERSION}" in named.detail
 
 
 def test_why_a_current_calibration_carries_the_claim_its_evidence_and_records() -> None:
