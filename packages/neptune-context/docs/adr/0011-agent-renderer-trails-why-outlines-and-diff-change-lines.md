@@ -25,7 +25,10 @@ cited. Three facts shape the grammar:
 1. **Where.** Trail sections follow "What changed since transaction M" and precede **Facts**; Facts stay
    complete, one sentence per item. A packet without trails renders byte for byte as before. The evidence
    footer lists the items' refs first, then those only a why step names (`answer_evidence_refs`), so
-   existing keys never move and the MCP resource links cover every cited source.
+   existing keys never move and the MCP resource links cover every cited source. This **amends ADR 0003
+   §7**: the property `parse_citations(render(p)) == p.evidence_refs()` becomes "starts with
+   `p.evidence_refs()`, then the why steps' refs" for an answer with why trails; `render_text`, which
+   renders no trails, is unchanged, and so is every answer without trails.
 2. **Why outline.** Heading `Why Memory holds <claim id> (explain clause i, as Memory knew it at
    transaction N; K claims, R repeated, G gaps listed under Not answered):`, then one line per step in the
    packet's pre-order, indented two spaces a level: `- <label>: <sentence>. <citations>`.
@@ -38,7 +41,7 @@ cited. Three facts shape the grammar:
    - `G` counts the packet's gaps at the clause's pointer, so a cut tree (depth, fan-out, steps, budget,
      inference withheld) says so in its heading and the gaps are under **Not answered**.
 3. **Diff lines.** Heading `What changed about <node>[, with its declared identities ...] between <point>
-   and <point> (explain clause i; K claims, C changes, G gaps ...):`, then `Predicate <p>:` groups, each
+   and <point> (explain clause i; K claims, G gaps ...):`, then `Predicate <p>:` groups, each
    in the order opened, closed, superseded, between.
    - `Opened`, `Closed`, `Superseded` and `Between` are cited sentences of the claim. `Closed` and
      `Superseded` name the earlier version and indent `Narrowed to` or `Replaced by` lines under it. A claim
@@ -50,7 +53,8 @@ cited. Three facts shape the grammar:
      as_of N reads it].` It carries no citation because the packet holds no evidence for it. `N` is the
      transaction the diff compared the claim at (or the packet's snapshot on a world-time diff); a version
      that opened and closed in between was current at no transaction and gets no `as_of`.
-   - An empty diff is its heading with `0 changes`.
+   - An empty diff is its heading with `0 claims`. The heading states no change count: an opened change
+     naming several claims renders several lines, so the count could not be checked.
 4. **No cause, no reading.** Sentences are the claims' own words plus the labels above; the renderer adds
    no adjective, no "because", no count beyond the heading's.
 5. **The grammar is checked.** `parse_answer` accepts, in a trail section, only:
@@ -59,9 +63,19 @@ cited. Three facts shape the grammar:
    - an evidence-only line of the uncarried why-step form (`[E]` keys only);
    - a named-only diff line of exactly the form above.
 
-   It also checks the outline's shape (one root first, one level deeper at a time, `Narrowed to` and
-   `Replaced by` under a closed or superseded line), that a `Between` line says so, that a conflict names its
-   finding, and that each heading's claim, repeat and gap counts match the lines and the gaps. It returns
+   It also checks, reading each line with its quoted strings removed so source text cannot satisfy a check:
+   - the outline's shape: one root first, one level deeper at a time, a claim shown in full once, a
+     repeat naming a claim shown earlier and the item it cites, nothing under a repeat;
+   - the diff's shape: `Narrowed to` only under `Closed`, `Narrowed to` or `Replaced by` under `Superseded`
+     (Memory's closure of the old claim is one of the replacing versions), both only within their own
+     predicate group, and a closed or superseded line saying nothing replaced it exactly when it has none
+     beneath it;
+   - the note ending a diff sentence: one per label and axis (`held only between the two points, at neither
+     of them` only on `Between`, `no longer holds` wording only on `Closed` and `Superseded` and by the
+     diff's axis), and the `neptune_why` transaction of a named-only line: the diff's own transaction for
+     its side, the packet's snapshot on a world-time diff, none on a transaction-diff `Between`;
+   - that a conflict names its finding, that a trail section comes before Facts, and that each
+     heading's claim, repeat and gap counts match the lines and the gaps. It returns
    `trail_lines`, one `TrailLine` per line with claim, label, depth, evidence, finding, predicate and
    repeat, so the tested property extends ADR 0009's: `parse_answer(render_answer(p))` recovers every claim,
    relation, depth, finding and evidence ref of every trail of `p`, in order.

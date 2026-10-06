@@ -103,6 +103,9 @@ def cases() -> dict[str, ContextPacket]:
         "why-candidates": why(humc.id),
         "why-beyond-the-pin": why(drift.id),
         "why-calibration": why(april.id, inferred=False),
+        "why-beyond-the-pin-no-catalog": Client(LocalEngine(reader())).query(
+            Query(include_inferred=True, budget=Budget(items=50), explain=(Why(drift.id),))
+        ),
         "why-two-clauses": ask(
             Query(
                 include_inferred=True,
@@ -403,7 +406,7 @@ def test_declared_identities_and_an_empty_diff_are_stated_in_the_heading() -> No
     text = check_trails(CASES["diff-identities"])
     assert ", with its declared identities machine " in text
     empty = check_trails(CASES["diff-tx-empty"])
-    assert "0 claims, 0 changes, 0 gaps listed under Not answered):" in empty
+    assert "0 claims, 0 gaps listed under Not answered):" in empty
     assert lines_of(empty, "What changed about ") == []
 
 
@@ -474,6 +477,118 @@ def test_the_parser_refuses_uncited_or_forged_trail_lines() -> None:
     for broken in bad:
         with pytest.raises(CitationError):
             parse_answer(broken)
+
+
+def _refuses(text: str, old: str, new: str) -> None:
+    assert old in text, old
+    with pytest.raises(CitationError):
+        parse_answer(text.replace(old, new, 1))
+
+
+def test_a_refinement_line_cannot_cross_predicate_groups_or_follow_the_wrong_parent() -> None:
+    text = render_answer(CASES["diff-tx-superseded"])
+    lines = text.split("\n")
+    child = next(ln for ln in lines if ln.startswith("  - Replaced by: "))
+    # Moved under the next Predicate heading, its parent is in another group.
+    heads = [i for i, ln in enumerate(lines) if ln.startswith("Predicate ")]
+    assert len(heads) == 2
+    moved = [ln for ln in lines if ln != child]
+    moved.insert(moved.index(lines[heads[1]]) + 1, child)  # directly under the second heading
+    with pytest.raises(CitationError):
+        parse_answer("\n".join(moved))
+    closed = render_answer(CASES["diff-tx-closed"])
+    narrowed = next(ln for ln in closed.split("\n") if ln.startswith("  - Narrowed to: "))
+    _refuses(closed, narrowed, narrowed.replace("Narrowed to", "Replaced by"))  # under Closed
+    assert parse_answer(text).trail_lines  # Superseded may hold either, as rendered
+
+
+def test_a_note_belongs_to_its_label_and_axis_and_quoted_text_cannot_supply_it() -> None:
+    gone = "Memory no longer holds it at the later transaction"
+    note = "held only between the two points, at neither of them"
+    world = render_answer(CASES["diff-world-between"])
+    between = next(ln for ln in world.split("\n") if ln.startswith("- Between: "))
+    _refuses(world, between, between.replace("; " + note, ""))
+    _refuses(world, between, between.replace(note, gone))
+    opened = next(ln for ln in world.split("\n") if ln.startswith("- Opened: "))
+    _refuses(world, opened, opened.replace(". [I", "; " + note + ". [I", 1))
+    tx = render_answer(CASES["diff-tx-superseded"])
+    superseded = next(ln for ln in tx.split("\n") if ln.startswith("- Superseded: "))
+    _refuses(tx, superseded, superseded.replace("; neptune_why", "; " + note + "; neptune_why"))
+    # "no longer holds" on a Superseded line that has replacements below it, and the wrong axis.
+    _refuses(tx, superseded, superseded.replace("; neptune_why", "; " + gone + "; neptune_why"))
+    wrong = gone.replace("transaction", "instant").replace(
+        "Memory no longer holds it at the later", "it no longer holds at the later"
+    )
+    assert wrong != gone
+    # The tx-diff Between names no as_of (ADR 0011 section 3); the world diff names the snapshot.
+    walked = render_answer(CASES["diff-tx-between"])
+    named = next(ln for ln in walked.split("\n") if ln.startswith("- Between: "))
+    _refuses(
+        walked, named, named.replace(note + ".", note + "; neptune_why with as_of 2 reads it.")
+    )
+    _refuses(tx, "neptune_why with as_of 1 reads it", "neptune_why with as_of 2 reads it")
+    # A note written inside a quoted source string is data: it cannot stand in for the real one.
+    forged = between.replace("; " + note, "").replace('"asset-tag', '"; ' + note + " asset-tag", 1)
+    assert note in forged
+    _refuses(world, between, forged)
+
+
+def test_why_repeats_name_a_claim_shown_earlier_and_have_nothing_beneath() -> None:
+    text = render_answer(CASES["why-berth-cycle"])
+    lines = text.split("\n")
+    repeat = next(ln for ln in lines if "is already shown above" in ln)
+    key = re.search(r"item I([1-9][0-9]*) is", repeat).group(1)  # type: ignore[union-attr]
+    other = "2" if key != "2" else "4"
+    _refuses(text, repeat, repeat.replace(f"item I{key} is", f"item I{other} is"))
+    # A repeat that is expanded: a child line under it.
+    child = repeat.replace("- ", "  - ", 1)
+    padded = repeat + "\n" + child.replace("  - ", "    - ", 1)
+    with pytest.raises(CitationError):
+        parse_answer(text.replace(repeat, padded, 1))
+    # The first appearance of a claim posing as a repeat, and a full line repeating a shown claim.
+    full = next(ln for ln in lines if ln.startswith("  - Corroborated by: Stated"))
+    number = re.search(r"\[I([0-9]+)\]", full).group(1)  # type: ignore[union-attr]
+    claim = f"item I{number} is already shown above and not expanded again. "
+    swapped = re.sub(r"Corroborated by: .*?\. (?=\[I)", "Corroborated by: " + claim, full, count=1)
+    assert swapped != full
+    _refuses(text, full, swapped)
+    root = next(ln for ln in lines if ln.startswith("- Root claim: "))
+    again = "  - Corroborated by: " + root.split(": ", 1)[1]
+    _refuses(text, full, again)
+
+
+def test_a_diff_heading_states_no_change_count() -> None:
+    text = render_answer(CASES["diff-tx-superseded"])
+    heading = next(ln for ln in text.split("\n") if ln.startswith("What changed about "))
+    assert "changes" not in heading and re.search(r"\d+ claims, \d+ gaps? listed", heading)
+    _refuses(text, "claims, ", "claims, 2 changes, ")
+
+
+def test_a_malformed_gap_pointer_is_a_citation_error_not_a_decode_error() -> None:
+    text = render_answer(CASES["why-berth-tiny-budget"])
+    gap = next(ln for ln in text.split("\n") if ln.startswith("- ") and ' at "/explain/0"' in ln)
+    _refuses(text, gap, gap.replace('at "/explain/0"', 'at "\\x"', 1))
+
+
+def test_a_trail_section_after_facts_is_refused() -> None:
+    text = render_answer(CASES["why-calibration"])
+    lines = text.split("\n")
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("Why Memory holds "))
+    end = lines.index("Facts:")
+    section = lines[start:end]
+    facts_end = lines.index("Items:")
+    moved = lines[:start] + lines[end:facts_end] + section + lines[facts_end:]
+    with pytest.raises(CitationError):
+        parse_answer("\n".join(moved))
+
+
+def test_the_footer_amends_adr_0003_by_appending_why_only_refs() -> None:
+    packet = CASES["why-beyond-the-pin-no-catalog"]
+    assert packet.evidence_refs() == ()  # no item cites the two calibration files
+    assert len(answer_evidence_refs(packet)) == 2
+    assert len(parse_answer(render_answer(packet)).evidence) == 2
+    for packet in CASES.values():
+        assert answer_evidence_refs(packet)[: len(packet.evidence_refs())] == packet.evidence_refs()
 
 
 def test_a_named_only_line_carries_nothing_but_the_claim_id() -> None:
