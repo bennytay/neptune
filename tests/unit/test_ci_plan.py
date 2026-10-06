@@ -296,6 +296,7 @@ def test_the_corpus_inputs_exist() -> None:
         "packages/neptune-deploy/src/neptune_deploy/lifecycle/mapper.py",
         "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/cmms_generic.json",
         "packages/neptune-deploy/src/neptune_deploy/__main__.py",
+        "packages/neptune-deploy/src/neptune_deploy/packs/cli.py",
         "packages/neptune-deploy/pyproject.toml",
     ],
 )
@@ -305,10 +306,10 @@ def test_a_deploy_stage_input_runs_the_platform_tests_that_map_the_corpus(path: 
     assert "neptune-platform" in packages and "neptune-deploy" in packages
 
 
-def test_other_deploy_code_does_not_run_the_platform() -> None:
+def test_deploy_tests_and_docs_do_not_run_the_platform() -> None:
     members = {**MEMBERS, "neptune-deploy": frozenset()}
-    path = "packages/neptune-deploy/src/neptune_deploy/packs/render.py"
-    assert "neptune-platform" not in ci_plan.plan([path], members).packages
+    for path in ("packages/neptune-deploy/tests/test_x.py", "packages/neptune-deploy/docs/a.md"):
+        assert "neptune-platform" not in ci_plan.plan([path], members).packages
 
 
 def test_the_deploy_stage_inputs_exist() -> None:

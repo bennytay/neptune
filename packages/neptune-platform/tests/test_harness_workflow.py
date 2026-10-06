@@ -126,6 +126,7 @@ def test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platfor
         f"{lifecycle}/mapper.py",
         f"{lifecycle}/presets/cmms_generic.json",
         "packages/neptune-deploy/src/neptune_deploy/__main__.py",
+        "packages/neptune-deploy/src/neptune_deploy/packs/cli.py",  # the CLI imports it at start
         "packages/neptune-deploy/pyproject.toml",
         *json.loads(acceptance.DEPLOY.read_text(encoding="utf-8"))["templates"],
     ]
@@ -139,7 +140,7 @@ def test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platfor
     for path in watched:
         assert _covered(path), path
         assert path.startswith(ci_plan.DEPLOY_STAGE_INPUTS), path
-    assert not _covered("packages/neptune-deploy/src/neptune_deploy/packs/render.py")
+    assert not _covered("packages/neptune-deploy/tests/test_deploy_packs_render.py")
 
 
 def test_every_contracts_owner_tests_are_inside_the_pull_request_paths() -> None:

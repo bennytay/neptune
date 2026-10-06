@@ -308,7 +308,8 @@ def test_a_real_deploy_map_that_writes_no_record_is_red(tmp_path: Path) -> None:
         "manipulator: the Deploy map wrote no lifecycle record",
         "manipulator: preset:register_zone mapped no record",
     ]
-    # The mapped package still flows on (and is registered): it is evidence of what did not map.
+    # The mapped package is kept in the report (evidence of what did not map); the red stage stops
+    # the run before the ledger, so it is not registered.
     assert ctx.package_ids("deploy") == [row["package"]]
 
 
@@ -337,3 +338,30 @@ def test_a_malformed_declaration_fails_the_case_without_running_deploy(tmp_path:
     ]
     assert entry["output"]["cases"] == [{"case": "manipulator", "declared": True}]
     assert not ctx.deploy_root("manipulator").exists()
+
+
+def test_a_deploy_built_against_another_package_schema_is_a_stub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import neptune_deploy
+
+    monkeypatch.setattr(neptune_deploy, "PACKAGE_SCHEMA_VERSION", 1)
+    resolution = resolve(DEPLOY, contracts.registry())
+    assert resolution.mode == "stub"
+    assert resolution.reason.startswith("neptune_deploy:PACKAGE_SCHEMA_VERSION is 1, ")
+
+
+def test_a_map_that_raises_is_that_cases_problem_not_a_stage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from harness import stages
+
+    def boom(plan: object) -> object:
+        raise ValueError(f"cannot read {tmp_path}/secret")
+
+    ctx = _declaring(tmp_path, {"deploy_format": 1, "presets": ["cmms_generic"]})
+    monkeypatch.setattr(stages, "_declarations", boom)
+    entry = run_stage(DEPLOY, ctx, services_up=False, upstream_ok=True)
+    assert entry["status"] == "failed"
+    assert entry["problems"] == ["manipulator: the Deploy map raised ValueError"]
+    assert entry["output"]["cases"][0]["state"] == "error"

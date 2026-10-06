@@ -11,7 +11,8 @@ otherwise; the report says which, and why:
    is the stage's own ``entry`` module when it names one (Deploy owns no contract: its stage writes
    package-schema packages through ``neptune_deploy``);
 2. its version constant, when it declares one, matches the registry's latest version of the contract
-   it owns (an integer constant is the registry major, a string constant must equal the version);
+   it owns (an integer constant is the registry major, a string constant must equal the version),
+   and so does the stage's ``built_against`` constant (Deploy's ``PACKAGE_SCHEMA_VERSION``);
 3. every contract the package locks in ``contracts/lock.toml`` is within its latest major;
 4. the harness has a real driver for it (``Stage.real``).
 
@@ -36,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from harness.contracts import load_tool
+from harness.corpus import REPO
 
 if TYPE_CHECKING:
     from harness.corpus import Case
@@ -91,6 +93,9 @@ class Stage:
     real: Driver | None
     stub: Driver
     entry: str | None = None  # a module of the stage's package that a real run also needs
+    # the stage package's own constant naming the contract version it was built against, for a
+    # package that writes a contract it does not own; checked as the owner's constant is
+    built_against: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,18 +137,18 @@ def resolve(stage: Stage, registry: Any) -> Resolution:
         return stub(f"{stage.entry} is not importable")
     if latest is None:
         return stub(f"{stage.contract} has no published version")
-    if owner.version_constant is not None:
+    for constant in (owner.version_constant, stage.built_against):
+        if constant is None:
+            continue
         try:
-            value = _constant(owner.version_constant)
+            value = _constant(constant)
         except (ImportError, AttributeError) as error:
-            return stub(f"{owner.version_constant} cannot be read ({type(error).__name__})")
+            return stub(f"{constant} cannot be read ({type(error).__name__})")
         expected: object = (
             latest.version[0] if isinstance(value, int) else tool.show(latest.version)
         )
         if value != expected:
-            return stub(
-                f"{owner.version_constant} is {value!r}, the registry's latest is {version}"
-            )
+            return stub(f"{constant} is {value!r}, the registry's latest is {version}")
     for contract_id, locked in sorted(registry.lock().get(stage.package, {}).items()):
         newest = registry.latest(contract_id, stable=True)
         if newest is not None and tool.parse_semver(locked)[0] < newest.version[0]:
@@ -261,7 +266,6 @@ def resolve_gold(package: Path, gold_path: Path) -> Json:
 
 # --- Deploy (real) ---------------------------------------------------------------------------
 
-REPO: Final = Path(__file__).resolve().parents[1]
 DEPLOY_FORMAT: Final = 1
 DEPLOY_TIMEOUT_S: Final = 900  # the mapper streams; the acceptance corpus maps in about a second
 
@@ -318,19 +322,26 @@ def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
 
 def _declarations(plan: DeployPlan) -> tuple[dict[str, str], list[str]]:
     """Each declared preset and template file, by the sha256 its transform record names, mapped to
-    the declaration that brought it in (``preset:<name>``, ``template:<path>``); and the presets
-    Deploy does not ship."""
+    the declaration that brought it in (``preset:<name>``, ``template:<path>``); and why the
+    declaration cannot run: a preset Deploy does not ship, a file declared twice. Only Deploy's
+    public names are used (``PRESETS``, ``preset``, ``TemplateRegistry``)."""
     from neptune_deploy.lifecycle import PRESETS, TemplateRegistry, preset
 
     labels: dict[str, str] = {}
-    missing = [name for name in plan.presets if name not in PRESETS]
-    for name in plan.presets:
-        if name in PRESETS:
-            labels[str(preset(name).sha256)] = f"preset:{name}"
+    problems = [f"Deploy ships no preset {name!r}" for name in plan.presets if name not in PRESETS]
+    declared = [
+        (str(preset(name).sha256), f"preset:{name}") for name in plan.presets if name in PRESETS
+    ]
     for path in plan.templates:
-        for template in TemplateRegistry.from_paths([REPO / path]).templates():
-            labels[str(template.sha256)] = f"template:{path}"
-    return labels, missing
+        declared += [
+            (str(template.sha256), f"template:{path}")
+            for template in TemplateRegistry.from_paths([REPO / path]).templates()
+        ]
+    for sha, label in declared:
+        if sha in labels:
+            problems.append(f"{label} declares the same file as {labels[sha]}")
+        labels.setdefault(sha, label)
+    return labels, problems
 
 
 def _lifecycle_records(root: Path) -> tuple[dict[str, int], Counter[str]]:
@@ -341,11 +352,14 @@ def _lifecycle_records(root: Path) -> tuple[dict[str, int], Counter[str]]:
     transforms: Counter[str] = Counter()
     for kind in sorted(k.kind for k in LIFECYCLE_KINDS):
         path = root / "records" / f"{kind}.jsonl"
-        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
-        records = [json.loads(line) for line in lines if line]
-        if records:
-            kinds[kind] = len(records)
-        transforms.update(str(r.get("provenance", {}).get("transform")) for r in records)
+        if not path.is_file():
+            continue
+        with path.open(encoding="utf-8") as lines:  # one record at a time (ADR 0070)
+            for line in lines:
+                if line.strip():
+                    record = json.loads(line)
+                    kinds[kind] = kinds.get(kind, 0) + 1
+                    transforms[str(record.get("provenance", {}).get("transform"))] += 1
     return kinds, transforms
 
 
@@ -363,16 +377,25 @@ def _transform_sources(root: Path) -> dict[str, str]:
     return out
 
 
-def _map(ctx: Context, case: Case, plan: DeployPlan, row: Json, problems: list[str]) -> None:
+def _map(
+    ctx: Context,
+    case: Case,
+    plan: DeployPlan,
+    schema: _PackageSchema,
+    row: Json,
+    problems: list[str],
+) -> None:
     """``python -m neptune_deploy map`` over one compiled package, then the mapped package read
     back, verified, validated and counted."""
+    from neptune_deploy.lifecycle import PRESETS
+
     from neptune.store.package import PackageError, read_package
 
-    labels, missing = _declarations(plan)
-    problems.extend(f"{case.id}: Deploy ships no preset {name!r}" for name in missing)
+    labels, refused = _declarations(plan)
+    problems.extend(f"{case.id}: {problem}" for problem in refused)
     out = ctx.deploy_root(case.id)
     argv = [sys.executable, "-m", "neptune_deploy", "map", str(ctx.package_root(case.id))]
-    argv += [arg for name in plan.presets if name not in missing for arg in ("-p", name)]
+    argv += [arg for name in plan.presets if name in PRESETS for arg in ("-p", name)]
     argv += [arg for path in plan.templates for arg in ("-t", str(REPO / path))]
     argv += ["-o", str(out)]
     done = subprocess.run(
@@ -405,11 +428,7 @@ def _map(ctx: Context, case: Case, plan: DeployPlan, row: Json, problems: list[s
         by_declaration=dict(sorted(made.items())),
         findings=dict(sorted(Counter(f["code"] for f in receipt.get("findings", [])).items())),
     )
-    schema = _PackageSchema.latest(ctx.registry)
-    if schema is None:
-        problems.append("package-schema has no stable version to validate against")
-    else:
-        schema.check(f"{case.id} (deploy)", out, row, problems)
+    schema.check(f"{case.id} (deploy)", out, row, problems)
     if not kinds:  # never green on nothing: the case declares mappings, so records are owed
         problems.append(f"{case.id}: the Deploy map wrote no lifecycle record")
     problems.extend(
@@ -431,6 +450,9 @@ def deploy_real(ctx: Context) -> Outcome:
     compiled = {str(row["case"]): row for row in ctx.upstream.get("compiler", {}).get("cases", [])}
     cases: list[Json] = []
     problems: list[str] = []
+    schema = _PackageSchema.latest(ctx.registry)
+    if schema is None:
+        return Outcome({"cases": []}, ("package-schema has no stable version to validate against",))
     for case in ctx.cases:
         row: Json = {"case": case.id, "declared": case.deploy is not None}
         cases.append(row)
@@ -445,7 +467,12 @@ def deploy_real(ctx: Context) -> Outcome:
             row["state"] = "not_attempted"
             problems.append(f"{case.id}: the compiler stage committed no package to map")
             continue
-        _map(ctx, case, plan, row, problems)
+        try:
+            _map(ctx, case, plan, schema, row, problems)
+        except Exception as error:  # one case's failure is a problem, not the stage's (partial)
+            # The type only: a timeout's or a parser's message carries paths and arguments.
+            row["state"] = "error"
+            problems.append(f"{case.id}: the Deploy map raised {type(error).__name__}")
     return Outcome({"cases": cases}, tuple(problems))
 
 
@@ -727,6 +754,7 @@ STAGES: Final[tuple[Stage, ...]] = (
         deploy_real,
         deploy_stub,
         entry="neptune_deploy.lifecycle",
+        built_against="neptune_deploy:PACKAGE_SCHEMA_VERSION",
     ),
     Stage("ledger", "neptune-ledger", "catalog-api", False, ledger_real, ledger_stub),
     Stage("memory", "neptune-memory", "graph-schema", True, None, memory_stub),

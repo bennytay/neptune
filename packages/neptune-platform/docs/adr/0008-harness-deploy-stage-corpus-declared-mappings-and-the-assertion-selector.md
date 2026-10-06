@@ -33,8 +33,10 @@ claims (MVL-191 triage, 2026-10-06). Forces:
 ## Decision
 
 1. **Stages.** compiler → **deploy** → ledger → memory → context. The deploy stage is owned by
-   `neptune-deploy`, checks the `package-schema` contract it writes, and names an `entry` module
-   (`neptune_deploy.lifecycle`) that must be importable for a real run, beside ADR 0004 §3's rules.
+   `neptune-deploy` and checks the `package-schema` contract it writes. Beside ADR 0004 §3's rules,
+   a real run needs its `entry` module (`neptune_deploy.lifecycle`) importable and its
+   `built_against` constant (`neptune_deploy:PACKAGE_SCHEMA_VERSION`) equal to the registry's
+   latest major, so a Deploy built against an older schema falls back to the stub.
    Its stub maps nothing, and the compiled packages flow on.
 2. **The declaration.** A case may carry a Deploy declaration (`Case.deploy`); the acceptance
    corpus's is `harness/acceptance/deploy.json`, next to `gold.json` and outside the generated
@@ -57,12 +59,16 @@ claims (MVL-191 triage, 2026-10-06). Forces:
    an `at_least` count is not reached. Deploy's own findings (`table_unmapped`, `row_unmatched`
    and the others) are reported by code and never fail the stage. A case without a declaration
    (the worked examples, `--corpus DIR`) is passed over.
-4. **Downstream.** The ledger stage registers every compiled package and then every mapped one
-   (`<case>.deploy`, with a `stage` field), under the same checks (ADR 0006). The stubs count
-   both. The harness posts to Deploy's gate issue, as for every stage owner.
+4. **Downstream.** When the deploy stage passes, the ledger stage registers every compiled
+   package and then every mapped one (`<case>.deploy`, with a `stage` field), under the same
+   checks (ADR 0006); a red deploy stage stops the run before the ledger, as any red stage does
+   (ADR 0004 §2), and its report keeps the mapped package's id and counts. One case's map that
+   raises is that case's problem; the other cases still map. The stubs count both packages. The
+   harness posts to Deploy's gate issue, as for every stage owner.
 5. **CI.** `harness.yml`'s pull-request paths and `.github/scripts/ci_plan.py`'s
-   `DEPLOY_STAGE_INPUTS` cover Deploy's `lifecycle/` package (mapper, presets, templates), its
-   `__main__.py` and its `pyproject.toml`. A change to any of them runs the harness and the
+   `DEPLOY_STAGE_INPUTS` cover Deploy's source (`packages/neptune-deploy/src/**`: the command line
+   imports the lifecycle mapper, presets, templates and the pack commands at start) and its
+   `pyproject.toml`. A change to any of them runs the harness and the
    `neptune-platform` job, whose tests map the corpus. A template that `deploy.json` declares
    outside those paths fails a workflow test until the filters cover it.
 6. **The `assertion` selector** (extends ADR 0007 §5 and §6). `{kind: "assertion", path, id}`
@@ -90,7 +96,9 @@ claims (MVL-191 triage, 2026-10-06). Forces:
   and change the package it configures.
 - **Calling `map_package` in process.** Lost: it ties the harness to Deploy's internals; the
   command line is Deploy's published interface, and running it as a user does catches packaging
-  and entry-point breaks.
+  and entry-point breaks. In process, the stage uses only the public names `PRESETS`, `preset` and
+  `TemplateRegistry`, to refuse an unshipped preset or a file declared twice before the run and
+  to attribute each record to its declaration by file sha256.
 - **Failing on every Deploy finding.** Lost: an unmapped PDF table is expected coverage, not a
   break; zero records and a silent declaration are the breaks.
 - **Keeping 1.1.0 by leaving the old keys in the calibration files.** Lost: the files would no

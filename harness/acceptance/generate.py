@@ -36,6 +36,7 @@ import importlib.util
 import io
 import struct
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
@@ -356,32 +357,21 @@ reprojection_error: 1.86
 # --- PLANT-2, CELL-3: the hand-eye calibrations as easy_handeye writes them ---------------------
 
 
+@dataclass(frozen=True)
 class HandEye:
     """One wrist camera hand-eye calibration of ARM-3A: what easy_handeye saved, and what the
     vision team's log says about it."""
 
-    def __init__(
-        self,
-        ident: str,
-        performed: str,
-        reason: str,
-        xyz: tuple[float, float, float],
-        quaternion: tuple[float, float, float, float],
-        error_px: str,
-        board: str,
-        procedure: str,
-        limit_px: str,
-        work_order: str,
-    ) -> None:
-        self.ident, self.performed, self.reason = ident, performed, reason
-        self.xyz, self.quaternion = xyz, quaternion
-        self.error_px, self.board, self.procedure, self.limit_px = (
-            error_px,
-            board,
-            procedure,
-            limit_px,
-        )
-        self.work_order = work_order
+    ident: str
+    performed: str
+    reason: str
+    xyz: tuple[float, float, float]
+    quaternion: tuple[float, float, float, float]  # qx, qy, qz, qw
+    error_px: str
+    board: str
+    procedure: str
+    limit_px: str
+    work_order: str
 
 
 # The D1 cell's four calibrations (``make_archetypes.cell()``: the same ids, times, translations

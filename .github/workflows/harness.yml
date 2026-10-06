@@ -50,10 +50,10 @@ on:
       # lake, threads and lineage, with pgserver/psycopg from its dependencies (platform ADR 0006)
       - "packages/neptune-ledger/src/**"
       - "packages/neptune-ledger/pyproject.toml"
-      # the deploy stage runs `python -m neptune_deploy map` with Deploy's presets and templates
-      # (platform ADR 0008); ci_plan.py's DEPLOY_STAGE_INPUTS is the same set
-      - "packages/neptune-deploy/src/neptune_deploy/lifecycle/**"
-      - "packages/neptune-deploy/src/neptune_deploy/__main__.py"
+      # the deploy stage runs `python -m neptune_deploy map` with Deploy's presets and templates, and
+      # its command line imports the pack commands too (platform ADR 0008); ci_plan.py's
+      # DEPLOY_STAGE_INPUTS is the same set
+      - "packages/neptune-deploy/src/**"
       - "packages/neptune-deploy/pyproject.toml"
       # every contract's owner tests (`contract_tests` in contracts/*/contract.toml), which
       # `check --all` runs; a unit test fails until a new one is listed here

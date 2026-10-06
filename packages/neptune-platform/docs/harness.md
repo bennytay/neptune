@@ -25,7 +25,7 @@ is always written.
 
 CI is `.github/workflows/harness.yml`: merge queue, nightly, on demand, and pull requests that touch
 `contracts/**`, `harness/**`, an exported schema or the code a real stage runs (the SDK, the Ledger, Deploy's
-`lifecycle/` package and command line). The pull request gets one comment (edited in place); the
+source). The pull request gets one comment (edited in place); the
 nightly run comments on the Linear gate issues only when red; dispatch it by hand for a green record.
 
 ## Read the report
@@ -78,19 +78,21 @@ A case maps with Deploy when it carries a declaration (`Case.deploy`). The accep
 ```
 
 Add a shipped preset by name, or a template file or directory by its repository path, and raise `at_least` for
-the kinds it yields. A template outside Deploy's `lifecycle/` package also needs a path in `harness.yml` and in
-`ci_plan.py`'s `DEPLOY_STAGE_INPUTS`: `test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platform_job`
-fails until both cover it.
+the kinds it yields. A template outside Deploy's `src/` also needs a path in `harness.yml` and in `ci_plan.py`'s
+`DEPLOY_STAGE_INPUTS`: `test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platform_job` fails
+until both cover it. A red deploy stage stops the run before the ledger; its report still names the mapped
+package and its counts.
 
 ## Add a stage
 
 1. Write its driver in `harness/stages.py`: `def driver(ctx: Context) -> Outcome`. It reads `ctx.registry`,
    `ctx.work` (scratch), `ctx.cases` and earlier outputs (`ctx.upstream[stage_id]`), and returns
    `Outcome(output, problems)`: output is JSON-able, deterministic and path-free; any problem fails the stage.
-2. Add `Stage(id, package, contract, needs_services, real, stub, entry=None)` to `STAGES`, in flow order.
-   `contract` is the contract the package owns (or, for a package that owns none, the one it writes); its
-   `[owner]` entry point and version constant decide real versus stub. `entry` is a module of the package that
-   a real run also needs (the deploy stage's is `neptune_deploy.lifecycle`).
+2. Add `Stage(id, package, contract, needs_services, real, stub)` to `STAGES`, in flow order. `contract` is
+   the contract the package owns (or, for a package that owns none, the one it writes); its `[owner]` entry
+   point and version constant decide real versus stub. For a package that owns none, `entry` names a module a
+   real run also needs and `built_against` its constant for the contract version (the deploy stage's are
+   `neptune_deploy.lifecycle` and `neptune_deploy:PACKAGE_SCHEMA_VERSION`).
 3. Give it a stub: `_golden_stub(contract_id, consumes)` serves the contract's goldens (or a canned marker).
 4. Add the package's exported-schema path to the `pull_request` filter in the workflow if it is new (the
    workflow test lists any contract module that is not covered).
