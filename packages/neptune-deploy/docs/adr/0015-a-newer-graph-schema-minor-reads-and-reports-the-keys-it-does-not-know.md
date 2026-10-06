@@ -38,10 +38,11 @@ a lenient one that dropped unknown keys would lose data without saying so. The d
 
 7. **The demo snapshot is a test double.** ADR 0014 §7's `tests/fixtures/packs/acceptance_corpus.graph.json` is
    hand-written in graph-schema shape (claim ids that do not match their content, unsorted lists, a generation
-   that is not Memory's hash, 1.7 claims), so it is not a Memory snapshot and is not named as one. It is now
-   `acceptance_corpus.test_double.graph.json`, with a README beside it and one beside the sample PDF. Memory's
-   consolidator-built `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json` replaces it. Its
-   bytes, and so every golden and the sample PDF, are unchanged by the rename.
+   that is not Memory's hash, 1.7 claims), so it is not a Memory snapshot. It keeps its file name because
+   Context's tests read it by that path, but a README beside it and one beside the sample PDF label it a
+   hand-written test double. Memory's consolidator-built
+   `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json` replaces it once Context reads that
+   instead; then the Deploy copy is renamed or removed. Its bytes, every golden and the sample PDF are unchanged.
 
 ## Consequences
 

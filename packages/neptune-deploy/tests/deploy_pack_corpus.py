@@ -1,4 +1,4 @@
-"""Generator of the Demo v1 test double (``fixtures/packs/acceptance_corpus.test_double.graph.json``,
+"""Generator of the Demo v1 test double (``fixtures/packs/acceptance_corpus.graph.json``,
 ADR 0014): not a Memory snapshot.
 
 A hand-written graph document about the acceptance corpus (Platform ADR 0007, ``harness/acceptance``
