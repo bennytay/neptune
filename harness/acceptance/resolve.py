@@ -197,6 +197,21 @@ def resolve_one(package: Package, select: Json) -> Json:
                 continue
             if "equals" not in select or _known(value.get("text")) == str(select["equals"]):
                 found.append(value)
+    elif kind == "calibration" and "translation" in select:
+        # A hand-eye result states its pose as the calibration's extrinsic (ADR 0073), not as
+        # a named parameter: select the calibration whose extrinsic translation axis equals it.
+        axis = "xyz".index(select["translation"])
+        transforms = {t["id"]: t for t in package.kind("frame_transform")}
+        for record in package.kind("calibration"):
+            if _source(record) != content:
+                continue
+            for ref in record.get("extrinsics", []):
+                values = transforms.get(ref, {}).get("value", {}).get("translation", {})
+                values = values.get("values", [])
+                stated = values[axis] if len(values) > axis else None
+                if stated is not None and ("equals" not in select or stated == select["equals"]):
+                    found.append(record)
+                    break
     elif kind == "calibration":
         (parameter,) = _need(select, "parameter")
         for record in package.kind("calibration"):
@@ -291,6 +306,8 @@ def _locator(kind: str, record: Json, select: Json) -> Json | None:
     if kind == "config_value":
         return {"pointer": select["pointer"]}
     if kind == "calibration":
+        if "translation" in select:
+            return {"translation": select["translation"]}
         return {"parameter": select["parameter"]}
     if kind == "stream":
         return {"topic": select["topic"]}
