@@ -102,7 +102,7 @@ def test_the_handshake_names_the_server_and_offers_tools_and_resources() -> None
     assert "include_inferred" in result.instructions
 
 
-def test_the_six_tools_are_listed_read_only_with_valid_schemas() -> None:
+def test_the_seven_tools_are_listed_read_only_with_valid_schemas() -> None:
     async def use(session: ClientSession) -> list[types.Tool]:
         return (await session.list_tools()).tools
 
@@ -111,6 +111,7 @@ def test_the_six_tools_are_listed_read_only_with_valid_schemas() -> None:
         "neptune_query",
         "neptune_why",
         "neptune_diff",
+        "neptune_compare_runs",
         "neptune_hydrate",
         "neptune_plan",
         "neptune_entities",

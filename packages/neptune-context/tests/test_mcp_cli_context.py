@@ -70,6 +70,7 @@ def test_a_real_stdio_session_lists_tools_and_answers_a_question() -> None:
         "neptune_query",
         "neptune_why",
         "neptune_diff",
+        "neptune_compare_runs",
         "neptune_hydrate",
         "neptune_plan",
         "neptune_entities",
