@@ -1,0 +1,29 @@
+{
+  "id": "rec:sha256:7969e984b486d119fc7f8b1afe9cac9dbcf48d99379285886f8f9436491b85e8",
+  "kind": "snapshot_binding",
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "json_pointer",
+          "pointer": "/runs/0/snapshots/0"
+        },
+        {
+          "kind": "neptune.manifest:binding",
+          "run": "rec:sha256:fecd699331854a745187c71ffb0bcc1315028ff7746cfc3a050292502ae09f74",
+          "snapshot": "rec:sha256:0c9dffbee75b1994daf1e760a61f51287fc2ef31e1e09e200ff1a8611ecba321"
+        }
+      ],
+      "source": "sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"
+    },
+    "transform": "rec:sha256:a2b0671a06c3d06ef518330959c7187d6d3bd3e79c92bce5407e030bc4d2d738"
+  },
+  "run": "rec:sha256:fecd699331854a745187c71ffb0bcc1315028ff7746cfc3a050292502ae09f74",
+  "schema_version": 3,
+  "snapshot": "rec:sha256:0c9dffbee75b1994daf1e760a61f51287fc2ef31e1e09e200ff1a8611ecba321",
+  "snapshot_kind": "configuration_snapshot",
+  "validity": {
+    "knowledge": "unknown"
+  }
+}

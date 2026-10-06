@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:0215b74e3c6f6db663df1de72baeada92dff317e60c2a33ceb7428e1966cbcfa",
+  "id": "rec:sha256:0cb63a86c7a8eba6d6943d21fe544556a0d548c99f83aee358517d5424a55e48",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "cell3/config/controller.yaml"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

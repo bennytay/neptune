@@ -3,9 +3,9 @@
 The transcript fixture (``golden/agent/transcript-arm-cell.json``) is an agent asking "why did the
 arm-cell incident happen, what changed" over the two-site corpus snapshot: it lists declared
 identities, finds names in the question, drafts a query with ``neptune_plan`` (a replayed model),
-runs it with and without inferences, follows with ``neptune_why`` and ``neptune_diff`` and opens a
-source. The same calls must give the same bytes in process, over a real stdio subprocess, and on
-every run.
+runs it with and without inferences, follows with ``neptune_why`` and ``neptune_diff`` (cited
+trails, ADR 0011) and opens a source. The same calls must give the same bytes in process, over a
+real stdio subprocess, and on every run.
 """
 
 from __future__ import annotations
@@ -46,6 +46,9 @@ SKILL = PACKAGE / "claude" / "skills" / "neptune" / "SKILL.md"
 SAMPLE = PACKAGE / "claude" / "mcp.sample.json"
 
 
+WHY_DIFF = ("neptune_why", "neptune_diff")
+
+
 def golden_transcript() -> dict[str, Any]:
     return json.loads(TRANSCRIPT.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
@@ -79,6 +82,24 @@ def test_the_transcript_fixture_is_current() -> None:
     golden = golden_transcript()
     assert document["question"] == golden["question"] == QUESTION
     assert document["steps"] == golden["steps"]
+
+
+def test_why_and_diff_over_the_demo_answer_with_cited_trails() -> None:
+    steps = {s["tool"]: s for s in golden_transcript()["steps"] if s["tool"] in WHY_DIFF}
+    assert set(steps) == set(WHY_DIFF)
+    incident = steps["neptune_why"]["arguments"]["claim_id"]
+    why = steps["neptune_why"]["text"]
+    parsed = parse_answer(why)
+    (root,) = [ln for ln in parsed.trail_lines if ln.trail == "why"]
+    assert root.label == "Root claim" and root.claim_id == incident and root.evidence
+    assert " involves machine " in why and "Why Memory holds " + incident in why
+    diff = steps["neptune_diff"]["text"]
+    opened = [ln for ln in parse_answer(diff).trail_lines if ln.trail == "diff"]
+    assert len(opened) >= 10 and all(ln.label == "Opened" for ln in opened)
+    assert all(ln.carried and ln.evidence for ln in opened)  # max_items 20 carries all twelve
+    assert incident in {ln.claim_id for ln in opened}  # the incident is among what opened
+    assert 'has_configuration configuration "cfg:cfg-c3-1.5"' in diff
+    assert 'What changed about machine "asset-tag:ARM-3A" between transaction 1 and' in diff
 
 
 def test_the_agent_transcript_replays_in_process() -> None:

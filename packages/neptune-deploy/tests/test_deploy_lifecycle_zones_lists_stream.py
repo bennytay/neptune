@@ -100,7 +100,7 @@ def test_a_declared_zone_is_a_civil_time_zone_record_and_nothing_converts() -> N
     ]
     assert event.performed.value.domain_id == domain.id
     # 2026-03-02 09:40 as written: the civil clock's ticks, not moved by the zone's offset.
-    assert event.performed.value.ticks == 20514 * 86400 + 9 * 3600 + 40 * 60
+    assert event.performed.value.ticks == 20514 * 1440 + 9 * 60 + 40  # minutes (ADR 0016 §9)
     assert isinstance(domain.timescale, Unknown)
 
 

@@ -5,8 +5,12 @@ that ends with the citation keys of its evidence (``[E1]``, ``[E2]`` ...), the c
 since ``as_of``, the resolver findings, the gaps, and an ``Evidence:`` footer that maps each key to
 the evidence ref's canonical JSON. ``parse_citations`` reads the footer back (a line's citations
 are the run of keys that ends it). The property every
-renderer must keep: ``parse_citations(render(packet)) == packet.evidence_refs()``, and every key a
-line cites is in the footer. A renderer only formats what the packet holds; it adds no fact, no
+renderer must keep: ``parse_citations(render(packet))`` starts with ``packet.evidence_refs()`` (the
+items' refs, in order of first mention) and every key a line cites is in the footer. A renderer of
+a packet with why trails (ADR 0010) appends, after those, the refs only a why step names (a claim
+the packet cannot carry still cites its bytes): ``render.agent.answer_evidence_refs`` is that
+list, and ADR 0011 amends this clause for them. ``render_text`` below does not render trails, so
+for it the two lists are equal. A renderer only formats what the packet holds; it adds no fact, no
 score and no reading of its own, and it marks every inferred item as inferred.
 
 Every value taken from evidence is written as a JSON string literal, so text in a document span

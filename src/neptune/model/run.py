@@ -14,7 +14,7 @@ Both are evidence records (ADR 0017) of the ``run`` family, specified by ADR 001
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Final
 
 from neptune.model._fields import (
     check_text_values,
@@ -131,6 +131,79 @@ def run_from_json(data: JsonValue) -> Run:
         machine=from_json(obj["machine"], logical_id_from_json, provenance_from_json),
         first=from_json(obj["first"], timestamp_from_json, provenance_from_json),
         last=from_json(obj["last"], timestamp_from_json, provenance_from_json),
+    )
+
+
+RUN_DECLARATION_SINCE: Final = 9
+
+
+@dataclass(frozen=True)
+class RunDeclaration:
+    """What one declaration says a run involved: its machine, site and task (ADR 0072 §2).
+
+    A declaration about a run is not the run's own evidence: a manifest entry says "the recording
+    at these paths was ARM-3A at PLANT-2", and the recording itself states none of it. So it is a
+    record of its own beside the ``Run`` it names, never a rewrite of that run, and it is
+    ``stated``: ``provenance`` cites the declaration, made finer by a step naming the run where
+    one declaration covers several (``neptune.manifest:run``).
+
+    - ``run``: the ``Run`` record the declaration is about (a declaration that names no run the
+      package holds is a finding, not a record).
+    - ``logical_id``: the id the declaration gives the run (``("manifest", "cell3-2026-09-14")``).
+    - ``machine``, ``site``, ``task``: the declared ids of what the run involved, each citing where
+      the declaration says so; ``Unknown`` where it could have said and did not. Never inferred
+      from a folder, a topic or a hostname, and never merged with the ids other evidence uses.
+    """
+
+    kind: ClassVar[str] = "run_declaration"
+    family: ClassVar[Family] = Family.RUN
+    since: ClassVar[int] = RUN_DECLARATION_SINCE
+    id: RecordId
+    provenance: Provenance
+    run: RecordId
+    logical_id: Knowledge[LogicalId]
+    machine: Knowledge[LogicalId]
+    site: Knowledge[LogicalId]
+    task: Knowledge[LogicalId]
+
+    def __post_init__(self) -> None:
+        check_evidence_record(self.id, self.provenance)
+        parse_record_id(self.run)
+        for name in ("logical_id", "machine", "site", "task"):
+            check_type(name, getattr(self, name), LogicalId)
+
+    def to_json(self) -> JsonObject:
+        return evidence_record_json(
+            self.kind,
+            self.id,
+            self.provenance,
+            {
+                "logical_id": to_json(self.logical_id, LogicalId.to_json),
+                "machine": to_json(self.machine, LogicalId.to_json),
+                "run": self.run,
+                "site": to_json(self.site, LogicalId.to_json),
+                "task": to_json(self.task, LogicalId.to_json),
+            },
+            self.since,
+        )
+
+
+def run_declaration_from_json(data: JsonValue) -> RunDeclaration:
+    """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
+    obj, record_id, provenance = evidence_record_object(
+        data,
+        RunDeclaration.kind,
+        {"logical_id", "machine", "run", "site", "task"},
+        RunDeclaration.since,
+    )
+    return RunDeclaration(
+        id=record_id,
+        provenance=provenance,
+        run=parse_record_id(json_str(obj["run"], "run")),
+        logical_id=from_json(obj["logical_id"], logical_id_from_json, provenance_from_json),
+        machine=from_json(obj["machine"], logical_id_from_json, provenance_from_json),
+        site=from_json(obj["site"], logical_id_from_json, provenance_from_json),
+        task=from_json(obj["task"], logical_id_from_json, provenance_from_json),
     )
 
 

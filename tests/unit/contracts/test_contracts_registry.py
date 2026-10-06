@@ -82,6 +82,9 @@ def test_package_schema_goldens_cover_four_robots_and_every_document() -> None:
         "assertion_cell_baseline",  # human assertions (ADR 0062)
         "assertion_fleet_identity",
         "assertion_retraction",
+        "manifest_aerial_survey",  # manifest declarations as stated records (ADR 0072)
+        "manifest_amr_fleet",
+        "manifest_manipulator_cell",
     }
     for robot in robots:
         assert latest.goldens[f"{robot}.manifest.json"] == "#/$defs/PackageManifest"
