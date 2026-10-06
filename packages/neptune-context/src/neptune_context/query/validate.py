@@ -1,8 +1,9 @@
 """Is this query answerable without a silent assumption? (ADR 0002 §7)
 
 ``validate`` returns every finding in a fixed order, and an empty tuple for an answerable query.
-It checks values against the pinned upstream contracts (subject kinds from Memory's node types
-and the Ledger's thread kinds, predicates from graph-schema 1's vocabulary, civil clocks by
+It checks values against the pinned upstream contracts (subject kinds from graph-schema's node
+types and catalog-api's thread kinds, predicates from graph-schema's vocabulary, all at the
+versions in ``pins.py`` via ``neptune_context.pinned``, civil clocks by
 Memory's ``CivilClock`` rule, units by the compiler's catalogue), and refuses any query that
 could mix clocks or frames without naming the record that relates them:
 
@@ -19,16 +20,15 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Hashable
-from typing import TYPE_CHECKING, Final, Generic, TypeVar, get_args
+from typing import TYPE_CHECKING, Final, Generic, TypeVar
 
-from neptune_ledger.api import ThreadKind
 from neptune_memory.schema.interval import CivilClock
-from neptune_memory.schema.nodes import NodeType
-from neptune_memory.schema.predicates import CORE_PREDICATES, is_declared_value
+from neptune_memory.schema.predicates import is_declared_value
 
 from neptune.model.ids import check_token
 from neptune.model.time import Epoch, Timescale
 from neptune.model.units import Dimension, unit_from_json
+from neptune_context import pinned
 from neptune_context.query.codec import (
     canonical_bytes,
     clock_bridge_to_json,
@@ -72,10 +72,10 @@ if TYPE_CHECKING:
 
 N = TypeVar("N", bound=Hashable)
 
-# Subject kinds: Memory's node types (graph-schema 1) and the Ledger's thread kinds (catalog-api).
-SUBJECT_KINDS: Final = frozenset(str(t) for t in NodeType) | frozenset(get_args(ThreadKind))
-# Graph predicates: the vocabulary of the pinned graph-schema major.
-PREDICATES: Final = frozenset(spec.name for spec in CORE_PREDICATES.specs)
+# Subject kinds: graph-schema node types and catalog-api thread kinds, at the pins (ADR 0006 §9).
+SUBJECT_KINDS: Final = pinned.node_types() | pinned.thread_kinds()
+# Graph predicates: the vocabulary of the pinned graph-schema version, not Memory's live registry.
+PREDICATES: Final = pinned.predicates()
 _RECORD_ID: Final = re.compile(r"rec:sha256:[0-9a-f]{64}")
 _CLAIM_ID: Final = re.compile(r"claim:sha256:[0-9a-f]{64}")
 _LENGTH: Final = Dimension(length=1)

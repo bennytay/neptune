@@ -119,7 +119,7 @@ def test_a_configuration_snapshot_that_lost_values(tmp_path: Path) -> None:
     values = sorted(
         (r for r in package.records if r.kind == "configuration_value"), key=lambda r: r.id
     )
-    kept = [r for r in package.records if r is not values[-1]]
+    kept = [r for r in package.records if r != values[-1]]  # records are read afresh: not "is"
     store = dict(package.manifest.store)
     contents = package_contents(kept, series=package.series, store=store, derived=package.derived)
     write_package(tmp_path / "cut", contents)

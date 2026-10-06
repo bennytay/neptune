@@ -1,0 +1,28 @@
+{
+  "as_of": "head",
+  "budget": {
+    "items": 2,
+    "latency_ms": 100
+  },
+  "clock_bridges": [],
+  "during": {
+    "clock": {
+      "domain_id": "rec:sha256:ab683ba52eb6d738d33b657e7b3e9704ea0772891ca65acd83b17b9ac62f0445",
+      "kind": "domain"
+    },
+    "end": 100000000,
+    "start": 0
+  },
+  "explain": [],
+  "frame_bridges": [],
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [],
+  "subjects": [
+    {
+      "declared_id": "asset-tag:QUAD-03",
+      "kind": "machine",
+      "same_as_depth": 0
+    }
+  ]
+}

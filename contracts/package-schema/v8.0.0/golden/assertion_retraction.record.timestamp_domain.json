@@ -1,0 +1,43 @@
+{
+  "declared_monotonic": {
+    "knowledge": "unknown"
+  },
+  "epoch": {
+    "knowledge": "known",
+    "value": "unix"
+  },
+  "field": "authored_at",
+  "id": "rec:sha256:57b8e115a319df64fba55b431f24f4495f343d7df58392caf9eb8f266f21f64d",
+  "kind": "timestamp_domain",
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "json_pointer",
+          "pointer": "/assertions/1/authored_at"
+        }
+      ],
+      "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+    },
+    "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+  },
+  "resolution": {
+    "knowledge": "known",
+    "value": {
+      "denominator": 1,
+      "numerator": 1
+    }
+  },
+  "role": {
+    "knowledge": "known",
+    "value": "document"
+  },
+  "schema_version": 1,
+  "scope": [
+    "/assertions/1"
+  ],
+  "timescale": {
+    "knowledge": "unknown"
+  }
+}

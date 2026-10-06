@@ -12,7 +12,7 @@ from mcp.client.stdio import stdio_client
 
 from context_packet_goldens import PACKETS
 from neptune_context.mcp.__main__ import main
-from neptune_context.render.citations import render_text
+from neptune_context.render.agent import render_answer
 from sdk_testing_context import golden_packet
 
 CLAIM = "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a"
@@ -29,6 +29,15 @@ def test_the_cli_refuses_bad_targets_with_exit_code_two(
     err = capsys.readouterr().err
     assert err.count("neptune mcp:") == 3
     assert "tok-secret" not in err
+
+
+def test_an_unreadable_packet_file_is_exit_code_two(
+    tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = tmp_path / "packets"  # type: ignore[operator]
+    (folder / "q01.json").mkdir(parents=True)  # a directory where a packet file should be
+    assert main(["--packets", str(folder)]) == 2
+    assert "neptune mcp:" in capsys.readouterr().err
 
 
 def test_the_cli_needs_exactly_one_target() -> None:
@@ -57,8 +66,15 @@ def test_a_real_stdio_session_lists_tools_and_answers_a_question() -> None:
             return names, result
 
     names, result = asyncio.run(session())
-    assert names == ["neptune_query", "neptune_why", "neptune_diff", "neptune_hydrate"]
+    assert names == [
+        "neptune_query",
+        "neptune_why",
+        "neptune_diff",
+        "neptune_hydrate",
+        "neptune_plan",
+        "neptune_entities",
+    ]
     assert not result.isError
     first = result.content[0]
     assert isinstance(first, types.TextContent)
-    assert first.text == render_text(golden_packet("q04"))
+    assert first.text == render_answer(golden_packet("q04"))

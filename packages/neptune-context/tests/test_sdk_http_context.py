@@ -155,6 +155,27 @@ def test_status_codes_map_to_structured_errors() -> None:
         assert raised.value.code is code, status
 
 
+def test_an_unmapped_status_takes_the_code_its_body_names() -> None:
+    # C1 gate review: a server's deterministic defect is not retried as an outage.
+    for status, named in (
+        (502, ErrorCode.INVALID_RESPONSE),
+        (500, ErrorCode.ENGINE_ERROR),
+        (410, ErrorCode.NOT_FOUND),
+    ):
+        reply = error_body(SdkError(named, "defect"))
+        with (
+            serve(lambda *_, s=status, r=reply: (s, r)) as (url, seen),
+            pytest.raises(SdkError) as raised,
+        ):
+            Client(url).query(golden_query("q01"))
+        assert raised.value.code is named, status
+        assert len(seen.requests) == 1, "a non-retryable code is asked once"
+    mapped = error_body(SdkError(ErrorCode.ENGINE_ERROR, "x"))
+    with serve(lambda *_: (404, mapped)) as (url, _), pytest.raises(SdkError) as raised:
+        Client(url, retry=RetryPolicy(attempts=1)).query(golden_query("q01"))
+    assert raised.value.code is ErrorCode.NOT_FOUND  # a mapped status decides
+
+
 def test_a_refused_query_answer_carries_its_findings_back() -> None:
     reply = error_body(SdkError(ErrorCode.QUERY_REFUSED, "no", findings=_findings()))
     with serve(lambda *_: (422, reply)) as (url, _), pytest.raises(SdkError) as raised:
@@ -347,7 +368,21 @@ def _raw_server(script: Callable[[Any], None]) -> Iterator[str]:
     def run() -> None:
         connection, _ = listener.accept()
         with connection:
-            connection.recv(65536)
+            # Drain the whole request first: unread bytes would make the close a reset, which
+            # hides how the client treats a clean close (a truncated body must still fail).
+            request = connection.recv(65536)
+            while b"\r\n\r\n" not in request:
+                request += connection.recv(65536)
+            head, _, body = request.partition(b"\r\n\r\n")
+            length = next(
+                int(line.split(b":", 1)[1])
+                for line in head.split(b"\r\n")
+                if line.lower().startswith(b"content-length:")
+            )
+            while len(body) < length:
+                more = connection.recv(65536)
+                assert more, "the client closed before sending its whole request"
+                body += more
             script(connection)
 
     thread = threading.Thread(target=run, daemon=True)

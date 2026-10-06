@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="diffbot">
+  <xacro:include filename="$(find diffbot_description)/urdf/sensors.xacro"/>
+  <xacro:arg name="prefix" default=""/>
+  <xacro:arg name="use_sim" default="false"/>
+  <xacro:property name="wheel_radius" value="0.0508"/>
+  <xacro:property name="wheel_separation" value="0.351"/>
+  <xacro:property name="chassis" value="0.42 0.31 0.18"/>
+  <xacro:macro name="wheel" params="side reflect *joint_origin">
+    <link name="$(arg prefix)${side}_wheel_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi / 2} 0 0"/>
+        <geometry>
+          <mesh filename="$(find diffbot_description)/meshes/wheel.stl"/>
+        </geometry>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi / 2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="0.04"/>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="$(arg prefix)${side}_wheel_joint" type="continuous">
+      <parent link="$(arg prefix)base_link"/>
+      <child link="$(arg prefix)${side}_wheel_link"/>
+      <xacro:insert_block name="joint_origin"/>
+      <axis xyz="0 ${reflect} 0"/>
+      <limit effort="10.0" velocity="${20.0 * wheel_radius / wheel_radius}"/>
+    </joint>
+  </xacro:macro>
+  <link name="$(arg prefix)base_footprint"/>
+  <link name="$(arg prefix)base_link">
+    <visual>
+      <geometry>
+        <box size="${chassis}"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="$(arg prefix)base_joint" type="fixed">
+    <parent link="$(arg prefix)base_footprint"/>
+    <child link="$(arg prefix)base_link"/>
+    <origin xyz="0 0 ${wheel_radius - 0.0406}" rpy="0 0 0"/>
+  </joint>
+  <xacro:wheel side="left" reflect="1">
+    <origin xyz="0 ${wheel_separation / 2} ${wheel_radius}" rpy="0 0 0"/>
+  </xacro:wheel>
+  <xacro:wheel side="right" reflect="-1">
+    <origin xyz="0 ${-wheel_separation / 2} ${wheel_radius}" rpy="0 0 0"/>
+  </xacro:wheel>
+  <xacro:lidar_sensor parent="$(arg prefix)base_link" xyz="0.1 0 0.2"/>
+  <link name="$(arg prefix)imu_link"/>
+  <joint name="$(arg prefix)imu_joint" type="fixed">
+    <parent link="$(arg prefix)base_link"/>
+    <child link="$(arg prefix)imu_link"/>
+    <origin xyz="0 0 ${caster_height}" rpy="0 0 0"/>
+  </joint>
+  <xacro:arg name="serial_port"/>
+  <ros2_control name="diffbot_system" type="system">
+    <hardware>
+      <xacro:if value="$(arg use_sim)">
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      </xacro:if>
+      <xacro:unless value="$(arg use_sim)">
+        <plugin>diffbot_hardware/DiffBotSystem</plugin>
+        <param name="serial_port">$(arg serial_port)</param>
+        <param name="home">$(env HOME)</param>
+      </xacro:unless>
+    </hardware>
+  </ros2_control>
+</robot>

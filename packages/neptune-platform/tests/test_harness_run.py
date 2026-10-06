@@ -40,7 +40,7 @@ def test_today_the_compiler_and_the_ledger_are_real_and_the_rest_are_stubs(
     assert catalog is not None
     assert report["stages"][1]["contract_version"] == ".".join(map(str, catalog.version))
     assert report["smoke"]["ok"] is True
-    assert report["smoke"]["packet_source"].startswith("canned: query-packet")
+    assert report["smoke"]["packet_source"].startswith("golden query-packet packet.q01-")
     assert report["corpus"] == {"name": "worked-examples", "cases": list(corpus.EXAMPLE_NAMES)}
 
 
@@ -86,8 +86,9 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
     }
     ids = {case["package"] for case in cases}
     assert len(ids) == 4  # four robots, four packages
+    # query-packet 1.0.0 is published (MVL-111): the smoke query reads its first golden packet.
     packet = report["smoke"]["packet"]
-    assert {item["package"] for item in packet["evidence"]} == ids
+    assert (packet["kind"], packet["packet_version"]) == ("context_packet", 1)
 
 
 def test_two_runs_give_byte_identical_reports_with_no_path_in_them(tmp_path: Path) -> None:
