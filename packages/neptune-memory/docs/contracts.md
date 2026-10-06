@@ -54,7 +54,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
   - What it holds today:
-    - 12 runs from both sites, with `evidenced_by` and `has_member`.
+    - 12 runs from both sites, with `evidenced_by` and `has_member`, and from each run's `run_declaration` a
+      stated `recorded_by` machine and `at_site` site (the manifest declares no task).
     - 97 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
       2026-09-14.
     - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
@@ -68,7 +69,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     - No configuration lineage and no `authorisation_undecided`. Deploy's 5 `change_record`, 15
       `maintenance_event` (WO-26-0911 among them) and 2 `authorisation_envelope` records are in the Ledger
       export. Memory places them on Ledger thread nodes, which it reads today only from the `ledger_thread`
-      stand-in (ADR 0003 §1); no real Ledger export carries those. Runs also name no machine (MVL-205).
+      stand-in (ADR 0003 §1); no real Ledger export carries those. 
     - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
 
     This file is regenerated as those land, never edited.
@@ -76,8 +77,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 - Compiler package schema: `SCHEMA_VERSION = 9` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
   0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the task kinds, root ADR
-  0063; 8 adds the robot-description kinds, root ADR 0039; 9 adds `run_declaration`, root ADR 0072, the
-  compiler's shape of the run consolidator's stand-in: its Consequences list the delta). Alignment records (MVL-82, package-schema 3.0.0),
+  0063; 8 adds the robot-description kinds, root ADR 0039; 9 adds `run_declaration`, root ADR 0072, read
+  by the run consolidator with the compiler's reader, ADR 0020). Alignment records (MVL-82, package-schema 3.0.0),
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
