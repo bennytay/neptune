@@ -27,7 +27,7 @@ from neptune.model.provenance import EvidenceRef, JsonPointer, TransformRecord
 from neptune.model.source import LocalPath, RawLocalPath, local_location
 
 MANIFEST_ID: Final = "neptune.manifest"
-MANIFEST_VERSION: Final = "0.1.0"
+MANIFEST_VERSION: Final = "0.2.0"  # 0.2.0: declarations become records (ADR 0072)
 MANIFEST_NAMES: Final = ("neptune.yaml", "neptune.yml", "neptune.json")
 
 
