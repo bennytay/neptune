@@ -34,7 +34,9 @@ AMR-05 to `firmware:4.2.0` and pick up that claim as a change on AMR-05.
      not of identity's claims.
    - Nothing that events reads reads identity.
    Events must never read identity's claims: an event joined by `same_as` is still two statements (ADR 0013). If a
-   consolidator ever needs both, it runs after both.
+   consolidator ever needs both, it runs after both. Because identity now depends on events, a build in which
+   `memory.events` does not complete skips identity entirely, machine `same_as` included. Its previous build
+   stands (ADR 0016), but a fresh rebuild then has no identity claims until events completes.
 2. **Event nodes.** Each `evidenced_by(record:<r> → r)` claim of `memory.events` adds the event node `record:<r>` to
    identity's node view. A timeline entry (`record:<r>/timeline/<i>`) has no record or id of its own and is never
    in a scope. Where a Ledger thread already holds the key, the thread's node is kept. An event node's
@@ -91,8 +93,10 @@ change is one even when no shape changes.
 - **1.x documents.** `graph_from_json` still reads a 1.x document as written. It is labelled major 1 (`release`
   `None`; a reader reports `graph_schema_version` 1) and is written back unchanged, never relabelled 2.x. In-repo
   consumers on 1.x keep working until they move. Any other major is refused.
-- **Migration.** `graph-schema.md` § Migrating from 1.x to 2.0.0. Consumers' locks are raised by their own
-  coordinators. Until then they are a major behind, and `contracts.py check` says so.
+- **Migration.** `graph-schema.md` § Migrating from 1.x to 2.0.0. As the registry requires (the
+  `contracts/lock.toml` header, `contracts.py bump`), the PR publishing a major raises every in-repo consumer's
+  `graph-schema` lock to 2.0.0, and each consumer's contract tests pass at it before the PR merges: Context's and
+  Deploy's locks move to 2.0.0 in the PR that publishes it.
 - **Not in 2.0.0.** The claim-id derivation vectors (MVL-137) come later in an additive 2.x.
 
 The golden graph changes only by vocabulary 11 (a new resolver generation), identity's version (re-ided

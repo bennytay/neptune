@@ -1,0 +1,27 @@
+{
+  "adapter_id": "neptune.introspection",
+  "adapter_version": "0.1.0",
+  "config": {
+    "limits": {
+      "max_definition_bytes": 1048576,
+      "max_depth": 32,
+      "max_fields": 16384,
+      "max_json_depth": 64,
+      "max_layout_bytes": 4194304,
+      "max_name_bytes": 1024,
+      "max_paths": 4096,
+      "max_pointer_bytes": 4096,
+      "max_types": 1024
+    },
+    "max_output_bytes": 33554432,
+    "max_total_bytes": 67108864
+  },
+  "config_hash": "sha256:c9bc334a3ccc9ee16d496be9a6b10c4fb1d0a994ea6f19ec135122607e445b94",
+  "id": "rec:sha256:095ea76d4be71f52e7e86d72ccb0018d4e78520678b422ce936fe184fecc3ab9",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": [
+    "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d"
+  ]
+}

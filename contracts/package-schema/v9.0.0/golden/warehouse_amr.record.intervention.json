@@ -1,0 +1,312 @@
+{
+  "authority": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/interventions/0/authority"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "level 2 remote operator"
+  },
+  "commands": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/interventions/0/commands/0"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": "pause"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/interventions/0/commands/1"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": "set waypoint W-12-3"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/interventions/0/commands/2"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": "resume"
+    }
+  ],
+  "configuration": {
+    "knowledge": "not_covered"
+  },
+  "end": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/interventions/0/end"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": {
+      "domain_id": "rec:sha256:926bf595c94452c9523525c7a55a1dea9d794213931f406de5d64e30be186e8d",
+      "ticks": 1790222741
+    }
+  },
+  "id": "rec:sha256:d5ab6da6f45fc2f49e113791decd69a8925c7702baa046836ba904041aa70e9b",
+  "identifiers": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/interventions/0/ticket"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": {
+        "namespace": "siteops.ticket",
+        "value": "INT-1187"
+      }
+    }
+  ],
+  "kind": "intervention",
+  "machines": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/interventions/0/machine"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": {
+        "namespace": "fleet",
+        "value": "AMR-07"
+      }
+    }
+  ],
+  "mode": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/interventions/0/mode"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "remote assist"
+  },
+  "outcome": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/interventions/0/outcome"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "mission completed"
+  },
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 4903,
+          "offset": 0
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": "/interventions/0"
+        }
+      ],
+      "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+    },
+    "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+  },
+  "reason": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/interventions/0/reason"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "blocked by a pallet in aisle 12"
+  },
+  "related": [],
+  "schema_version": 4,
+  "site": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/site"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": {
+      "namespace": "siteops.site",
+      "value": "S-007"
+    }
+  },
+  "start": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/interventions/0/start"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": {
+      "domain_id": "rec:sha256:926bf595c94452c9523525c7a55a1dea9d794213931f406de5d64e30be186e8d",
+      "ticks": 1790222530
+    }
+  }
+}

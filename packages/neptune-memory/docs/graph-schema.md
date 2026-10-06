@@ -158,7 +158,8 @@ edge (`parent`, `child`), in the `representation` both declare, with the transfo
 - A **graph document** (`#/$defs/Graph`) is one resolved history: every claim version and every finding, the
   `resolver_config` whose hash is its `generation`, and its `head`: the latest Ledger transaction it covers. The
   head may be later than every `recorded_at`, because a transaction can produce no claim. From 1.9.0 it may hold
-  `builds` (`#/$defs/Build`), ordered by `(recorded_at, consolidator_id)`: each consolidator run it was resolved
+  `builds` (`#/$defs/Build`; optional, and when present it has at least one build, `minItems` 1), ordered by
+  `(recorded_at, consolidator_id)`: each consolidator run it was resolved
   with, its lineage (consolidator id, version, config hash), its transaction and every claim id it emitted, possibly
   none. A document without builds writes no `builds` key and reads exactly as 1.8.0. From 2.0.0 it names the
   full release it was written to, `graph_schema` (`"2.0.0"`), beside the major `graph_schema_version`, so a
@@ -277,7 +278,11 @@ def test_graph_schema_contract(check):
     at the same `t` (one `Timestamp`, so one clock), `A ≠ B`. Nothing else is a change: an unknown or candidate span
     between them, or another clock, breaks the adjacency, so no change is read across a gap
     ([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §2;
-    `consolidate.configuration.transitions` reads it). `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
+    `consolidate.configuration.transitions` reads it). In vocabulary 11 only `memory.configuration` emits
+    `has_configuration`. Where several spans of one machine end at `t` and several begin at `t`, each ending and
+    beginning pair with different configurations is one change, as `transitions` reads it. A
+    `configuration_candidate` or `configuration_unknown` span beside a decided one marks an ambiguous or unknown
+    boundary, never a change. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
     made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
     envelope end is never read as open.
 13. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run
