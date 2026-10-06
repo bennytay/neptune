@@ -1,0 +1,20 @@
+{
+  "adapter_id": "neptune.bindings",
+  "adapter_version": "0.1.0",
+  "config": {
+    "join": "verbatim",
+    "scope": "recording_unit",
+    "slot": "kind_and_file_name"
+  },
+  "config_hash": "sha256:dbfdd73f0250888d3e9f966626216c926f6aa846c09f87a64c941c9e108ffe33",
+  "id": "rec:sha256:1a5b401f12deec73bee69d6e87ce0e21726780d9531cfd0aa689e8076c5155d5",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": [
+    "rec:sha256:59263d4d869737c97b9c2573c09c0b88e02cc1291081c118dd92928552531bd5",
+    "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+    "rec:sha256:ca6e8981baa908f102fb5ee788d23d78014744c49ba84a922b28e118c8fc502f",
+    "rec:sha256:ce7e973dd25f50a0254325a5f9f0f066eb411b09344a3b7ef59b693fad5523cf"
+  ]
+}

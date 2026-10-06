@@ -10,10 +10,10 @@ flowchart LR
     RET["retrieve/ channel interface + graph channel (ADR 0007)"]
     ENG["engine.py LocalEngine (ADR 0007)"]
     PKT["packets/"]
-    RND["render/"]
+    RND["render/ agent text renderer (ADR 0009)"]
     SDK["sdk/ Client + engine seam (ADR 0004)"]
-    MCP["mcp/ 4 read-only tools (ADR 0004)"]
-    EXP["explain/"]
+    MCP["mcp/ 6 read-only tools + Claude Code skill (ADR 0004, 0009)"]
+    EXP["explain/ why + diff trails, Markdown (ADR 0010)"]
     EVA["eval/"]
   end
   OUT[("Agents / Deploy / Learn")]
@@ -22,8 +22,10 @@ flowchart LR
   MEM -->|read only| RET
   LED & MEM -.-> PIN
   QRY --> RET --> PKT --> RND
-  RET --> EXP
+  LED & MEM -->|read only| EXP
+  EXP --> ENG
   PKT --> SDK
+  QRY -->|planner| SDK
   MCP --> SDK
   RET --> ENG -->|engine seam| SDK
   EVA -.-> RET
@@ -42,8 +44,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1,PIN,PKT built
-  class K2,QRY,RND,SDK,MCP,RET,ENG partial
-  class EXP,EVA,K3 todo
+  class K2,QRY,RND,SDK,MCP,RET,ENG,EXP partial
+  class EVA,K3 todo
   class LED,MEM,OUT,CON ext
   style P fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

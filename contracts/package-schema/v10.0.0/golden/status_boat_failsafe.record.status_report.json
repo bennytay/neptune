@@ -1,0 +1,125 @@
+{
+  "convention": "ardupilot_error",
+  "hardware_id": {
+    "knowledge": "not_covered",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 89,
+            "offset": 178
+          }
+        ],
+        "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+      },
+      "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+    }
+  },
+  "id": "rec:sha256:04b4d6e91d1c26e1b744d0030ee3dcff2603d41475c3aa23177c6c05f4495d90",
+  "kind": "status_report",
+  "level": {
+    "knowledge": "not_covered",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 89,
+            "offset": 178
+          }
+        ],
+        "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+      },
+      "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+    }
+  },
+  "level_names": {
+    "knowledge": "not_covered",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 89,
+            "offset": 178
+          }
+        ],
+        "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+      },
+      "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+    }
+  },
+  "message": {
+    "knowledge": "not_covered",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 89,
+            "offset": 178
+          }
+        ],
+        "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+      },
+      "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+    }
+  },
+  "name": {
+    "knowledge": "not_covered",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 89,
+            "offset": 178
+          }
+        ],
+        "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+      },
+      "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+    }
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 13,
+          "offset": 1583
+        }
+      ],
+      "source": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867"
+    },
+    "transform": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe"
+  },
+  "schema_version": 10,
+  "stream": "rec:sha256:56be4318a4248741e48b35d9f5f000e515039c8d1f8ef7ccae4a8dc95086249d",
+  "times": [
+    {
+      "knowledge": "known",
+      "value": {
+        "domain_id": "rec:sha256:56cc7ed3a075c3d11fd24d0ebca3c3d05183d472471d326274a5cf9c93dcfa49",
+        "ticks": 9000000
+      }
+    }
+  ],
+  "values": [
+    {
+      "key": "Subsys",
+      "value": 5
+    },
+    {
+      "key": "ECode",
+      "value": 1
+    }
+  ]
+}

@@ -120,6 +120,8 @@ The forces:
 - Packages with ROS or flight-log sources change id (new adapter versions and config options);
   only those with a recognised status write records of version 10.
 - The safety catalogue is maintained with the adapters; adding a type is a new adapter version.
-- The Ledger's schema-version registry refuses a skipped version, so its entry for 10 follows 9's.
+- The Ledger's schema-version registry gains 10 after 9's. `status_report.stream` and
+  `safety_state.stream` are its first `stream` hot filter: generated migration 0012 adds the
+  `stream_ids` column (Ledger ADR 0009).
 - Revisit when a manifest can bind a topic to a safety field, when a consumer needs OK statuses
   as records by default, or when a status type nests deeper than these.

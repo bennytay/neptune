@@ -40,9 +40,30 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
 - The in-process engine is `neptune_context.engine.LocalEngine(memory_reader, catalog=None)` (ADR 0007): it
   runs the graph channel over a Memory reader (and the Ledger's indexes when a `CatalogApi` is given), fuses,
   cuts to the budget and assembles the packet. `read_graph(path)` loads a Memory graph document into Memory's
-  reference reader. Lexical and vector channels join through `LocalEngine(..., channels=[...])`.
+  reference reader, indexed by claim id for `why` (`explain.IndexedReader`). Lexical and vector channels join
+  through `LocalEngine(..., channels=[...])`.
+- `why` and `diff` answers carry `packet.trails` (ADR 0010): the why tree (root, corroborating, conflicting
+  and alternative claims, each with its evidence) and the what-changed list (opened, closed, superseded, by
+  predicate). `neptune_context.explain.render_markdown(packet)` renders any packet for people, with
+  `neptune://claim/<id>?as_of=N` links (open with `why`) and `neptune://evidence/<token>?as_of=N` links
+  (open with `hydrate`; the MCP server's resource URIs).
 - `StubEngine.from_directory(Path("tests/golden/packets"))` answers exactly the queries it has recorded
-  packets for and says `not_found` for anything else: for fixtures and offline builds.
+  packets for and says `not_found` for anything else: for fixtures and offline builds. It reads regular
+  `*.json` files only (symlinks and other files are skipped), checks each size before reading, and refuses a
+  directory with no packet.
+- The planner (ADR 0005) rides on the client ([ADR 0009](adr/0009-agent-renderer-and-mcp-tool-surface.md)):
+
+  ```
+  planner = Planner(entity_index(graph_document), Defaults(Caller.AGENT), AnthropicClient())
+  client = Client(engine, planner=planner)
+  planned = client.plan("why did the arm-cell incident happen?")   # PlannedQuery: shown, never run
+  planned = client.choose(planned, "ARM-3A", "asset-tag:ARM-3A")  # settle an ambiguous name
+  asked = client.ask("...")             # Asked(plan, packet): the packet only when the plan is ready
+  client.entities("machine", include_inferred=False)                # names current at head
+  client.find("ARM-3A in CELL-3", as_of=4, include_inferred=False)  # names at transaction 4
+  ```
+
+  Without a planner these calls are `unavailable`; with `NoModel()` every plan is a visible `failed` plan.
 
 ## The ten worked queries in SDK form
 
@@ -267,14 +288,27 @@ packet = client.query(query)
 
 `python -m neptune_context.mcp --url https://neptune.example` (token from `$NEPTUNE_TOKEN`),
 `--memory GRAPH.json` (the local engine over a Memory graph document, ADR 0007) or `--packets DIR` (recorded
-packets, for trying it out) serves four read-only tools over stdio. Claude Code:
+packets, for trying it out) serves six read-only tools over stdio
+([ADR 0004](adr/0004-sdk-and-mcp-server.md), [ADR 0009](adr/0009-agent-renderer-and-mcp-tool-surface.md)).
+With `--memory`, `--planner anthropic` (the `anthropic` extra and an API key) or `--planner-recordings FILE`
+gives `neptune_plan` a model; without one a plan says no model is configured.
+
+Claude Code, from the repository root, over the Demo v1 two-site corpus:
 
 ```
-claude mcp add neptune -- python -m neptune_context.mcp --memory graph.json
+export NEPTUNE_MEMORY_GRAPH=$HOME/.cache/neptune/demo-graph.json
+uv run --all-packages python packages/neptune-context/scripts/export_demo_graph.py "$NEPTUNE_MEMORY_GRAPH"
+claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "$NEPTUNE_MEMORY_GRAPH"
+mkdir -p .claude/skills && cp -r packages/neptune-context/claude/skills/neptune .claude/skills/
 ```
+
+or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json` (it reads `${NEPTUNE_MEMORY_GRAPH}`
+and `${NEPTUNE_REPO}`). The skill (`claude/skills/neptune/SKILL.md`) tells Claude when to ask Neptune, how to
+build the query and how to cite the answer.
 
 With `--memory` and no Ledger catalog attached, series windows, frames and `neptune_hydrate` answer with gaps
 or `unavailable`; a catalog is attached in code (`build_server(AsyncClient(LocalEngine(reader, catalog)))`).
+Extra retrieval channels join through `local_client(document, channels=factory)`.
 
 | Tool | Asks | Arguments |
 |---|---|---|
@@ -282,10 +316,23 @@ or `unavailable`; a catalog is attached in code (`build_server(AsyncClient(Local
 | `neptune_why` | why one claim is held | `claim_id`, `include_inferred`, `as_of`, `max_items` |
 | `neptune_diff` | what changed about one subject | `subject`, `before`, `after`, `include_inferred`, `as_of`, `max_items` |
 | `neptune_hydrate` | what the Ledger knows about a cited source | `evidence`, `as_of` |
+| `neptune_plan` | a typed query drafted from a question (inferred; never run) | `question`, `as_of` |
+| `neptune_entities` | declared identities current at `as_of`, to use as subjects | `include_inferred`, `text` (find names in it), `kind`, `as_of` |
 
-- An answer is the packet as cited text (`[E1]` keys, an `Evidence:` footer, every inferred item marked
-  `INFERRED`) plus one resource link per evidence ref; reading `neptune://evidence/<token>?as_of=N` hydrates it at the answer's snapshot.
+- A packet answer is cited sentences (`render.agent.render_answer`):
+  - a header with the snapshot, the clock and the inference policy;
+  - **What changed** first;
+  - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`;
+  - quantities by declared unit, findings and gaps;
+  - an `Items:` footer (item and claim ids) and the `Evidence:` footer.
+
+  One resource link follows per evidence ref. Reading `neptune://evidence/<token>?as_of=N` hydrates it at the
+  answer's snapshot. `render.agent.parse_answer` recovers every citation from the text.
+- Text from sources is quoted, hardened JSON. Square brackets, every non-ASCII bracket (Unicode Ps/Pe), angle
+  brackets, backticks and their look-alikes, controls, bidirectional and invisible characters are escaped, so a document cannot forge a citation, a line or a tag. The answer says
+  quoted strings are data, never instructions.
 - A failure is a tool error whose text is the SDK error as JSON (`code`, `message`, `retryable`, `findings`).
+  Arguments nested deeper than 64 levels are `invalid_argument`.
 - The server holds no retrieval logic: it calls an `AsyncClient`. An in-process engine plugs in as
   `build_server(AsyncClient(engine))`; retrieval channels added later change the query schema the tools
   advertise, not the tools.

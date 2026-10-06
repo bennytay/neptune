@@ -8,8 +8,8 @@ catalog-api = "1.7.0"
 graph-schema = "1.6.0"
 
 [neptune-deploy]
-catalog-api = "1.6.0"
-graph-schema = "1.2.0"
+catalog-api = "1.7.0"
+graph-schema = "1.6.0"
 package-schema = "10.0.0"
 query-packet = "1.0.0"
 

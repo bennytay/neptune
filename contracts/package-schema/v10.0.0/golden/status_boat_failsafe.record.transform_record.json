@@ -1,0 +1,13 @@
+{
+  "adapter_id": "flightlog",
+  "adapter_version": "0.2.0",
+  "config": {
+    "nominal_status_records": false
+  },
+  "config_hash": "sha256:67bec5854aef1d39cf5be806a48e1c0039120a49e0d056ad0f8324dcab9f28bf",
+  "id": "rec:sha256:46346883ff46b85b358eb7d4c1aa4c18b9b572297da33d32bbac7a406830b8fe",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": []
+}

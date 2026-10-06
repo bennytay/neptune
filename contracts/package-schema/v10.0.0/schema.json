@@ -8921,6 +8921,50 @@
       ],
       "type": "object"
     },
+    "RunDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "run_declaration"
+        },
+        "logical_id": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "machine": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "run": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "schema_version": {
+          "const": 9
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "task": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "logical_id",
+        "machine",
+        "provenance",
+        "run",
+        "schema_version",
+        "site",
+        "task"
+      ],
+      "type": "object"
+    },
     "RunMember": {
       "additionalProperties": false,
       "properties": {
@@ -10284,6 +10328,9 @@
     },
     {
       "$ref": "#/$defs/Stream"
+    },
+    {
+      "$ref": "#/$defs/RunDeclaration"
     },
     {
       "$ref": "#/$defs/StatusReport"

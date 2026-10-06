@@ -9,10 +9,13 @@ flowchart LR
   end
   CON[("contracts/")]
   D1["Deploy D1 archetype generators"]
+  DM["Deploy lifecycle mapper<br/>python -m neptune_deploy map"]
   CON -->|published interfaces| CORE
   CON -->|contracts check, stubs| HARNESS
   D1 -->|imported| CORPUS
   CORPUS -->|versioned sources, gold answers| HARNESS
+  CORPUS -->|declared presets, templates| DM
+  DM -->|mapped packages, deploy stage| HARNESS
 
   subgraph KEY[" "]
     K1["built"]
@@ -28,7 +31,7 @@ flowchart LR
   class K1,CORPUS,HARNESS built
   class K2 partial
   class CORE,K3 todo
-  class CON,D1 ext
+  class CON,D1,DM ext
   style P fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none
   linkStyle default stroke:#8b949e

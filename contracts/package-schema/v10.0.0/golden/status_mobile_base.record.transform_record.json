@@ -1,0 +1,23 @@
+{
+  "adapter_id": "rosbag1",
+  "adapter_version": "0.3.0",
+  "config": {
+    "decode_payloads": true,
+    "max_array_items": 65536,
+    "max_chunk_bytes": 67108864,
+    "max_decoded_columns": 512,
+    "max_header_bytes": 1048576,
+    "max_message_bytes": 16777216,
+    "max_status_records": 8192,
+    "nominal_status_records": false
+  },
+  "config_hash": "sha256:e93b23fec6823d516238cf4597868fa0342e1ec4aa112a96f3f7c40a3bc45657",
+  "id": "rec:sha256:26984b1adc1b3ecdf559c7906a33466b3cd41cb634ccda36216352472a45916b",
+  "kind": "transform_record",
+  "libraries": {
+    "bz2": "cpython-3.12",
+    "lz4": "4.4.5"
+  },
+  "schema_version": 1,
+  "upstream": []
+}

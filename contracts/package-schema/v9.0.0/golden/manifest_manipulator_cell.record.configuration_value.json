@@ -1,0 +1,66 @@
+{
+  "id": "rec:sha256:21674c6135ef7fb7b2fc255e51ef9d6bea9799ee03495b5cca4ed1bd8860c3da",
+  "key_tag": {
+    "knowledge": "not_applicable"
+  },
+  "kind": "configuration_value",
+  "occurrence": [
+    0,
+    0,
+    0
+  ],
+  "order": 1,
+  "path": [
+    "sites",
+    0,
+    "name"
+  ],
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "index": 0,
+          "kind": "config:document"
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": "/sites/0/name"
+        }
+      ],
+      "source": "sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"
+    },
+    "transform": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+  },
+  "schema_version": 2,
+  "snapshot": "rec:sha256:20550e193a6544cb90e74d020bd1d347488b7d87e32afbd7b6df3d04830ad61b",
+  "tag": {
+    "knowledge": "known",
+    "value": "!"
+  },
+  "text": {
+    "knowledge": "known",
+    "value": "Riverside plant 2"
+  },
+  "value": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "end": 152,
+            "kind": "span",
+            "start": 133
+          }
+        ],
+        "source": "sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"
+      },
+      "transform": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+    },
+    "value": {
+      "type": "string",
+      "value": "Riverside plant 2"
+    }
+  }
+}

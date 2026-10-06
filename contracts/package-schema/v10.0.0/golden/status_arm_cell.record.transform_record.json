@@ -1,0 +1,25 @@
+{
+  "adapter_id": "mcap",
+  "adapter_version": "0.3.0",
+  "config": {
+    "decode_payloads": true,
+    "log_time_end": 18446744073709551615,
+    "log_time_start": 0,
+    "max_array_items": 65536,
+    "max_chunk_bytes": 268435456,
+    "max_decoded_columns": 512,
+    "max_message_bytes": 16777216,
+    "max_status_records": 8192,
+    "nominal_status_records": false,
+    "topic_pattern": ""
+  },
+  "config_hash": "sha256:78bb423a8a0adbc2b71a3b20487015329925cec8c073c042e2abfd6497641f84",
+  "id": "rec:sha256:ca6e8981baa908f102fb5ee788d23d78014744c49ba84a922b28e118c8fc502f",
+  "kind": "transform_record",
+  "libraries": {
+    "lz4": "4.4.5",
+    "zstandard": "0.25.0"
+  },
+  "schema_version": 1,
+  "upstream": []
+}

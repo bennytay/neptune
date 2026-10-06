@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:fe5926ddf656a4ce227353d79b433cffb49747709fe52d6a84991e1f981f5867",
+  "id": "rec:sha256:414657adcf9334479d8d40989dd8b5dc87413293edc288dee929d96e73c99d2e",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "logs/boat_failsafe.bin"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

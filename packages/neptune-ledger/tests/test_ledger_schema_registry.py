@@ -32,6 +32,7 @@ from neptune.model.knowledge import AssertionKind, Known, NotCovered, Unknown
 from neptune.model.machine import DescriptionExpansion
 from neptune.model.provenance import Provenance
 from neptune.model.record import SCHEMA_VERSION
+from neptune.model.run import Run, RunDeclaration
 from neptune.model.status import StatusConvention, StatusReport
 from neptune.model.task import WorkOrder
 from neptune.store.package import package_files, read_package
@@ -532,10 +533,11 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
 def newest_package(tmp_path: Path) -> WorkedPackage:
     """A package of package-schema 10: the schema-4 manipulator cell plus one work order (version
     7, root ADR 0063), stated by a declared-records transform over the cell's risk-assessment
-    transform, one Xacro expansion (version 8, root ADR 0039) and one status report (version 10,
-    root ADR 0071) that adapters observed in the same bytes. No worked example holds a kind of
-    version 7 or later, and a package is written at the lowest version that holds its records, so
-    the newest version needs a record of its own."""
+    transform, one Xacro expansion (version 8, root ADR 0039) a description adapter observed in
+    the same bytes, a manifest's run declaration (version 9, root ADR 0072) about a run the same
+    declaration states, and one status report (version 10, root ADR 0071) a log adapter observed.
+    No worked example holds a kind of version 7 or later, and a package is written at the lowest
+    version that holds its records, so the newest version needs a record of its own."""
     cell = materialise("manipulator_cell", tmp_path / "manipulator_cell-4")
     records = list(read_package(cell.root).records)
     assessment = next(record for record in records if record.kind == "risk_assessment")
@@ -568,6 +570,23 @@ def newest_package(tmp_path: Path) -> WorkedPackage:
         len(expanded),
         (),
     )
+    run = Run(
+        evidence_record_id("run", evidence, declared),
+        stated,
+        Known(LogicalId("manifest", "cell3-pick"), stated),
+        NotCovered(),
+        NotCovered(),
+        NotCovered(),
+    )
+    named = RunDeclaration(
+        evidence_record_id("run_declaration", evidence, declared),
+        stated,
+        run.id,
+        Known(LogicalId("manifest", "cell3-pick"), stated),
+        Known(LogicalId("manifest", "ARM-3A"), stated),
+        Known(LogicalId("manifest", "PLANT-2"), stated),
+        NotCovered(),
+    )
     log = transform_record(adapter_id="mcap", adapter_version="0.3.0", config={})
     observed = Provenance(evidence, log.id, AssertionKind.OBSERVED)
     status = StatusReport(
@@ -583,7 +602,7 @@ def newest_package(tmp_path: Path) -> WorkedPackage:
         hardware_id=Unknown(),
         values=Known(()),
     )
-    files = package_files([*records, declared, order, xacro, expansion, log, status])
+    files = package_files([*records, declared, order, xacro, expansion, run, named, log, status])
     return write("manipulator_cell", tmp_path / "manipulator_cell", files)
 
 
@@ -591,8 +610,8 @@ def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
     """Boundary: the registry's newest version (the manipulator cell with a work order, a
-    description expansion and a status report, version 10) registers; the same package one version
-    past it is a future version."""
+    description expansion, a run declaration and a status report, version 10) registers; the same
+    package one version past it is a future version."""
     cell = newest_package(tmp_path)
     assert cell.schema_version == shipped_registry().latest.version == SCHEMA_VERSION
     manifest = dict(cell.manifest)

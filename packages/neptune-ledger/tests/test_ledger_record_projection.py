@@ -97,15 +97,20 @@ def migration(version: int, text: str) -> Migration:
 
 
 def test_the_shipped_spec_is_generated_from_the_declared_package_schema() -> None:
-    """The newest spec follows the declared version. No version after 1 adds a projection
-    column: 2 adds kinds with no hot filter, and 3 and 4 fill columns 0005 made, so their only
-    migration is the guard 0006."""
+    """The newest spec follows the declared version. Of the versions after 1 only 10 adds a
+    projection column: 2 adds kinds with no hot filter, 3 and 4 fill columns 0005 made (their
+    only migration is the guard 0006), and 10's status and safety-state kinds are the first to
+    state a ``stream`` (root ADR 0071), so migration 0012 adds ``stream_ids``."""
     latest = shipped_registry().latest
     assert latest.version == SCHEMA_VERSION
     newest = EXPORTS / f"v{latest.contract_version}" / "schema.json"
     assert shipped_spec() == latest.spec == projection_spec(json.loads(newest.read_bytes()))
-    for older, newer in pairwise(shipped_registry().versions):
-        assert "ADD COLUMN" not in render_migration(older.spec, newer.spec, 6)
+    added = {
+        newer.contract_version: re.findall(r"ADD COLUMN (\w+)", text)
+        for older, newer in pairwise(shipped_registry().versions)
+        if "ADD COLUMN" in (text := render_migration(older.spec, newer.spec, 6))
+    }
+    assert added == {"10.0.0": ["stream_ids"]}
     assert set(shipped_spec().kinds) - set(BASELINE_KINDS) >= {
         "configuration_snapshot",
         "configuration_value",
@@ -238,15 +243,16 @@ def test_schema_key_order_does_not_change_the_spec() -> None:
 
 
 def test_a_bump_that_adds_a_kind_renders_its_new_columns_only() -> None:
-    """No partition: the new kind lives in record_default (ADR 0008; ADR 0009 §6)."""
+    """No partition: the new kind lives in record_default (ADR 0008; ADR 0009 §6). Every column
+    the fixture's kind states exists already (``stream_ids`` since 0012), so the bump is a guard
+    and adds none."""
     text = render_migration(shipped_spec(), projection_spec(bumped_schema()), 5)
     assert text.startswith(f"-- 0005 record projections for urn:neptune:schema:canonical:{BUMPED}")
     assert "CREATE TABLE" not in text
     assert "IF EXISTS (SELECT 1 FROM record WHERE kind IN ('contact_event')) THEN" in text
-    assert "ADD COLUMN stream_ids text[]" in text
     assert "--   contact_event.machine -> machine_namespace, machine_value" in text
-    assert "ADD COLUMN machine_" not in text  # machine columns already exist
-    assert "ADD COLUMN clock_ids" not in text
+    assert "--   contact_event.stream -> stream_ids" in text
+    assert "ADD COLUMN" not in text  # machine, clock and stream columns already exist
 
 
 @pytest.mark.parametrize("change", ["drop_kind", "drop_projection", "drop_opaque"])
@@ -436,11 +442,15 @@ def test_a_bump_migration_refuses_rows_of_its_kind_already_filed(pg: Conn) -> No
     bump = migration(len(shipped) + 1, render_migration(shipped_spec(), new, len(shipped) + 1))
     with pytest.raises(psycopg.errors.RaiseException, match="rebuild this catalog"):
         apply_migrations(pg, "acme", shipped=(*shipped, bump))
-    columns = pg.execute(
-        "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'tenant_acme'"
-        " AND table_name = 'record' AND column_name = 'stream_ids'"
+    applied = pg.execute(
+        "SELECT count(*) FROM tenant_acme.schema_migration WHERE version = %s",
+        (len(shipped) + 1,),
     ).fetchone()
-    assert columns == (0,)
+    assert applied == (0,)
+    filed = pg.execute(
+        "SELECT stream_ids FROM tenant_acme.record WHERE kind = 'contact_event'"
+    ).fetchall()
+    assert filed == [(None,)]
 
 
 def test_a_logical_id_projection_is_both_columns_or_neither(pg: Conn) -> None:

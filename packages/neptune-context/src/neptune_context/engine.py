@@ -7,9 +7,11 @@ channel serves yet are explicit ``not_covered`` gaps, so an answer never reads a
 it is not. ``hydrate`` is the Ledger's ``resolve``.
 
 By default the engine runs the graph channel only; lexical (MVL-142) and vector (MVL-143)
-channels are passed in ``channels``. The client validates the query and checks the packet
-answers it (``answer.answer_problems``); this engine re-validates too, because it may be called
-directly.
+channels are passed in ``channels``. ``explain`` clauses (``why``, ``diff``) are answered by the
+``Explainer`` (ADR 0010): its claim and evidence hits are fused with the channels' as peers of the
+graph and catalog answers, and its trails give the packet their structure. The client validates
+the query and checks the packet answers it (``answer.answer_problems``); this engine re-validates
+too, because it may be called directly.
 """
 
 from __future__ import annotations
@@ -20,13 +22,15 @@ from typing import TYPE_CHECKING, Final
 
 from neptune_memory.schema.codec import graph_from_json
 from neptune_memory.schema.interval import ledger_tx
-from neptune_memory.schema.reference import ReferenceReader
 
 from neptune.identity.canonical_json import dumps
 from neptune.identity.hashing import content_id
 from neptune.model.ids import ConfigHash
 from neptune.model.knowledge import Known
 from neptune_context.answer import domain_id
+from neptune_context.explain.explainer import Explainer
+from neptune_context.explain.history import IndexedReader
+from neptune_context.packets.findings import PacketError
 from neptune_context.packets.model import (
     BudgetUse,
     Channel,
@@ -44,7 +48,7 @@ from neptune_context.pins import CATALOG_API_VERSION
 from neptune_context.query.codec import query_id
 from neptune_context.query.decode import accept
 from neptune_context.query.findings import Refused
-from neptune_context.retrieve.channel import ChannelAnswer, Retrieval, Snapshot
+from neptune_context.retrieve.channel import ChannelAnswer, Retrieval, Snapshot, answer
 from neptune_context.retrieve.fusion import RRF_K, cut, fuse
 from neptune_context.retrieve.graph import GraphChannel
 from neptune_context.sdk.errors import ErrorCode, SdkError
@@ -54,10 +58,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from neptune_ledger.api import CatalogApi, Resolution
+    from neptune_memory.schema.codec import GraphDocument
     from neptune_memory.schema.reader import MemoryReader
 
     from neptune.model.jsonvalue import JsonObject
     from neptune.model.provenance import EvidenceRef
+    from neptune_context.explain.history import ClaimHistory
+    from neptune_context.explain.run import Caps
+    from neptune_context.packets.trails import Trail
     from neptune_context.query.model import Query
     from neptune_context.retrieve.channel import RetrievalChannel
 
@@ -67,7 +75,11 @@ MAX_GRAPH_BYTES: Final = 256 * 1024 * 1024  # a graph document is read whole int
 
 
 class LocalEngine:
-    """An in-process engine over ``memory`` and, optionally, a Ledger ``catalog``."""
+    """An in-process engine over ``memory`` and, optionally, a Ledger ``catalog``.
+
+    ``history`` looks claims up by id for ``why`` (ADR 0010 §2); by default ``memory`` itself
+    when it offers ``ClaimHistory`` (``read_graph``'s reader does), else ``why`` is a gap.
+    """
 
     def __init__(
         self,
@@ -75,9 +87,12 @@ class LocalEngine:
         catalog: CatalogApi | None = None,
         *,
         channels: Sequence[RetrievalChannel] | None = None,
+        history: ClaimHistory | None = None,
+        explain_caps: Caps | None = None,
     ) -> None:
         self._memory = memory
         self._catalog = catalog
+        self._explainer = Explainer(memory, catalog, history=history, caps=explain_caps)
         self._channels: tuple[RetrievalChannel, ...] = (
             (GraphChannel(memory, catalog),) if channels is None else tuple(channels)
         )
@@ -90,6 +105,7 @@ class LocalEngine:
         """What decides this engine's answers: its channels' settings and fusion's."""
         return {
             "channels": [c.config for c in sorted(self._channels, key=lambda c: str(c.channel))],
+            "explain": self._explainer.config,
             "fusion": {"k": RRF_K, "rule": "rrf"},
         }
 
@@ -134,6 +150,22 @@ class LocalEngine:
         snapshot = self.snapshot(query)
         request = Retrieval(query, snapshot)
         answers = [_retrieve(channel, request) for channel in self._channels]
+        trails: tuple[Trail, ...] = ()
+        explained_claims: frozenset[str] = frozenset()
+        if query.explain:
+            try:
+                explained = self._explainer.explain(request)
+            except Exception as exc:  # partial success: the explainer failing is a gap
+                answers = _with(answers, (_explain_failed(query, exc),))
+            else:
+                answers = _with(answers, explained.answers)
+                trails = explained.trails
+                explained_claims = frozenset(
+                    h.claim.id
+                    for a in explained.answers
+                    for h in a.hits
+                    if isinstance(h, ClaimItem)
+                )
         limits = Limits(
             query.budget.items, query.budget.tokens, query.budget.bytes, query.budget.latency_ms
         )
@@ -149,7 +181,20 @@ class LocalEngine:
                 query.during.start,
                 query.during.end,
             )
-        return ContextPacket(
+        cut_from_trails = {t.at: sorted(set(t.claims) & explained_claims - claims) for t in trails}
+        extra_gaps = tuple(
+            Gap(
+                GapCode.NOT_COVERED,
+                at,
+                Channel.GRAPH,
+                tuple(ids),
+                "the budget cut these claims the trail names; ask with a larger budget to"
+                " carry them",
+            )
+            for at, ids in cut_from_trails.items()
+            if ids
+        )
+        header = dict(
             query_id=query_id(query),
             as_of=snapshot.as_of,
             head=snapshot.head,
@@ -171,8 +216,16 @@ class LocalEngine:
                     key=lambda f: (f.recorded_at, f.claim, str(f.code), f.others),
                 )
             ),
-            gaps=_gaps(query, answers),
         )
+        gaps = _gaps(query, answers, extra_gaps)
+        try:
+            return ContextPacket(**header, gaps=gaps, trails=trails)  # type: ignore[arg-type]
+        except PacketError as exc:
+            if not trails:
+                raise
+            # A trail that disagrees with the items is a defect here, never a failed query.
+            failed = _explain_failed(query, exc).gaps
+            return ContextPacket(**header, gaps=_gaps(query, answers, failed))  # type: ignore[arg-type]
 
     def hydrate(self, evidence: EvidenceRef, *, as_of: int | None) -> Resolution:
         if self._catalog is None:
@@ -200,6 +253,25 @@ def _retrieve(channel: RetrievalChannel, request: Retrieval) -> ChannelAnswer:
         )
 
 
+def _with(answers: Sequence[ChannelAnswer], extra: Sequence[ChannelAnswer]) -> list[ChannelAnswer]:
+    """``answers`` with the explainer's folded in: an explain answer joins the channel answer of
+    the same channel (best score per item, as within one channel), else stands as its own."""
+    out = {a.channel: a for a in answers}
+    for more in extra:
+        held = out.get(more.channel)
+        if held is None:
+            out[more.channel] = more
+            continue
+        out[more.channel] = answer(
+            more.channel,
+            [(hit.relevance.score, hit) for hit in (*held.hits, *more.hits)],
+            gaps=(*held.gaps, *more.gaps),
+            findings=(*held.findings, *more.findings),
+            superseded=(*held.superseded, *more.superseded),
+        )
+    return [out[channel] for channel in sorted(out, key=str)]
+
+
 def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
     out: dict[str, object] = {}
     for key, value in pairs:
@@ -213,11 +285,19 @@ def _no_constant(token: str) -> object:
     raise ValueError(f"{token} is not JSON")
 
 
-def read_graph(path: Path) -> ReferenceReader:
-    """A Memory graph document at ``path``, read strictly (bounded size, no duplicate keys, no NaN)
-    and decoded by Memory's codec (ids, order, generation all checked) into Memory's reference
-    reader. Raises ``ValueError`` or ``OSError``; nothing else. Only a regular file is read: a
-    FIFO or a device could block or never end."""
+def read_graph(path: Path) -> IndexedReader:
+    """A Memory graph document at ``path`` (``read_graph_document``) in Memory's reference
+    reader, indexed by claim id for ``why`` (``IndexedReader``, ADR 0010). Raises
+    ``ValueError`` or ``OSError``; nothing else."""
+    return IndexedReader(read_graph_document(path))
+
+
+def read_graph_document(path: Path) -> GraphDocument:
+    """A Memory graph document at ``path``, read strictly (bounded size, no duplicate keys, no
+    NaN) and decoded by Memory's codec (ids, order, generation all checked). Raises
+    ``ValueError`` or ``OSError``; nothing else. Only a regular file is read: a FIFO or a device
+    could block or never end. Hosts that index the document itself (the planner's declared
+    identities, a lexical channel) read it once here."""
     if not stat.S_ISREG(path.stat().st_mode):
         raise ValueError(f"{path.name} is not a regular file")
     with path.open("rb") as handle:
@@ -226,16 +306,31 @@ def read_graph(path: Path) -> ReferenceReader:
         raise ValueError(f"{path.name} is larger than {MAX_GRAPH_BYTES} bytes")
     try:
         document = json.loads(data, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
-        return ReferenceReader(graph_from_json(document))
+        return graph_from_json(document)
     except RecursionError as exc:
         raise ValueError(f"{path.name} is nested too deeply") from exc
     except (TypeError, KeyError) as exc:
         raise ValueError(f"{path.name} is not a Memory graph document: {exc}") from exc
 
 
-def _gaps(query: Query, answers: Sequence[ChannelAnswer]) -> tuple[Gap, ...]:
-    """Every channel's gaps, plus the query members no channel serves yet."""
+def _explain_failed(query: Query, exc: Exception) -> ChannelAnswer:
+    """A ``not_covered`` gap at every explain clause: the explainer could not answer."""
+    detail = f"the explain clauses could not be answered: {type(exc).__name__}: {exc}"
+    return ChannelAnswer(
+        Channel.GRAPH,
+        gaps=tuple(
+            Gap(GapCode.NOT_COVERED, f"/explain/{i}", Channel.GRAPH, (), detail[:2000])
+            for i, _ in enumerate(query.explain)
+        ),
+    )
+
+
+def _gaps(
+    query: Query, answers: Sequence[ChannelAnswer], extra: Sequence[Gap] = ()
+) -> tuple[Gap, ...]:
+    """Every channel's gaps and ``extra``, plus the query members no channel serves yet."""
     gaps = {g.sort_key(): g for a in answers for g in a.gaps}
+    gaps.update((g.sort_key(), g) for g in extra)
     served = {a.channel for a in answers}
     if query.text is not None and not served & {Channel.LEXICAL, Channel.VECTOR}:
         gap = Gap(
@@ -245,15 +340,6 @@ def _gaps(query: Query, answers: Sequence[ChannelAnswer]) -> tuple[Gap, ...]:
             (),
             "no lexical or vector channel is attached (MVL-142, MVL-143): the text clause is"
             " not searched",
-        )
-        gaps[gap.sort_key()] = gap
-    for index, _ in enumerate(query.explain):
-        gap = Gap(
-            GapCode.NOT_COVERED,
-            f"/explain/{index}",
-            None,
-            (),
-            "why and diff trails are not assembled by this engine yet (MVL-149)",
         )
         gaps[gap.sort_key()] = gap
     return tuple(gaps[k] for k in sorted(gaps))

@@ -1,0 +1,84 @@
+{
+  "convention": "ros_diagnostic_status",
+  "hardware_id": {
+    "knowledge": "known",
+    "value": "GRIP-2F"
+  },
+  "id": "rec:sha256:61f1d164c2e555f4736b11a7e4009bd1f03a10e04fdba133a0f2698edc1f692c",
+  "kind": "status_report",
+  "level": {
+    "knowledge": "known",
+    "value": 3
+  },
+  "level_names": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 738,
+            "offset": 4594
+          }
+        ],
+        "source": "sha256:1c30f4b103f3b68858689dbc3a3c3549cb6f118979c3ed871d8fd783d1682d1d"
+      },
+      "transform": "rec:sha256:ca6e8981baa908f102fb5ee788d23d78014744c49ba84a922b28e118c8fc502f"
+    },
+    "value": [
+      "STALE"
+    ]
+  },
+  "message": {
+    "knowledge": "known",
+    "value": "no update for 2.0 s"
+  },
+  "name": {
+    "knowledge": "known",
+    "value": "gripper"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 535,
+          "offset": 1609
+        },
+        {
+          "kind": "byte_range",
+          "length": 111,
+          "offset": 1027
+        }
+      ],
+      "source": "sha256:1c30f4b103f3b68858689dbc3a3c3549cb6f118979c3ed871d8fd783d1682d1d"
+    },
+    "transform": "rec:sha256:ca6e8981baa908f102fb5ee788d23d78014744c49ba84a922b28e118c8fc502f"
+  },
+  "schema_version": 10,
+  "stream": "rec:sha256:cd7ed58d9bcacb5ae09fb26299a26d4f8e10f3952d636b7ec628b3a4cc813462",
+  "times": [
+    {
+      "knowledge": "known",
+      "value": {
+        "domain_id": "rec:sha256:4a87491ce5f27a13cb7e719fd8e781fa9de505d955e4c3abaca5fe4f0c21b609",
+        "ticks": 1790000005500000000
+      }
+    },
+    {
+      "knowledge": "known",
+      "value": {
+        "domain_id": "rec:sha256:73c2a73cd684c14375220908792126d3a694a8742c198a228eaf5afecfbef6c3",
+        "ticks": 1790000005500000000
+      }
+    }
+  ],
+  "values": [
+    {
+      "key": "age_s",
+      "value": "2.0"
+    }
+  ]
+}

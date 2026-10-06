@@ -5,8 +5,8 @@ Status: **authoritative**; frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, 
 (MVL-23, ADR 0037), version 3 alignment records (MVL-82, ADR 0050), version 4 deployment lifecycle records
 (MVL-83, ADR 0051), version 5 human assertions (MVL-183, ADR 0062), version 6 declared civil time zones and
 list states (MVL-202, ADR 0061), version 7 task records (MVL-33, ADR 0063), version 8 robot descriptions
-(MVL-24, ADR 0039) and version 10 status and safety-state records (MVL-204, ADR 0071; 9 is MVL-205's, ADR
-0072). Primitives are specified by
+(MVL-24, ADR 0039), version 9 run declarations (MVL-205, ADR 0072) and version 10 status and
+safety-state records (MVL-204, ADR 0071). Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
@@ -23,7 +23,7 @@ domains.
 | `lineage` | `TransformRecord` | `model/provenance.py` (ADR 0016) |
 | `finding` | `IngestFinding` | `model/finding.py` |
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform`; since version 6 `CivilTimeZone` | `model/reference.py` (ADR 0061) |
-| `run` | `Run`, `Stream`; since version 10 `StatusReport`, `SafetyState` | `model/run.py`, series contract in `model/series.py` (ADR 0018), `model/status.py` (ADR 0071) |
+| `run` | `Run`, `Stream`; since version 9 `RunDeclaration`; since version 10 `StatusReport`, `SafetyState` | `model/run.py`, series contract in `model/series.py` (ADRs 0018, 0072), `model/status.py` (ADR 0071) |
 | `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue`; since version 8 `HardwareSpecification`, `DescriptionExtension`, `DescriptionExpansion` | `model/machine.py` (ADRs 0019, 0039), `model/configuration.py` (ADR 0037) |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord`; since version 4 `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`, `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment` | `model/world.py` (ADR 0020), `model/lifecycle.py` (ADR 0051) |
 | `task` | `TaskBrief`, `Requirement`, `SOPSection`, `WorkOrder` (since 7) | `model/task.py` (ADR 0063) |
@@ -184,6 +184,10 @@ a bug, not a value.
   tables (MVL-13, ADR 0036; assembled over evidence by MVL-34, ADR 0066), never `Run`s. The files one
   `Run` is made of, where a source states them (rosbag2's `relative_file_paths`), are a canonical
   `run_assembly` (ADR 0050 §7, ADR 0066 §1); each file's own `Run` stays as declared.
+- `RunDeclaration` (since 9): what one declaration, today a manifest's run entry, says a `Run` involved:
+  `run` (the record), `logical_id` (the name it gives the run), `machine`, `site`, `task` (declared ids, each
+  citing where it is said). A record beside the run, never an edit of it; one per run an entry covers, its
+  citation made finer by a `neptune.manifest:run` step naming the run (ADR 0072).
 - `Stream`: one channel as declared. It holds `run`, `topic`, `schema_name` / `schema_encoding` /
   `schema_definition`, `message_encoding`, `metadata`, `clocks`, and the source's declared `message_count` /
   `first` / `last`, plus `series`. A topic split across files is several streams of one run.

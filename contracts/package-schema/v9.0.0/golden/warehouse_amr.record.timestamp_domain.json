@@ -1,0 +1,47 @@
+{
+  "declared_monotonic": {
+    "knowledge": "unknown"
+  },
+  "epoch": {
+    "knowledge": "known",
+    "value": "unix"
+  },
+  "field": "date-time",
+  "id": "rec:sha256:926bf595c94452c9523525c7a55a1dea9d794213931f406de5d64e30be186e8d",
+  "kind": "timestamp_domain",
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 4903,
+          "offset": 0
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": ""
+        }
+      ],
+      "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+    },
+    "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+  },
+  "resolution": {
+    "knowledge": "known",
+    "value": {
+      "denominator": 1,
+      "numerator": 1
+    }
+  },
+  "role": {
+    "knowledge": "known",
+    "value": "document"
+  },
+  "schema_version": 1,
+  "scope": [],
+  "timescale": {
+    "knowledge": "known",
+    "value": "posix"
+  }
+}

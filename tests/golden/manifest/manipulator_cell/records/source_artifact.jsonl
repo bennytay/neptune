@@ -1,0 +1,3 @@
+{"chunk_size":8388608,"chunks":["sha256:0215b74e3c6f6db663df1de72baeada92dff317e60c2a33ceb7428e1966cbcfa"],"content_id":"sha256:0215b74e3c6f6db663df1de72baeada92dff317e60c2a33ceb7428e1966cbcfa","kind":"source_artifact","schema_version":1,"size":45}
+{"chunk_size":8388608,"chunks":["sha256:0a35978d52fc40d9e9373fe0aeb61647d80c070ec7b41bd9463cbb48c3251efb"],"content_id":"sha256:0a35978d52fc40d9e9373fe0aeb61647d80c070ec7b41bd9463cbb48c3251efb","kind":"source_artifact","schema_version":1,"size":428}
+{"chunk_size":8388608,"chunks":["sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"],"content_id":"sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c","kind":"source_artifact","schema_version":1,"size":416}
