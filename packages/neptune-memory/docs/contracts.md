@@ -27,7 +27,52 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   `MemorySnapshot` per Ledger snapshot and `memory dump` writes claims as canonical JSON Lines; their shapes and
   the determinism they promise are in [`guarantees.md`](guarantees.md) and
   [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
+- Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
+  quickstart (MVL-191). Use it instead of a hand-made graph:
+  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
+    (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
+    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    1. The harness's compiler stage compiles the corpus into one package, registered at tx 1.
+    2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
+       `servicenow_csv` presets into a lifecycle package, registered at tx 2.
+    3. Both are exported as the records the Ledger catalogs, plus the compiler's `derived/clock_mapping` fits.
+    4. The deterministic consolidators run, with `memory.time_estimates` alongside
+       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
 
+    Copy the file byte for byte; do not edit it.
+  - Regenerate it from the repository root with
+    `uv run --all-packages python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
+    `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
+    `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
+    makes it stale.
+  - A regeneration is byte-identical on any host, in CI and locally. Record ids depend only on what the
+    repository pins: the corpus, adapter versions, the libraries in `uv.lock` and the Python minor version in
+    `.python-version`. `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names
+    what moved. Cite corpus evidence by source path and locator, not by record id: a version bump renames record
+    ids.
+  - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
+    exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
+    canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
+  - What it holds today:
+    - 12 runs from both sites, with `evidenced_by` and `has_member`, and from each run's `run_declaration` a
+      stated `recorded_by` machine and `at_site` site (the manifest declares no task).
+    - 97 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
+      2026-09-14.
+    - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
+      `stated_severity`, `has_description` and `evidenced_by`.
+    - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
+      drop them with `include_inferred=False`. One is the cell PC's ≈ −96.7 s on 2026-09-14.
+  - What it lacks:
+    - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
+      incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
+      inferred mapping.
+    - No configuration lineage and no `authorisation_undecided`. Deploy's 5 `change_record`, 15
+      `maintenance_event` (WO-26-0911 among them) and 2 `authorisation_envelope` records are in the Ledger
+      export. Memory places them on Ledger thread nodes, which it reads today only from the `ledger_thread`
+      stand-in (ADR 0003 §1); no real Ledger export carries those. 
+    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
+
+    This file is regenerated as those land, never edited.
 ## Consumes
 
 - Compiler package schema: `SCHEMA_VERSION = 9` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,

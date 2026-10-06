@@ -88,9 +88,13 @@ class Inferred(ValueError):
 
 
 def _strict(parse: Callable[[JsonValue], _T], record: Mapping[str, object]) -> _T:
-    """A compiler reader over one record; whatever it refuses is malformed here."""
+    """A compiler reader over one record; whatever it refuses is malformed here. A record that is
+    inferred, in its provenance or (a ``derived/`` line, root ADR 0060 §6) at its top level, is
+    ``Inferred`` before it is read."""
     provenance = record.get("provenance")
-    if isinstance(provenance, dict) and provenance.get("assertion_kind") == "inferred":
+    if record.get("assertion_kind") == "inferred" or (
+        isinstance(provenance, dict) and provenance.get("assertion_kind") == "inferred"
+    ):
         raise Inferred(f"an inferred {record.get('kind')!r} record is a derived/ record")
     try:
         return parse(dict(record))  # type: ignore[arg-type]

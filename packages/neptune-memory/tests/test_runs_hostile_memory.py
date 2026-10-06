@@ -23,6 +23,7 @@ from memory_run_records import (
     run,
     site,
 )
+from memory_time_records import estimate
 from neptune.identity import canonical_json
 from neptune.model.alignment import MemberRole
 from neptune.model.ids import LogicalId
@@ -131,6 +132,16 @@ def test_inferred_records_are_findings_never_grounds() -> None:
     result = consolidate({"log": [record, inferred]})
     assert codes(result) == ["runs.inferred_record"]
     assert of(result, "has_member") == []
+
+
+def test_an_estimated_clock_mapping_line_is_inferred_not_malformed() -> None:
+    """A ``derived/clock_mapping`` line states ``assertion_kind`` at its top level: it is an
+    INFO ``inferred_record``, never a malformed record, and never a ground."""
+    record, _ = run("x.mcap", first=at(0), last=at(9))
+    line = estimate("fit", "x", "y", anchor=(0, 0))
+    result = consolidate({"log": [record, line]})
+    assert codes(result) == ["runs.inferred_record"]
+    assert all(str(c.assertion_kind) != "inferred" for c in result.claims)
 
 
 def test_one_record_id_with_two_contents_is_a_conflict_and_neither_is_used() -> None:
