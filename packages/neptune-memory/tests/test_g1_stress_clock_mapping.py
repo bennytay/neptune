@@ -8,9 +8,9 @@ everything through it end at the revision.
 
 Verdict: the ``clock_mismatch`` refusal HOLDS. The revision HOLDS for every build (MVL-130): the
 time-domain registry closes the old mapping at the revision, citing both records, and a conversion
-after the revision goes through the new one. What stays a GAP is MVL-132's: the version emitted
-open before the revision stays current beside the closed one until build withdrawal ends it
-(the strict ``xfail`` at the end).
+after the revision goes through the new one. Since MVL-132 (ADR 0016), build withdrawal ends the
+version emitted open before the revision at the revision's build, so it never stays current
+beside the closed one. HOLDS.
 """
 
 from __future__ import annotations
@@ -18,8 +18,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING, Final, cast
-
-import pytest
 
 from memory_g1_harness import (
     MAR_02_2026,
@@ -214,14 +212,9 @@ def test_a_revision_ends_the_old_mapping_at_the_revision_in_every_later_build() 
         assert [c.provenance.records for c in result.value.path] == [(cited,)]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="GAP MVL-132: no build withdrawal yet (ADR 0007 §5)",
-)
 def test_after_a_revision_no_current_mapping_runs_open_through_the_old_one() -> None:
     """At tx 3 the build states v1 closed at the revision; the version it emitted open at tx 2
-    must stop being current. Without withdrawal it stays current beside the closed one."""
+    stops being current there, withdrawn by that build (ADR 0016)."""
     runs = _runs(TimeDomainConsolidator())
     claims = [c for _, run in runs for c in run.claims]
     builds = [build(run, tx) for tx, run in runs]

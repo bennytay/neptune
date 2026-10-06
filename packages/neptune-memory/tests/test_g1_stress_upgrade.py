@@ -5,8 +5,8 @@ transaction. Its first claim retires every current version of v1, at that transa
 object and v2's never contradict each other (no closure, no finding between them); ``as_of``
 before the upgrade answers exactly as before; claim ids are siblings, never edited; the generation
 is unchanged because priorities and vocabulary are. A rerun of v2 retires nothing and a return to
-v1 is refused. Verdict: HOLDS. An upgrade that emits no claim at all retires nothing (ADR 0003's
-known gap): ADR 0007 §5 closes it with build withdrawal, GAP owned by MVL-132 (strict ``xfail``).
+v1 is refused. Verdict: HOLDS. An upgrade that emits no claim at all (ADR 0003's known gap) retires
+the old lineage at its build: ADR 0007 §5 build withdrawal, landed by MVL-132 (ADR 0016). HOLDS.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import pytest
 from memory_g1_harness import (
     JUN_10_2026,
     MAR_02_2026,
-    Build,
     Fixed,
     build,
     cite,
@@ -33,7 +32,7 @@ from neptune_memory.schema.claim import Claim, TypedLiteral, ValueType
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
-from neptune_memory.schema.supersede import LineageError, is_closure, lineage_of, resolve
+from neptune_memory.schema.supersede import Build, LineageError, is_closure, lineage_of, resolve
 
 ROV = NodeRef(NodeType.MACHINE, "hull-number:ROV-SEAEYE-11")
 INSPECTION = rid("inspection_report", "rov-11-may")
@@ -120,11 +119,6 @@ def test_a_rollback_to_v1_is_a_new_version_never_a_reused_lineage() -> None:
     assert caught.value.code == "lineage_reuse"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="GAP MVL-132: no build withdrawal yet (ADR 0007 §5)",
-)
 def test_an_upgrade_that_emits_nothing_still_retires_the_old_lineage() -> None:
     v1 = _build("1", 1, _state("thruster fault", start=JUN_10_2026))
     v2: list[Claim] = _build("2", 2)  # the new parser finds nothing to claim

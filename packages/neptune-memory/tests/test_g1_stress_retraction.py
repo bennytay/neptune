@@ -11,17 +11,15 @@ operator said, and the history keeps both.
   claim does not withdraw it. ADR 0003 §1.4 said "undoing an identity is superseding a claim";
   the resolver cannot do that. ADR 0007 §5 defines build withdrawal (MVL-132). MVL-126 landed
   retraction (ADR 0008 §3): a ``retract`` assertion (root ADR 0062) naming the confirmation's
-  declared id, after which the identity build emits no claim resting on it. HOLDS for that half;
-  GAP for withdrawal (MVL-132), pinned by the strict ``xfail`` below.
+  declared id, after which the identity build emits no claim resting on it; MVL-132 landed build
+  withdrawal (ADR 0016), which ends the ``same_as`` at the retraction's build. HOLDS.
 
-Verdict: GAP (MVL-132 only).
+Verdict: HOLDS.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-
-import pytest
 
 from memory_g1_harness import (
     JUN_10_2026,
@@ -137,11 +135,6 @@ def test_the_build_after_a_retraction_emits_nothing_that_rests_on_it() -> None:
     assert _run(2, retracted=True).findings == ()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="GAP MVL-132: no build withdrawal yet (ADR 0007 §5)",
-)
 def test_a_retracted_same_as_stops_being_current_and_stays_in_history() -> None:
     claims = _identity(1, retracted=False) + _identity(2, retracted=True)
     builds = [build(_run(1, retracted=False), 1), build(_run(2, retracted=True), 2)]
