@@ -32,3 +32,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0023](0023-event-table-rows-declare-ids-in-their-at-id-column.md) | Event table rows declare their ids in their @id column | Accepted |
 | [0024](0024-snapshot-configurations-come-from-the-ledgers-threads.md) | Snapshot configurations come from the Ledger's threads | Accepted |
 | [0025](0025-declared-names-and-values-maintenance-and-status-events.md) | Declared names and values, maintenance and status events (graph-schema 2.2.0) | Accepted |
+| [0026](0026-a-lifecycle-events-declared-number-is-its-name.md) | A lifecycle event's declared number is its name | Accepted |
