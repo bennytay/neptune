@@ -879,6 +879,534 @@
       ],
       "type": "object"
     },
+    "Delta": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "name": {
+              "type": "string"
+            },
+            "quantity": {
+              "const": "parameter"
+            },
+            "representation": {
+              "const": "values"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 100000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "earlier",
+            "later",
+            "name",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "translation"
+            },
+            "representation": {
+              "const": "homogeneous_matrix"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "transform",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "translation"
+            },
+            "representation": {
+              "const": "translation"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "transform",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "adjustment": {
+              "enum": [
+                "wrapped"
+              ]
+            },
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "euler_angles"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            }
+          },
+          "required": [
+            "adjustment",
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "transform",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "adjustment": {
+              "enum": [
+                "none"
+              ]
+            },
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "homogeneous_matrix"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 9,
+              "minItems": 9,
+              "type": "array"
+            }
+          },
+          "required": [
+            "adjustment",
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "transform",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "adjustment": {
+              "enum": [
+                "later_negated",
+                "none"
+              ]
+            },
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "quaternion"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            }
+          },
+          "required": [
+            "adjustment",
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "transform",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "adjustment": {
+              "enum": [
+                "none"
+              ]
+            },
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "rotation_matrix"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 9,
+              "minItems": 9,
+              "type": "array"
+            }
+          },
+          "required": [
+            "adjustment",
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "transform",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "adjustment": {
+              "enum": [
+                "none"
+              ]
+            },
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "rotation_vector"
+            },
+            "transform": {
+              "additionalProperties": false,
+              "properties": {
+                "child": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "child_to_parent",
+                    "parent_to_child"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "child",
+                "direction",
+                "parent"
+              ],
+              "type": "object"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            }
+          },
+          "required": [
+            "adjustment",
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "transform",
+            "values"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "later - earlier, component by component, between two calibration records, in their declared form and unit; never converted. A rotation states how later was read: a quaternion negated when the two point opposite ways, Euler angles wrapped into a half turn either side (neptune-memory ADR 0014)"
+    },
     "DiffPoint": {
       "oneOf": [
         {
@@ -956,6 +1484,9 @@
                   "at_site",
                   "at_site_candidate",
                   "authorised_configuration",
+                  "calibrated_by",
+                  "calibrated_with",
+                  "calibration_candidate",
                   "clock_map",
                   "co_occurs_within",
                   "configuration_active_during",
@@ -965,6 +1496,7 @@
                   "continues_candidate",
                   "declared_kind",
                   "deployed_at",
+                  "drift",
                   "ends_at",
                   "ends_at_candidate",
                   "episode_of",
@@ -972,6 +1504,7 @@
                   "evidenced_by",
                   "executes_task",
                   "executes_task_candidate",
+                  "gap",
                   "governed_by",
                   "has_calibration",
                   "has_clock",
@@ -982,6 +1515,7 @@
                   "has_summary",
                   "in_zone",
                   "in_zone_candidate",
+                  "integrity_finding",
                   "intervened",
                   "intervened_candidate",
                   "involves",
@@ -995,13 +1529,19 @@
                   "operated_by",
                   "outcome",
                   "part_of_programme",
+                  "rate_declared",
+                  "rate_observed",
                   "rated_payload",
+                  "recorded",
                   "recorded_by",
                   "recorded_by_candidate",
                   "runs_model",
                   "runs_software",
                   "same_as",
                   "same_as_candidate",
+                  "sensor_not_recorded",
+                  "sensor_presence_unknown",
+                  "sensor_recorded",
                   "starts_at",
                   "stated_severity",
                   "succeeds",
@@ -2888,6 +3428,51 @@
             },
             "value": {
               "$ref": "#/$defs/ClockMap"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
+              "const": "delta"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "knowledge": {
+                      "const": "known"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/Unit"
+                    }
+                  },
+                  "required": [
+                    "knowledge",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$ref": "#/$defs/NotApplicable"
+                }
+              ],
+              "description": "the unit both calibrations declare, as declared; not_applicable for a form without one (a quaternion, a rotation matrix)"
+            },
+            "value": {
+              "$ref": "#/$defs/Delta"
             }
           },
           "required": [

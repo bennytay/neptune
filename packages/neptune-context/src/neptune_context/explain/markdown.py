@@ -29,7 +29,7 @@ from neptune_memory.schema.nodes import NodeRef
 from neptune_memory.schema.supersede import is_closure
 
 from neptune.identity.canonical_json import dumps
-from neptune.model.knowledge import Known, to_json
+from neptune.model.knowledge import Known
 from neptune_context.explain.links import claim_link, evidence_link
 from neptune_context.packets.model import (
     ClaimItem,
@@ -108,9 +108,10 @@ def _object(claim: Claim) -> str:
     if isinstance(obj, NodeRef):
         return _node(obj)
     if isinstance(obj, TypedLiteral):
-        return code(obj.to_json()["value"]) + (
-            f" ({code(to_json(obj.unit))})" if str(obj.datatype) == "quantity" else ""
-        )
+        # The unit as the literal declares it (Memory's own encoding; a bare ``Unit`` is not JSON).
+        encoded = obj.to_json()
+        unit = f" ({code(encoded['unit'])})" if str(obj.datatype) in {"quantity", "delta"} else ""
+        return code(encoded["value"]) + unit
     assert isinstance(obj, LedgerRecordRef)
     return f"record {ident(obj.record_id)}"
 

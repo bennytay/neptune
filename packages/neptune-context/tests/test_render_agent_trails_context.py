@@ -91,6 +91,12 @@ def cases() -> dict[str, ContextPacket]:
     candidate = X.find(X.UAV, "same_as_candidate")
     humc = X.find(X.HUM_RUN, "configuration_candidate", X.HUM_C1)
     april = X.find(X.WCAM, "has_calibration", X.CAL_B)
+    # drift is inside the graph-schema 2.0.0 pin; a pin that predates it shows the named-only root.
+    with X.pin_without("drift"):
+        beyond = why(drift.id)
+        beyond_no_catalog = Client(LocalEngine(reader())).query(
+            Query(include_inferred=True, budget=Budget(items=50), explain=(Why(drift.id),))
+        )
     return {
         "why-berth-cycle": why(berth()[0]),
         "why-berth-capped": why(berth()[0], explain_caps=Caps(depth=0)),
@@ -101,11 +107,10 @@ def cases() -> dict[str, ContextPacket]:
         "why-overridden-inference": why(field.id),
         "why-inferred-root": why(candidate.id),
         "why-candidates": why(humc.id),
-        "why-beyond-the-pin": why(drift.id),
+        "why-beyond-the-pin": beyond,
+        "why-drift": why(drift.id),
         "why-calibration": why(april.id, inferred=False),
-        "why-beyond-the-pin-no-catalog": Client(LocalEngine(reader())).query(
-            Query(include_inferred=True, budget=Budget(items=50), explain=(Why(drift.id),))
-        ),
+        "why-beyond-the-pin-no-catalog": beyond_no_catalog,
         "why-two-clauses": ask(
             Query(
                 include_inferred=True,
@@ -348,6 +353,13 @@ def test_a_claim_beyond_the_pin_is_named_with_the_evidence_it_cites() -> None:
     text = check_trails(packet)
     (root,) = lines_of(text, "Why Memory holds ")
     assert root.startswith("- Root claim: Observed: claim:sha256:") and root.endswith("[E1][E2]")
+
+
+def test_a_claim_inside_the_pin_is_carried_and_cited_with_its_declared_value() -> None:
+    text = check_trails(CASES["why-drift"])
+    (root,) = lines_of(text, "Why Memory holds ")
+    assert root.startswith('- Root claim: Observed: sensor "asset-tag:WCAM-7" drift 4.3 (unit "mm"')
+    assert re.search(r"\[I[0-9]+\]\[E1\]\[E2\]$", root)
 
 
 def test_caps_and_gaps_are_counted_in_the_heading_and_listed() -> None:

@@ -310,6 +310,10 @@ def _literal(literal: TypedLiteral) -> str:
         return _instant(value)  # type: ignore[arg-type]
     if literal.datatype is ValueType.CLOCK_MAP:
         return f"clock map {quote(value.to_json())}"  # type: ignore[union-attr]
+    if literal.datatype is ValueType.DELTA:
+        # later - earlier between two calibration records, as Memory wrote it (graph-schema 2.0.0):
+        # the declared form, numbers and unit only, never a size or a verdict on them.
+        return f"delta {quote(value.to_json())} ({_unit(literal)}, as declared)"  # type: ignore[union-attr]
     return quote(value)  # type: ignore[arg-type]
 
 

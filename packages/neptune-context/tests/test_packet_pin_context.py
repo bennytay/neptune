@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import retrieve_fixtures_context as F
-from neptune_context import pinned
+from neptune_context import pinned, pins
 from neptune_context.engine import LocalEngine
 from neptune_context.packets.codec import canonical_bytes, decode
 from neptune_context.packets.findings import PacketFindingCode, PacketRefused
@@ -62,9 +62,10 @@ def refused_at(packet: ContextPacket) -> tuple[PacketFindingCode, str, str]:
 
 
 def test_a_claim_with_a_predicate_beyond_the_pin_is_refused() -> None:
-    code, at, message = refused_at(packet_with("drift"))
+    code, at, message = refused_at(packet_with(F.BEYOND_PIN))
     assert (code, at) == (PacketFindingCode.SHAPE, "/items/0/claim")
-    assert "'drift'" in message and "graph-schema 1.6.0" in message
+    assert f"'{F.BEYOND_PIN}'" in message
+    assert f"graph-schema {pins.GRAPH_SCHEMA_VERSION}" in message
 
 
 def test_a_node_type_beyond_the_pin_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
