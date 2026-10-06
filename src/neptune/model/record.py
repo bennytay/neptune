@@ -29,14 +29,15 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 # the M1 gate (ADR 0023), 2 with the configuration kinds (ADR 0037), 3 with the alignment kinds
 # (ADR 0050), 4 with the deployment lifecycle kinds (ADR 0051), 5 with the assertion kind
 # (ADR 0062), 6 with the civil time zone kind and list states (ADR 0061), 7 with the task kinds
-# (ADR 0063), 8 with the robot-description kinds (ADR 0039) and 9 with the status and safety-state
-# kinds (ADR 0071). The model only grows: a newer
+# (ADR 0063), 8 with the robot-description kinds (ADR 0039) and 10 with the status and
+# safety-state kinds (ADR 0071; 9 is the manifest run declarations', ADR 0072). The model only
+# grows: a newer
 # version adds record kinds, enum members, locator steps or states a field may hold, through an
 # ADR, and never changes an existing field's JSON. A record of any version from
 # OLDEST_READABLE_VERSION on is therefore valid as it is: its migration is the identity. A record
 # is written at the version that added its kind, or the later version that added a shape it uses,
 # so an addition never changes the bytes of records that do not use it (ADR 0037 §1, ADR 0061 §6).
-SCHEMA_VERSION: Final = 9
+SCHEMA_VERSION: Final = 10
 OLDEST_READABLE_VERSION: Final = 1
 ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 

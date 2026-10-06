@@ -1,6 +1,6 @@
 """Status and safety-state records: what a typed log stream's own messages report (ADR 0071).
 
-Both are evidence records (ADR 0017) of the ``run`` family, ``observed``, since schema version 9.
+Both are evidence records (ADR 0017) of the ``run`` family, ``observed``, since schema version 10.
 Each is one statement a message makes because its *declared* type is a status or safety type,
 never because of its topic's name (a guess from a name is derived, ADR 0071 §2):
 
@@ -49,7 +49,7 @@ from neptune.model.record import Family
 from neptune.model.time import Timestamp, timestamp_from_json
 
 # The schema version that added the status kinds; their records are written at it (ADR 0037 §1).
-STATUS_SINCE: Final = 9
+STATUS_SINCE: Final = 10
 
 
 class StatusConvention(StrEnum):

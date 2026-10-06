@@ -2323,7 +2323,7 @@
           "type": "array"
         },
         "schema_version": {
-          "maximum": 9,
+          "maximum": 10,
           "minimum": 1,
           "type": "integer"
         },
@@ -8051,7 +8051,7 @@
           "$ref": "#/$defs/RecordId"
         },
         "schema_version": {
-          "maximum": 9,
+          "maximum": 10,
           "minimum": 1,
           "type": "integer"
         },
@@ -8349,7 +8349,7 @@
           "type": "string"
         },
         "schema_version": {
-          "maximum": 9,
+          "maximum": 10,
           "minimum": 1,
           "type": "integer"
         },
@@ -9021,7 +9021,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 9
+          "const": 10
         },
         "stream": {
           "$ref": "#/$defs/RecordId"
@@ -9548,7 +9548,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 9
+          "const": 10
         },
         "stream": {
           "$ref": "#/$defs/RecordId"
@@ -10246,7 +10246,7 @@
       "type": "object"
     }
   },
-  "$id": "urn:neptune:schema:canonical:9",
+  "$id": "urn:neptune:schema:canonical:10",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
@@ -10404,5 +10404,5 @@
     }
   ],
   "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). The package's manifest, receipt and receipt envelope are #/$defs/PackageManifest, #/$defs/IngestReceipt and #/$defs/ReceiptEnvelope (ADR 0022). Generated from neptune.model; the Python readers are stricter (ADR 0021).",
-  "title": "Neptune canonical record, schema version 9"
+  "title": "Neptune canonical record, schema version 10"
 }
