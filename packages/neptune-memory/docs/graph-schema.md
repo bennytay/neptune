@@ -272,7 +272,9 @@ def test_graph_schema_contract(check):
     blank or padded declared id names nothing (`identity.malformed_identifier`).
 12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
     places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
-    the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
+    the compiler's snapshot bindings. A bound snapshot's configuration is the anchored configuration thread its
+    evidence keys, a pinned `configuration_snapshot` included ([ADR 0022](adr/0022-pinned-configuration-snapshots-name-their-anchored-configuration.md)).
+    Where the evidence states none, the claim is `configuration_unknown`, never the
     nearest configuration in time; where records disagree, every reading is a `configuration_candidate`.
     Configuration nodes are shared by every machine that names them, so a change is the machine's own: two
     `memory.configuration` claims `has_configuration(m → A)` ending at `t` and `has_configuration(m → B)` starting
