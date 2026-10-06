@@ -15,8 +15,9 @@ byte: it reads the manifest, the scan's layout and the records the adapters comm
 - **Snapshot pins.** Each ``snapshots`` pin (a path, or a content id) names the bytes a run ran
   with; every snapshot record of those bytes (configuration, software, hardware, calibration) is
   bound to every run the entry covers by a canonical ``SnapshotBinding``, citing the pin with a
-  ``neptune.manifest:binding`` step naming the run and the snapshot. Validity stays ``Unknown``:
-  the manifest says which, not when.
+  ``neptune.manifest:binding`` step naming the run and the snapshot, once per run and snapshot
+  however many pins name it. Validity stays ``Unknown``: the manifest says which, not when. A pin
+  is resolved even when its entry covers no run, so a wrong pin is always a finding.
 
 What cannot be applied is a finding of the manifest transform, citing the declaration:
 
@@ -117,6 +118,7 @@ class _Builder:
         self.transform = loaded.transform
         self.records: dict[RecordId, Machine | Site | RunDeclaration | SnapshotBinding] = {}
         self.findings: dict[RecordId, IngestFinding] = {}
+        self.pinned: set[tuple[RecordId, RecordId]] = set()
 
     def cite(self, pointer: str, *steps: tuple[str, Mapping[str, str]]) -> EvidenceRef:
         cited = self.loaded.cite(pointer)
@@ -169,7 +171,9 @@ class _Builder:
                 )
             ),
         ]
-        unique = dict(found)  # an alias equal to the manifest id cites the id
+        unique: dict[LogicalId, str] = {}
+        for ident, at in found:  # an alias equal to the manifest id cites the id
+            unique.setdefault(ident, at)
         return tuple(
             Known(ident, self.stated(self.cite(at)))
             for ident, at in sorted(
@@ -316,6 +320,9 @@ class _Builder:
             return
         for run in runs:
             for snapshot, kind in found:
+                if (run.id, snapshot.id) in self.pinned:
+                    continue  # pinned again (by path and by content): bound once, by the first
+                self.pinned.add((run.id, snapshot.id))
                 evidence = self.cite(
                     pin.pointer, (BINDING_STEP, {"run": run.id, "snapshot": snapshot.id})
                 )
@@ -331,12 +338,8 @@ class _Builder:
                 )
 
 
-def _covers(paths: Sequence[str], path: bytes) -> bool:
-    for declared in paths:
-        own = declared.encode("utf-8")
-        if path == own or path.startswith(own + b"/"):
-            return True
-    return False
+def _covers(paths: Sequence[bytes], path: bytes) -> bool:
+    return any(path == own or path.startswith(own + b"/") for own in paths)
 
 
 def declared_records(
@@ -370,7 +373,9 @@ def declared_records(
     machines = {entity.id: entity for entity in manifest.section("machines")}
     declared_by: dict[RecordId, list[RunDecl]] = defaultdict(list)
     for decl in manifest.runs:
-        covered = {content for path, content in files.items() if _covers(decl.paths, path)}
+        own = [declared.encode("utf-8") for declared in decl.paths]
+        held = [content for path, content in files.items() if _covers(own, path)]
+        covered = set(held)
         runs = sorted(
             {run.id: run for c in covered for run in runs_of.get(c, ())}.values(),
             key=lambda run: run.id,
@@ -380,10 +385,10 @@ def declared_records(
                 RUN_UNRECORDED,
                 FindingCategory.MISSING,
                 builder.cite(decl.pointer),
-                f"the manifest's run {decl.name!r} holds {len(covered)} file(s), none of which "
+                f"the manifest's run {decl.name!r} holds {len(held)} file(s), none of which "
                 "declares a run: what it declares is said of no run record",
                 {
-                    "files": len(covered),
+                    "files": len(held),
                     "manifest_pointer": decl.pointer,
                     "pins": len(decl.snapshots),
                     "run": decl.name,
@@ -394,9 +399,8 @@ def declared_records(
             declared_by[run.id].append(decl)
             if decl.machine is not None:
                 builder.contradiction(decl, run, machines[decl.machine])
-        if runs:
-            for pin in decl.snapshots:
-                builder.pin(decl, pin, runs, files, links, contents, snapshots)
+        for pin in decl.snapshots:  # resolved even with no run to bind: a bad pin is said
+            builder.pin(decl, pin, runs, files, links, contents, snapshots)
     twice: dict[tuple[str, ...], list[RecordId]] = defaultdict(list)
     for run_id, decls in sorted(declared_by.items()):
         if len(decls) > 1:

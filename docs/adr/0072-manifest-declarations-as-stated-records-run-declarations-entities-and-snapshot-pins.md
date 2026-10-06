@@ -62,7 +62,9 @@ interpretation); identities are never merged; one canonical record has one recor
    `hardware_configuration`, `calibration`) is bound to every run record the entry covers by a
    canonical `snapshot_binding`, `stated`, evidence `[{json_pointer: /runs/N/snapshots/K},
    {kind: "neptune.manifest:binding", run, snapshot}]`, validity `Unknown` (the manifest says
-   which, not when; ADR 0064 §8). The bindings pass (ADR 0064 §1) reads these as it reads any
+   which, not when; ADR 0064 §8). One snapshot pinned twice for a run (by path and by content) is
+   bound once, by the first pin; a pin is resolved even when its entry covers no run record, so
+   a wrong pin is always a finding. The bindings pass (ADR 0064 §1) reads these as it reads any
    canonical binding: the kind is bound, so no `snapshot_unresolved` for it, and its transform's
    upstream gains the manifest transform. Nearest-session inference is unchanged, so a pinned run
    may also hold an inferred binding of the same slot; consumers prefer the stated one.
@@ -79,7 +81,8 @@ interpretation); identities are never merged; one canonical record has one recor
 
    What ADR 0047 §1–§2 refuses stays refused whole, before anything is read (exit 6): an id a run
    names that no entry declares, a run name or a pin given twice, an absolute or `..` pin path, a
-   malformed content id. A typo applied anyway would become a stated fact.
+   malformed content id, and an alias namespace that is not a record namespace (a lowercase
+   token). A typo applied anyway would become a stated fact.
 6. **Lineage and versions.** The manifest transform is `neptune.manifest` 0.2.0 (its output
    grew; 0.1.0 packages are not rewritten). Its records are made at assembly, after run assembly
    and before snapshot binding, from records only: no source byte is read and no adapter called.

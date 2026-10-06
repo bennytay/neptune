@@ -252,3 +252,29 @@ def test_a_machines_aliases_are_its_identifiers_each_citing_where_it_is_written(
         LogicalId("serial", "20235400123"): (JsonPointer("/machines/0/aliases/serial"),),
     }
     assert machine.provenance.evidence.locator == (JsonPointer("/machines/0"),)
+
+
+def test_one_snapshot_pinned_by_path_and_by_content_is_bound_once() -> None:
+    params = MAKER.content_id(MAKER.PARAMS)
+    text = flight(
+        b"  - {name: a, paths: [flights], snapshots: [{path: params/survey_quad_7.yaml}, "
+        b"{content: '%s'}]}" % params.encode()
+    )
+    found = made("aerial_survey", text)
+    assert found.findings == ()
+    (binding,) = [r for r in found.records if isinstance(r, SnapshotBinding)]
+    pointer, _ = binding.provenance.evidence.locator
+    assert pointer == JsonPointer("/runs/0/snapshots/0")
+
+
+def test_a_pin_on_an_entry_with_no_run_is_still_resolved() -> None:
+    text = flight(b"  - {name: a, paths: [params], snapshots: [{path: params/typo.yaml}]}")
+    assert codes(made("aerial_survey", text)) == [PIN_UNRESOLVED, RUN_UNRECORDED]
+
+
+def test_an_alias_equal_to_the_manifest_id_cites_the_id() -> None:
+    text = b"neptune: 1\nmachines:\n  - {id: quad, aliases: {manifest: quad}}\n"
+    (machine,) = [r for r in made("aerial_survey", text).records if isinstance(r, Machine)]
+    (ident,) = machine.identifiers
+    assert isinstance(ident, Known) and isinstance(ident.provenance, Provenance)
+    assert ident.provenance.evidence.locator == (JsonPointer("/machines/0/id"),)

@@ -178,6 +178,8 @@ def test_json_and_yaml_give_the_same_declarations() -> None:
             "pinned twice",
         ),
         ("neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: {path: c}}\n", "a list"),
+        ("neptune: 1\nmachines:\n  - {id: a, aliases: {Serial: b}}\n", "not a namespace"),
+        ("neptune: 1\nmachines:\n  - {id: a, aliases: {'px4:uuid': b}}\n", "not a namespace"),
     ],
 )
 def test_refused_declarations(text: str, says: str) -> None:

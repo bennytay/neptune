@@ -43,7 +43,7 @@
       },
       "description": "Other identifiers the evidence uses for this entity, by namespace.",
       "propertyNames": {
-        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"
+        "pattern": "^[a-z][a-z0-9_.\\-]{0,127}$"
       },
       "type": "object"
     }
