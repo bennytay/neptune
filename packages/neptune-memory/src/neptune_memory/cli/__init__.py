@@ -13,6 +13,12 @@ Rule: thin wrappers over the library; no logic of their own, and no direct packa
   (``derived.clocks``, ADR 0011 §4, ADR 0017), so the compiler's estimated clock mappings become
   ``inferred`` claims beside the deterministic ones. Off by default; a graph built with it is
   extended only with it (dropping a consolidator takes a rebuild).
+- ``--config FILE`` (``consolidate`` and ``rebuild``): a JSON object of consolidator configs by
+  consolidator id, e.g. ``{"memory.events": {"tables": [...], "vendors": {...}}}`` (ADR 0013 §5).
+  Each is resolved as that consolidator's contract says (defaults filled in), so its hash, in every
+  claim's provenance and in the ``MemorySnapshot``, is the same however it is spelled. An id that
+  is not registered is a usage error; a key a consolidator does not take is its own finding. A
+  changed config is new lineage: claims made under the old one are withdrawn, not rewritten.
 - ``dump [--as-of TX]``: every claim version of the tenant's graph (or the graph as of ``TX``) as
   canonical JSON Lines, ordered by claim id, to ``--out`` or stdout.
 - ``verify GRAPH``: check a graph document file someone else holds (a consumer's fixture) with the
@@ -32,10 +38,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TextIO
 
 from neptune.identity import canonical_json
+from neptune_memory.consolidate.event_records import resolve_config as event_config
+from neptune_memory.consolidate.events import EVENTS_CONSOLIDATOR_ID
 from neptune_memory.consolidate.snapshot import (
     GraphExtendError,
     PlanError,
@@ -54,8 +63,9 @@ from neptune_memory.schema.supersede import LineageError, as_of
 from neptune_memory.store.graphs import GraphStoreError, TenantGraphs
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
+    from neptune.model.jsonvalue import JsonValue
     from neptune_memory.ledger import LedgerExport
 
 OK: Final = 0
@@ -78,6 +88,12 @@ def _parser() -> argparse.ArgumentParser:
             action="store_true",
             dest="with_estimates",
             help="also relay the compiler's estimated clock mappings as inferred claims",
+        )
+        command.add_argument(
+            "--config",
+            type=Path,
+            default=None,
+            help="a JSON object of consolidator configs by consolidator id",
         )
     dump = commands.add_parser("dump")
     dump.add_argument("--as-of", type=int, default=None, dest="as_of")
@@ -138,10 +154,53 @@ def _verify(path: Path, out: TextIO) -> int:
     return OK
 
 
-def registrations(*, with_estimates: bool) -> tuple[Registration, ...]:
-    """The deterministic consolidators, and ``memory.time_estimates`` when asked (ADR 0017)."""
-    estimates = Registration(EstimatedClocksConsolidator(), {"model": CLOCKS_MODEL.to_json()})
-    return (*default_registrations(), *((estimates,) if with_estimates else ()))
+Configs = dict[str, dict[str, "JsonValue"]]
+
+
+def _estimates_config(given: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """The model is always in the config (ADR 0017); naming another one is refused by the runner."""
+    return {"model": CLOCKS_MODEL.to_json(), **given}
+
+
+# How a given config is resolved, by consolidator id. A consolidator that takes no config gets it
+# as given, and reports its keys as ``unknown_config``.
+RESOLVERS: Final[Mapping[str, Callable[[Mapping[str, JsonValue]], dict[str, JsonValue]]]] = {
+    EVENTS_CONSOLIDATOR_ID: event_config,
+    EstimatedClocksConsolidator().consolidator_id: _estimates_config,
+}
+
+
+def registrations(
+    *, with_estimates: bool, configs: Mapping[str, Mapping[str, JsonValue]] | None = None
+) -> tuple[Registration, ...]:
+    """The deterministic consolidators, and ``memory.time_estimates`` when asked (ADR 0017), each
+    with its resolved config: the one ``configs`` gives for its id, else its default. ``configs``
+    naming an id that is not registered is a ``ValueError``."""
+    estimates = Registration(EstimatedClocksConsolidator(), _estimates_config({}))
+    registered = (*default_registrations(), *((estimates,) if with_estimates else ()))
+    given = dict(configs or {})
+    unknown = sorted(given.keys() - {r.consolidator_id for r in registered})
+    if unknown:
+        raise ValueError(f"--config names consolidators that are not registered: {unknown}")
+    return tuple(
+        r
+        if r.consolidator_id not in given
+        else replace(
+            r,
+            config=RESOLVERS.get(r.consolidator_id, dict)(given[r.consolidator_id]),
+        )
+        for r in registered
+    )
+
+
+def read_configs(path: Path) -> Configs:
+    """``--config FILE``: strict JSON, an object of objects keyed by consolidator id."""
+    document = _strict_json(path, "consolidator config")
+    if not isinstance(document, dict) or not all(
+        isinstance(value, dict) for value in document.values()
+    ):
+        raise ValueError("the consolidator config must be an object of objects by consolidator id")
+    return document
 
 
 def _consolidate(
@@ -152,8 +211,10 @@ def _consolidate(
     *,
     rebuild: bool,
     with_estimates: bool,
+    configs: Configs | None = None,
 ) -> bytes:
-    run = consolidate(ledger.at(snapshot), registrations(with_estimates=with_estimates), snapshot)
+    registered = registrations(with_estimates=with_estimates, configs=configs)
+    run = consolidate(ledger.at(snapshot), registered, snapshot)
     printed = canonical_json.dumps(run.snapshot.to_json())
     if rebuild:  # the new graph exists before the old one is replaced: a refusal keeps it
         graphs.save(tenant, extend(None, run), run, fresh=True)
@@ -205,6 +266,7 @@ def main(
                     _dump(graphs, args.tenant, args.as_of, handle)
             return OK
         ledger = _ledger(args.ledger)
+        configs = None if args.config is None else read_configs(args.config)
         rebuild = args.command == "rebuild"
         printed = _consolidate(
             graphs,
@@ -213,6 +275,7 @@ def main(
             args.snapshot,
             rebuild=rebuild,
             with_estimates=args.with_estimates,
+            configs=configs,
         )
         out.write(printed.decode("utf-8") + "\n")
         return OK
