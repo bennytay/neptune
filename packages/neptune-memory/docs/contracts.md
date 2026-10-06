@@ -112,7 +112,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
   compiler's own strict readers (ADR 0008 §1), the `identifiers` of `incident_record` and `intervention`
-  records `memory.events` placed (ADR 0019 §1), and `machine` (with `run` and `run_declaration` to place it)
+  records `memory.events` placed (ADR 0019 §1) and of event table rows' `@id:<namespace>` cells (ADR 0023), and `machine` (with `run` and `run_declaration` to place it)
   the same way (ADR 0021). The configuration lineage consolidator reads
   `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`, `authorisation_envelope`
   (lifecycle records, root ADR 0051), `run`, `snapshot_binding` (root ADR 0050 §8) and the snapshot kinds a binding

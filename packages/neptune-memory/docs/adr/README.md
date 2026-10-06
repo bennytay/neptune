@@ -29,3 +29,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0020](0020-runs-read-the-compilers-run-declaration.md) | The run consolidator reads the compiler's run_declaration | Accepted |
 | [0021](0021-a-machine-records-declared-ids-are-same-as.md) | A machine record's declared ids are same_as | Accepted |
 | [0022](0022-pinned-configuration-snapshots-name-their-anchored-configuration.md) | Pinned configuration snapshots name their anchored configuration | Accepted (transitional, until the Ledger threads `configuration_snapshot`) |
+| [0023](0023-event-table-rows-declare-ids-in-their-at-id-column.md) | Event table rows declare their ids in their @id column | Accepted |

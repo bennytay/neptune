@@ -40,6 +40,7 @@ from neptune.model.machine import machine_from_json
 from neptune.model.provenance import EvidenceRef, Provenance, evidence_ref_from_json
 from neptune.model.reference import timestamp_domain_from_json
 from neptune.model.time import Timestamp, timestamp_from_json
+from neptune.model.world import structured_record_from_json, structured_table_from_json
 from neptune_memory.schema.interval import OPEN, CivilClock, Open
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import is_declared_value
@@ -61,6 +62,10 @@ IDENTITY_LINK: Final = "identity_link"
 CONFIGURATION_LINEAGE: Final = "configuration_lineage"
 ASSERTION: Final = "assertion"
 TIMESTAMP_DOMAIN: Final = "timestamp_domain"
+STRUCTURED_TABLE: Final = "structured_table"
+STRUCTURED_RECORD: Final = "structured_record"
+# A typed table's column holding each row's own id in ``<namespace>`` (Deploy ADR 0017 §1).
+ROW_ID_PREFIX: Final = "@id:"
 INCIDENT_RECORD: Final = "incident_record"
 INTERVENTION: Final = "intervention"
 MACHINE: Final = "machine"
@@ -417,6 +422,56 @@ def incident_identifiers(record: Mapping[str, object]) -> Declaring:
 def intervention_identifiers(record: Mapping[str, object]) -> Declaring:
     parsed = _strict(intervention_from_json, record)
     return _declaring(parsed.id, parsed.identifiers)
+
+
+def id_columns(record: Mapping[str, object]) -> tuple[RecordId, dict[int, str]]:
+    """A ``structured_table``'s id and its ``@id:<namespace>`` columns, by index (ADR 0023);
+    none when its header is not ``Known`` or a namespace is not a record namespace."""
+    parsed = _strict(structured_table_from_json, record)
+    header = _known(parsed.header) or ()
+    found: dict[int, str] = {}
+    for index, name in enumerate(header):
+        namespace = name[len(ROW_ID_PREFIX) :]
+        if name.startswith(ROW_ID_PREFIX):
+            try:
+                LogicalId(namespace, "x")
+            except ValueError:
+                continue
+            found[index] = namespace
+    return parsed.id, found
+
+
+def row_identifiers(
+    record: Mapping[str, object], columns: Mapping[RecordId, Mapping[int, str]]
+) -> Declaring | None:
+    """The ids a table row declares in its table's ``@id:<namespace>`` cells (ADR 0023), as an
+    event record's ``identifiers`` are read: a ``Known`` text cell certainly, each text candidate
+    of an ``Ambiguous`` one possibly. ``None`` for a row of a table with no such column."""
+    parsed = _strict(structured_record_from_json, record)
+    named = columns.get(parsed.table)
+    if not named:
+        return None
+    certain: list[LogicalId] = []
+    possible: list[LogicalId] = []
+    refused = 0
+    for index, namespace in sorted(named.items()):
+        cell = parsed.cells[index] if index < len(parsed.cells) else None
+        readings = (
+            [(cell.value, certain)]
+            if isinstance(cell, Known)
+            else [(c.value, possible) for c in cell.candidates]
+            if isinstance(cell, Ambiguous)
+            else []
+        )
+        for value, into in readings:
+            if not isinstance(value, str):
+                continue
+            if not is_declared_value(value):
+                refused += 1
+            elif LogicalId(namespace, value) not in into:
+                into.append(LogicalId(namespace, value))
+    possible = [p for p in possible if p not in certain]
+    return Declaring(parsed.id, tuple(certain), tuple(possible), refused)
 
 
 # --- Machine declarations -----------------------------------------------------------------------

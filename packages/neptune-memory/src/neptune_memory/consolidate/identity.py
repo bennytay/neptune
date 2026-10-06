@@ -431,6 +431,8 @@ def _events(view: _View, ledger: LedgerReader, previous: Sequence[Claim]) -> _Ev
                     continue  # the compiler's reader refuses it: memory.events placed no event
                 if declaring.record in found.origins:
                     declared.setdefault(declaring.record, set()).add(declaring)
+    for row in _rows(ledger, found):
+        declared.setdefault(row.record, set()).add(row)
     for record, readings in sorted(declared.items()):
         if len(readings) > 1:
             continue  # one id, two contents: memory.events placed nothing on it either
@@ -449,6 +451,33 @@ def _events(view: _View, ledger: LedgerReader, previous: Sequence[Claim]) -> _Ev
             for node in ids:
                 found.declaring.setdefault(_key(node), (set(), set()))[slot].add(record)
     return found
+
+
+def _rows(ledger: LedgerReader, found: _Events) -> list[parse.Declaring]:
+    """The ids event rows declare in their table's ``@id:<namespace>`` columns (ADR 0023)."""
+    columns: dict[RecordId, dict[int, str]] = {}
+    for ref in ledger.list_packages():
+        for record_json in ledger.read_records(ref.package_id, parse.STRUCTURED_TABLE) or ():
+            try:
+                table, named = parse.id_columns(record_json)
+            except parse.Malformed:
+                continue
+            if named:
+                columns[table] = named
+    rows: list[parse.Declaring] = []
+    if not columns:
+        return rows
+    for ref in ledger.list_packages():
+        for record_json in ledger.read_records(ref.package_id, parse.STRUCTURED_RECORD) or ():
+            if record_json.get("id") not in found.origins:
+                continue  # not an event memory.events placed: its ids name nothing here
+            try:
+                row = parse.row_identifiers(record_json, columns)
+            except parse.Malformed:
+                continue
+            if row is not None:
+                rows.append(row)
+    return rows
 
 
 @dataclass(frozen=True)
