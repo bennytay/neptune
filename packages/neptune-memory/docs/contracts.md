@@ -55,8 +55,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     `uv run --all-packages --all-groups python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
-    makes it stale. It compares both the decompressed document and the `.gz` bytes; the `.gz` bytes also depend
-    on the `zlib` of the uv-installed Python, which the test names if only they differ.
+    makes it stale. The decompressed document is the contract and is always compared byte for byte. The `.gz`
+    bytes are packaging: `acceptance_corpus.gzip.json` records the level and `zlib` they were deflated with, and
+    they are compared only under that `zlib`, so another `zlib` with the same document does not fail.
   - A regeneration is byte-identical on any host, in CI and locally. Record ids depend only on what the
     repository pins: the corpus, adapter versions, the libraries in `uv.lock` and the Python minor version in
     `.python-version`. `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names

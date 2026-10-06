@@ -70,16 +70,19 @@ REGENERATE: Final = (
 
 
 @pytest.fixture(scope="module")
-def regenerated(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes]:
+def regenerated(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes, bytes]:
     """(gzipped graph, environment) regenerated in a fresh process (the compiler's sandbox forks,
     which a threaded test process should not do) under another hash seed and time zone."""
     out = tmp_path_factory.mktemp("acceptance")
     env = {**os.environ, "PYTHONHASHSEED": "4242", "TZ": "Pacific/Chatham"}
     script = [sys.executable, str(generator().__file__), "--out", str(out / "graph.json.gz")]
     script += ["--environment-out", str(out / "environment.json")]
+    script += ["--gzip-out", str(out / "gzip.json")]
     done = subprocess.run(script, env=env, capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stderr[-2000:]
-    return (out / "graph.json.gz").read_bytes(), (out / "environment.json").read_bytes()
+    names = ("graph.json.gz", "environment.json", "gzip.json")
+    graph, environment, packaging = ((out / name).read_bytes() for name in names)
+    return graph, environment, packaging
 
 
 RECORD_ID: Final = re.compile(rb"rec:sha256:[0-9a-f]{64}")
@@ -99,7 +102,7 @@ def facts(data: bytes) -> list[bytes]:
 
 
 @pytest.mark.slow
-def test_a_regeneration_states_the_same_facts(regenerated: tuple[bytes, bytes]) -> None:
+def test_a_regeneration_states_the_same_facts(regenerated: tuple[bytes, bytes, bytes]) -> None:
     assert facts(gunzip(regenerated[0], MAX_GRAPH_BYTES)) == facts(committed()), (
         f"acceptance_corpus.graph.json.gz is stale (the corpus, the compiler or Memory changed). "
         f"{REGENERATE}"
@@ -124,11 +127,13 @@ def differences(here: JsonValue, recorded: JsonValue) -> dict[str, object]:
 
 
 @pytest.mark.slow
-def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes]) -> None:
+def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes, bytes]) -> None:
     """On any host, in CI and locally: the compiler no longer records host-bound library versions
-    in id-bearing content, so a difference here is a stale snapshot (the corpus, an adapter or its
-    version, a library ``uv.lock`` pins, or the Python minor ``.python-version`` pins)."""
-    graph, environment = regenerated
+    in id-bearing content, so a difference in the document is a stale snapshot (the corpus, an
+    adapter or its version, a library ``uv.lock`` pins, or the Python minor ``.python-version``
+    pins). The ``.gz`` bytes are packaging: compared only under the ``zlib`` recorded beside
+    them."""
+    graph, environment, packaging = regenerated
     recorded = generator().ENVIRONMENT.read_bytes()
     if environment != recorded:
         changed = differences(
@@ -139,10 +144,23 @@ def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes]) -> N
     assert gunzip(graph, MAX_GRAPH_BYTES) == committed(), (
         f"acceptance_corpus.graph.json.gz is stale. {REGENERATE}"
     )
-    assert graph == committed_gz(), (
-        f"the same graph deflates to other gzip bytes (zlib {zlib.ZLIB_RUNTIME_VERSION}). "
-        f"{REGENERATE}"
-    )
+    recorded = generator().GZIP.read_bytes()
+    if generator().same_zlib(recorded):
+        assert packaging == recorded
+        assert graph == committed_gz(), (
+            f"the same graph deflates to other gzip bytes under zlib {zlib.ZLIB_RUNTIME_VERSION}. "
+            f"{REGENERATE}"
+        )
+
+
+def test_the_gzip_bytes_are_compared_only_under_the_recorded_zlib() -> None:
+    recorded = generator().GZIP.read_bytes()
+    document = canonical_json.loads(recorded.rstrip(b"\n"))
+    assert isinstance(document, dict) and sorted(document) == ["level", "zlib"]
+    assert document["level"] == 9
+    assert generator().same_zlib(generator().gzip_record())
+    other = canonical_json.dumps({"level": 9, "zlib": "0.0.0-other"}) + b"\n"
+    assert not generator().same_zlib(other)  # another zlib: the document alone decides
 
 
 def test_differences_name_each_changed_adapter_and_the_corpus() -> None:

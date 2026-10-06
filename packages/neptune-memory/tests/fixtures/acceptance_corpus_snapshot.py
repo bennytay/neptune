@@ -40,9 +40,10 @@ the same code gives the same bytes on any host. What the bytes still depend on i
 repository: the corpus version, adapter versions, the libraries ``uv.lock`` pins and the Python
 minor version ``.python-version`` pins, all of which transform records name.
 ``acceptance_corpus.environment.json`` records them, so a failing regeneration says which moved.
-The gzip bytes also depend on the ``zlib`` deflating them, which no file pins; the snapshot test
-checks the document and the gzip bytes separately and names that ``zlib`` when only the latter
-differ.
+The decompressed document is the contract; the gzip bytes are packaging. They also depend on the
+``zlib`` deflating them, which nothing pins, so ``acceptance_corpus.gzip.json`` records the level
+and that ``zlib``. A check always compares the document byte for byte, and the gzip bytes only
+under the recorded ``zlib``: another ``zlib`` that gives the same document is not a stale snapshot.
 ``tests/test_acceptance_snapshot_memory.py`` regenerates and compares, byte for byte.
 
 From the repository root, with ``G=packages/neptune-memory/tests/fixtures/<this file>``::
@@ -62,6 +63,7 @@ import io
 import json
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -69,7 +71,7 @@ from neptune.identity import canonical_json
 from neptune.store.package import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport, ThreadsOf, threads_of_from_json
-from neptune_memory.store.gzipped import deterministic_gzip
+from neptune_memory.store.gzipped import LEVEL, deterministic_gzip, gunzip
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -81,6 +83,8 @@ REPO: Final = HERE.parents[3]
 SNAPSHOT: Final = HERE / "acceptance_corpus.graph.json.gz"
 ENVIRONMENT: Final = HERE / "acceptance_corpus.environment.json"
 CONFIG: Final = HERE / "acceptance_corpus.memory_config.json"
+GZIP: Final = HERE / "acceptance_corpus.gzip.json"  # the level and zlib the .gz was deflated with
+MAX_DOCUMENT: Final = 1 << 30
 TENANT: Final = "acceptance"
 COMPILED_AT: Final = 1  # the compiler's package: the first registration in a fresh catalog
 MAPPED_AT: Final = 2  # Deploy's lifecycle package, registered after it
@@ -246,6 +250,18 @@ def environment(export: LedgerExport) -> bytes:
     return canonical_json.dumps(document) + b"\n"
 
 
+def gzip_record() -> bytes:
+    """The packaging of the ``.gz``: its level and the running ``zlib``."""
+    document: JsonValue = {"level": LEVEL, "zlib": zlib.ZLIB_RUNTIME_VERSION}
+    return canonical_json.dumps(document) + b"\n"
+
+
+def same_zlib(recorded: bytes) -> bool:
+    """Whether ``recorded`` (a ``gzip_record``) names the running ``zlib`` and level: only then
+    are two ``.gz`` files of one document expected to be equal bytes."""
+    return recorded == gzip_record()
+
+
 def build(work: Path, export: Path | None = None) -> tuple[bytes, bytes]:
     """The snapshot's gzip bytes (``memory rebuild`` over the corpus's Ledger export, in ``work``,
     deterministically gzipped) and its environment's."""
@@ -268,19 +284,33 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--export", type=Path, help="also write the Ledger export here")
     parser.add_argument("--out", type=Path, default=SNAPSHOT)
     parser.add_argument("--environment-out", type=Path, default=ENVIRONMENT)
+    parser.add_argument("--gzip-out", type=Path, default=GZIP)
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as scratch:
-        built = build(Path(scratch), args.export)
-    status = 0
-    for path, data in zip((args.out, args.environment_out), built, strict=True):
-        if args.check:
-            same = path.is_file() and path.read_bytes() == data
-            sys.stdout.write(f"{path}: {'up to date' if same else 'differs from a regeneration'}\n")
-            status = status or (0 if same else 1)
-        else:
+        packed, environment = build(Path(scratch), args.export)
+    outputs = (
+        (args.out, packed),
+        (args.environment_out, environment),
+        (args.gzip_out, gzip_record()),
+    )
+    if not args.check:
+        for path, data in outputs:
             path.write_bytes(data)
             sys.stdout.write(f"{path}: {len(data)} bytes from {corpus_label()}\n")
-    return status
+        return 0
+    recorded = args.gzip_out.read_bytes() if args.gzip_out.is_file() else b""
+    old = args.out.read_bytes() if args.out.is_file() else b""
+    verdicts = {
+        args.environment_out: args.environment_out.is_file()
+        and args.environment_out.read_bytes() == environment,
+        # the document always; the gzip bytes only under the zlib recorded beside them
+        args.out: bool(old)
+        and gunzip(old, MAX_DOCUMENT) == gunzip(packed, MAX_DOCUMENT)
+        and (old == packed or not same_zlib(recorded)),
+    }
+    for path, same in verdicts.items():
+        sys.stdout.write(f"{path}: {'up to date' if same else 'differs from a regeneration'}\n")
+    return 0 if all(verdicts.values()) else 1
 
 
 if __name__ == "__main__":
