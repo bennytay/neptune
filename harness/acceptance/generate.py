@@ -1470,8 +1470,10 @@ def asset_register() -> bytes:
 # What the site integrator's run sheet states for each declared run (root ADR 0072): the task, the
 # software it ran (firmware and controller versions), and the snapshot files it ran with. A pin
 # is only what the hand-over can show was in force at the run:
-# - ARM-3A: the hand-eye calibration loaded (the last good run CAL-ARM3A-0818, before WO-26-0911;
-#   the incident run CAL-ARM3A-0911 and the vision PC's export of it). The tool change of
+# - ARM-3A: the hand-eye calibration loaded (the last good run CAL-ARM3A-0818, before WO-26-0911,
+#   as its start line says; the incident run CAL-ARM3A-0911 and the vision PC's export of it). The
+#   2026-08-20 run's bag names no calibration; the integrator pins CAL-ARM3A-0818, the one in force
+#   from WO-26-0391 (2026-08-18) to the next calibration on 2026-09-11. The tool change of
 #   WO-26-0911 has no snapshot (no change record, and the managed cell_config.yaml is stale, so it
 #   is never pinned).
 # - LEG-01: the dated patrol configuration of its firmware.

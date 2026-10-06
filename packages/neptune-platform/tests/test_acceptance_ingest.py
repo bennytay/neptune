@@ -257,8 +257,12 @@ def test_every_item_lists_citations_that_support_it(
     assert estop["citations"][0]["locator"] == {"log_time": log_time, "topic": "/diagnostics"}
 
 
-def _paths_by_content(package: resolve.Package) -> dict[str, str]:
-    return {str(r["content_id"]): r["location"]["path"] for r in package.kind("source_revision")}
+def _paths_by_content(package: resolve.Package) -> dict[str, list[str]]:
+    """Every path of each content id: byte-identical copies (the vendor share) share one."""
+    out: dict[str, list[str]] = {}
+    for revision in package.kind("source_revision"):
+        out.setdefault(str(revision["content_id"]), []).append(revision["location"]["path"])
+    return out
 
 
 def test_the_run_sheet_pins_bind_their_runs_stated_and_nothing_else_is_pinned(
@@ -275,7 +279,8 @@ def test_the_run_sheet_pins_bind_their_runs_stated_and_nothing_else_is_pinned(
     ]
     runs_of: dict[str, set[str]] = {}
     for recording in package.kind("run"):
-        runs_of.setdefault(paths[str(resolve._source(recording))], set()).add(str(recording["id"]))
+        for path in paths[str(resolve._source(recording))]:
+            runs_of.setdefault(path, set()).add(str(recording["id"]))
     expected = 0
     for declared in generate.RUNS:
         recordings = {

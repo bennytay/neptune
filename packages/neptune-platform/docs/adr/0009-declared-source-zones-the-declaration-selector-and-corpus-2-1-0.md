@@ -77,7 +77,8 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
      (firmware and controller versions, as top-level `software` entries with a `version`) and the
      `snapshots` it ran with, by path. A pin is only what the hand-over shows was in force:
      - ARM-3A's last good run is pinned to CAL-ARM3A-0818, and the incident run to CAL-ARM3A-0911
-       and the vision PC's export of it. The tool change has no snapshot, and the stale
+       and the vision PC's export of it, as their start lines name them. The 2026-08-20 run's bag
+       names none; it is pinned to CAL-ARM3A-0818, in force from 2026-08-18 to 2026-09-11. The tool change has no snapshot, and the stale
        `cell_config.yaml` is never pinned.
      - LEG-01's patrols are pinned to their dated configurations.
      - AMR-07 is pinned to its revision 12 navigation export only for the run after the 4.3.1
