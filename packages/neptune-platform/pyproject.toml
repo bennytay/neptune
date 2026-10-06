@@ -31,6 +31,13 @@ files = ["src", "tests"]
 # The repository root, so the tests can import the integration harness (harness/, MVL-123).
 mypy_path = "src:../.."
 
+# The docs site (docsite/, platform ADR 0012) calls Sphinx, whose sources use Python 3.12 syntax
+# that mypy cannot parse while it targets 3.11, and docutils ships no types; their names are Any.
+[[tool.mypy.overrides]]
+module = ["sphinx", "sphinx.*", "docutils", "docutils.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["../.."]
