@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:e299693cbe522db0a420c475e86a0c90cd51a16d01f0739d4fa92bd3403540ce`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:3b16d2ba877b9a801c3943489070abed0fbaacbabdac9ba85f909dce0c96120e`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -37,7 +37,7 @@ Receipt `rec:sha256:e299693cbe522db0a420c475e86a0c90cd51a16d01f0739d4fa92bd34035
 | `deploy_document_map` | `0.2.0` | `sha256:67ef41692d04` | none | `rec:bc6c62eb9a73` |
 | `deploy_document_map` | `0.2.0` | `sha256:c629d0ba9c9c` | none | `rec:e45218a80b62` |
 | `deploy_lifecycle_map` | `0.2.0` | `sha256:fccc9e52e714` | none | `rec:039839dfe1b2` |
-| `deploy_lifecycle_map` | `0.2.0` | `sha256:e864f07a8fc9` | none | `rec:daac8de125fa` |
+| `deploy_lifecycle_map` | `0.2.0` | `sha256:1963812978dd` | none | `rec:457ce49b3a97` |
 | `deploy_lifecycle_map` | `0.2.0` | `sha256:c16992b5ced4` | none | `rec:f54880ed9534` |
 | `deploy_lifecycle_map` | `0.2.0` | `sha256:05451e1127ea` | none | `rec:ff321fcc87aa` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
@@ -88,8 +88,8 @@ Receipt `rec:sha256:e299693cbe522db0a420c475e86a0c90cd51a16d01f0739d4fa92bd34035
 - **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:c0a2a37593c5`
 - **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:9ae9463f45be`
 - **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:e8c2dc3936c2`
-- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value or list is not covered, never read as none · `rec:060da2bad239`
 - **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value or list is not covered, never read as none · `rec:2d55f2ac19cd`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value or list is not covered, never read as none · `rec:c7d8413263ce`
 - **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value or list is not covered, never read as none · `rec:db67d421ee8a`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:420a20914a90`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:d2d15048f8b8`
