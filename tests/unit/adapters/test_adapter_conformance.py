@@ -1,12 +1,17 @@
 """The reusable conformance check: well-behaved adapters pass, each broken law is caught."""
 
 import itertools
+import platform
+import sys
+import zlib
 from dataclasses import replace
 from typing import Any
+from xml.parsers import expat
 
 import pytest
 
-from neptune.adapters.conformance import check_conformance, conformance_inputs
+from neptune.adapters.builtin import builtin_adapters
+from neptune.adapters.conformance import check_conformance, check_libraries, conformance_inputs
 from neptune.adapters.contract import (
     AdapterConfig,
     Chunk,
@@ -126,3 +131,44 @@ def test_a_law_broken_in_ingest_names_the_input() -> None:
 
     with pytest.raises(ContractError, match=r"said nothing about its source.*\(input of 0 bytes\)"):
         check_conformance(_Wrapped(ingest=ingest), SAMPLES)
+
+
+def _with_libraries(*libraries: tuple[str, str]) -> _Wrapped:
+    adapter = _Wrapped()
+    adapter.descriptor = replace(adapter.descriptor, libraries=tuple(sorted(libraries)))
+    return adapter
+
+
+def test_every_shipped_adapter_declares_no_interpreter_build() -> None:
+    for adapter in builtin_adapters():
+        check_libraries(adapter)
+
+
+@pytest.mark.parametrize(
+    "library",
+    [
+        ("expat", expat.EXPAT_VERSION),
+        ("expat", expat.EXPAT_VERSION.removeprefix("expat_")),
+        ("python", sys.version),
+        ("python", sys.version.split()[0]),
+        ("python", platform.python_version()),
+        ("python", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"),
+        ("cpython", platform.python_compiler()),
+        ("bz2", f"cpython-{platform.python_version()}"),
+        ("zlib", zlib.ZLIB_RUNTIME_VERSION),
+        ("host", platform.platform()),
+        ("host", f"linux {platform.release()}"),
+    ],
+    ids=lambda library: f"{library[0]}-{str(library[1])[:20]}",
+)
+def test_a_library_taken_from_the_interpreter_build_is_refused(library: tuple[str, str]) -> None:
+    with pytest.raises(ContractError, match="interpreter build"):
+        check_conformance(_with_libraries(library), SAMPLES)
+
+
+def test_a_library_the_interpreter_ships_is_declared_by_minor_version() -> None:
+    minor = f"{sys.version_info.major}.{sys.version_info.minor}"
+    check_conformance(
+        _with_libraries(("python", minor), ("bz2", f"cpython-{minor}"), ("pyyaml", "6.0.2")),
+        SAMPLES,
+    )
