@@ -1,0 +1,15 @@
+{
+  "contract": "graph-schema",
+  "goldens": {
+    "graph.json": "#/$defs/Graph",
+    "result.claims.json": "#/$defs/ClaimsResult",
+    "result.episodes.json": "#/$defs/EpisodesResult",
+    "result.neighbours.json": "#/$defs/NeighboursResult",
+    "result.node.json": "#/$defs/NodeResult",
+    "vocabulary.json": "#/$defs/PredicateRegistry"
+  },
+  "owner_version": 1,
+  "schema_sha256": "sha256:ec7351f935e358fcb807ce08efc632517b2b370c1107cc90c2a127da0af902c2",
+  "status": "stable",
+  "version": "1.8.0"
+}
