@@ -1,8 +1,10 @@
 """The acceptance corpus through the harness: one real ingest, partial success, the storyline's
-evidence in the package and every gold evidence item resolved (Platform ADR 0007)."""
+evidence in the package, every gold evidence item resolved (Platform ADR 0007), and the Deploy map
+of the package registered beside it (ADR 0008)."""
 
 import json
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -10,6 +12,7 @@ import pytest
 from harness import acceptance
 from harness.acceptance import generate, resolve
 from harness.run import run
+from harness.stages import read_deploy
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -67,6 +70,77 @@ def test_the_harness_default_is_the_acceptance_corpus_and_it_is_green(
 def gold_question(qid: str) -> str:
     document = json.loads(acceptance.GOLD.read_text(encoding="utf-8"))
     return str(next(q["question"] for q in document["questions"] if q["id"] == qid))
+
+
+def _stage(report: dict[str, Any], stage: str) -> dict[str, Any]:
+    return next(entry for entry in report["stages"] if entry["stage"] == stage)
+
+
+def test_the_deploy_stage_maps_every_declaration_and_the_ledger_registers_both(
+    harness_run: tuple[dict[str, Any], Path],
+) -> None:
+    report, package_root = harness_run
+    deploy = _stage(report, "deploy")
+    assert (deploy["mode"], deploy["status"], deploy["problems"]) == ("real", "ok", [])
+    (row,) = deploy["output"]["cases"]
+    plan, _ = read_deploy(acceptance.DEPLOY)
+    assert plan is not None
+    assert row["state"] == "committed" and row["package_verified"]
+    assert row["manifest_valid"] and row["receipt_valid"]
+    assert set(row["by_declaration"]) == {f"preset:{name}" for name in plan.presets}
+    assert all(count > 0 for count in row["by_declaration"].values())
+    assert all(row["records"].get(kind, 0) >= n for kind, n in plan.at_least.items())
+    # What no mapping reads (the PDFs' tables, the syslog and downtime exports, the calibration
+    # log) is a finding in the mapped package's receipt, and the stage is still green.
+    assert row["findings"]["deploy_lifecycle_map.table_unmapped"] >= 3
+    ledger = _stage(report, "ledger")["output"]["cases"]
+    assert [(r["case"], r["stage"]) for r in ledger] == [
+        (CASE, "compiler"),
+        (f"{CASE}.deploy", "deploy"),
+    ]
+    assert all(r["registration"] == "registered" and r["verify"] == "intact" for r in ledger)
+    mapped = resolve.Package(package_root.parent / f"{CASE}.deploy")
+    envelopes = {
+        ident["value"]["value"]
+        for record in mapped.kind("authorisation_envelope")
+        for ident in record["identifiers"]
+    }
+    assert {"ENV-P2-01", "ENV-P2-02", "ENV-P2-03", "ENV-S007-03", "ENV-S007-04"} == envelopes
+
+
+def test_the_package_holds_both_stops_32_s_apart_and_the_assertion_joining_them(
+    package: resolve.Package, gold: dict[str, Any]
+) -> None:
+    resolved = resolve.resolve(package.root, gold)
+    rows = {r["id"]: r for r in package.kind("structured_record")}
+
+    def cells(key: str) -> list[str]:
+        (record,) = resolved[key]["records"]
+        return [str(c.get("value")) for c in rows[record]["cells"]]
+
+    cmms = datetime.fromisoformat(cells("cmms.stop.DT-26-0914-01")[5])
+    pstop = datetime.fromisoformat(cells("syslog.pstop")[1])
+    assert (cmms - pstop).total_seconds() == 32
+    (record,) = resolved["assert.same-stop"]["records"]
+    (assertion,) = [a for a in package.kind("assertion") if a["id"] == record]
+    assert assertion["provenance"]["assertion_kind"] == "stated"
+    assert [s["value"] for s in assertion["scope"]["value"]] == ["DT-26-0914-01", "4182"]
+
+
+def test_the_calibrations_land_as_configuration_until_the_compiler_reads_easy_handeye(
+    package: resolve.Package,
+) -> None:
+    """MVL-207 adds the format; until then each file is a configuration snapshot whose values the
+    gold answers cite by pointer, and only the vision PC's OpenCV export is a calibration."""
+    for ident in ("CAL-ARM3A-0818", "CAL-ARM3A-0911"):
+        content = package.content(f"sites/PLANT-2/cell3/calibration/{ident}.yaml")
+        values = [
+            v["path"]
+            for v in package.kind("configuration_value")
+            if v["provenance"]["evidence"]["source"] == content
+        ]
+        assert ["transformation", "z"] in values
+    assert len(package.kind("calibration")) == 1
 
 
 def test_one_corrupt_bag_is_findings_not_a_failed_job(
