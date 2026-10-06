@@ -194,10 +194,11 @@ def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Pa
     ctx = _compiled(tmp_path / "work", registry)
     assert LEDGER.real is not None
     outcome = LEDGER.real(ctx)  # resolve() would make it a stub: a lock a major behind
-    # The manipulator and quadruped packages need package-schema 2 (compiler ADR 0037).
+    # The manipulator package needs package-schema 2 (compiler ADR 0037); the quadruped's
+    # robot.urdf gives robot-description records, which need package-schema 8 (compiler ADR 0039).
     assert outcome.problems == (
         "manipulator: the package needs package-schema 2, neptune-ledger locks 1.0.0",
-        "quadruped: the package needs package-schema 2, neptune-ledger locks 1.0.0",
+        "quadruped: the package needs package-schema 8, neptune-ledger locks 1.0.0",
     )
 
 
