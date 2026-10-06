@@ -20,6 +20,17 @@ Registry rules that the tool enforces beyond ADR 0002:
 - **An owner that fails to import is a failure.** The owner's contract tests are skipped only while the
   owner module or one of its parent packages does not exist; any other import error fails the check.
 
+## Golden-only releases
+
+When an owner's goldens change but its schema does not (for example a consolidator or parser version bump
+that changes ids, a new lineage under root AGENTS.md non-negotiable 6), publish them as a new minor or patch
+version with `scripts/contracts.py bump <contract> <x.y.z> --golden-only` (ADR 0010). It refuses a major,
+a schema that is not byte-identical to the latest version's, and goldens equal to the latest version's. The
+constant rule is unchanged: an integer constant stays at the major; a string constant is raised to the new
+version first. The new `version.json` records `"release": "golden-only"`, `check` re-verifies it against the
+version before it, `compatibility.md` shows `x.y.z (golden-only, schema of <previous>)`, and the
+announcement tells consumers that only the goldens changed. Earlier version directories are never touched.
+
 ## Publishes
 
 _None yet._
