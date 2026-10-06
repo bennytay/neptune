@@ -122,7 +122,9 @@ def exported(root: Path, registered_at: int, derived: tuple[str, ...] = ()) -> E
 def harness_packages(work: Path) -> tuple[Path, Path]:
     """The acceptance corpus's packages, ``<case>`` and ``<case>.deploy``, as the harness's
     compiler and deploy stages write them under ``work``. A stage that runs as a stub, or reports
-    a problem, stops the snapshot: it is never made from goldens or from a partial mapping."""
+    a problem, stops the snapshot: it is never made from goldens or from a partial mapping. So
+    does a corpus that declares no Deploy mapping (the deploy stage passes it over, ok): the
+    snapshot's head is Deploy's registration."""
     corpus, stages, run = harness("corpus"), harness("stages"), harness("run")
     _, cases = corpus.select(into=work / "corpus")
     if len(cases) != 1:
@@ -137,6 +139,9 @@ def harness_packages(work: Path) -> tuple[Path, Path]:
                 f"the harness's {name} stage ran {entry['mode']}, {entry['status']}: {why}"
             )
     (case,) = cases
+    (mapped,) = ctx.upstream["deploy"]["cases"]
+    if mapped.get("state") != "committed":
+        raise RuntimeError(f"the harness's deploy stage mapped nothing for {case.id}: {mapped}")
     return ctx.package_root(case.id), ctx.deploy_root(case.id)
 
 
