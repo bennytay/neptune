@@ -1,7 +1,7 @@
 # Graph schema v2
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v2.1.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.1.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v2.2.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.2.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -17,7 +17,9 @@ calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-c
 the vocabulary is unchanged). **2.0.0 (major)** narrows `succeeds` and names the release in every document
 (below; [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3); 2.1.0 (minor,
 golden-only) republishes the goldens under identity v4 ([ADR 0021](adr/0021-a-machine-records-declared-ids-are-same-as.md),
-[ADR 0023](adr/0023-event-table-rows-declare-ids-in-their-at-id-column.md); schema and vocabulary unchanged). Within major 1, earlier goldens still
+[ADR 0023](adr/0023-event-table-rows-declare-ids-in-their-at-id-column.md); schema and vocabulary unchanged); 2.2.0 (minor)
+adds `declared_value`, `stated_cause`, the `declared_value` value type and the `maintenance` event kind
+([ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md)). Within major 1, earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -53,7 +55,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 11`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 12`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -75,6 +77,7 @@ major version (ADR 0002 §5).
 | `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `declared_kind` | event | text, integer | one | the event's kind exactly as its source declares it: a level, a code, a mode |
+| `declared_value` | configuration, event | declared_value | many | a value the subject's record declares at a key path, as stated (unit as declared), cited where the value appears; never converted or compared |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
 | `drift` | sensor | delta | many | observed: two consecutive calibrations' declared values differ by the delta; no judgement |
 | `ends_at_candidate` | episode | instant | many | ambiguous: may end here (a stated end, or a stop event inside it) |
@@ -123,17 +126,18 @@ major version (ADR 0002 §5).
 | `sensor_presence_unknown` | run | sensor | many | unknown: the evidence does not decide whether a configured sensor recorded in the run |
 | `sensor_recorded` | run | sensor | many | a sensor of a configuration bound to the run recorded in it: a run's file declares its identifier |
 | `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
+| `stated_cause` | event | text | one | the cause a record states for the event, verbatim: a root cause, a diagnosis; never inferred |
 | `stated_severity` | event | text, integer | one | the severity a record states, verbatim; never ranked or compared |
 | `succeeds` | configuration | configuration | many | a source states the subject replaces the object as configurations, wherever they appear; never read from one machine's chain (ADR 0019 §2) |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 `EventKind` (`#/$defs/EventKind`) lists the registered event kinds, the only objects of `event_kind`:
-`collision`, `emergency_stop`, `failsafe`, `fault`, `incident`, `intervention`, `mode_change`, `near_miss`,
+`collision`, `emergency_stop`, `failsafe`, `fault`, `incident`, `intervention`, `maintenance`, `mode_change`, `near_miss`,
 `protective_stop`, `reset`, `safety_field_violation`, `stale`, `warning`. A kind is added with a vocabulary
 version and never renamed or removed within a major.
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
-`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record`, `delta` and `clock_map` (`#/$defs/ClockMap`:
+`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record`, `delta`, `declared_value` and `clock_map` (`#/$defs/ClockMap`:
 a mapping's `anchor`, `rate` and `residual_bound` exactly as stated, each a `Knowledge` state inheriting the
 claim's provenance, with `method` `stated` or `co_sampled`; or a `composed` chain naming its mapping records in
 `chain` and the clocks between in `via`, with no parameters of its own). A `delta`
@@ -143,6 +147,11 @@ edge (`parent`, `child`), in the `representation` both declare, with the transfo
 (`transform`). A rotation states its `adjustment`: a quaternion negated when the two point opposite ways
 (`later_negated`), Euler angles wrapped into a half turn (`wrapped`), else `none`. Its unit is the one both declare
 (`Known`), or `not_applicable` for a form without one (a quaternion, a rotation matrix); it is never converted.
+A `declared_value` (`#/$defs/DeclaredValue`) is one value a record declares: its key `path` (keys verbatim,
+sequence positions as integers, a calibration parameter's declared name as one step), its `type` (`text`,
+`integer`, `real`, `boolean`, or `reals`: numbers in source order) and its `value` in that type, never converted
+(`0.0745` stays a real, `"0.0745"` text). Its unit is the literal's: as declared for a number (`unknown` where
+the source states none), `not_applicable` for text and booleans.
 
 ## The claim and the finding
 
@@ -315,7 +324,9 @@ def test_graph_schema_contract(check):
 16. **Events are what one record states, and co-occurrence is never cause**
     ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md)). An event node is
     `record:<rec id>` (a timeline entry `record:<rec id>/timeline/<i>`). Each event comes from an
-    `incident_record`, an `intervention`, or a row of a table the event consolidator's config declares. Every
+    `incident_record`, an `intervention`, a `maintenance_event` (each action it lists is its own event,
+    `record:<rec id>/actions/<i>`), a `status_report` (ADR 0025), or a row of a table the event consolidator's
+    config declares. A lifecycle event's one declared number is its `has_name` (ADR 0026). Every
     claim about an event holds over its time as declared (an instant is `[t, t + 1 tick)`), and again on each
     clock a stated `clock_mapping` reaches directly, citing that mapping. `event_kind` is set only through a
     declared vendor mapping. `co_occurs_within` links two events from different sources, one claim each way, and
@@ -350,6 +361,12 @@ def test_graph_schema_contract(check):
     id)`. So what a withdrawn winner had cut is held again, a full tie goes the same way in every run, and an
     incremental graph holds what a rebuild holds. An assertion whose pieces and grounds do not change keeps its
     versions.
+20. **Names and values are declared, never derived** ([ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md)).
+    `memory.declared` gives a configuration node one `declared_value` per scalar its snapshot holds and per
+    parameter its calibration declares, cited where the value appears, and a `has_name`: the path its bytes were
+    found at, `observed`. A run's `has_name` is the name its `run_declaration` states. Each claim holds where
+    `memory.configuration` or `memory.runs` places the node, one claim per placement; a node placed nowhere gets
+    none (a `declared.unplaced` finding), and a value that is not `Known` is a counted finding, never a fact.
 
 ## Caveat: a resolver configuration is a store generation
 

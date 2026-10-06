@@ -55,6 +55,7 @@ from neptune_context.query.model import (
     MAX_ZONES,
     Box,
     Clock,
+    CompareRuns,
     Diff,
     DomainClock,
     Explain,
@@ -273,6 +274,18 @@ class _Validator:
                         f"{at}/claim_id",
                         "a claim id is claim:sha256:<hex>",
                     )
+                continue
+            if isinstance(item, CompareRuns):
+                for name, subject in (("before", item.before), ("after", item.after)):
+                    self.subject(subject, f"{at}/{name}")
+                    if subject.kind != "run" or subject.declared_id is None:
+                        self.add(
+                            FindingCode.BAD_IDENTIFIER,
+                            f"{at}/{name}",
+                            "compare_runs names two runs, each by its declared id",
+                        )
+                if item.before == item.after:
+                    self.add(FindingCode.DUPLICATE, at, "compare_runs compares two different runs")
                 continue
             pair = self.diff(item, at)
             if pair is not None:

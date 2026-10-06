@@ -159,6 +159,27 @@ def claim_object(value: Mapping[str, JsonValue]) -> str:
         return f"instant {literal.get('ticks')} on {literal.get('domain_id')}"
     if datatype == "clock_map" and isinstance(literal, Mapping):
         return _clock_map(literal)
+    if datatype == "declared_value" and isinstance(literal, Mapping):
+        path = literal.get("path")
+        key = "/".join(str(step) for step in path) if isinstance(path, list | tuple) else "?"
+        stated = literal.get("value")
+        if literal.get("type") == "text":
+            shown = json.dumps(stated, ensure_ascii=False)
+        elif isinstance(stated, list | tuple):
+            shown = "[" + ", ".join(_number(v) for v in stated) + "]"
+        elif isinstance(stated, bool):
+            shown = "true" if stated else "false"
+        elif stated is None:
+            shown = "?"
+        else:
+            shown = _number(stated)
+        unit = value.get("unit", "")
+        tail = (
+            f" {_unit(unit)}"
+            if isinstance(unit, Mapping) and unit.get("knowledge") == "known"
+            else ""
+        )
+        return f"declared {json.dumps(key, ensure_ascii=False)} = {shown}{tail}"
     if datatype == "delta" and isinstance(literal, Mapping):
         values = literal.get("values")
         shown = ", ".join(_number(v) for v in values) if isinstance(values, list | tuple) else "?"

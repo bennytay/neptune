@@ -96,6 +96,14 @@ a message is met only by a row. Deploy D3 resolves against the base package and 
 Scoring: ADR 0007 §6; the `assertion` selector (an assertion by its declared id, located by its entry's JSON
 pointer) is ADR 0008 §6.
 
+`harness/acceptance/answers.json` (ADR 0011) is the gold questions asked through Context's MCP tools over the
+graph Memory builds from this corpus: per question, the tool calls; per gold claim, its class with a reason:
+`supported` (a cited statement carries the fact), `co_cited` (statements cite its evidence but state something
+else) or a gap. For 2.1.0 over graph-schema 2.2.0, asked as the Claude Code skill prescribes: 12 supported, 10 co-cited, 18
+gaps of 40. `cmms.WO-26-0911.work` and `.firmware` name single cells
+of WO-26-0911's row (the `table_row` selector's `column`), next to the whole-row `cmms.WO-26-0911`. Changing the corpus moves the graph, so the
+same PR runs `make demo-pin` and classifies what moved ([harness](harness.md#the-pinned-answers)).
+
 ## The Deploy declaration
 
 `harness/acceptance/deploy.json` lists the Deploy presets (by name) and document templates (by repository path)
@@ -141,7 +149,8 @@ assertion (`INC-C3-0011.assertions.json`) is an identifier the mapped package de
 2. Bump `VERSION` in `harness/acceptance/__init__.py` by ADR 0007 §3, and `corpus_version` in `gold.json` and
    `deploy.json`.
 3. `uv run --all-packages python -m harness.acceptance lock`, then `make check PKG=neptune-platform`: the
-   ingest test resolves every evidence item and checks the expected findings.
+   ingest test resolves every evidence item and checks the expected findings. Regenerate Memory's snapshot
+   (its `acceptance_corpus_snapshot.py`) and re-pin the answers (`make demo-pin`), reviewing both diffs.
 4. Say in the PR what changed for consumers (an answer, an evidence id, a new question).
 
 2.1.0 (MVL-191) added the syslog export's `MsgID` column and renamed the assertion's scope to Deploy's generic

@@ -319,6 +319,14 @@ def _literal(literal: TypedLiteral) -> str:
         # later - earlier between two calibration records, as Memory wrote it (graph-schema 2.0.0):
         # the declared form, numbers and unit only, never a size or a verdict on them.
         return f"delta {quote(value.to_json())} ({_unit(literal)}, as declared)"  # type: ignore[union-attr]
+    if literal.datatype is ValueType.DECLARED_VALUE:
+        # One value a record declares at a key path, as Memory wrote it (graph-schema 2.2.0): the
+        # path, the declared type and the value, never converted, with its unit as declared.
+        encoded = value.to_json()  # type: ignore[union-attr]
+        return (
+            f"declared value at {quote(encoded['path'])}: {encoded['type']}"
+            f" {quote(encoded['value'])} ({_unit(literal)}, as declared)"
+        )
     return quote(value)  # type: ignore[arg-type]
 
 
@@ -1084,7 +1092,9 @@ _NEXT: Final = {
 
 
 def _entity(entity: Entity) -> str:
-    return f"{entity.kind} {quote(entity.declared_id)}"
+    names = [n for n in (entity.label, *entity.aliases) if n is not None]
+    named = f" named {', '.join(quote(n) for n in names)}" if names else ""
+    return f"{entity.kind} {quote(entity.declared_id)}{named}"
 
 
 def _mention(mention: Mention) -> str:

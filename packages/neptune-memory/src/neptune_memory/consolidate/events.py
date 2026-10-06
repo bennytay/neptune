@@ -1,8 +1,10 @@
 """Events as a deterministic consolidator (ADR 0013).
 
 One ``event`` node per thing one record states happened: an ``incident_record`` (and each entry of
-its timeline), an ``intervention``, or a row of a table the config declares an event table (Deploy's
-ROS 2 ``diagnostic events``, a PLC or safety-controller log, a syslog export). The node is keyed by
+its timeline), an ``intervention``, a ``maintenance_event`` (and each action it states, ADR 0025
+§1), a ``status_report`` a typed log stream's message makes (ADR 0025 §2), or a row of a table the
+config declares an event table (Deploy's ROS 2 ``diagnostic events``, a PLC or safety-controller
+log, a syslog export). The node is keyed by
 its record (``record:<rec id>``; a timeline entry ``record:<rec id>/timeline/<i>``): two records
 are two statements, and relating two reports of one incident is identity's, never this module's.
 
@@ -13,8 +15,11 @@ stated ``clock_mapping`` from that clock reaches directly, and on the civil cloc
 
 - ``event_kind``: a registered kind (``EVENT_KINDS``) through a vendor mapping the config declares;
   an unmapped kind is no claim (``Unknown``) and a finding. ``declared_kind``, ``stated_severity``
-  and ``has_description``: verbatim. ``involves``, ``at_site`` and ``in_zone`` from declared ids,
-  a ``*_candidate`` claim per reading of an ``Ambiguous`` one. ``evidenced_by``: the record.
+  and ``has_description``: verbatim; ``stated_cause``: an incident's root cause or a maintenance
+  event's diagnosis, verbatim. ``involves``, ``at_site`` and ``in_zone`` from declared ids, a
+  ``*_candidate`` claim per reading of an ``Ambiguous`` one; a maintenance event also involves the
+  parts it removed and installed, by serial. ``declared_value``: a status report's key/values.
+  ``evidenced_by``: the record.
 - ``co_occurs_within``: two events from different sources whose onsets fall inside one window of
   the configured length on a clock both are placed on. The claim's valid interval *is* that window
   (so its length names the window and its clock the clock), it cites the mapping used, and it is
@@ -48,8 +53,9 @@ from neptune.model.knowledge import (
     NotApplicable,
     Unknown,
 )
-from neptune.model.lifecycle import IncidentRecord, Intervention
+from neptune.model.lifecycle import IncidentRecord, Intervention, MaintenanceEvent
 from neptune.model.provenance import Provenance
+from neptune.model.status import StatusReport
 from neptune.model.time import INT64_MAX, Timestamp
 from neptune.model.world import StructuredRecord, StructuredTable
 from neptune_memory.consolidate import event_records as parse
@@ -61,7 +67,13 @@ from neptune_memory.consolidate.identity import node_ref
 from neptune_memory.consolidate.identity_records import declared
 from neptune_memory.consolidate.runs import EVIDENCED_BY, _covers, _definite
 from neptune_memory.consolidate.runs import Placement as RunPlacement
-from neptune_memory.schema.claim import LedgerRecordRef, TypedLiteral, ValueType
+from neptune_memory.schema.claim import (
+    DeclaredType,
+    DeclaredValue,
+    LedgerRecordRef,
+    TypedLiteral,
+    ValueType,
+)
 from neptune_memory.schema.interval import OPEN, CivilClock, Open
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import (
@@ -69,10 +81,12 @@ from neptune_memory.schema.predicates import (
     CANDIDATE_OF,
     CO_OCCURS_WITHIN,
     DECLARED_KIND,
+    DECLARED_VALUE,
     EVENT_KIND,
     HAS_DESCRIPTION,
     IN_ZONE,
     INVOLVES,
+    STATED_CAUSE,
     STATED_SEVERITY,
     is_declared_value,
 )
@@ -91,6 +105,7 @@ if TYPE_CHECKING:
 OBSERVED: Final = AssertionKind.OBSERVED
 STATED: Final = AssertionKind.STATED
 RECORD_NAMESPACE: Final = "record"
+HAS_NAME: Final = "has_name"
 MAX_LISTED: Final = 16  # record ids an aggregated finding lists; its details give the count
 
 
@@ -132,6 +147,8 @@ def event_node(record: RecordId, *path: str | int) -> NodeRef:
 class _View:
     incidents: dict[RecordId, IncidentRecord] = field(default_factory=dict)
     interventions: dict[RecordId, Intervention] = field(default_factory=dict)
+    maintenance: dict[RecordId, MaintenanceEvent] = field(default_factory=dict)
+    statuses: dict[RecordId, StatusReport] = field(default_factory=dict)
     tables: dict[RecordId, StructuredTable] = field(default_factory=dict)
     rows: dict[RecordId, StructuredRecord] = field(default_factory=dict)
     domains: dict[RecordId, parse.Clock] = field(default_factory=dict)
@@ -158,6 +175,8 @@ _PARSERS: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
     parse.CLOCK_MAPPING: parse.mapping,
     parse.INCIDENT: parse.incident_record,
     parse.INTERVENTION: parse.intervention_record,
+    parse.MAINTENANCE: parse.maintenance_record,
+    parse.STATUS_REPORT: parse.status_report,
     parse.STRUCTURED_TABLE: parse.table,
     parse.STRUCTURED_RECORD: parse.row,
 }
@@ -167,7 +186,14 @@ def _record_id(parsed: object) -> RecordId:
     if isinstance(parsed, parse.Clock):
         return parsed.record
     assert isinstance(
-        parsed, ClockMapping | IncidentRecord | Intervention | StructuredTable | StructuredRecord
+        parsed,
+        ClockMapping
+        | IncidentRecord
+        | Intervention
+        | MaintenanceEvent
+        | StatusReport
+        | StructuredTable
+        | StructuredRecord,
     )
     return parsed.id
 
@@ -238,6 +264,10 @@ def _read(ledger: LedgerReader) -> _View:
             view.incidents[parsed.id] = parsed
         elif isinstance(parsed, Intervention):
             view.interventions[parsed.id] = parsed
+        elif isinstance(parsed, MaintenanceEvent):
+            view.maintenance[parsed.id] = parsed
+        elif isinstance(parsed, StatusReport):
+            view.statuses[parsed.id] = parsed
         elif isinstance(parsed, StructuredTable):
             view.tables[parsed.id] = parsed
         elif isinstance(parsed, StructuredRecord):
@@ -352,17 +382,80 @@ def _listed(
     ]
 
 
-def _stated_text(knowledge: Knowledge[str], predicate: str) -> list[_Fact]:
+def _stated_text(
+    knowledge: Knowledge[str], predicate: str, default: AssertionKind = STATED
+) -> list[_Fact]:
     if isinstance(knowledge, Known):
         return [
             _Fact(
                 predicate,
                 _text(knowledge.value),
-                _kind(knowledge.provenance, STATED),
+                _kind(knowledge.provenance, default),
                 _cited(knowledge.provenance),
             )
         ]
     return []
+
+
+def _parts(record: MaintenanceEvent) -> list[_Fact]:
+    """``involves`` for each part unit a maintenance event removed or installed, by its declared
+    id (a serial); a list not stated names none."""
+    if not isinstance(record.parts, Known):
+        return []
+    cited = _cited(record.parts.provenance)
+    return [
+        _Fact(fact.predicate, fact.obj, fact.kind, (*fact.evidence, *cited))
+        for part in record.parts.value
+        for listed in (part.removed, part.installed)
+        for fact in _listed(listed, NodeType.ASSET)
+    ]
+
+
+def _named_by(identifiers: Knowledge[tuple[Knowledge[LogicalId], ...]]) -> list[_Fact]:
+    """``has_name``: the one id value a lifecycle record declares for itself (a work order or
+    incident number), verbatim, as the name people use for the event; never the node's key
+    (ADR 0026). Several distinct values, or none stated, name nothing."""
+    if not isinstance(identifiers, Known):
+        return []
+    known = [
+        i for i in identifiers.value if isinstance(i, Known) and is_declared_value(i.value.value)
+    ]
+    values = {i.value.value for i in known}
+    if len(values) != 1:
+        return []
+    first = known[0]
+    return [
+        _Fact(
+            HAS_NAME,
+            _text(first.value.value),
+            _kind(first.provenance, STATED),
+            (*_cited(first.provenance), *_cited(identifiers.provenance)),
+        )
+    ]
+
+
+def _status_values(record: StatusReport) -> list[_Fact]:
+    """``declared_value`` for each key/value a status states, in order: text, or an integer
+    with no unit stated (``Unknown``). A list not stated states none."""
+    if not isinstance(record.values, Known):
+        return []
+    kind = _kind(record.values.provenance, OBSERVED)
+    cited = _cited(record.values.provenance)
+    facts: list[_Fact] = []
+    for item in record.values.value:
+        if isinstance(item.value, str):
+            literal = TypedLiteral(
+                ValueType.DECLARED_VALUE,
+                DeclaredValue((item.key,), DeclaredType.TEXT, item.value),
+            )
+        else:
+            literal = TypedLiteral(
+                ValueType.DECLARED_VALUE,
+                DeclaredValue((item.key,), DeclaredType.INTEGER, item.value),
+                Unknown(),
+            )
+        facts.append(_Fact(DECLARED_VALUE, literal, kind, cited))
+    return facts
 
 
 class _Builder:
@@ -458,6 +551,7 @@ class _Builder:
             record.id,
             severity=record.severity,
             description=record.description,
+            root_cause=record.root_cause,
         )
         self.vet(
             record.id,
@@ -474,6 +568,8 @@ class _Builder:
                 *self.lifecycle_kind(parse.INCIDENT, record.severity, record.id),
                 *_stated_text(record.severity, STATED_SEVERITY),
                 *_stated_text(record.description, HAS_DESCRIPTION),
+                *_stated_text(record.root_cause, STATED_CAUSE),
+                *_named_by(record.identifiers),
                 *_listed(record.machines, NodeType.MACHINE),
                 *_listed(record.assets, NodeType.ASSET),
                 *_ids(record.site, AT_SITE, NodeType.SITE, STATED),
@@ -534,8 +630,133 @@ class _Builder:
             *self.lifecycle_kind(parse.INTERVENTION, record.mode, record.id),
             *_stated_text(record.mode, DECLARED_KIND),
             *_stated_text(record.reason, HAS_DESCRIPTION),
+            *_named_by(record.identifiers),
             *_listed(record.machines, NodeType.MACHINE),
             *_ids(record.site, AT_SITE, NodeType.SITE, STATED),
+        ]
+        return [event]
+
+    def maintenance(self, record: MaintenanceEvent) -> list[_Event]:
+        """The event a maintenance record states, and one event per action it lists, in order
+        (``record:<id>/actions/<i>``), each with its text verbatim. Its diagnosis is its stated
+        cause; it involves its machines and the part units it removed or installed."""
+        self.note_ambiguous(record.id, diagnosis=record.diagnosis)
+        self.vet(record.id, machines=record.machines, site=record.site)
+        performed = self.instant(record.id, record.performed, "the maintenance states no time")
+        if performed is None:
+            return []
+        evidence = (record.provenance.evidence,)
+        source = str(record.provenance.evidence.source)
+        machines = _listed(record.machines, NodeType.MACHINE)
+        if not isinstance(record.machines, Known):
+            self.findings.append(
+                _finding(
+                    "machine_unstated",
+                    "the maintenance names no machine; its events involve none",
+                    (record.id,),
+                    Severity.INFO,
+                    event=event_node(record.id).node_id,
+                )
+            )
+        event = _Event(event_node(record.id), source, evidence, (record.id,), *performed)
+        event.facts += [
+            _Fact(EVIDENCED_BY, LedgerRecordRef(record.id), STATED),
+            *self.lifecycle_kind(parse.MAINTENANCE, Unknown(), record.id),
+            *_stated_text(record.diagnosis, STATED_CAUSE),
+            *_named_by(record.identifiers),
+            *machines,
+            *_parts(record),
+            *_ids(record.site, AT_SITE, NodeType.SITE, STATED),
+        ]
+        events = [event]
+        if isinstance(record.actions, Known):
+            cited = _cited(record.actions.provenance)
+            for index, action in enumerate(record.actions.value):
+                self.note_ambiguous(record.id, action=action)
+                if not isinstance(action, Known):
+                    continue
+                step = _Event(
+                    event_node(record.id, "actions", index),
+                    source,
+                    evidence,
+                    (record.id,),
+                    *performed,
+                )
+                step.facts += [
+                    _Fact(EVIDENCED_BY, LedgerRecordRef(record.id), STATED),
+                    *(
+                        _Fact(f.predicate, f.obj, f.kind, (*f.evidence, *cited))
+                        for f in _stated_text(action, HAS_DESCRIPTION)
+                    ),
+                    *machines,
+                ]
+                events.append(step)
+        return events
+
+    def status(self, record: StatusReport) -> list[_Event]:
+        """The status a message reports, at its first stated time in its stream's clock order
+        (other clocks are reached through stated mappings). Its declared kind is its level's one
+        name, else its level; its event kind is the vendor mapping's for its ``convention``."""
+        self.note_ambiguous(record.id, level=record.level, message=record.message)
+        times = [t for t in record.times if isinstance(t, Known)]
+        if not times:
+            self.untimed(record.id, "the status states no time on any clock")
+            return []
+        names = record.level_names
+        name = names.value[0] if isinstance(names, Known) and len(names.value) == 1 else None
+        level_state = record.level
+        level = level_state.value if isinstance(level_state, Known) else None
+        declared_as: list[_Fact] = []
+        if name is not None:
+            assert isinstance(names, Known)
+            declared_as = [
+                _Fact(
+                    DECLARED_KIND,
+                    _text(name),
+                    _kind(names.provenance, OBSERVED),
+                    _cited(names.provenance),
+                )
+            ]
+        elif isinstance(level_state, Known):
+            declared_as = [
+                _Fact(
+                    DECLARED_KIND,
+                    TypedLiteral(ValueType.INTEGER, level_state.value),
+                    _kind(level_state.provenance, OBSERVED),
+                    _cited(level_state.provenance),
+                )
+            ]
+        vendor = str(record.convention)
+        mapping = self.config.vendors.get(vendor, {})
+        keys = [
+            *([(parse.TEXT, name)] if name is not None else []),
+            *([(parse.INTEGER, str(level))] if level is not None else []),
+        ]
+        hit = next((key for key in keys if key in mapping), None)
+        kind_facts: list[_Fact] = []
+        if hit is not None:
+            target = mapping[hit]
+            if target is None:  # the vendor declares this level is not an event
+                return []
+            kind_facts = [_Fact(EVENT_KIND, _text(target), STATED)]
+        elif keys:
+            self.unmapped[(vendor, keys[0])].append(record.id)
+        first = times[0]
+        event = _Event(
+            event_node(record.id),
+            str(record.provenance.evidence.source),
+            (record.provenance.evidence,),
+            (record.id,),
+            first.value,
+            None,
+            _cited(first.provenance),
+        )
+        event.facts += [
+            _Fact(EVIDENCED_BY, LedgerRecordRef(record.id), OBSERVED),
+            *kind_facts,
+            *declared_as,
+            *_stated_text(record.message, HAS_DESCRIPTION, OBSERVED),
+            *_status_values(record),
         ]
         return [event]
 
@@ -1323,7 +1544,9 @@ class EventConsolidator:
     """Deterministic event claims (ADR 0013). Its config is ``event_records.resolve_config``'s."""
 
     consolidator_id: Final = EVENTS_CONSOLIDATOR_ID
-    version: Final = "1"
+    # 2: maintenance events and their actions, status reports, stated causes (ADR 0025).
+    # 3: a lifecycle record's one declared id value names its event (has_name, ADR 0026).
+    version: Final = "3"
     model: Final[ModelRef | None] = None
 
     def consolidate(
@@ -1342,6 +1565,10 @@ class EventConsolidator:
             events.extend(builder.incident(view.incidents[rid]))
         for rid in sorted(view.interventions):
             events.extend(builder.intervention(view.interventions[rid]))
+        for rid in sorted(view.maintenance):
+            events.extend(builder.maintenance(view.maintenance[rid]))
+        for rid in sorted(view.statuses):
+            events.extend(builder.status(view.statuses[rid]))
         events.extend(builder.tables())
         builder.summarise()
         drafts: list[ClaimDraft] = []

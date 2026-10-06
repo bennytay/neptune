@@ -6,12 +6,12 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.1.0/` (1.0.0 to 1.9.0 and 2.0.0 stay; 2.1.0 is golden-only, identity v4, ADRs 0021 and 0023; major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.2.0/` (1.0.0 to 1.9.0, 2.0.0 and 2.1.0 stay; 2.1.0 is golden-only, identity v4, ADRs 0021 and 0023; 2.2.0 adds `declared_value`, `stated_cause` and the `maintenance` event kind, [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md); major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
   - `neptune_memory.schema`: `NodeRef`/`NodeType`/`Tier`, `Claim` and its objects and provenance (with `ModelRef`),
-    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 11`), the
+    `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 12`), the
     superseding resolver (`resolve`, `as_of`, `ResolutionFinding`, `resolver_config`, and from 1.9.0 `Build` for
     withdrawal), `codec` (strict JSON) and `export.graph_schema`. Claim model:
     [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md); superseding:
@@ -30,8 +30,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
-    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.1.0**
-    document (`graph_schema_version: 2`, `graph_schema: "2.1.0"`, with `builds`), head 2, written by Memory's codec. It is what
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.2.0**
+    document (`graph_schema_version: 2`, `graph_schema: "2.2.0"`, with `builds`), head 2, written by Memory's codec. It is what
     `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.1.0. The pipeline:
     1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
        Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
@@ -44,8 +44,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     4. The deterministic consolidators run, with `memory.time_estimates` alongside
        ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)), under
        `tests/fixtures/acceptance_corpus.memory_config.json`. That file declares Deploy's `syslog events`
-       table as an event table keyed by `MsgID` and maps `PSTOP`, `ESTOP` and the CMMS `Protective stop` to
-       registered kinds ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §5).
+       table as an event table keyed by `MsgID` and maps `PSTOP`, `ESTOP`, the CMMS `Protective stop` and the
+       ROS diagnostic levels `WARN`, `ERROR`, `STALE` to registered kinds
+       ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §5, [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md) §2).
        Wall-clock ticks stay on their own domain: two logs are compared only through a stated clock mapping.
 
     **Deploy** copies the `.gz` byte for byte into its fixtures (decompress with any gzip reader, e.g.
@@ -102,6 +103,16 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
         `identity_link` or an operator assertion joins them, and the corpus has neither.
     - No `authorised_configuration`: no envelope places a configuration on its site.
     - No calibration `drift` (MVL-207, then #129).
+    - Since [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md): every
+      `maintenance_event` is a `maintenance` event with its `stated_cause` (diagnosis), the machines and part
+      serials it `involves`, and one event per action with its text (WO-26-0911's four, `record:<id>/actions/<i>`);
+      the 25 `/diagnostics` `status_report`s are `observed` events (`warning`, `fault`) with their key/values as
+      `declared_value`s (23 name `CAL-ARM3A-0911`); INC-C3-0011's root cause is its `stated_cause`.
+      `memory.declared` names the bound configurations by path (`…/CAL-ARM3A-0818.yaml`, `…/CAL-ARM3A-0911.yaml`,
+      `…/wrist_camera_handeye.yml`) and the runs by their run-sheet names (`cell3-2026-09-09`, `cell3-2026-09-14`),
+      and gives each bound configuration its `declared_value`s (`transformation/z` 0.0745 and 0.0702;
+      `reprojection_error` [1.86], `board`, `calibration_id` CAL-ARM3A-0911). `cell_config.yaml` is bound to no run,
+      so its values (`vision/calibration_id` CAL-ARM3A-0818) wait in a `declared.unplaced` finding.
 
     This file is regenerated as those land, never edited.
 ## Consumes
@@ -110,7 +121,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the task kinds, root ADR
   0063; 8 adds the robot-description kinds, root ADR 0039; 9 adds `run_declaration`, root ADR 0072, read
   by the run consolidator with the compiler's reader, ADR 0020; 10 the `status_report` and `safety_state`
-  kinds, root ADR 0071, which the event index does not read yet). Alignment records (MVL-82, package-schema 3.0.0),
+  kinds, root ADR 0071: the event index reads `status_report`, ADR 0025, and not `safety_state` yet). Alignment records (MVL-82, package-schema 3.0.0),
   human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
   records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the

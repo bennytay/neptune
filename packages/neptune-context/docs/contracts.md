@@ -10,7 +10,7 @@ consumes nothing, and an entry in `contracts/packages.toml`.
 
 ## Publishes
 
-`query-packet` **1.3.0, stable** (`contracts/query-packet/v1.3.0/`), consumed by Deploy and Learn. Fixed by
+`query-packet` **1.5.0, stable** (`contracts/query-packet/v1.5.0/`), consumed by Deploy and Learn. Fixed by
 [ADR 0002](adr/0002-query-language.md) (query), [ADR 0003](adr/0003-the-context-packet.md) (packet) and
 [ADR 0006](adr/0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) (publication, answer checks, C1 gate
 amendments). 1.1.0 is the additive pin bump of [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md):
@@ -20,7 +20,12 @@ packet reader refuses values beyond that pin. 1.2.0 adds the optional packet mem
 each answered explain clause, written only when present, so every 1.1 packet keeps its bytes. 1.3.0 is the
 additive pin bump of [ADR 0012](adr/0012-graph-schema-2-0-0-pin-and-query-packet-1-3-0.md): graph-schema 2.0.0's
 twelve new predicates join the predicate enums and its `delta` literal joins `TypedLiteral`; nothing is
-removed, so every 1.x query and packet is valid at 1.3.0.
+removed, so every 1.x query and packet is valid at 1.3.0. 1.4.0 is the additive pin bump of
+[ADR 0014](adr/0014-graph-schema-2-2-0-pin-and-query-packet-1-4-0.md): graph-schema 2.2.0's `declared_value` and
+`stated_cause` join the predicate enums and its `declared_value` literal joins `TypedLiteral`; every 1.x query
+and packet is valid at 1.4.0. 1.5.0 adds the `compare_runs` explain clause of
+[ADR 0015](adr/0015-compare-runs-and-named-runs-and-events.md) (`Query/$defs/CompareRuns`): what memory states
+differs between two runs; it adds no trail, its claims are the packet's items, so every 1.x packet is valid.
 
 - **Owner module** `neptune_context.contract`.
   - `contract_schema()` is the registry export. It embeds both halves' schemas verbatim, each as its own
@@ -63,7 +68,7 @@ and this file in step.
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
 | `catalog-api` | `neptune-ledger` | `CATALOG_API_VERSION = "1.7.0"` | `neptune_ledger.api.CATALOG_API_VERSION`; read through `neptune_ledger.api.CatalogApi` (`query(spec)` with frame windows and budgets, Ledger ADR 0016) | Ledger ADR 0004, 0016; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md) |
-| `graph-schema` | `neptune-memory` | `GRAPH_SCHEMA_VERSION = "2.0.0"` | `neptune_memory.schema.GRAPH_SCHEMA_VERSION` (registry major 2); documents read through Memory's codec (a 2.x document names its release, a 1.x one is read as written, major 1) and `neptune_memory.schema.reader.MemoryReader` | Memory ADR 0006, 0019; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md), [ADR 0012](adr/0012-graph-schema-2-0-0-pin-and-query-packet-1-3-0.md) |
+| `graph-schema` | `neptune-memory` | `GRAPH_SCHEMA_VERSION = "2.2.0"` | `neptune_memory.schema.GRAPH_SCHEMA_VERSION` (registry major 2); documents read through Memory's codec (a 2.x document names its release, a 1.x one is read as written, major 1) and `neptune_memory.schema.reader.MemoryReader` | Memory ADR 0006, 0019, 0025; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md), [ADR 0012](adr/0012-graph-schema-2-0-0-pin-and-query-packet-1-3-0.md), [ADR 0014](adr/0014-graph-schema-2-2-0-pin-and-query-packet-1-4-0.md) |
 
 The vocabularies and definitions Context publishes from these contracts (subject kinds, predicate names, the
 Memory definitions the packet schema embeds) come from `src/neptune_context/pinned.json`, a snapshot of the

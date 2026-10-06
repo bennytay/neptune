@@ -34,7 +34,7 @@ ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check harness
+  contracts-check harness demo demo-pin
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -91,6 +91,13 @@ contracts-check: ## Owner rule, lock + upstream contract tests, matrix freshness
 HARNESS_RUN_DIR ?= harness/.run
 harness: ## Integration harness: contracts check, corpus through the stages, smoke query, report
 > $(RUN) python -m harness --run-dir "$(HARNESS_RUN_DIR)" $(HARNESS_ARGS)
+
+DEMO_DIR ?= demo
+demo: ## Demo v1: corpus -> compiler -> Deploy -> Ledger -> Memory -> cited MCP answers + PDFs in demo/
+> $(RUN) python -m harness.demo --out "$(DEMO_DIR)"
+
+demo-pin: ## Re-pin harness/acceptance/answers.json from a demo run (review the diff)
+> $(RUN) python -m harness.demo --out "$(DEMO_DIR)" --pin
 
 # The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
 # A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.

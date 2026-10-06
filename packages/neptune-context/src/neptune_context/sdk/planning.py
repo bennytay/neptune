@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
-from neptune_memory.schema.claim import is_inferred
+from neptune_memory.schema.claim import TypedLiteral, is_inferred
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.nodes import NodeRef
 from neptune_memory.schema.supersede import as_of as snapshot_of
@@ -141,6 +141,9 @@ def _declared(node: NodeRef) -> Entity | None:
     return Entity(str(node.node_type), node.node_id)
 
 
+_NAMED_KINDS: Final = frozenset({"event", "run"})
+
+
 def entity_index(document: GraphDocument) -> GraphEntities:
     """The declared identities a Memory graph document names, as an ``as_of``-aware resolver."""
     return GraphEntities(document)
@@ -203,12 +206,30 @@ class GraphEntities:
             for node in (claim.subject, claim.object):
                 if isinstance(node, NodeRef) and (entity := _declared(node)) is not None:
                     kinds.setdefault(entity.declared_id, set()).add(entity.kind)
-        if len(kinds) > MAX_ENTITIES:
+        # A run or an event is keyed by its record (a content address, never a declared name);
+        # the name memory states for it (a run sheet's run name, a work order or incident
+        # number: ``has_name``) finds it (ADR 0015).
+        named: dict[str, tuple[str, set[str]]] = {}
+        for claim in snapshot_of(self._history, ledger_tx(tx)).claims:
+            if claim.predicate != "has_name" or (
+                is_inferred(claim.assertion_kind) and not include_inferred
+            ):
+                continue
+            node, obj = claim.subject, claim.object
+            if str(node.node_type) in _NAMED_KINDS and isinstance(obj, TypedLiteral):
+                named.setdefault(node.node_id, (str(node.node_type), set()))[1].add(str(obj.value))
+        if len(kinds) + len(named) > MAX_ENTITIES:
             raise ValueError(f"more than {MAX_ENTITIES} declared identities; use a Ledger listing")
         # One identifier under two kinds is two identities memory has not told apart: offering
         # either would settle that silently, so neither is a name (they are listed as conflicts).
         conflicts = tuple(sorted(i for i, k in kinds.items() if len(k) > 1))
-        single = (Entity(next(iter(k)), i) for i, k in sorted(kinds.items()) if len(k) == 1)
+        single = [Entity(next(iter(k)), i) for i, k in sorted(kinds.items()) if len(k) == 1]
+        held = {e.declared_id for e in single}
+        single += [
+            Entity(kind, node_id, label=min(names), aliases=tuple(sorted(names - {min(names)})))
+            for node_id, (kind, names) in sorted(named.items())
+            if node_id not in held
+        ]
         return ListingIndex(single, conflicts=conflicts)
 
     # EntityResolver (the planner's seam): evidence only, at the plan's snapshot.

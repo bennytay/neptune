@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Final
 
@@ -21,24 +22,38 @@ def _ok(_: Context) -> Outcome:
     return Outcome({"ran": True})
 
 
+_OPEN: list[Context] = []
+
+
+@pytest.fixture(autouse=True)
+def _close_contexts() -> Iterator[None]:
+    """A real ledger keeps its server for the stages after it (ADR 0011): stop it after a test."""
+    yield
+    while _OPEN:
+        _OPEN.pop().close()
+
+
 def _context(tmp_path: Path, registry: object | None = None) -> Context:
     _, cases = corpus.select(name="worked-examples")
-    return Context(registry=registry or contracts.registry(), work=tmp_path, cases=cases)
+    ctx = Context(registry=registry or contracts.registry(), work=tmp_path, cases=cases)
+    _OPEN.append(ctx)
+    return ctx
 
 
 def test_the_stage_order_and_service_flags() -> None:
-    # The real ledger runs on an embedded PostgreSQL (platform ADR 0006), so it needs no services.
+    # The real ledger runs on an embedded PostgreSQL (platform ADR 0006), and memory and context
+    # run in process over its catalog (ADR 0011), so no stage needs the compose stack.
     assert [(s.id, s.needs_services) for s in STAGES] == [
         ("compiler", False),
         ("deploy", False),
         ("ledger", False),
-        ("memory", True),
-        ("context", True),
+        ("memory", False),
+        ("context", False),
     ]
-    assert [s.real is not None for s in STAGES] == [True, True, True, False, False]
+    assert all(s.real is not None for s in STAGES)
 
 
-def test_today_the_compiler_and_the_ledger_resolve_to_real() -> None:
+def test_today_every_stage_resolves_to_real() -> None:
     registry = contracts.registry()
     resolved = {stage.id: resolve(stage, registry) for stage in STAGES}
 
@@ -60,9 +75,13 @@ def test_today_the_compiler_and_the_ledger_resolve_to_real() -> None:
     catalog = latest("catalog-api")
     assert resolved["ledger"].reason == f"neptune_ledger.api is importable and matches {catalog}"
     assert resolved["ledger"].contract_version == catalog
-    assert resolved["context"].mode == "stub"
-    assert resolved["memory"].mode == "stub"  # graph-schema published; no driver yet
-    assert resolved["memory"].contract_version == latest("graph-schema")
+    assert resolved["memory"].mode == "real"
+    graph = latest("graph-schema")
+    assert resolved["memory"].reason == f"neptune_memory.cli is importable and matches {graph}"
+    assert resolved["memory"].contract_version == graph
+    assert resolved["context"].mode == "real"
+    packet = latest("query-packet")
+    assert resolved["context"].reason == f"neptune_context.mcp is importable and matches {packet}"
 
 
 def test_an_importable_package_without_a_driver_is_still_a_stub() -> None:
@@ -663,3 +682,68 @@ def test_event_table_rows_are_counted_by_table_and_attributed_to_their_preset(
     assert transforms == Counter({"tr": 4, "None": 1})
     assert stages._transform_sources(root) == {"tr": "sha256:s"}
     assert stages._event_rows(tmp_path / "empty") == ({}, Counter())
+
+
+# --- Memory and context, real (ADR 0011) -------------------------------------------------------
+
+MEMORY: Final = BY_ID["memory"]
+CONTEXT: Final = BY_ID["context"]
+
+
+def _uri(ctx: Context) -> str | None:
+    return ctx.ledger_uri  # read through a call: mypy keeps no narrowing across close()
+
+
+def test_the_real_ledger_keeps_its_catalog_for_the_stages_after_it(tmp_path: Path) -> None:
+    import psycopg
+
+    ctx = _compiled(tmp_path)
+    entry = run_stage(LEDGER, ctx, services_up=False, upstream_ok=True)
+    assert entry["status"] == "ok" and ctx.ledger_uri is not None
+    uri = ctx.ledger_uri
+    with psycopg.connect(uri) as conn:  # still serving after the stage ended
+        assert conn.execute("SELECT 1").fetchone() == (1,)
+    ctx.close()
+    assert _uri(ctx) is None
+    with pytest.raises(psycopg.OperationalError):
+        psycopg.connect(uri, connect_timeout=2)
+    ctx.close()  # idempotent
+
+
+def test_a_real_memory_with_nothing_registered_fails(tmp_path: Path) -> None:
+    assert MEMORY.real is not None
+    outcome = MEMORY.real(_context(tmp_path))
+    assert outcome.problems == ("the ledger stage registered no package to consolidate",)
+
+
+def test_a_real_context_without_a_graph_fails(tmp_path: Path) -> None:
+    assert CONTEXT.real is not None
+    outcome = CONTEXT.real(_context(tmp_path))
+    assert outcome.problems == ("the memory stage wrote no graph document",)
+
+
+def test_memory_and_context_after_a_stub_ledger_are_skipped_not_run(tmp_path: Path) -> None:
+    entry = run_stage(MEMORY, _context(tmp_path), services_up=False, upstream_ok=False)
+    assert entry["status"] == "skipped" and entry["mode"] == "real"
+
+
+def test_memory_consolidates_the_registered_packages_and_context_answers_over_them(
+    tmp_path: Path,
+) -> None:
+    """The worked examples through every real stage: four packages at transactions 1..4, one
+    graph that ``memory verify`` accepts, and a smoke query answered over it by the local engine,
+    in process and over a spawned stdio MCP server alike."""
+    ctx = _compiled(tmp_path)
+    for stage in (DEPLOY, LEDGER, MEMORY, CONTEXT):
+        entry = run_stage(stage, ctx, services_up=False, upstream_ok=True)
+        assert (entry["mode"], entry["status"]) == ("real", "ok"), entry["problems"]
+    memory = ctx.upstream["memory"]
+    assert [p["registered_at"] for p in memory["packages"]] == [1, 2, 3, 4]
+    assert memory["head"] == 4 and memory["verify"] == "ok" and memory["claims"] > 0
+    assert memory["config"] is None and "snapshot" not in memory  # nothing declared, nothing pinned
+    assert (tmp_path / "memory" / "graph.json").is_file()
+    context = ctx.upstream["context"]
+    assert context["smoke"]["packet"]["kind"] == "context_packet"
+    assert context["smoke"]["packet"]["as_of"] == 4
+    assert context["stdio"]["same_as_in_process"] is True
+    assert "answers" not in context  # the worked examples declare no gold answers

@@ -14,6 +14,12 @@ Every kind is a compiler kind, read with the compiler's own strict reader:
   intervention involves ``machines``, names ``related`` records and has a ``start`` / ``end`` on the
   clock its timestamps name; an incident states the instant it ``occurred``. No compiler kind states
   a task attempt yet (root ADR 0047 §9).
+- ``maintenance_event`` (root ADR 0051; ADR 0025 §1): a work order or maintenance record,
+  ``stated``, ``performed`` at an instant on the machines it names, with its ``diagnosis``, its
+  ``actions`` in order and the ``parts`` it replaced.
+- ``status_report`` (root ADR 0071, package-schema 10; ADR 0025 §2): one status a typed log
+  stream's message reports, ``observed``, with its level, message and key/values, at a sample time
+  on each of its stream's clocks.
 - ``structured_table`` and ``structured_record`` (root ADR 0020 §5): a table and its rows, read as
   events only where the config declares the table an event table (by its declared name). Deploy's
   ROS 2 diagnostics mapper writes such a table (``diagnostic events``, with a ``@clock:stamp``
@@ -22,8 +28,8 @@ Every kind is a compiler kind, read with the compiler's own strict reader:
   co-occurrence window) and whether it declares itself civil; ``clock_mapping`` (root ADR 0050 §5,
   ``run_records.mapping``): a stated map between two clocks.
 
-No stand-in kind is read. A bag's topics, a flight log's logged messages and any time written as
-text are not records the compiler produces as events yet, so nothing here reads them.
+No stand-in kind is read. A bag's topics are read only through the ``status_report`` records the
+compiler writes for them, and no time written as text is read.
 
 The config (``EventConfig``) declares the co-occurrence window, the vendor mappings from a source's
 own kinds to the registered ``EVENT_KINDS``, and the event tables with the columns that hold each
@@ -46,10 +52,13 @@ from neptune.model.knowledge import Ambiguous, Known
 from neptune.model.lifecycle import (
     IncidentRecord,
     Intervention,
+    MaintenanceEvent,
     incident_record_from_json,
     intervention_from_json,
+    maintenance_event_from_json,
 )
 from neptune.model.provenance import Provenance
+from neptune.model.status import StatusReport, status_report_from_json
 from neptune.model.world import (
     StructuredRecord,
     StructuredTable,
@@ -75,16 +84,21 @@ _T = TypeVar("_T")
 # Ledger record kinds the episode and event consolidators read.
 INCIDENT: Final = "incident_record"
 INTERVENTION: Final = "intervention"
+MAINTENANCE: Final = "maintenance_event"
+STATUS_REPORT: Final = "status_report"
 STRUCTURED_TABLE: Final = "structured_table"
 STRUCTURED_RECORD: Final = "structured_record"
 TIMESTAMP_DOMAIN: Final = "timestamp_domain"
 CLOCK_MAPPING: Final = "clock_mapping"
 
-# The vendor names of the two lifecycle kinds: an incident's mapping is keyed by its stated
-# severity, an intervention's by its stated mode. Unmapped, each is its own registered kind.
+# The vendor names of the lifecycle kinds: an incident's mapping is keyed by its stated severity,
+# an intervention's by its stated mode; a maintenance event states no kind of its own, so it is
+# always ``maintenance``. Unmapped, each is its own registered kind. A status report's vendor is
+# its ``convention`` (``ros_diagnostic_status``), keyed by its level's name or its level.
 LIFECYCLE_DEFAULT_KIND: Final[Mapping[str, str]] = {
     INCIDENT: "incident",
     INTERVENTION: "intervention",
+    MAINTENANCE: "maintenance",
 }
 
 # A vendor mapping's target for a declared kind that is not an event (an OK status, an info line).
@@ -108,7 +122,9 @@ __all__ = [
     "INCIDENT",
     "INTERVENTION",
     "LIFECYCLE_DEFAULT_KIND",
+    "MAINTENANCE",
     "NOT_AN_EVENT",
+    "STATUS_REPORT",
     "STRUCTURED_RECORD",
     "STRUCTURED_TABLE",
     "TIMESTAMP_DOMAIN",
@@ -127,10 +143,12 @@ __all__ = [
     "incident_record",
     "intervention",
     "intervention_record",
+    "maintenance_record",
     "mapping",
     "parse_config",
     "resolve_config",
     "row",
+    "status_report",
     "table",
 ]
 
@@ -141,6 +159,14 @@ def incident_record(record: Mapping[str, object]) -> IncidentRecord:
 
 def intervention_record(record: Mapping[str, object]) -> Intervention:
     return _strict(intervention_from_json, record)
+
+
+def maintenance_record(record: Mapping[str, object]) -> MaintenanceEvent:
+    return _strict(maintenance_event_from_json, record)
+
+
+def status_report(record: Mapping[str, object]) -> StatusReport:
+    return _strict(status_report_from_json, record)
 
 
 # --- Event summaries for episodes (ADR 0012 §1) -------------------------------------------------

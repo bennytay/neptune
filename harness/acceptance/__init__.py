@@ -26,6 +26,15 @@ LOCK: Final = HERE / "corpus.lock.json"
 GOLD: Final = HERE / "gold.json"
 # What the harness's deploy stage maps over the compiled corpus (Platform ADR 0008).
 DEPLOY: Final = HERE / "deploy.json"
+# Memory's declaration for this corpus (its consolidator configs, Memory ADR 0013 §5) and the
+# graph Memory built and committed from it: both Memory's, read where Memory keeps them
+# (Platform ADR 0011).
+MEMORY_FIXTURES: Final = HERE.parents[1] / "packages" / "neptune-memory" / "tests" / "fixtures"
+MEMORY_CONFIG: Final = MEMORY_FIXTURES / "acceptance_corpus.memory_config.json"
+MEMORY_SNAPSHOT: Final = MEMORY_FIXTURES / "acceptance_corpus.graph.json.gz"
+# The gold questions asked through Context's agent tools, with the claims each answer must cite
+# (Platform ADR 0011).
+ANSWERS: Final = HERE / "answers.json"
 MAX_FILE_BYTES: Final = 512 * 1024
 LOCK_FORMAT: Final = 1
 
