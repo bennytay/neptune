@@ -389,18 +389,45 @@ def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
     return plan, []
 
 
+# Deploy's preset families, by module: each publishes ``PRESETS`` (names) and ``preset(name)``
+# (a mapping with ``sha256``), and ``neptune_deploy map -p`` takes a name from any of them. A
+# family this Deploy does not have yet is passed over (Deploy ADR 0017 adds ``eventlogs``).
+PRESET_FAMILIES: Final = ("neptune_deploy.lifecycle", "neptune_deploy.eventlogs")
+
+
+def _shipped_presets() -> tuple[dict[str, str], list[str]]:
+    """Every preset Deploy ships, by name, mapped to its file's sha256 (what its transform
+    record's ``mapping_sha256`` names); and a name two families both ship, which ``-p`` could not
+    tell apart. Only each family's public ``PRESETS`` and ``preset`` are used."""
+    shipped: dict[str, str] = {}
+    problems: list[str] = []
+    for family in PRESET_FAMILIES:
+        try:
+            module = importlib.import_module(family)
+        except ModuleNotFoundError as error:
+            if error.name == family:
+                continue  # a family this Deploy does not ship
+            raise
+        for name in module.PRESETS:
+            if name in shipped:
+                problems.append(f"Deploy ships preset {name!r} in two families")
+                continue
+            shipped[name] = str(module.preset(name).sha256)
+    return shipped, problems
+
+
 def _declarations(plan: DeployPlan) -> tuple[dict[str, str], list[str]]:
     """Each declared preset and template file, by the sha256 its transform record names, mapped to
     the declaration that brought it in (``preset:<name>``, ``template:<path>``); and why the
-    declaration cannot run: a preset Deploy does not ship, a file declared twice. Only Deploy's
-    public names are used (``PRESETS``, ``preset``, ``TemplateRegistry``)."""
-    from neptune_deploy.lifecycle import PRESETS, TemplateRegistry, preset
+    declaration cannot run: a preset Deploy does not ship in any family, a file declared twice.
+    Only Deploy's public names are used (each family's ``PRESETS`` and ``preset``,
+    ``TemplateRegistry``)."""
+    from neptune_deploy.lifecycle import TemplateRegistry
 
+    shipped, problems = _shipped_presets()
     labels: dict[str, str] = {}
-    problems = [f"Deploy ships no preset {name!r}" for name in plan.presets if name not in PRESETS]
-    declared = [
-        (str(preset(name).sha256), f"preset:{name}") for name in plan.presets if name in PRESETS
-    ]
+    problems += [f"Deploy ships no preset {name!r}" for name in plan.presets if name not in shipped]
+    declared = [(shipped[name], f"preset:{name}") for name in plan.presets if name in shipped]
     for path in plan.templates:
         declared += [
             (str(template.sha256), f"template:{path}")
@@ -571,6 +598,33 @@ def _dangling_scopes(compiled: Path, mapped: Path) -> list[str]:
     return problems
 
 
+def _event_rows(root: Path) -> tuple[dict[str, int], Counter[str]]:
+    """The mapped package's typed event-table rows (Deploy ADR 0017 §1: ``structured_record`` rows
+    a mapping writes, such as ``syslog_csv``'s ``syslog events``), counted by their table's name and
+    by the transform that made each. The base package's tables are not copied into a mapped
+    package, so every row here is Deploy's."""
+    from harness.acceptance.resolve import _known
+
+    names: dict[str, str] = {}
+    path = root / "records" / "structured_table.jsonl"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        if line.strip():
+            table = json.loads(line)
+            names[str(table["id"])] = str(_known(table.get("name")) or table["id"])
+    by_table: dict[str, int] = {}
+    transforms: Counter[str] = Counter()
+    path = root / "records" / "structured_record.jsonl"
+    if path.is_file():
+        with path.open(encoding="utf-8") as lines:  # one record at a time (ADR 0070)
+            for line in lines:
+                if line.strip():
+                    row = json.loads(line)
+                    name = names.get(str(row.get("table")), str(row.get("table")))
+                    by_table[name] = by_table.get(name, 0) + 1
+                    transforms[str(row.get("provenance", {}).get("transform"))] += 1
+    return dict(sorted(by_table.items())), transforms
+
+
 def _transform_sources(root: Path) -> dict[str, str]:
     """Each Deploy transform record's id, mapped to the sha256 of the mapping or template file it
     applied (its config's ``mapping_sha256`` or ``template_sha256``)."""
@@ -595,20 +649,19 @@ def _map(
 ) -> None:
     """``python -m neptune_deploy map`` over one compiled package, then the mapped package read
     back, verified, validated and counted."""
-    from neptune_deploy.lifecycle import PRESETS
-
     from neptune.store.package import PackageError, read_package
 
+    shipped, _ = _shipped_presets()
     labels, refused = _declarations(plan)
     problems.extend(f"{case.id}: {problem}" for problem in refused)
     out = ctx.deploy_root(case.id)
     argv = [sys.executable, "-m", "neptune_deploy", "map", str(ctx.package_root(case.id))]
-    argv += [arg for name in plan.presets if name in PRESETS for arg in ("-p", name)]
+    argv += [arg for name in plan.presets if name in shipped for arg in ("-p", name)]
     argv += [arg for path in plan.templates for arg in ("-t", str(REPO / path))]
     argv += [  # only for presets the run maps: Deploy refuses a zone for any other
         arg
         for zone in plan.sources
-        if zone.preset in PRESETS
+        if zone.preset in shipped
         for arg in ("--source-zone", zone.preset, zone.source, zone.civil_time_zone)
     ]
     argv += ["-o", str(out)]
@@ -628,30 +681,34 @@ def _map(
         return
     receipt = json.loads((out / "receipt.json").read_text(encoding="utf-8"))
     kinds, by_transform = _lifecycle_records(out)
+    tables, row_transforms = _event_rows(out)
     applied = _transform_sources(out)
     made: Counter[str] = Counter({label: 0 for label in labels.values()})
-    for transform, count in by_transform.items():
+    for transform, count in (by_transform + row_transforms).items():
         label = labels.get(applied.get(transform, ""))
         if label is not None:
             made[label] += count
+    # What at_least counts: lifecycle records by kind, and event-table rows as structured_record.
+    counted = {**kinds, **({"structured_record": sum(tables.values())} if tables else {})}
     row.update(
         state="committed",
         package=str(package.id),
         package_verified=True,
         records=kinds,
+        event_rows=tables,
         by_declaration=dict(sorted(made.items())),
         findings=dict(sorted(Counter(f["code"] for f in receipt.get("findings", [])).items())),
     )
     schema.check(f"{case.id} (deploy)", out, row, problems)
-    if not kinds:  # never green on nothing: the case declares mappings, so records are owed
-        problems.append(f"{case.id}: the Deploy map wrote no lifecycle record")
+    if not kinds and not tables:  # never green on nothing: the case declares mappings
+        problems.append(f"{case.id}: the Deploy map wrote no lifecycle record or event-table row")
     problems.extend(
         f"{case.id}: {label} mapped no record" for label, count in sorted(made.items()) if not count
     )
     problems.extend(
-        f"{case.id}: {kind} records are {kinds.get(kind, 0)}, the declaration needs at least {n}"
+        f"{case.id}: {kind} records are {counted.get(kind, 0)}, the declaration needs at least {n}"
         for kind, n in sorted(plan.at_least.items())
-        if kinds.get(kind, 0) < n
+        if counted.get(kind, 0) < n
     )
     if plan.sources:
         row["zones"] = [

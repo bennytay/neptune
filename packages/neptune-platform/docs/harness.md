@@ -50,10 +50,11 @@ did not (each one missing fails the stage; [acceptance corpus](acceptance-corpus
 <a id="deploy-stage"></a>The deploy's `output.cases[]` has, per case: `declared` (whether the case names a Deploy declaration;
 nothing more for one that does not), and for one that does the `presets` and `templates`, `state`, the mapped
 `package` id, `package_verified`, `manifest_valid` and `receipt_valid`, `records` (lifecycle records by kind),
-`by_declaration` (records per `preset:<name>` and `template:<path>`) and `findings` by code. Deploy's findings
+`event_rows` (typed event-table rows by table name, from an event-log preset such as `syslog_csv`),
+`by_declaration` (lifecycle records and event-table rows per `preset:<name>` and `template:<path>`) and `findings` by code. Deploy's findings
 (`table_unmapped`, `row_unmatched`, `column_unmapped`, ...) are what no mapping read: they never fail the stage.
 It fails when the map exits non-zero, a declared preset is not shipped, the package does not verify or validate,
-it holds no lifecycle record, a declaration mapped none, an `at_least` count is not met, or a declared source
+it holds no lifecycle record and no event-table row, a declaration mapped none, an `at_least` count is not met, or a declared source
 zone (`sources`, `zones` in the row; ADR 0009) did not come back as that preset's `civil_time_zone` for that
 source, or, with `require_assertion_scopes`, a stated same-event assertion's scope entry is no `(namespace,
 value)` the mapped package declares (`assertion_scopes: dangling`). The mapped package is
@@ -84,8 +85,8 @@ A case maps with Deploy when it carries a declaration (`Case.deploy`). The accep
 `sources` is optional: the civil zone a declared preset reads one source's zone-less times in, passed to the
 map as `--source-zone PRESET SOURCE ZONE` ([acceptance corpus](acceptance-corpus.md#declared-source-zones)).
 
-Add a shipped preset by name, or a template file or directory by its repository path, and raise `at_least` for
-the kinds it yields. A template outside Deploy's `src/` also needs a path in `harness.yml` and in `ci_plan.py`'s
+Add a shipped preset by name (from any of Deploy's families: lifecycle or event-log), or a template file or directory by its repository path, and raise `at_least` for
+the kinds it yields (`structured_record` counts event-table rows). A template outside Deploy's `src/` also needs a path in `harness.yml` and in `ci_plan.py`'s
 `DEPLOY_STAGE_INPUTS`: `test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platform_job` fails
 until both cover it. A red deploy stage stops the run before the ledger; its report still names the mapped
 package and its counts.

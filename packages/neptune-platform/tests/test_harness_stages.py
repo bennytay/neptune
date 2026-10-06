@@ -305,7 +305,7 @@ def test_a_real_deploy_map_that_writes_no_record_is_red(tmp_path: Path) -> None:
     assert row["state"] == "committed" and row["records"] == {}
     assert row["by_declaration"] == {"preset:register_zone": 0}
     assert entry["problems"] == [
-        "manipulator: the Deploy map wrote no lifecycle record",
+        "manipulator: the Deploy map wrote no lifecycle record or event-table row",
         "manipulator: preset:register_zone mapped no record",
     ]
     # The mapped package is kept in the report (evidence of what did not map); the red stage stops
@@ -586,3 +586,55 @@ def _read_problem(path: Path) -> str:
     assert plan is None
     (problem,) = problems
     return problem
+
+
+def test_presets_are_discovered_in_every_family_deploy_ships(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``-p`` takes a lifecycle or an event-log preset (Deploy ADR 0017 §1); a family this Deploy
+    lacks is passed over, and a name two families share is a problem."""
+    import sys
+    import types
+
+    from harness import stages
+    from neptune_deploy.lifecycle import PRESETS
+
+    family = types.ModuleType("fake_eventlogs")
+    family.PRESETS = ("syslog_csv", "cmms_generic")  # type: ignore[attr-defined]
+    family.preset = lambda name: types.SimpleNamespace(sha256=f"sha256:{name}")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "fake_eventlogs", family)
+    monkeypatch.setattr(
+        stages, "PRESET_FAMILIES", ("neptune_deploy.lifecycle", "fake_eventlogs", "no_such_family")
+    )
+    shipped, problems = stages._shipped_presets()
+    assert set(shipped) == {*PRESETS, "syslog_csv"}
+    assert shipped["syslog_csv"] == "sha256:syslog_csv"
+    assert problems == ["Deploy ships preset 'cmms_generic' in two families"]
+    plan = stages.DeployPlan(("syslog_csv", "nope"), (), {})
+    labels, refused = stages._declarations(plan)
+    assert labels == {"sha256:syslog_csv": "preset:syslog_csv"}
+    assert "Deploy ships no preset 'nope'" in refused
+
+
+def test_event_table_rows_are_counted_by_table_and_attributed_to_their_preset(
+    tmp_path: Path,
+) -> None:
+    """``syslog_csv`` writes a typed table, not lifecycle records: its rows are what it mapped."""
+    from collections import Counter
+
+    from harness import stages
+
+    root = tmp_path / "mapped"
+    _write(
+        root,
+        "structured_table",
+        [{"header": _known(["Seq"]), "id": "t", "name": _known("syslog events")}],
+    )
+    rows = [{"cells": [], "provenance": {"transform": "tr"}, "table": "t"} for _ in range(4)]
+    _write(root, "structured_record", [*rows, {"cells": [], "provenance": {}, "table": "u"}])
+    _write(root, "transform_record", [{"config": {"mapping_sha256": "sha256:s"}, "id": "tr"}])
+    tables, transforms = stages._event_rows(root)
+    assert tables == {"syslog events": 4, "u": 1}
+    assert transforms == Counter({"tr": 4, "None": 1})
+    assert stages._transform_sources(root) == {"tr": "sha256:s"}
+    assert stages._event_rows(tmp_path / "empty") == ({}, Counter())

@@ -99,6 +99,18 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
    one string, padded or reformatted. The acceptance corpus sets the key when its `cmms_downtime`
    and `syslog_csv` presets are wired. The report row says `assertion_scopes: declared | dangling`.
 
+7. **Every preset family, and event-table rows** (amends ADR 0008 §3).
+   - The stage discovers shipped presets in each of Deploy's families (`PRESET_FAMILIES`:
+     `neptune_deploy.lifecycle`, `neptune_deploy.eventlogs`), through each family's public
+     `PRESETS` and `preset(name).sha256`. A family this Deploy lacks is passed over. A name two
+     families ship is a problem, because `-p` could not tell them apart.
+   - An event-log preset (`syslog_csv`) writes a typed table, not lifecycle records (Deploy ADR 0017
+     §1). Its `structured_record` rows count for its declaration, attributed through their
+     transform's `mapping_sha256`.
+   - The row reports them as `event_rows` (rows by table name). `at_least` may name
+     `structured_record`, which counts every event-table row of the mapped package.
+   - "Wrote nothing" now means no lifecycle record and no event-table row.
+
 ## Alternatives considered
 
 - **A `Timezone` column in each CSV.** Lost: a collector's export does not carry one, and ADR 0061 §3

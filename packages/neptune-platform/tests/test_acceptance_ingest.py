@@ -89,7 +89,8 @@ def test_the_deploy_stage_maps_every_declaration_and_the_ledger_registers_both(
     assert row["manifest_valid"] and row["receipt_valid"]
     assert set(row["by_declaration"]) == {f"preset:{name}" for name in plan.presets}
     assert all(count > 0 for count in row["by_declaration"].values())
-    assert all(row["records"].get(kind, 0) >= n for kind, n in plan.at_least.items())
+    counted = {**row["records"], "structured_record": sum(row["event_rows"].values())}
+    assert all(counted.get(kind, 0) >= n for kind, n in plan.at_least.items())
     # What no mapping reads (the PDFs' tables, the syslog and downtime exports, the calibration
     # log) is a finding in the mapped package's receipt, and the stage is still green.
     assert row["findings"]["deploy_lifecycle_map.table_unmapped"] >= 3
