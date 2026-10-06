@@ -30,7 +30,7 @@ A gate quotes the version and tree id from the report's corpus line: `acceptance
 
 | Where | What |
 |---|---|
-| `neptune.yaml` | machines (AMR-05..07 `mobile_base`, ARM-3A `manipulator`, LEG-01 `legged`), sites S-007 and PLANT-2, declared runs: the bags and patrols, and each hand-eye calibration as a session of ARM-3A (easy_handeye's file names no robot) |
+| `neptune.yaml` | the run sheet: machines (AMR-05..07 `mobile_base`, ARM-3A `manipulator`, LEG-01 `legged`) with their `cmms.asset` and `servicenow.ci` aliases, sites S-007 and PLANT-2, tasks, software versions, and declared runs: the bags and patrols, each with its task, software and pinned snapshots, and each hand-eye calibration as a session of ARM-3A (easy_handeye's file names no robot) |
 | `records/asset_register.csv` | both sites' assets; stale for GRP-3A's finger set and LEG-01's firmware |
 | `sites/S-007/` | the Deploy D1 AMR fleet narrowed to S-007: URDFs, nav configs (firmware 4.3.1 after the 4.2.0 rollout), zone map and register, CMMS, changes, requalification, MCAP runs, incident INC-0007 |
 | `sites/PLANT-2/cmms`, `changes` | the plant's CMMS work orders (D1 cell rows plus WO-26-0911..0916), its downtime log (DT-26-0914-01: the INC-C3-0011 stop, entered by hand at 14:33:10) and change records (none after 2026-08-18) |
@@ -61,6 +61,21 @@ as each source writes it. The sources state no zone; `deploy.json`'s `sources` d
 (root ADR 0061 §3). The 32 s compares two times on one declared civil clock.
 
 The managed export `cell_config.yaml` (2026-09-01) still holds the old tool and calibration: the stale config.
+
+The run sheet (`neptune.yaml`, root ADR 0072) pins what each run ran with, as 12 stated `snapshot_binding`
+records. It never pins the stale config, and it leaves the runs whose configuration is not in the hand-over
+unpinned:
+
+| Run | Snapshots pinned | Software |
+|---|---|---|
+| cell3-2026-08-20 | CAL-ARM3A-0818 | controller 5.6.0 |
+| cell3-2026-09-09 (last good) | CAL-ARM3A-0818 | controller 5.6.0, PALLET_C3 1.4.0 |
+| cell3-2026-09-14 (INC-C3-0011) | CAL-ARM3A-0911, `vision/wrist_camera_handeye.yml` | controller 5.6.0, PALLET_C3 1.4.0 |
+| leg01-2026-09-12 | `config/2026-09-01/LEG-01_patrol.yaml` | firmware 3.1.4 |
+| leg01-2026-09-14 | `config/2026-09-13/LEG-01_patrol.yaml` | firmware 3.2.0 |
+| amr05-, amr06-2026-03-03; amr07-2026-04-02 (INC-0007) | none: the only navigation export is for 4.3.1 | firmware 4.2.0 |
+| amr07-2026-04-15 | `config/AMR-07/nav2_params.yaml` (revision 12) | firmware 4.3.1 |
+| arm3a-handeye-* (5) | none (they record no run); task SOP-CELL-021 | |
 
 The calibration files are what easy_handeye saves (`yaml.dump` of `parameters` and `transformation`; a test
 round-trips each through PyYAML). The compiler has no easy_handeye reader until MVL-207, so today they land as
@@ -128,7 +143,10 @@ assertion (`INC-C3-0011.assertions.json`) is an identifier the mapped package de
 
 2.1.0 (MVL-191) added the syslog export's `MsgID` column and renamed the assertion's scope to Deploy's generic
 namespaces (`cmms.downtime`, `syslog`) and its ticket to `cmms.work_order`. It added evidence `zone.downtime` and
-`zone.syslog` (the `declaration` selector), cited by Q7.C4. No existing evidence id or answer changed meaning; a
+`zone.syslog` (the `declaration` selector), cited by Q7.C4; the run sheet's pins, aliases, tasks and software,
+with evidence `pin.0909.calibration`, `pin.0914.calibration`, `pin.0914.vision`, `pin.leg0914.config` (the
+`pin` selector; Q2.C3, Q3.C2, Q3.C6) and the gap claim Q6.C3 (`s007.manifest.amr07-0402`,
+`s007.nav2.amr07.firmware`, `s007.WO-26-0414`). No existing evidence id or answer changed meaning; a
 consumer that matches the scope's namespaces matches the new spelling.
 
 2.0.0 (MVL-191) moved `cal.0818.z`, `cal.0911.z` (now `/transformation/z`) and `cal.0818.error`, `cal.0911.error`

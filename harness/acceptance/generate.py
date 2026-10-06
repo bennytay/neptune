@@ -1467,38 +1467,182 @@ def asset_register() -> bytes:
     return table(header, rows)
 
 
-MANIFEST: Final = """\
+# What the site integrator's run sheet states for each declared run (root ADR 0072): the task, the
+# software it ran (firmware and controller versions), and the snapshot files it ran with. A pin
+# is only what the hand-over can show was in force at the run:
+# - ARM-3A: the hand-eye calibration loaded (the last good run CAL-ARM3A-0818, before WO-26-0911;
+#   the incident run CAL-ARM3A-0911 and the vision PC's export of it). The tool change of
+#   WO-26-0911 has no snapshot (no change record, and the managed cell_config.yaml is stale, so it
+#   is never pinned).
+# - LEG-01: the dated patrol configuration of its firmware.
+# - The AMRs: the fleet manager's navigation export is revision 12, for firmware 4.3.1, flashed
+#   2026-04-14 (CHG0050021..23), so it is pinned only to the run after the rollout. The runs before it
+#   (AMR-05 and AMR-06 on 2026-03-03, AMR-07 at INC-0007 on 2026-04-02) are deliberately unpinned:
+#   which navigation configuration they ran is not in the hand-over.
+# - The hand-eye calibration sessions record no run, so they name their procedure and pin nothing.
+@dataclass(frozen=True)
+class DeclaredRun:
+    name: str
+    path: str
+    machine: str
+    site: str
+    task: str | None = None
+    software: tuple[str, ...] = ()
+    snapshots: tuple[str, ...] = ()
+
+
+ARM_SOFTWARE: Final = ("ARM-3A-controller-5.6.0", "PALLET_C3-1.4.0")
+RUNS: Final = (
+    DeclaredRun(
+        "cell3-2026-08-20",
+        f"{CELL}/bags/pick_place_2026-08-20",
+        "ARM-3A",
+        "PLANT-2",
+        software=ARM_SOFTWARE[:1],
+        snapshots=(f"{CELL}/calibration/CAL-ARM3A-0818.yaml",),
+    ),
+    DeclaredRun(
+        "cell3-2026-09-09",
+        f"{CELL}/bags/{LAST_GOOD_RUN}",
+        "ARM-3A",
+        "PLANT-2",
+        "PALLET_C3",
+        ARM_SOFTWARE,
+        (f"{CELL}/calibration/CAL-ARM3A-0818.yaml",),
+    ),
+    DeclaredRun(
+        "cell3-2026-09-14",
+        f"{CELL}/bags/{INCIDENT_RUN}",
+        "ARM-3A",
+        "PLANT-2",
+        "PALLET_C3",
+        ARM_SOFTWARE,
+        (f"{CELL}/calibration/CAL-ARM3A-0911.yaml", f"{CELL}/vision/wrist_camera_handeye.yml"),
+    ),
+    DeclaredRun(
+        "leg01-2026-09-12",
+        f"{LEGGED}/runs/patrol_2026-09-12.mcap",
+        "LEG-01",
+        "PLANT-2",
+        "PATROL-A",
+        ("LEG-01-firmware-3.1.4",),
+        (f"{LEGGED}/config/2026-09-01/LEG-01_patrol.yaml",),
+    ),
+    DeclaredRun(
+        "leg01-2026-09-14",
+        f"{LEGGED}/runs/patrol_2026-09-14",
+        "LEG-01",
+        "PLANT-2",
+        "PATROL-A",
+        ("LEG-01-firmware-3.2.0",),
+        (f"{LEGGED}/config/2026-09-13/LEG-01_patrol.yaml",),
+    ),
+    *(
+        DeclaredRun(
+            f"arm3a-handeye-{c.performed[:10]}",
+            f"{CELL}/calibration/{c.ident}.yaml",
+            "ARM-3A",
+            "PLANT-2",
+            "SOP-CELL-021",
+        )
+        for c in HANDEYE
+    ),
+    DeclaredRun(
+        "amr05-2026-03-03",
+        f"{S007}/runs/amr-05_2026-03-03.mcap",
+        "AMR-05",
+        "S-007",
+        software=("AMR-firmware-4.2.0",),
+    ),
+    DeclaredRun(
+        "amr06-2026-03-03",
+        f"{S007}/runs/amr-06_2026-03-03.mcap",
+        "AMR-06",
+        "S-007",
+        software=("AMR-firmware-4.2.0",),
+    ),
+    DeclaredRun(
+        "amr07-2026-04-02",
+        f"{S007}/runs/amr-07_2026-04-02.mcap",
+        "AMR-07",
+        "S-007",
+        software=("AMR-firmware-4.2.0",),
+    ),
+    DeclaredRun(
+        "amr07-2026-04-15",
+        f"{S007}/runs/amr-07_2026-04-15.mcap",
+        "AMR-07",
+        "S-007",
+        software=("AMR-firmware-4.3.1",),
+        snapshots=(f"{S007}/config/AMR-07/nav2_params.yaml",),
+    ),
+)
+
+
+# The machines, with the ids each enterprise export gives them, as those exports write them: the
+# CMMS work orders' and downtime log's ``Asset ID`` (Deploy's ``cmms.asset``) and the ServiceNow
+# changes' ``cmdb_ci`` (``servicenow.ci``). LEG-01 has no ServiceNow CI in the hand-over.
+MACHINES: Final = (
+    ("AMR-05", "mobile_base", {"cmms.asset": "AMR-05", "servicenow.ci": "AMR-05"}),
+    ("AMR-06", "mobile_base", {"cmms.asset": "AMR-06", "servicenow.ci": "AMR-06"}),
+    ("AMR-07", "mobile_base", {"cmms.asset": "AMR-07", "servicenow.ci": "AMR-07"}),
+    ("ARM-3A", "manipulator", {"cmms.asset": "ARM-3A", "servicenow.ci": "ARM-3A"}),
+    ("LEG-01", "legged", {"cmms.asset": "LEG-01"}),
+)
+
+
+def _machine_line(machine: tuple[str, str, dict[str, str]]) -> str:
+    ident, embodiment, aliases = machine
+    named = ", ".join(f"{namespace}: {value}" for namespace, value in sorted(aliases.items()))
+    return f"  - {{id: {ident}, embodiment: {embodiment}, aliases: {{{named}}}}}"
+
+
+def _run_line(run: DeclaredRun) -> str:
+    fields = [f"name: {run.name}", f"paths: [{run.path}]", f"machine: {run.machine}"]
+    fields.append(f"site: {run.site}")
+    if run.task:
+        fields.append(f"task: {run.task}")
+    if run.software:
+        fields.append(f"software: [{', '.join(run.software)}]")
+    if run.snapshots:
+        fields.append(f"snapshots: [{', '.join(f'{{path: {p}}}' for p in run.snapshots)}]")
+    return f"  - {{{', '.join(fields)}}}"
+
+
+MANIFEST: Final = (
+    """\
 # The hand-over folder for the INC-C3-0011 review (PLANT-2) and the S-007 fleet.
 # Read every CSV here with its first row as the header (root ADR 0042 section 2).
 # Each hand-eye calibration is declared as a session of ARM-3A: easy_handeye's file names no robot.
+# Each run states its task, software and the snapshot files it ran with, as the integrator's run
+# sheet does (root ADR 0072); a run with no snapshots is one whose configuration is not here.
 neptune: 1
 machines:
-  - {id: AMR-05, embodiment: mobile_base}
-  - {id: AMR-06, embodiment: mobile_base}
-  - {id: AMR-07, embodiment: mobile_base}
-  - {id: ARM-3A, embodiment: manipulator}
-  - {id: LEG-01, embodiment: legged}
+"""
+    + "".join(_machine_line(machine) + "\n" for machine in MACHINES)
+    + """\
 sites:
   - {id: S-007, name: "Northgate distribution centre"}
   - {id: PLANT-2, name: "Riverside plant 2"}
+tasks:
+  - {id: PALLET_C3, name: "PALLET_C3 palletising at CELL-3"}
+  - {id: PATROL-A, name: "LEG-01 inspection patrol A"}
+  - {id: SOP-CELL-021, name: "Wrist camera hand-eye calibration (SOP-CELL-021)"}
+software:
+  - {id: ARM-3A-controller-5.6.0, name: "ARM-3A controller software", version: "5.6.0"}
+  - {id: PALLET_C3-1.4.0, name: "PALLET_C3 application", version: "1.4.0"}
+  - {id: LEG-01-firmware-3.1.4, name: "LEG-01 firmware", version: "3.1.4"}
+  - {id: LEG-01-firmware-3.2.0, name: "LEG-01 firmware", version: "3.2.0"}
+  - {id: AMR-firmware-4.2.0, name: "AMR drive controller firmware", version: "4.2.0"}
+  - {id: AMR-firmware-4.3.1, name: "AMR drive controller firmware", version: "4.3.1"}
 runs:
-  - {name: cell3-2026-08-20, paths: [sites/PLANT-2/cell3/bags/pick_place_2026-08-20], machine: ARM-3A, site: PLANT-2}
-  - {name: cell3-2026-09-09, paths: [sites/PLANT-2/cell3/bags/pallet_2026-09-09], machine: ARM-3A, site: PLANT-2}
-  - {name: cell3-2026-09-14, paths: [sites/PLANT-2/cell3/bags/pallet_2026-09-14], machine: ARM-3A, site: PLANT-2}
-  - {name: leg01-2026-09-12, paths: [sites/PLANT-2/legged/runs/patrol_2026-09-12.mcap], machine: LEG-01, site: PLANT-2}
-  - {name: leg01-2026-09-14, paths: [sites/PLANT-2/legged/runs/patrol_2026-09-14], machine: LEG-01, site: PLANT-2}
-  - {name: arm3a-handeye-2026-02-26, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0226.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-04-15, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0415.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-06-23, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0623.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-08-18, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-09-11, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: amr05-2026-03-03, paths: [sites/S-007/runs/amr-05_2026-03-03.mcap], machine: AMR-05, site: S-007}
-  - {name: amr06-2026-03-03, paths: [sites/S-007/runs/amr-06_2026-03-03.mcap], machine: AMR-06, site: S-007}
-  - {name: amr07-2026-04-02, paths: [sites/S-007/runs/amr-07_2026-04-02.mcap], machine: AMR-07, site: S-007}
-  - {name: amr07-2026-04-15, paths: [sites/S-007/runs/amr-07_2026-04-15.mcap], machine: AMR-07, site: S-007}
+"""
+    + "".join(_run_line(run) + "\n" for run in RUNS)
+    + """\
 adapters:
   tabular: {options: {csv_header: first_row}}
 """
+)
 
 
 def build() -> dict[str, bytes]:

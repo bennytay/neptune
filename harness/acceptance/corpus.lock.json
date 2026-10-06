@@ -2,8 +2,8 @@
   "corpus": "acceptance",
   "files": {
     "neptune.yaml": {
-      "sha256": "sha256:279b7ab6cea08b67e4d779a1a96c2fcca93a2a5c762bfe40b0e9f917dc9ca203",
-      "size": 2330
+      "sha256": "sha256:10e421ebebca14ccb8589befdfb87a76092bf790708ecee2cb91e9441d993bbe",
+      "size": 4484
     },
     "records/asset_register.csv": {
       "sha256": "sha256:b24e816567ecca2d15afb5da6c046d7d666538c8327cafd247ed738311869e7d",
@@ -227,6 +227,6 @@
     }
   },
   "lock_format": 1,
-  "tree": "sha256:972aa18f7e0e9f157fdba3b27b36294ecdec53ba597f4b4f1efcefb48f258b54",
+  "tree": "sha256:60b76d247875d9bc361cbac4b71916f177076a77f0682b09649e9982ff93e0c6",
   "version": "2.1.0"
 }

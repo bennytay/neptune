@@ -667,3 +667,45 @@ def test_the_declaration_selector_cites_a_zone_the_deploy_declaration_states(
     moved = resolve.Package(root, declaration={"sources": [entry]}, declaration_path="d.json")
     (citation,) = resolve.resolve_one(moved, select)["citations"]
     assert citation["record"] == record and citation["locator"]["declaration"] == "d.json"
+
+
+def test_the_pin_selector_cites_a_stated_binding_by_its_pin(tmp_path: Path) -> None:
+    """A run sheet's pin (root ADR 0072 §4) by manifest, run file and snapshot file (ADR 0009)."""
+    root = tmp_path / "package"
+    (root / "records").mkdir(parents=True)
+    content = {name: "sha256:" + str(i) * 64 for i, name in enumerate(("m", "r", "c", "o"), 1)}
+    paths = {"m": "neptune.yaml", "r": "run.mcap", "c": "cal.yaml", "o": "other.yaml"}
+
+    def write(kind: str, *records: dict[str, Any]) -> None:
+        lines = "".join(json.dumps(r) + "\n" for r in records)
+        (root / "records" / f"{kind}.jsonl").write_text(lines)
+
+    def cited(name: str, kind: str = "stated", pointer: str = "") -> dict[str, Any]:
+        locator = [{"kind": "json_pointer", "pointer": pointer}] if pointer else []
+        evidence = {"locator": locator, "source": content[name]}
+        return {"assertion_kind": kind, "evidence": evidence}
+
+    write(
+        "source_revision",
+        *({"content_id": content[k], "id": k, "location": {"path": v}} for k, v in paths.items()),
+    )
+    write("run", {"id": "run", "provenance": cited("r")})
+    write("calibration", {"id": "cal", "provenance": cited("c")})
+    write("configuration_snapshot", {"id": "oth", "provenance": cited("o")})
+    pin = "/runs/0/snapshots/0"
+    write(
+        "snapshot_binding",
+        {"id": "b1", "provenance": cited("m", pointer=pin), "run": "run", "snapshot": "cal"},
+        {"id": "b2", "provenance": cited("m", "inferred", pin), "run": "run", "snapshot": "cal"},
+        {"id": "b3", "provenance": cited("m", pointer=pin), "run": "run", "snapshot": "oth"},
+    )
+    package = resolve.Package(root)
+    select = {"kind": "pin", "path": "neptune.yaml", "run": "run.mcap", "snapshot": "cal.yaml"}
+    found = resolve.resolve_one(package, select)
+    assert found["records"] == ["b1"]  # stated only, and only this snapshot
+    assert found["citations"] == [
+        {"locator": {"pointer": pin}, "path": "neptune.yaml", "record": "b1"}
+    ]
+    assert resolve.resolve_one(package, {**select, "snapshot": "nowhere.yaml"})["records"] == []
+    with pytest.raises(resolve.GoldError, match="needs run, snapshot"):
+        resolve.resolve_one(package, {"kind": "pin", "path": "neptune.yaml"})

@@ -1,4 +1,4 @@
-# 0009 — Declared source zones in the Deploy declaration, the declaration selector, no dangling same-event links, and corpus 2.1.0
+# 0009 — Declared source zones, the declaration and pin selectors, no dangling same-event links, and corpus 2.1.0
 
 - Status: Accepted
 - Date: 2026-10-06
@@ -73,6 +73,25 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
    - The author and assertion ids keep the review console's own namespaces.
    - PLANT-2's zone is `generate.PLANT_ZONE` (`America/New_York`), which the assertion's
      `authored_zone` also uses.
+   - **The run sheet** (`neptune.yaml`, root ADR 0072). Each run states its `task`, its `software`
+     (firmware and controller versions, as top-level `software` entries with a `version`) and the
+     `snapshots` it ran with, by path. A pin is only what the hand-over shows was in force:
+     - ARM-3A's last good run is pinned to CAL-ARM3A-0818, and the incident run to CAL-ARM3A-0911
+       and the vision PC's export of it. The tool change has no snapshot, and the stale
+       `cell_config.yaml` is never pinned.
+     - LEG-01's patrols are pinned to their dated configurations.
+     - AMR-07 is pinned to its revision 12 navigation export only for the run after the 4.3.1
+       rollout.
+     - AMR-05's and AMR-06's runs of 2026-03-03 and AMR-07's INC-0007 run are deliberately
+       unpinned: their configuration is not in the hand-over (gold Q6.C3).
+     - Tasks: `PALLET_C3`, `PATROL-A`, and `SOP-CELL-021` for the hand-eye sessions.
+     - The pins give 12 stated `snapshot_binding` records.
+   - **Machine aliases.** Each machine declares the ids the enterprise exports give it, as written:
+     `cmms.asset` (the CMMS `Asset ID`) and `servicenow.ci` (`cmdb_ci`; LEG-01 has none). Each is a
+     stated identifier of the machine record.
+   - New gold evidence: `zone.downtime`, `zone.syslog`, `pin.0909.calibration`,
+     `pin.0914.calibration`, `pin.0914.vision`, `pin.leg0914.config`, `s007.manifest.amr07-0402`,
+     `s007.nav2.amr07.firmware` and `s007.WO-26-0414`. One new claim, Q6.C3 (unknown).
 5. **CI** (amends ADR 0008 §5). `ci_plan.py`'s `MEMORY_SNAPSHOT_INPUTS` covers every format adapter
    (`src/neptune/adapters/`), `harness/acceptance/`, the harness modules Memory's snapshot generator
    runs (`stages.py`, `run.py`, `corpus.py`, `contracts.py`) and the deploy stage's inputs. With
@@ -114,6 +133,12 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
      `structured_record`, which counts every event-table row of the mapped package.
    - "Wrote nothing" now means no lifecycle record and no event-table row.
 
+8. **The `pin` selector** (extends ADR 0007 §5 and §6). `{kind: "pin", path, run, snapshot}`
+   selects the stated `snapshot_binding` records whose evidence is the manifest at `path` and that
+   bind a run recorded in the corpus file `run` to a snapshot record (configuration, software,
+   hardware or calibration) of the file `snapshot`. The locator is the pin's JSON pointer,
+   `{"pointer": "/runs/<i>/snapshots/<k>"}`.
+
 ## Alternatives considered
 
 - **A `Timezone` column in each CSV.** Lost: a collector's export does not carry one, and ADR 0061 §3
@@ -137,10 +162,11 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
 
 ## Consequences
 
-- Deploy must ship `--source-zone` on `neptune_deploy map` before `deploy.json` declares `sources`,
-  and the corpus's `cmms_downtime` and `syslog_csv` presets with it. Until then the gold's
-  `declaration` item and the `sources` entries wait. The PR that wires them is the one that adds the
-  presets.
+- `deploy.json` relies on Deploy's `--source-zone` and its `cmms_downtime`, `requalification_csv`
+  and `syslog_csv` presets and `incident_report` template (Deploy ADR 0016, ADR 0017). Renaming any
+  of them turns the platform job red.
+- Memory joins a machine's runs, maintenance and changes through the declared aliases. An export
+  that writes a machine's id differently needs a new alias, never a rewrite of the export.
 - A Deploy change that ignores a declared zone turns the harness and the platform job red.
 - Memory's job runs on adapter and corpus changes, so a snapshot that drifts fails in the PR that
   moved it, not on main.

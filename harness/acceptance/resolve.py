@@ -39,6 +39,10 @@ Selectors (``select.kind``):
   ``{"declaration": <the declaration's path, harness/acceptance/deploy.json by default>,
   "pointer": "/sources/<i>/<field>"}``; the path must still be a source of the package. Platform
   ADR 0009.
+- ``pin`` ``{path, run, snapshot}``: stated ``snapshot_binding`` records whose evidence is the
+  manifest at ``path`` (root ADR 0072 §4), binding a run recorded in the corpus file ``run`` to a
+  snapshot record of the file ``snapshot``; located by the pin's JSON pointer
+  (``/runs/<i>/snapshots/<k>``). Platform ADR 0009.
 - ``clock_mapping`` ``{path, offset_s}``: derived ``clock_mapping`` lines evidenced by the path
   whose anchor offset, target minus source in seconds by each clock's stated resolution, lies in
   ``[low, high]``; a clock without a known resolution is never compared.
@@ -67,6 +71,14 @@ SELECTORS: Final = (
     "clock_mapping",
     "assertion",
     "declaration",
+    "pin",
+)
+# The kinds a manifest pin can bind a run to (root ADR 0064, ADR 0072 §4).
+SNAPSHOT_KINDS: Final = (
+    "configuration_snapshot",
+    "software_configuration",
+    "hardware_configuration",
+    "calibration",
 )
 # The corpus's Deploy declaration (Platform ADR 0008), by repository path: what a ``declaration``
 # citation names, and what ``Package`` reads when it is given no declaration of its own.
@@ -284,6 +296,24 @@ def resolve_one(package: Package, select: Json) -> Json:
             for i, entry in sorted(entries, key=lambda e: _entry_id(e[1]))
         ]
         return out
+    elif kind == "pin":
+        run_path, snapshot_path = _need(select, "run", "snapshot")
+        run_content, snapshot_content = package.content(run_path), package.content(snapshot_path)
+        runs = {str(r["id"]) for r in package.kind("run") if _source(r) == run_content}
+        snapshots = {
+            str(r["id"])
+            for name in SNAPSHOT_KINDS
+            for r in package.kind(name)
+            if _source(r) == snapshot_content
+        }
+        found = [
+            b
+            for b in package.kind("snapshot_binding")
+            if _source(b) == content
+            and b.get("provenance", {}).get("assertion_kind") == "stated"
+            and str(b.get("run")) in runs
+            and str(b.get("snapshot")) in snapshots
+        ]
     elif kind == "clock_mapping":
         (bounds,) = _need(select, "offset_s")
         low, high = Fraction(str(bounds[0])), Fraction(str(bounds[1]))
@@ -348,7 +378,7 @@ def _locator(kind: str, record: Json, select: Json) -> Json | None:
         return {"topic": select["topic"]}
     if kind == "finding":
         return {"code": select["code"]}
-    if kind == "assertion":
+    if kind in ("assertion", "pin"):
         locator = record["provenance"]["evidence"]["locator"]
         at = next((p["pointer"] for p in locator if p.get("kind") == "json_pointer"), None)
         return {"pointer": at} if at is not None else None
