@@ -633,9 +633,10 @@ SYSLOG: Final = (
 
 # A person's statement that the CMMS stop and the syslog stop are one event (root ADR 0062's
 # ``neptune.assertions`` file, as the review console writes it): stated evidence, applied by
-# nobody but Memory. Its scope names each stop as Deploy's mappings identify it, in Deploy's
-# generic namespaces: ``cmms.downtime`` + the Downtime ID (``cmms_downtime``) and ``syslog`` + the
-# Seq (``syslog_csv``); the ticket is a ``cmms.work_order`` (``cmms_generic``).
+# nobody but Memory. Its scope names each record of the stop as Deploy's mappings identify it, in
+# Deploy's generic namespaces: ``cmms.downtime`` + the Downtime ID (``cmms_downtime``), ``syslog`` +
+# the Seq (``syslog_csv``) and, since 2.2.0, ``incident_report.incident`` + the incident number
+# (the ``incident_report`` template); the ticket is a ``cmms.work_order`` (``cmms_generic``).
 SAME_EVENT_ASSERTION: Final = {
     "format": "neptune.assertions",
     "version": 1,
@@ -648,6 +649,7 @@ SAME_EVENT_ASSERTION: Final = {
             "authored_zone": PLANT_ZONE,
             "scope": [
                 {"namespace": "cmms.downtime", "value": "DT-26-0914-01"},
+                {"namespace": "incident_report.incident", "value": "INC-C3-0011"},
                 {"namespace": "syslog", "value": SYSLOG_PSTOP_SEQ},
             ],
             "payload": {"incident": "INC-C3-0011", "relation": "same_event"},
@@ -1581,14 +1583,41 @@ RUNS: Final = (
 )
 
 
-# The machines, with the ids each enterprise export gives them, as those exports write them: the
-# CMMS work orders' and downtime log's ``Asset ID`` (Deploy's ``cmms.asset``) and the ServiceNow
-# changes' ``cmdb_ci`` (``servicenow.ci``). LEG-01 has no ServiceNow CI in the hand-over.
+# The machines, with the ids each source gives them, as those sources write them and in the
+# namespace the mapping that reads them keys the machine by (Platform ADR 0013):
+# - ``cmms.asset``: the CMMS work orders' and downtime log's ``Asset ID`` (Deploy's ``cmms_generic``
+#   and ``cmms_downtime``);
+# - ``servicenow.ci``: the ServiceNow changes' ``cmdb_ci`` (``servicenow_csv``). LEG-01 has none;
+# - ``incident_report.machine``: an incident report's ``Machine`` (Deploy's ``incident_report``
+#   template): ARM-3A in INC-C3-0011, AMR-07 in INC-0007;
+# - ``requalification.robot``: a requalification log's ``Robot`` (``requalification_csv``): ARM-3A
+#   at PLANT-2, AMR-07 at S-007;
+# - ``syslog.host``: the syslog export's ``Host``, as Memory's event-table declaration keys it
+#   (Memory's ``acceptance_corpus.memory_config.json``): ARM-3A's controller. PLC-C3 is no machine.
 MACHINES: Final = (
     ("AMR-05", "mobile_base", {"cmms.asset": "AMR-05", "servicenow.ci": "AMR-05"}),
     ("AMR-06", "mobile_base", {"cmms.asset": "AMR-06", "servicenow.ci": "AMR-06"}),
-    ("AMR-07", "mobile_base", {"cmms.asset": "AMR-07", "servicenow.ci": "AMR-07"}),
-    ("ARM-3A", "manipulator", {"cmms.asset": "ARM-3A", "servicenow.ci": "ARM-3A"}),
+    (
+        "AMR-07",
+        "mobile_base",
+        {
+            "cmms.asset": "AMR-07",
+            "incident_report.machine": "AMR-07",
+            "requalification.robot": "AMR-07",
+            "servicenow.ci": "AMR-07",
+        },
+    ),
+    (
+        "ARM-3A",
+        "manipulator",
+        {
+            "cmms.asset": "ARM-3A",
+            "incident_report.machine": "ARM-3A",
+            "requalification.robot": "ARM-3A",
+            "servicenow.ci": "ARM-3A",
+            "syslog.host": "ARM-3A",
+        },
+    ),
     ("LEG-01", "legged", {"cmms.asset": "LEG-01"}),
 )
 

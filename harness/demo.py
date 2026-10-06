@@ -101,7 +101,7 @@ def incident_pack(document: Json, mapped: Path, snapshot: str) -> Pack:
     name = f"incident-timeline-{INCIDENT['value']}"
     records = [r for r in Package(mapped).kind("incident_record") if INCIDENT in _identifiers(r)]
     if len(records) != 1:
-        return Pack(name, "incident-timeline", 2, None, f"{len(records)} incident records name it")
+        return Pack(name, "incident-timeline", 3, None, f"{len(records)} incident records name it")
     node = f"record:{records[0]['id']}"
     entries = {
         str(c["subject"]["node_id"])
@@ -110,7 +110,7 @@ def incident_pack(document: Json, mapped: Path, snapshot: str) -> Pack:
     }
     span = _span(document["claims"], entries)
     if span is None:
-        return Pack(name, "incident-timeline", 2, None, "Memory holds no timeline entry of it")
+        return Pack(name, "incident-timeline", 3, None, "Memory holds no timeline entry of it")
     clock, first, last = span
     interval = {
         "end": {"domain_id": clock, "ticks": last + 1},
@@ -119,8 +119,8 @@ def incident_pack(document: Json, mapped: Path, snapshot: str) -> Pack:
     return Pack(
         name,
         "incident-timeline",
-        2,
-        _spec("incident-timeline", 2, "event", node, interval, snapshot),
+        3,
+        _spec("incident-timeline", 3, "event", node, interval, snapshot),
     )
 
 
@@ -139,11 +139,11 @@ def traceability_pack(document: Json, snapshot: str) -> Pack:
         if c["subject"].get("node_id") in runs and isinstance(c.get("valid"), dict)
     ]
     if not stamps:
-        return Pack(name, "configuration-traceability", 2, None, f"no run is recorded by {MACHINE}")
+        return Pack(name, "configuration-traceability", 3, None, f"no run is recorded by {MACHINE}")
     latest = max(stamps, key=lambda s: (s["ticks"], s["domain_id"]))
     interval = {"end": "open", "start": {"domain_id": latest["domain_id"], "ticks": 0}}
-    spec = _spec("configuration-traceability", 2, "machine", MACHINE, interval, snapshot)
-    return Pack(name, "configuration-traceability", 2, spec)
+    spec = _spec("configuration-traceability", 3, "machine", MACHINE, interval, snapshot)
+    return Pack(name, "configuration-traceability", 3, spec)
 
 
 def _spec(

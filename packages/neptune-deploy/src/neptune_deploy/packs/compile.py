@@ -537,6 +537,10 @@ def _scope(
                                     | {claim.id, other.id}
                                 )
                     continue
+                if hop.direction == "closure":
+                    for joined, chain in _closure(node, hop.predicate, snapshot, excluded):
+                        step[joined] = step.get(joined, frozenset()) | via | chain
+                    continue
                 index = snapshot.by_subject if hop.direction == "out" else snapshot.by_object
                 for claim in index.get(node, ()):
                     if claim.predicate != hop.predicate:
@@ -552,6 +556,34 @@ def _scope(
         for node, via in frontier.items():
             reached[node] = reached.get(node, frozenset()) | via
     return reached
+
+
+def _closure(
+    start: Node, predicate: str, snapshot: Snapshot, excluded: set[str]
+) -> list[tuple[Node, frozenset[str]]]:
+    """Every node a chain of current ``predicate`` claims joins to ``start`` (either direction,
+    ``start`` left out), each with the claims of one shortest chain to it (claims taken in id
+    order, so the chain is the same on every run). An inferred claim is never followed, whatever
+    the spec's inference policy: a ``closure`` hop reads identity as stated or observed only
+    (ADR 0019), and a left-out inferred claim is counted as excluded."""
+    seen: dict[Node, frozenset[str]] = {start: frozenset()}
+    frontier = [start]
+    while frontier:
+        reached: list[Node] = []
+        for node in frontier:
+            edges = (*snapshot.by_subject.get(node, ()), *snapshot.by_object.get(node, ()))
+            for claim in sorted(edges, key=lambda c: c.id):
+                if claim.predicate != predicate or claim.object_node is None:
+                    continue
+                if claim.inferred:
+                    excluded.add(claim.id)
+                    continue
+                other = claim.object_node if claim.subject == node else claim.subject
+                if other not in seen:
+                    seen[other] = seen[node] | {claim.id}
+                    reached.append(other)
+        frontier = sorted(reached)
+    return [(node, seen[node]) for node in sorted(seen) if node != start]
 
 
 def _order(statements: Iterable[Statement]) -> tuple[Statement, ...]:
