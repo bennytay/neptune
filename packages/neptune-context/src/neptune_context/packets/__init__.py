@@ -2,6 +2,7 @@
 
 - ``model``: ``ContextPacket``, its header, the seven item kinds, budgets, gaps; ``PACKET_VERSION``.
 - ``codec``: canonical bytes, ids and the strict reader ``decode`` (findings, never exceptions).
+- ``trails``: the structure of a ``why`` or ``diff`` answer (ADR 0010), by claim id.
 - ``findings``: ``PacketFinding`` codes; ``schema``: the JSON Schema export;
   ``conformance``: the checks a consumer runs over packets it reads.
 

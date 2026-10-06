@@ -78,6 +78,7 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/golden/assertion/make_assertion_golden.py
 > $(UV) run python tests/golden/urdf/make_urdf_golden.py
 > $(UV) run python tests/golden/calibration/make_calibration_golden.py
+> $(UV) run python tests/golden/manifest/make_manifest_golden.py
 
 # One `check` call covers every selected member (and, without PKG, every package in lock.toml), so
 # each upstream owner's contract tests run once; the matrix must match the registry.

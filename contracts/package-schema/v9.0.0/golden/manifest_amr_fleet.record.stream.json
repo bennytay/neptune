@@ -1,0 +1,134 @@
+{
+  "clocks": [
+    "rec:sha256:4c3606276ecf24317bf27a7bf7a8c2e710759650045d084290071fc115c27c91",
+    "rec:sha256:9d6014507b337b70e0a6bd50d842a8fc758904ea16066c48c8a59db0f0a6223f"
+  ],
+  "first": {
+    "knowledge": "unknown"
+  },
+  "id": "rec:sha256:1046b62422195442fe24477da40af5683023822c1f24eefe465b3e96a60159a7",
+  "kind": "stream",
+  "last": {
+    "knowledge": "unknown"
+  },
+  "message_count": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 10,
+            "offset": 366
+          }
+        ],
+        "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+      },
+      "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+    },
+    "value": 1
+  },
+  "message_encoding": {
+    "knowledge": "known",
+    "value": "cdr"
+  },
+  "metadata": {},
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 40,
+          "offset": 271
+        }
+      ],
+      "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+    },
+    "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+  },
+  "run": "rec:sha256:4c19b6723225a0359dd147dc46f111ffa9293d70a6a3abf00324c28586c54ec8",
+  "schema_definition": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 60,
+            "offset": 211
+          }
+        ],
+        "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+      },
+      "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+    },
+    "value": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 11,
+          "offset": 260
+        }
+      ],
+      "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+    }
+  },
+  "schema_encoding": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 60,
+            "offset": 211
+          }
+        ],
+        "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+      },
+      "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+    },
+    "value": "ros2msg"
+  },
+  "schema_name": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 60,
+            "offset": 211
+          }
+        ],
+        "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+      },
+      "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+    },
+    "value": "std_msgs/msg/String"
+  },
+  "schema_version": 1,
+  "series": {
+    "assertion_kind": "observed",
+    "locator": [
+      {
+        "fixed": {},
+        "kind": "byte_range",
+        "per_row": [
+          "length",
+          "offset"
+        ]
+      }
+    ],
+    "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+  },
+  "topic": {
+    "knowledge": "known",
+    "value": "/amr_01/odom"
+  }
+}
