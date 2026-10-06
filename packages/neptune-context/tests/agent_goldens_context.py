@@ -159,7 +159,10 @@ def steps(packet_query_text: str) -> list[dict[str, Any]]:
             "tool": "neptune_diff",
             "arguments": {
                 "subject": {"kind": F.DEMO_ARM[0], "declared_id": F.DEMO_ARM[1]},
-                "before": {"clock": SERVICENOW_CLOCK, "ticks": 1_780_000_000},  # firmware 5.6.0
+                "before": {
+                    "clock": SERVICENOW_CLOCK,
+                    "ticks": 1_780_000_000,
+                },  # servicenow.u_after:5.6.0 in force
                 "after": {"clock": SERVICENOW_CLOCK, "ticks": 1_790_000_000},  # the TCP change
                 "include_inferred": True,
             },

@@ -22,8 +22,15 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    `needs_choice`, then run the query yourself. If it says no model is configured, write the
    query directly (step 3).
 3. **Ask with `neptune_query`.** Pass `include_inferred` (required; you must choose) and a
-   `query`. For "why did X happen / what changed", start from the machine and walk two hops both
-   ways:
+   `query`. For "why did X happen / what changed", first find the machine's ids, then start from
+   them and walk two hops both ways. The ids come from the call, not from this page:
+
+   ```text
+   neptune_entities {"text": "what happened to ARM-3A?", "include_inferred": false}
+   ```
+
+   then, with the ids it returned for that machine as `subjects` (the two below are placeholders
+   for them):
 
    ```json
    {
@@ -31,9 +38,8 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      "query": {
        "budget": {"items": 50, "tokens": 20000},
        "subjects": [
-         {"kind": "machine", "declared_id": "servicenow.ci:ARM-3A"},
-         {"kind": "machine", "declared_id": "cmms.asset:ARM-3A"},
-         {"kind": "machine", "declared_id": "manifest:ARM-3A"}
+         {"kind": "machine", "declared_id": "ns:id-from-neptune-entities"},
+         {"kind": "machine", "declared_id": "other-ns:same-machine-id-from-neptune-entities"}
        ],
        "graph": {"hops": 2, "direction": "both", "predicates": "any"}
      }

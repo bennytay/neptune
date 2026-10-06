@@ -42,7 +42,9 @@ def main() -> int:
         )
         return 1
     shutil.copyfile(LIVE, FROZEN)
-    assert read_graph_document(FROZEN).head == document.head
+    if read_graph_document(FROZEN).head != document.head:
+        print(f"{FROZEN.name} does not read back as {LIVE.name}", file=sys.stderr)
+        return 1
     print(f"froze {LIVE.relative_to(ROOT)} -> {FROZEN.relative_to(ROOT)} ({size} bytes)")
     return 0
 
