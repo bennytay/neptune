@@ -982,6 +982,8 @@ def _snapshot_configurations(
     cites, the node is the anchored configuration thread its record-level evidence keys by the
     Ledger's published rule (ADR 0022): the configuration the document's bytes declare. Only when
     the Ledger holds the snapshot: an ``unknown_record`` answer leaves it unresolved.
+    Transitional: delete the ``CONFIGURATION_SNAPSHOT`` branch once the Ledger threads snapshots
+    (ADR 0022, Consequences).
     """
     configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor, snapshot.record)
     if not configurations and snapshot.kind == CONFIGURATION_SNAPSHOT:

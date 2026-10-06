@@ -1,6 +1,6 @@
 # 0022 — Pinned configuration snapshots name their anchored configuration
 
-- Status: Accepted
+- Status: Accepted (transitional, until the Ledger threads `configuration_snapshot`)
 - Date: 2026-10-06
 - Issue: MVL-191
 
@@ -60,5 +60,15 @@ had no configuration, and "what changed since the last good run" could not come 
   as a different configuration.
 - Configurations are keyed by evidence: two byte-identical files are one configuration, and a comment-only edit is
   another. Whether two configurations hold equal values is the digest's question and is not answered here.
-- Revisit if the Ledger threads `configuration_snapshot` (this rule becomes redundant; ids do not change) or
-  changes its thread-id rule (catalog-api 2.0.0).
+- **Transitional.** Computing the thread id in Memory is correct per Ledger ADR 0003 §1.3. The proper fix is
+  the Ledger threading `configuration_snapshot`: a superseding Ledger ADR 0003 §2 row that makes a
+  `ConfigurationSnapshot` the `subject` of an anchored `configuration` thread. Once that release is pinned and the
+  acceptance snapshot is regenerated, the catalog answers the same `thread:` node through ADR 0018 §2.1, and
+  this path is deleted with no change to node ids or claims (a version bump only if the claims change):
+  - in `consolidate/configuration.py`, the `CONFIGURATION_SNAPSHOT` branch of `_snapshot_configurations`, the
+    `_View.unthreaded_anchors` field, and its union into `anchor_only` in `_coverage`;
+  - `anchored_node` in `consolidate/threads.py`, and the `CONFIGURATION_SNAPSHOT` constant in
+    `consolidate/configuration_records.py`.
+  `test_the_node_is_the_one_a_ledger_threading_snapshots_would_answer` already checks that the threaded catalog
+  gives the same claims. Keep it as the regression test after the deletion.
+- Revisit if the Ledger changes its thread-id rule (catalog-api 2.0.0).

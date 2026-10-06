@@ -27,4 +27,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0018](0018-thread-membership-from-the-catalog-api.md) | Thread membership from the catalog API | Accepted |
 | [0019](0019-events-in-identity-and-machine-scoped-configuration-changes.md) | Events in identity, and configuration changes scoped to a machine | Accepted |
 | [0020](0020-runs-read-the-compilers-run-declaration.md) | The run consolidator reads the compiler's run_declaration | Accepted |
-| [0022](0022-pinned-configuration-snapshots-name-their-anchored-configuration.md) | Pinned configuration snapshots name their anchored configuration | Accepted |
+| [0022](0022-pinned-configuration-snapshots-name-their-anchored-configuration.md) | Pinned configuration snapshots name their anchored configuration | Accepted (transitional, until the Ledger threads `configuration_snapshot`) |
