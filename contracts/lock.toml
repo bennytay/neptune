@@ -5,7 +5,7 @@
 
 [neptune-context]
 catalog-api = "1.7.0"
-graph-schema = "1.6.0"
+graph-schema = "2.0.0"
 
 [neptune-deploy]
 catalog-api = "1.7.0"
