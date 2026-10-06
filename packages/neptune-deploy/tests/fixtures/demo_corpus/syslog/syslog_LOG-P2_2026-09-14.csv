@@ -1,0 +1,5 @@
+Seq,Timestamp,Host,Facility,Severity,Tag,MsgID,Message
+4170,2026-09-14 14:28:00,ARM-3A,user,notice,PALLET_C3,PGM_START,program PALLET_C3 1.4.0 started from the HMI
+4182,2026-09-14 14:32:38,ARM-3A,local0,err,SAFETY,PSTOP,"PSTOP: collision detection joint 5, external torque 41.7 Nm > 35.0 Nm, pick P1"
+4183,2026-09-14 14:32:41,PLC-C3,local0,crit,SAFETY,ESTOP,ESTOP: OP-2.ES1 pressed
+4186,2026-09-14 14:33:30,PLC-C3,local0,notice,SAFETY,LOTO,cell 3 locked out (LOTO-C3-2)
