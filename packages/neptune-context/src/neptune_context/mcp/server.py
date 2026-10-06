@@ -77,7 +77,7 @@ TOOLS: Final = (
 )
 # neptune_compare_runs's default budget: a whole comparison in an agent's reading (ADR 0015).
 COMPARE_ITEMS: Final = 100
-COMPARE_TOKENS: Final = 20_000
+COMPARE_TOKENS: Final = 60_000  # Context's estimate: ceil(item JSON bytes / 4)
 EVIDENCE_SCHEME: Final = "neptune://evidence/"
 MAX_LINKS: Final = 100  # resource links per answer; the footer lists every ref regardless
 MAX_URI_CHARS: Final = 8192
@@ -505,7 +505,6 @@ def query_from_arguments(tool: str, arguments: Mapping[str, Any]) -> Query:
             "include_inferred": _flag(arguments),
             "as_of": _snapshot(arguments),
             "budget": {"items": _count({"max_items": items}), "tokens": tokens},
-            "subjects": [arguments["before"], arguments["after"]],
             "explain": [
                 {"kind": "compare_runs", "before": arguments["before"], "after": arguments["after"]}
             ],

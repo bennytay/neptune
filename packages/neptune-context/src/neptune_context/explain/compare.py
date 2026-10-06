@@ -119,7 +119,7 @@ def explain_compare(run: Run, index: int, clause: CompareRuns) -> Trail | None:
             )
     for side, other in ((before, after), (after, before)):
         for claim in side.own:
-            if claim.predicate in (NAME, RECORDED_BY, ACTIVE):
+            if claim.predicate in (NAME, ACTIVE):
                 _carry(run, claim)
         for claim in side.names:
             _carry(run, claim)
