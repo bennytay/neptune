@@ -240,7 +240,8 @@ def test_graph_schema_contract(check):
     An assertion may name an `event` node ([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md)
     §1): by the record `memory.events` keyed it by, or by an id its `incident_record` or `intervention` declares
     (a Ledger thread's node first). An id several event records declare, or one only possibly does, is
-    `identity.scope_ambiguous` and candidates, never `same_as`; a record id that names no event is not read.
+    `identity.scope_ambiguous` and candidates, never `same_as`; a record id that names no event is not read, and a
+    blank or padded declared id names nothing (`identity.malformed_identifier`).
 12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
     places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
     the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
