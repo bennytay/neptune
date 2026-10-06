@@ -97,6 +97,15 @@ mistake a template can make, so the rule is fixed here before any template needs
    - The fixture is corpus 2.0.0's `downtime_log.csv` (harness PR #143), committed as a source and
      ingested into `tests/fixtures/demo_corpus/downtime_package/`. It is pinned by content id until
      2.0.0's lock is on main, which then binds it.
+8. **`servicenow_csv` version 2 states the configuration a change results in.**
+   - `u_after` is also the record's `configuration`: an id under `servicenow.u_after`, copied as
+     written (`5.6.0`, `TCP z=145.5 mm`), never parsed, and citing its cell. A blank cell is
+     `Unknown`. Memory reads it to answer "what changed since the last good run".
+   - The change record kind (root ADR 0051) has no prior-configuration field. `u_before` stays the
+     change item's `before`, which is the field that means exactly "the value before". An id-typed
+     prior configuration would be a compiler change, and none is raised for Demo v1.
+   - The archetype goldens change in their change records (`configuration` is now stated and leaves
+     `fields_not_covered`) and in the preset's transform id.
 
 ## Alternatives considered
 
