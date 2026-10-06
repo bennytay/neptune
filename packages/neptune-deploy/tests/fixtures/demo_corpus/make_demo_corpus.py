@@ -13,7 +13,9 @@ source's bytes against ``corpus.lock.json``.
 ``downtime/downtime_log.csv`` is PLANT-2's CMMS downtime log from corpus 2.0.0 (``CORPUS_2``,
 harness PR #143), committed as a source because that corpus version is not on main yet. It is
 ingested on its own into ``downtime_package/``, so ``package/`` does not change when it lands.
-Run from the repository root::
+``syslog/`` is PLANT-2's syslog export from corpus 2.1.0 (``CORPUS_2_1``, with the ``MsgID``
+column), committed and ingested on its own into ``syslog_package/`` in the same way. Run from the
+repository root::
 
     uv run --all-packages --all-groups python \
         packages/neptune-deploy/tests/fixtures/demo_corpus/make_demo_corpus.py
@@ -36,6 +38,11 @@ DOWNTIME_PACKAGE: Final = HERE / "downtime_package"
 DOWNTIME_PATH: Final = "sites/PLANT-2/cmms/downtime_log.csv"
 # Its content id in acceptance 2.0.0's corpus.lock.json.
 CORPUS_2: Final = "sha256:3dc72a6d8664f88e5197d03dc16b955a7b439302b609e6d9b30114035bb3ba58"
+SYSLOG: Final = HERE / "syslog" / "syslog_LOG-P2_2026-09-14.csv"
+SYSLOG_PACKAGE: Final = HERE / "syslog_package"
+SYSLOG_PATH: Final = "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv"
+# Its content id in acceptance 2.1.0's corpus.lock.json (Platform's corpus-event-tables branch).
+CORPUS_2_1: Final = "sha256:aa7fa922273367c8b4b05835b460161536f41489e4730cb960888a5cc9f4826d"
 FILES: Final = (
     "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_C.pdf",
     "sites/PLANT-2/cell3/documents/commissioning_CR-C3-2026-02.pdf",
@@ -94,6 +101,7 @@ def _ingest(files: dict[str, bytes], target: Path) -> None:
 def main() -> int:
     _ingest(sources(), PACKAGE)
     _ingest({"neptune.yaml": MANIFEST, DOWNTIME_PATH: DOWNTIME.read_bytes()}, DOWNTIME_PACKAGE)
+    _ingest({"neptune.yaml": MANIFEST, SYSLOG_PATH: SYSLOG.read_bytes()}, SYSLOG_PACKAGE)
     return 0
 
 
