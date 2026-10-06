@@ -90,6 +90,11 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   `calibration`, `hardware_configuration`, `hardware_component`, `frame_transform`, `frame_binding`,
   `maintenance_event` and `requalification_record` the same way
   ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md) §1).
-- Ledger catalog API: `CATALOG_API_VERSION = "pending: pinned when MVL-85 (Ledger catalog API) lands"`.
-  Until then Memory codes against the `LedgerReader` Protocol in `neptune_memory/ledger.py` and tests
-  against `StubLedger`.
+- Ledger catalog API: `CATALOG_API_VERSION = "1.7.0"` (`contracts/catalog-api/v1.7.0/`, locked in
+  `contracts/lock.toml`). Memory reads thread membership from the catalog's `threads_of` answers (`ThreadsOf`,
+  `Membership`, `UnresolvedMembership`, `ThreadKey`), parsed from the published wire form by
+  `neptune_memory.ledger.threads_of_from_json` without the bookkeeping `api_version`, `as_of` and `findings`;
+  it imports no Ledger code ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)). It reads through
+  the `LedgerReader` Protocol in `neptune_memory/ledger.py`; the `memory` CLI's Ledger export carries the
+  answers under `threads`. The `ledger_thread` stand-in (ADR 0003 §1) stays for the archetype goldens and
+  unit tests; a reader that answers no thread queries is read through it alone.

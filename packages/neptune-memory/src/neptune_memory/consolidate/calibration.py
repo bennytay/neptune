@@ -78,6 +78,7 @@ from neptune_memory.consolidate.identity_records import (
     Malformed,
     clock,
 )
+from neptune_memory.consolidate.threads import catalog_threads
 from neptune_memory.schema.claim import (
     MAX_DELTA_VALUES,
     DeclaredTransform,
@@ -282,6 +283,12 @@ def _read(ledger: LedgerReader, previous: Sequence[Claim]) -> _View:
             for cited in thread.evidence:
                 view.anchors.setdefault((node.node_type, _key(cited)), set()).add(node)
                 view.cites.setdefault(node, set()).add(_key(cited))
+    catalog = catalog_threads(ledger, seen.keys() - conflicted)  # ADR 0018 §1
+    view.nodes |= catalog.nodes
+    for (node_type, anchor), nodes in catalog.anchors.items():
+        view.anchors.setdefault((node_type, anchor), set()).update(nodes)
+        for node in nodes:
+            view.cites.setdefault(node, set()).add(anchor)
     _chains(view, previous)
     return view
 
