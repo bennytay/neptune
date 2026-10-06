@@ -16,16 +16,15 @@ package-schema shape:
   civil clock, only where the evidence states the map.
 - ``site``: the site register, read only for the ids it declares.
 
-One kind is a Ledger stand-in until the compiler records what a manifest says a run involved
-(root ADR 0047 declares it; no record carries it yet): ``run_declaration {id, run, machine, site,
-task, evidence}``. ``run`` names the run by its declared logical id, or by its record as
-``{"namespace": "record", "value": <run record id>}``; ``machine``, ``site`` and ``task`` are
-compiler ``Knowledge`` of a ``LogicalId``; ``evidence`` cites the manifest entry. It is ``stated``.
+- ``run_declaration`` (root ADR 0072 §2, package-schema 9): what a manifest entry says one ``Run``
+  record involved. ``run`` is that record's id; ``machine``, ``site`` and ``task`` are ``Knowledge``
+  of a ``LogicalId``; it is ``stated`` and its ``provenance`` cites the entry. The declared
+  ``logical_id`` (the user's run name) is read and not used: it never names or keys a run node
+  (ADR 0020).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, TypeVar
 
 from neptune.model.alignment import (
@@ -34,10 +33,8 @@ from neptune.model.alignment import (
     clock_mapping_from_json,
     run_assembly_from_json,
 )
-from neptune.model.ids import LogicalId, RecordId, logical_id_from_json, parse_record_id
-from neptune.model.knowledge import Ambiguous, Known, from_json
-from neptune.model.provenance import EvidenceRef, evidence_ref_from_json, provenance_from_json
-from neptune.model.run import Run, run_from_json
+from neptune.model.knowledge import Ambiguous, Known
+from neptune.model.run import run_declaration_from_json, run_from_json
 from neptune.model.source import SourceRevision, source_revision_from_json
 from neptune.model.world import Site, site_from_json
 from neptune_memory.consolidate.identity_records import Clock, Malformed, clock, declared
@@ -45,8 +42,10 @@ from neptune_memory.consolidate.identity_records import Clock, Malformed, clock,
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
+    from neptune.model.ids import LogicalId
     from neptune.model.jsonvalue import JsonValue
     from neptune.model.knowledge import Knowledge
+    from neptune.model.run import Run, RunDeclaration
 
 _T = TypeVar("_T")
 
@@ -59,7 +58,7 @@ TIMESTAMP_DOMAIN: Final = "timestamp_domain"
 SITE: Final = "site"
 RUN_DECLARATION: Final = "run_declaration"
 
-# The namespace a ``run_declaration`` uses to name a run that declares no logical id by its record.
+# The namespace of a run node keyed by its record, for a run that declares no logical id.
 RECORD_NAMESPACE: Final = "record"
 
 __all__ = [
@@ -72,7 +71,6 @@ __all__ = [
     "SOURCE_REVISION",
     "TIMESTAMP_DOMAIN",
     "Clock",
-    "Declaration",
     "Inferred",
     "Malformed",
     "assembly",
@@ -140,56 +138,8 @@ def site(record: Mapping[str, object]) -> Site:
     return parsed
 
 
-@dataclass(frozen=True)
-class Declaration:
-    """What a manifest entry says a run involved (the ``run_declaration`` stand-in)."""
-
-    record: RecordId
-    run: LogicalId
-    machine: Knowledge[LogicalId]
-    site: Knowledge[LogicalId]
-    task: Knowledge[LogicalId]
-    evidence: tuple[EvidenceRef, ...]
-
-
-_DECLARATION_KEYS: Final = frozenset({"evidence", "id", "kind", "machine", "run", "site", "task"})
-
-
-def _logical_id(data: JsonValue) -> LogicalId:
-    return declared(logical_id_from_json(data))
-
-
-def _knowledge(record: Mapping[str, object], name: str) -> Knowledge[LogicalId]:
-    try:
-        value = from_json(record[name], _logical_id, provenance_from_json)  # type: ignore[arg-type]
-    except Malformed:
-        raise
-    except (ValueError, TypeError, KeyError, RecursionError) as exc:
-        raise Malformed(f"{name!r}: {exc}") from exc
-    return value
-
-
-def declaration(record: Mapping[str, object]) -> Declaration:
-    keys = set(record)
-    if keys != _DECLARATION_KEYS:
-        missing, extra = sorted(_DECLARATION_KEYS - keys), sorted(keys - _DECLARATION_KEYS)
-        raise Malformed(f"run_declaration keys: missing {missing}, unexpected {extra}")
-    evidence = record["evidence"]
-    if not isinstance(evidence, (list, tuple)) or not evidence:
-        raise Malformed("'evidence' must be a non-empty list of evidence refs")
-    try:
-        rid = parse_record_id(record["id"])  # type: ignore[arg-type]
-        named = _logical_id(record["run"])  # type: ignore[arg-type]
-        refs = tuple(evidence_ref_from_json(item) for item in evidence)
-    except Malformed:
-        raise
-    except (ValueError, TypeError, KeyError, RecursionError) as exc:
-        raise Malformed(str(exc) or type(exc).__name__) from exc
-    return Declaration(
-        record=rid,
-        run=named,
-        machine=_knowledge(record, "machine"),
-        site=_knowledge(record, "site"),
-        task=_knowledge(record, "task"),
-        evidence=refs,
-    )
+def declaration(record: Mapping[str, object]) -> RunDeclaration:
+    """The compiler's ``RunDeclaration``; a declared id that is blank or padded is malformed."""
+    parsed = _strict(run_declaration_from_json, record)
+    _declared_ids(parsed.logical_id, parsed.machine, parsed.site, parsed.task)
+    return parsed

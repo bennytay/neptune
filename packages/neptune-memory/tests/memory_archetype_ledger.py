@@ -212,7 +212,7 @@ def _warehouse_runs() -> dict[str, list[Record]]:
         packages.setdefault(f"{day}-manifest", []).append(
             runs.declaration(
                 f"amr-0{k}",
-                runs.by_record(run_id),
+                run_id,
                 site=NORTH if k <= 3 else SOUTH,
                 task=LogicalId("task", "pick-wave-1"),
             )
@@ -454,7 +454,7 @@ def _missions() -> tuple[dict[str, list[Record]], dict[str, list[Record]]]:
         ("J-1044", 20_000, 29_000, TOTE),
         ("J-1045", 30_000, 39_000, None),  # the mission log names no task for it
     ):
-        record, _ = runs.run(
+        record, run_id = runs.run(
             f"missions/{value}.mcap",
             first=at(first, boot),
             last=at(last, boot),
@@ -463,8 +463,8 @@ def _missions() -> tuple[dict[str, list[Record]], dict[str, list[Record]]]:
         )
         missions.append(record)
         if task is not None:
-            manifest.append(runs.declaration(value, _job(value), task=task))
-    other, _ = runs.run(
+            manifest.append(runs.declaration(value, run_id, task=task))
+    other, other_id = runs.run(
         "missions/J-2001.mcap",
         first=at(1_000, boot8),
         last=at(9_000, boot8),
@@ -472,7 +472,7 @@ def _missions() -> tuple[dict[str, list[Record]], dict[str, list[Record]]]:
         logical_id=_job("J-2001"),
     )
     missions.append(other)
-    manifest.append(runs.declaration("J-2001", _job("J-2001"), task=TOTE))
+    manifest.append(runs.declaration("J-2001", other_id, task=TOTE))
     assist, _ = epi.intervention(
         "INT-1187",
         machines=[AMR_A],
@@ -495,7 +495,7 @@ def _pick_cycle() -> list[Record]:
     mapping, and a human intervention mid-task stated on the console clock."""
     boot_record, boot = runs.domain("cell-3 arm boot", civil=False)
     console_record, console = runs.domain("cell console", civil=True)
-    cycle, _ = runs.run(
+    cycle, cycle_id = runs.run(
         "cell-3/cycle-0412.bag",
         first=at(5 * SECOND, boot),
         last=at(65 * SECOND, boot),
@@ -513,7 +513,7 @@ def _pick_cycle() -> list[Record]:
         console_record,
         cycle,
         runs.mapping("cell-3 ptp", boot, console, anchor=(0, EPOCH_NS), bound=2 * SECOND),
-        runs.declaration("cycle 0412", CYCLE, task=BIN_PICK),
+        runs.declaration("cycle 0412", cycle_id, task=BIN_PICK),
         stop,
     ]
 
