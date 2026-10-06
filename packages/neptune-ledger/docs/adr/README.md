@@ -23,3 +23,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0014](0014-lance-media-store-and-evidence-resolution-to-bytes.md) | Lance media store: evidence references resolved to verified bytes, and lazy hydration | Accepted |
 | [0015](0015-time-and-spatial-indexes-per-clock-and-per-reference.md) | Time and spatial indexes: intervals per clock, extents per declared frame or CRS | Accepted |
 | [0016](0016-query-engine-planner-budgets-and-sql-passthrough.md) | Query engine: a rule-based planner, budgets that cut only prefixes, and a sealed SQL passthrough | Accepted |
+| [0017](0017-configuration-snapshots-open-their-anchored-configuration-thread.md) | Configuration snapshots open their anchored configuration thread; every other unthreaded kind decided | Accepted |
