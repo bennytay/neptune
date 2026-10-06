@@ -1,0 +1,4 @@
+Downtime ID,Asset ID,Site,Location,Stop Type,Stopped,Restarted,Reason,Reported By,Related
+DT-26-0709-01,ARM-3A,PLANT-2,CELL-3,Safety stop,2026-07-09 14:22:00,2026-07-09 14:40:00,Light curtain stop at the pallet gate (near miss),A. Novak,INC-C3-0004
+DT-26-0910-01,ARM-3A,PLANT-2,CELL-3,Planned,2026-09-10 13:50:00,2026-09-10 16:20:00,Finger set change and wrist camera bracket refit,K. Patel,WO-26-0911
+DT-26-0914-01,ARM-3A,PLANT-2,CELL-3,Protective stop,2026-09-14 14:33:10,,Collision at pick P1; E-stop at OP-2,A. Novak,INC-C3-0011; WO-26-0915

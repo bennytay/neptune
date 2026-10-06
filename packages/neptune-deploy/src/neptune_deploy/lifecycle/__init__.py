@@ -11,6 +11,7 @@ the same package, files and mapper version give a byte-identical result.
 - ``map_package(base_root, mappings, out, templates)``: read, map, write through the compiler's
   streaming writer (ADR 0012 §3); returns the package id;
 - ``preset(name)`` / ``PRESETS``: the mapping files shipped for common exports;
+- ``template_preset(name)`` / ``TEMPLATE_PRESETS``: the document templates shipped for common forms;
 - ``TemplateRegistry`` / ``load_template``: the document templates a run may match.
 """
 
@@ -50,6 +51,8 @@ from neptune_deploy.lifecycle.templates import (
 
 PRESET_DIR: Final = Path(__file__).parent / "presets"
 PRESETS: Final = tuple(sorted(path.stem for path in PRESET_DIR.glob("*.json")))
+TEMPLATE_PRESET_DIR: Final = PRESET_DIR / "templates"
+TEMPLATE_PRESETS: Final = tuple(sorted(p.stem for p in TEMPLATE_PRESET_DIR.glob("*.json")))
 
 __all__ = [
     "DOCUMENT_FINDINGS",
@@ -60,6 +63,7 @@ __all__ = [
     "MAPPER_VERSION",
     "MAPPING_SCHEMA",
     "PRESETS",
+    "TEMPLATE_PRESETS",
     "TEMPLATE_SCHEMA",
     "DocumentTemplate",
     "LifecycleMapping",
@@ -72,6 +76,7 @@ __all__ = [
     "parse_mapping",
     "parse_template",
     "preset",
+    "template_preset",
 ]
 
 
@@ -80,6 +85,13 @@ def preset(name: str) -> LifecycleMapping:
     if name not in PRESETS:
         raise MappingError(f"no preset {name!r}: {list(PRESETS)}")
     return load_mapping(PRESET_DIR / f"{name}.json")
+
+
+def template_preset(name: str) -> DocumentTemplate:
+    """A shipped document template by name (``TEMPLATE_PRESETS``)."""
+    if name not in TEMPLATE_PRESETS:
+        raise MappingError(f"no template preset {name!r}: {list(TEMPLATE_PRESETS)}")
+    return load_template(TEMPLATE_PRESET_DIR / f"{name}.json")
 
 
 def map_files(

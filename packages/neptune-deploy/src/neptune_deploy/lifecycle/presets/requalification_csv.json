@@ -1,0 +1,193 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "requalification.csv",
+  "version": "1",
+  "description": "A requalification sheet exported as CSV, one requalification per row: up to three regression tests (Test n, Result n), the overall Result and the return-to-service Decision, all verbatim; nothing here decides that a requalification passed. The place is a Site column or, for a cell's own sheet, a Cell column (a table with both matches both rules and is a finding). The sheet's times are wall-clock text with no zone: declare it in a copy if the site states one.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "requalification_by_site",
+      "kind": "requalification_record",
+      "requires": [
+        "Requal ID",
+        "Performed",
+        "Site"
+      ],
+      "ignore": [
+        "Inspector"
+      ],
+      "fields": {
+        "identifiers": [
+          {
+            "column": "Requal ID",
+            "namespace": "requalification.id"
+          }
+        ],
+        "site": {
+          "column": "Site",
+          "namespace": "requalification.site"
+        },
+        "machines": [
+          {
+            "column": "Robot",
+            "namespace": "requalification.robot"
+          }
+        ],
+        "related": [
+          {
+            "column": "Work Order",
+            "namespace": "requalification.work_order"
+          }
+        ],
+        "performed": {
+          "column": "Performed",
+          "format": "%Y-%m-%d %H:%M",
+          "required": true
+        },
+        "cause": {
+          "column": "Cause"
+        },
+        "corrective_actions": [
+          {
+            "column": "Corrective Actions",
+            "split": ";"
+          }
+        ],
+        "tests": [
+          {
+            "name": {
+              "column": "Test 1"
+            },
+            "result": {
+              "column": "Result 1"
+            }
+          },
+          {
+            "name": {
+              "column": "Test 2"
+            },
+            "result": {
+              "column": "Result 2"
+            }
+          },
+          {
+            "name": {
+              "column": "Test 3"
+            },
+            "result": {
+              "column": "Result 3"
+            }
+          }
+        ],
+        "result": {
+          "column": "Result"
+        },
+        "return_to_service": {
+          "decision": {
+            "column": "Decision"
+          },
+          "authority": {
+            "column": "Decided By"
+          },
+          "time": {
+            "column": "Decided On",
+            "format": "%Y-%m-%d %H:%M",
+            "required": true
+          }
+        }
+      }
+    },
+    {
+      "id": "requalification_by_cell",
+      "kind": "requalification_record",
+      "requires": [
+        "Requal ID",
+        "Performed",
+        "Cell"
+      ],
+      "ignore": [
+        "Inspector"
+      ],
+      "fields": {
+        "identifiers": [
+          {
+            "column": "Requal ID",
+            "namespace": "requalification.id"
+          }
+        ],
+        "site": {
+          "column": "Cell",
+          "namespace": "requalification.cell"
+        },
+        "machines": [
+          {
+            "column": "Robot",
+            "namespace": "requalification.robot"
+          }
+        ],
+        "related": [
+          {
+            "column": "Work Order",
+            "namespace": "requalification.work_order"
+          }
+        ],
+        "performed": {
+          "column": "Performed",
+          "format": "%Y-%m-%d %H:%M",
+          "required": true
+        },
+        "cause": {
+          "column": "Cause"
+        },
+        "corrective_actions": [
+          {
+            "column": "Corrective Actions",
+            "split": ";"
+          }
+        ],
+        "tests": [
+          {
+            "name": {
+              "column": "Test 1"
+            },
+            "result": {
+              "column": "Result 1"
+            }
+          },
+          {
+            "name": {
+              "column": "Test 2"
+            },
+            "result": {
+              "column": "Result 2"
+            }
+          },
+          {
+            "name": {
+              "column": "Test 3"
+            },
+            "result": {
+              "column": "Result 3"
+            }
+          }
+        ],
+        "result": {
+          "column": "Result"
+        },
+        "return_to_service": {
+          "decision": {
+            "column": "Decision"
+          },
+          "authority": {
+            "column": "Decided By"
+          },
+          "time": {
+            "column": "Decided On",
+            "format": "%Y-%m-%d %H:%M",
+            "required": true
+          }
+        }
+      }
+    }
+  ]
+}

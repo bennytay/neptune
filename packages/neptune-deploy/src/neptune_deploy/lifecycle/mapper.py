@@ -63,7 +63,7 @@ from neptune_deploy.lifecycle.shapes import Shape, fields_of
 from neptune_deploy.lifecycle.times import read_time
 
 MAPPER_ID: Final = "deploy_lifecycle_map"
-MAPPER_VERSION: Final = "0.2.0"
+MAPPER_VERSION: Final = "0.3.0"
 STATED: Final = AssertionKind.STATED
 LEDGER_KINDS: Final = frozenset({"source_artifact", "source_revision", "source_absence"})
 # How many rows and records one grouped finding names (as root ADR 0042 §10 does).
