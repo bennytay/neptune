@@ -10,7 +10,7 @@ consumes nothing, and an entry in `contracts/packages.toml`.
 
 ## Publishes
 
-`query-packet` **1.4.0, stable** (`contracts/query-packet/v1.4.0/`), consumed by Deploy and Learn. Fixed by
+`query-packet` **1.5.0, stable** (`contracts/query-packet/v1.5.0/`), consumed by Deploy and Learn. Fixed by
 [ADR 0002](adr/0002-query-language.md) (query), [ADR 0003](adr/0003-the-context-packet.md) (packet) and
 [ADR 0006](adr/0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) (publication, answer checks, C1 gate
 amendments). 1.1.0 is the additive pin bump of [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md):
@@ -23,7 +23,9 @@ twelve new predicates join the predicate enums and its `delta` literal joins `Ty
 removed, so every 1.x query and packet is valid at 1.3.0. 1.4.0 is the additive pin bump of
 [ADR 0014](adr/0014-graph-schema-2-2-0-pin-and-query-packet-1-4-0.md): graph-schema 2.2.0's `declared_value` and
 `stated_cause` join the predicate enums and its `declared_value` literal joins `TypedLiteral`; every 1.x query
-and packet is valid at 1.4.0.
+and packet is valid at 1.4.0. 1.5.0 adds the `compare_runs` explain clause of
+[ADR 0015](adr/0015-compare-runs-and-named-runs-and-events.md) (`Query/$defs/CompareRuns`): what memory states
+differs between two runs; it adds no trail, its claims are the packet's items, so every 1.x packet is valid.
 
 - **Owner module** `neptune_context.contract`.
   - `contract_schema()` is the registry export. It embeds both halves' schemas verbatim, each as its own

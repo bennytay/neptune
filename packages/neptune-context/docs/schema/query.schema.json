@@ -107,6 +107,26 @@
       ],
       "type": "object"
     },
+    "CompareRuns": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/Subject"
+        },
+        "before": {
+          "$ref": "#/$defs/Subject"
+        },
+        "kind": {
+          "const": "compare_runs"
+        }
+      },
+      "required": [
+        "after",
+        "before",
+        "kind"
+      ],
+      "type": "object"
+    },
     "DeclaredId": {
       "pattern": "^[a-z][a-z0-9_.\\-]*:[\\s\\S]+$",
       "type": "string"
@@ -201,6 +221,9 @@
         },
         {
           "$ref": "#/$defs/Diff"
+        },
+        {
+          "$ref": "#/$defs/CompareRuns"
         }
       ]
     },
