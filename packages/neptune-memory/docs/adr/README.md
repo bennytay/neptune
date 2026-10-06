@@ -22,3 +22,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0013](0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) | Event index: evidence-linked event claims and co-occurrence that is never cause | Accepted |
 | [0014](0014-calibration-history-and-drift-consolidator.md) | The calibration history and drift consolidator | Accepted |
 | [0015](0015-coverage-and-health-consolidator.md) | The coverage and health consolidator | Accepted |
+| [0020](0020-runs-read-the-compilers-run-declaration.md) | The run consolidator reads the compiler's run_declaration | Accepted |
