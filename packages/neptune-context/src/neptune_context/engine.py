@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import stat
+import zlib
 from typing import TYPE_CHECKING, Final
 
 from neptune_memory.schema.codec import graph_from_json
@@ -72,6 +73,7 @@ if TYPE_CHECKING:
 ENGINE_ID: Final = "neptune-context.local"
 ENGINE_VERSION: Final = "1"
 MAX_GRAPH_BYTES: Final = 256 * 1024 * 1024  # a graph document is read whole into memory
+_GZIP_CHUNK: Final = 64 * 1024
 
 
 class LocalEngine:
@@ -292,18 +294,55 @@ def read_graph(path: Path) -> IndexedReader:
     return IndexedReader(read_graph_document(path))
 
 
+def _read_gzip(path: Path) -> bytes:
+    """The decompressed bytes of the gzip file at ``path``: one member, nothing after it.
+
+    ``MAX_GRAPH_BYTES`` bounds both the file and what it decompresses to; the decoder is fed
+    one chunk at a time and asked for no more than the bytes still allowed, so a bomb is
+    refused after at most the cap in memory, never expanded first. A truncated stream, a second
+    member, trailing bytes or bytes that are not gzip are a ``ValueError``."""
+    decoder = zlib.decompressobj(wbits=zlib.MAX_WBITS | 16)  # the gzip wrapper, one member
+    out = bytearray()
+    read = 0
+    try:
+        with path.open("rb") as handle:
+            while not decoder.eof and (chunk := handle.read(_GZIP_CHUNK)):
+                read += len(chunk)
+                if read > MAX_GRAPH_BYTES:
+                    raise ValueError(f"{path.name} is larger than {MAX_GRAPH_BYTES} bytes")
+                while chunk and not decoder.eof:
+                    out += decoder.decompress(chunk, MAX_GRAPH_BYTES + 1 - len(out))
+                    if len(out) > MAX_GRAPH_BYTES:
+                        raise ValueError(
+                            f"{path.name} decompresses to more than {MAX_GRAPH_BYTES} bytes"
+                        )
+                    chunk = decoder.unconsumed_tail
+            trailing = decoder.eof and (decoder.unused_data or handle.read(1))
+    except zlib.error as exc:
+        raise ValueError(f"{path.name} is not a valid gzip file: {exc}") from exc
+    if not decoder.eof:
+        raise ValueError(f"{path.name} is a truncated gzip file")
+    if trailing:
+        raise ValueError(f"{path.name} has bytes after its gzip member (one member only)")
+    return bytes(out)
+
+
 def read_graph_document(path: Path) -> GraphDocument:
     """A Memory graph document at ``path``, read strictly (bounded size, no duplicate keys, no
     NaN) and decoded by Memory's codec (ids, order, generation all checked). Raises
     ``ValueError`` or ``OSError``; nothing else. Only a regular file is read: a FIFO or a device
-    could block or never end. Hosts that index the document itself (the planner's declared
-    identities, a lexical channel) read it once here."""
+    could block or never end. A name ending ``.gz`` is a gzip file (Memory's pipeline-built
+    snapshot is ``.json.gz``): see ``_read_gzip`` for its limits. Hosts that index the document
+    itself (the planner's declared identities, a lexical channel) read it once here."""
     if not stat.S_ISREG(path.stat().st_mode):
         raise ValueError(f"{path.name} is not a regular file")
-    with path.open("rb") as handle:
-        data = handle.read(MAX_GRAPH_BYTES + 1)
-    if len(data) > MAX_GRAPH_BYTES:
-        raise ValueError(f"{path.name} is larger than {MAX_GRAPH_BYTES} bytes")
+    if path.suffix == ".gz":
+        data = _read_gzip(path)
+    else:
+        with path.open("rb") as handle:
+            data = handle.read(MAX_GRAPH_BYTES + 1)
+        if len(data) > MAX_GRAPH_BYTES:
+            raise ValueError(f"{path.name} is larger than {MAX_GRAPH_BYTES} bytes")
     try:
         document = json.loads(data, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
         return graph_from_json(document)

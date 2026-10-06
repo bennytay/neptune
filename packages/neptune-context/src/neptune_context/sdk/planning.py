@@ -6,7 +6,7 @@ one caller's declared defaults and one model client; ``Client(..., planner=...)`
 beside the packet, and runs the planned query only when the plan is ``ready``.
 
 ``entity_index(document)`` is the Demo v1 resolver: a ``DeclaredIdentifierIndex`` over the
-declared identifiers a Memory graph document names (``asset-tag:ARM-3A``, ``site-code:PLANT-2``),
+declared identifiers a Memory graph document names (``servicenow.ci:ARM-3A``, ``manifest:PLANT-2``),
 because the catalog API cannot list declared identifiers yet (ADR 0005 §3). Content-addressed
 node ids (runs, events, clocks: ``record:rec:sha256:...``) are not names anyone types and are left
 out, and so is an identifier the graph declares under two kinds (never settled silently). Only

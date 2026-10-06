@@ -1,7 +1,7 @@
 """``python -m neptune_context.mcp``: serve the Neptune tools to an agent over stdio (ADR 0004 §6).
 
     python -m neptune_context.mcp --url https://neptune.example   # token from $NEPTUNE_TOKEN
-    python -m neptune_context.mcp --memory graph.json             # the local engine (ADR 0007)
+    python -m neptune_context.mcp --memory graph.json[.gz]        # the local engine (ADR 0007)
     python -m neptune_context.mcp --packets tests/golden/packets  # fixtures: recorded answers only
 
 Claude Code: ``claude mcp add neptune -- python -m neptune_context.mcp --memory graph.json``, or
@@ -100,7 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     where = parser.add_mutually_exclusive_group(required=True)
     where.add_argument("--url", help="base URL of a Neptune engine (https, or loopback http)")
-    where.add_argument("--memory", type=Path, help="Memory graph document (JSON) to answer over")
+    where.add_argument(
+        "--memory", type=Path, help="Memory graph document (JSON, or .json.gz) to answer over"
+    )
     where.add_argument("--packets", type=Path, help="directory of recorded packet JSON (fixtures)")
     planner = parser.add_mutually_exclusive_group()
     planner.add_argument(
