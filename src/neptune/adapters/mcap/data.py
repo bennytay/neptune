@@ -36,6 +36,7 @@ from neptune.adapters.mcap.ingest import (
     as_place,
     columns,
     decoding_of,
+    definition_of,
     over_of,
     ticks,
 )
@@ -66,6 +67,13 @@ from neptune.adapters.mcap.scan import (
     read_exact,
     scan,
 )
+from neptune.adapters.rosmsg.status import (
+    Recognised,
+    Sample,
+    StatusWriter,
+    Unrecognised,
+    recognised,
+)
 from neptune.adapters.rosmsg.streams import (
     Decoding,
     Undecoded,
@@ -77,7 +85,7 @@ from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, Unknown
-from neptune.model.provenance import Row
+from neptune.model.provenance import EvidenceRef, Row
 from neptune.model.series import (
     SEQ,
     ColumnType,
@@ -86,7 +94,7 @@ from neptune.model.series import (
     locator_column,
     state_column,
 )
-from neptune.model.time import INT64_MAX
+from neptune.model.time import INT64_MAX, Timestamp
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
 
 if TYPE_CHECKING:
@@ -112,6 +120,9 @@ class Slot:
     decoding: Decoding | None = None
     columns: tuple[tuple[str, ColumnType, bool], ...] = ()
     undecoded: Undecoded = field(default_factory=Undecoded)
+    clocks: tuple[RecordId, ...] = ()  # the stream's clocks, in order
+    status: Recognised | None = None  # what its messages state as records (ADR 0071)
+    definition: EvidenceRef | None = None  # its definition's bytes
 
 
 # A channel's messages in one chunk, in record order: their offsets and log times, 16 bytes each.
@@ -143,6 +154,8 @@ class _Held:
 
 
 _MESSAGE_HEAD: Final = struct.Struct("<HIQQ")
+# Where a Message record's payload starts, from the record's first byte (its row's last step).
+MESSAGE_PAYLOAD: Final = RECORD_HEADER + MESSAGE_FIELDS
 
 
 def _content(source: SourceReader, place: Place) -> bytes:
@@ -180,13 +193,22 @@ class Data:
             decoding = decoding_of(declared, declared.channel(place), schema, config, over)
             usable = decoding if isinstance(decoding, Decoding) else None
             kinds = columns(self.chunked, decoding)
+            ids = self.cite.channel(place)
+            clocks = [self.cite.log_time, ids.publish]
+            if usable is not None and usable.has_header:
+                clocks.append(self.cite.header_clock(place))
+            status = recognised(decoding)
             self.slots[as_int(channel)] = Slot(
-                self.cite.channel(place).stream,
+                ids.stream,
                 as_int(seq),
                 {name: [] for name, _, _ in kinds},
                 usable,
                 kinds,
+                clocks=tuple(clocks),
+                status=None if isinstance(status, Unrecognised) else status,
+                definition=definition_of(declared, schema, self.cite) if status else None,
             )
+        self.status = StatusWriter(config)
         self.indexes: list[tuple[Place, ChunkIndex]] | None = None
         if "index" in context:
             places = [as_place(place) for place in as_list(context["index"])]
@@ -246,6 +268,8 @@ class Data:
                 {"size": self.source.size},
             )
         self._payload_findings()
+        self._status_findings()
+        self.records.extend(self.status.records)
         return ChunkOutput(
             records=tuple(self.records),
             series=tuple(self._batches()),
@@ -384,10 +408,42 @@ class Data:
             rows[locator_column(step, "length")].append(length)
             rows[locator_column(step, "offset")].append(offset)
         if slot.decoding is not None and payload is not None:
-            decoded = decode_row(slot.decoding, payload, size)
+            limit = slot.decoding.decoder.limits.max_message_bytes
+            read: bytes | memoryview | Callable[[], bytes | memoryview] = payload
+            if slot.status is not None and (size is None or size <= limit):
+                read = payload()  # read once, for the row and the records
+            decoded = decode_row(slot.decoding, read, size)
             add_cells(rows, slot.decoding, decoded, HEADER_CLOCK)
             if decoded.problem is not None:
                 slot.undecoded.add(decoded.problem.reason, Place(steps))
+            if slot.status is not None:
+                self._status(slot, steps, (log_time, publish_time), decoded.stamp, read)
+
+    def _status(
+        self,
+        slot: Slot,
+        steps: tuple[tuple[int, int], ...],
+        times: tuple[int, int],
+        stamp: int | None,
+        payload: "bytes | memoryview | Callable[[], bytes | memoryview]",
+    ) -> None:
+        """The status or safety-state records a message states (ADR 0071)."""
+        assert slot.status is not None and slot.decoding is not None
+        found: list[Knowledge[Timestamp]] = []
+        for clock, value in zip(slot.clocks, (*times, stamp), strict=False):
+            tick = ticks(value) if value is not None else None
+            found.append(Known(Timestamp(tick, clock)) if tick is not None else Unknown())
+        place = Place(steps)
+        sample = Sample(
+            self.source.content_id, place.locator(), MESSAGE_PAYLOAD, tuple(found), place
+        )
+        if callable(payload):  # a payload past max_message_bytes is not read
+            self.status.leave(slot.stream, "message_limit", sample)
+            return
+        decoder = slot.decoding.decoder
+        self.status.add(
+            slot.status, slot.stream, slot.definition, sample, payload, decoder.cdr, decoder.limits
+        )
 
     def _top_message(self, head: bytes, record: TopRecord) -> None:
         """A message outside chunks, in a file whose messages are not chunked.
@@ -854,6 +910,23 @@ class Data:
                         for name, kind, repeated in slot.columns
                     ),
                 )
+
+    def _status_findings(self) -> None:
+        """One finding per stream whose messages here left status records unwritten."""
+        channels = {slot.stream: channel for channel, slot in self.slots.items()}
+        for stream, place, report in self.status.reports():
+            assert isinstance(place, Place)
+            self.findings.append(
+                self.reporter.finding(
+                    report.code,
+                    report.category,
+                    report.severity,
+                    place,
+                    report.message,
+                    {**report.details, "id": channels[stream]},
+                    records=(stream,),
+                )
+            )
 
     def _payload_findings(self) -> None:
         """One finding per stream whose payloads this chunk could not all decode."""

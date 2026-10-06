@@ -41,6 +41,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.rosbag2 import metadata, storage
 from neptune.adapters.rosbag2._sqlite import MAGIC, Database, SqliteError, Walk, read_schema
+from neptune.adapters.rosmsg.status import STATUS_CONVENTION, STATUS_FINDINGS, STATUS_OPTIONS
 from neptune.adapters.rosmsg.streams import with_decode_options
 
 DEFAULT_MAX_ROWS: Final = 100_000
@@ -51,9 +52,13 @@ def _code(name: str, description: str) -> Documented:
     return Documented(f"rosbag2.{name}", description)
 
 
+def _sorted(*documented: Documented) -> tuple[Documented, ...]:
+    return tuple(sorted(documented, key=lambda item: item.name))
+
+
 DESCRIPTOR: Final = AdapterDescriptor(
     id="rosbag2",
-    version="0.2.0",
+    version="0.3.0",
     abi=ABI_VERSION,
     summary="ROS 2 bags: metadata.yaml as stated tables and a run, sqlite3 storage as a run and a"
     " stream per topic with every message's cell.",
@@ -61,10 +66,19 @@ DESCRIPTOR: Final = AdapterDescriptor(
         FormatSpec("rosbag2 metadata", extensions=(".yaml",)),
         FormatSpec("rosbag2 sqlite3 storage", extensions=(".db3",), magic=(Magic(0, MAGIC),)),
     ),
-    record_kinds=("run", "stream", "structured_record", "structured_table", "timestamp_domain"),
-    config=with_decode_options(),
+    record_kinds=(
+        "run",
+        "safety_state",
+        "status_report",
+        "stream",
+        "structured_record",
+        "structured_table",
+        "timestamp_domain",
+    ),
+    config=with_decode_options(*STATUS_OPTIONS),
     libraries=(),
-    finding_codes=(
+    finding_codes=_sorted(
+        *(_code(code, text) for code, text in STATUS_FINDINGS),
         _code("bad_database", "the source is not a SQLite database this reader opens (corrupt)"),
         _code(
             "bad_field",
@@ -209,7 +223,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " declares, cited after its topics row",
         ),
     ),
-    conventions=(
+    conventions=_sorted(
+        Documented(*STATUS_CONVENTION),
         Documented(
             "chunks",
             "a metadata file is one chunk; a sqlite3 file is a declarations chunk (clock, run,"

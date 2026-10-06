@@ -63,6 +63,7 @@ from neptune.adapters.rosbag1.records import (
     parse_record,
 )
 from neptune.adapters.rosbag1.summary import summarize
+from neptune.adapters.rosmsg.status import STATUS_CONVENTION, STATUS_FINDINGS, STATUS_OPTIONS
 from neptune.adapters.rosmsg.streams import with_decode_options
 
 DEFAULT_CHUNK_BYTES: Final = 64 * 1024 * 1024
@@ -82,15 +83,20 @@ def _code(name: str, description: str) -> Documented:
     return Documented(f"rosbag1.{name}", description)
 
 
+def _sorted(*documented: Documented) -> tuple[Documented, ...]:
+    return tuple(sorted(documented, key=lambda item: item.name))
+
+
 DESCRIPTOR: Final = AdapterDescriptor(
     id="rosbag1",
-    version="0.2.0",
+    version="0.3.0",
     abi=ABI_VERSION,
     summary="ROS 1 bags: a run, a stream per connection with every message's record time and"
     " exact bytes, the message definitions and md5sums as the publishers stated them.",
     formats=(FormatSpec("ROS 1 bag", extensions=(".bag",), magic=(Magic(0, MAGIC),)),),
-    record_kinds=("run", "stream", "timestamp_domain"),
+    record_kinds=("run", "safety_state", "status_report", "stream", "timestamp_domain"),
     config=with_decode_options(
+        *STATUS_OPTIONS,
         ConfigOption(
             "max_chunk_bytes",
             DEFAULT_MAX_CHUNK_BYTES,
@@ -105,7 +111,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
     ),
     libraries=LIBRARIES,
-    finding_codes=(
+    finding_codes=_sorted(
+        *(_code(code, text) for code, text in STATUS_FINDINGS),
         _code(
             "bad_magic", "the source does not start with the ROS 1 bag 2.0 magic; nothing is read"
         ),
@@ -231,7 +238,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " declares, cited after its Connection record",
         ),
     ),
-    conventions=(
+    conventions=_sorted(
+        Documented(*STATUS_CONVENTION),
         Documented(
             "chunks",
             "planned chunk 0 holds the declarations; the others are byte ranges of whole units"

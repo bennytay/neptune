@@ -41,7 +41,9 @@ from neptune.adapters.flightlog.common import (
     int_cell,
     place_of,
     real_cell,
+    sample_time,
     series_template,
+    status_report,
     text_cell,
     text_value,
     time_field,
@@ -63,11 +65,12 @@ from neptune.adapters.flightlog.ulog_format import FormatError
 from neptune.identity.provenance import EvidenceRecord
 from neptune.model.finding import FindingCategory, Severity
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.knowledge import Knowledge, Known, KnownAbsent, Unknown
+from neptune.model.knowledge import Knowledge, Known, KnownAbsent, NotCovered, Unknown
 from neptune.model.provenance import Row
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Run, Stream
 from neptune.model.series import ColumnType, state_column, value_column
+from neptune.model.status import StatusConvention, StatusReport, StatusValue
 from neptune.model.time import INT64_MAX, MICROSECOND, MILLISECOND, ClockRole, Epoch, Timescale
 from neptune.model.world import CellValue
 
@@ -195,6 +198,7 @@ class Walk:
         self.piece_weight = 0
         self.piece_seq: dict[str, int] = {}
         self.piece_rows: dict[str, int] = {}
+        self.statuses: list[StatusReport] = []  # built in ingest mode only (ADR 0071)
 
     def run(self, start: int, end: int) -> None:
         window = Window(self.source, start, end)
@@ -326,9 +330,11 @@ class Walk:
             self._parameter(fmt, layout, place, payload)
             return
         key = str(fmt.type)
+        status = status_kind(fmt) if name in STATUS_TYPES else None
         if self.plan:
             self.seq[key] = self.seq.get(key, 0) + 1
-            self.piece_weight += 1
+            # a row that is a record too weighs as a table row: a piece's records stay bounded
+            self.piece_weight += TABLE_ROW_WEIGHT if status is not None else 1
             if layout.time_label is None:
                 self.findings.aggregate(
                     "no_time_field",
@@ -368,6 +374,57 @@ class Walk:
         ts = values[layout.time_index] if layout.time_index is not None else None
         self.slots[key].row(
             place, ts, cells, time_state=NOT_COVERED if layout.time_label is None else None
+        )
+        if status is not None:
+            self._status(fmt, layout, status, place, ts, values)
+
+    def _status(
+        self,
+        fmt: Fmt,
+        layout: DfLayout,
+        convention: StatusConvention,
+        place: Place,
+        ts: int | None,
+        values: tuple[object, ...],
+    ) -> None:
+        """The status an ``MSG`` or ``ERR`` record reports (ADR 0071 §1): its text, or its
+        subsystem and error code, as stored. ArduPilot states no level, name or hardware id."""
+        label = layout.time_label
+        clock = None
+        if label is not None:
+            where = self.shared.time_fmt.get(label, (0, HEADER))
+            clock = self.cite.record_id(TimestampDomain.kind, where, time_field(label))
+        by_label = {column: values[layout.starts[i]] for i, column in enumerate(layout.labels)}
+        absent = NotCovered(self.cite.provenance(fmt.place))  # the FMT declares no such column
+        message: Knowledge[str] = absent
+        pairs: Knowledge[tuple[StatusValue, ...]] = absent
+        if convention is StatusConvention.ARDUPILOT_MESSAGE:
+            raw = by_label[MESSAGE_LABEL]
+            text = text_value(raw) if isinstance(raw, bytes) else None
+            message = Known(text) if text else Unknown()
+        else:
+            codes = [by_label[column] for column in ERROR_LABELS]
+            pairs = Known(
+                tuple(
+                    StatusValue(column, code)
+                    for column, code in zip(ERROR_LABELS, codes, strict=True)
+                    if isinstance(code, int)
+                )
+            )
+        self.statuses.append(
+            status_report(
+                self.cite,
+                place,
+                self.slots[str(fmt.type)].stream,
+                convention,
+                sample_time(ts, clock),
+                level=absent,
+                level_names=absent,
+                name=absent,
+                message=message,
+                hardware_id=absent,
+                values=pairs,
+            )
         )
 
     def _utf8(self, what: str, place: Place) -> None:
@@ -422,6 +479,18 @@ class Walk:
             )
         elif fmt.layout is not None and fmt.layout.time_label is not None:
             self.shared.time_fmt.setdefault(fmt.layout.time_label, place)
+        if fmt.layout is not None and fmt.name in STATUS_TYPES and status_kind(fmt) is None:
+            self.findings.aggregate(
+                "status_definition_unrecognised",
+                fmt.name,
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                place,
+                f"a {fmt.name} format without the columns ArduPilot defines for it"
+                f" ({', '.join(STATUS_TYPES[fmt.name])}); its records are rows only, no status"
+                " records",
+                {"type": fmt.name},
+            )
 
     def _parameter(self, fmt: Fmt, layout: DfLayout, place: Place, payload: bytes) -> None:
         if self.plan:
@@ -462,6 +531,28 @@ class Walk:
                 cells.append(int_cell(int(value), provenance))
         header = Known(layout.labels, self.cite.stated(_labels_place(fmt)))
         self.tables.add(PARAMETERS_TABLE, place, tuple(cells), header)
+
+
+# The status records ArduPilot logs (ADR 0071 §1), and the columns each must declare.
+MESSAGE_LABEL: Final = "Message"
+ERROR_LABELS: Final = ("Subsys", "ECode")
+STATUS_TYPES: Final = {"MSG": (MESSAGE_LABEL,), "ERR": ERROR_LABELS}
+_TEXT_CHARS: Final = frozenset("nNZ")
+_INTEGER_CHARS: Final = frozenset("bBhHiIqQM")
+
+
+def status_kind(fmt: Fmt) -> StatusConvention | None:
+    """What an ``MSG`` or ``ERR`` format's records report, when its FMT declares the columns
+    ArduPilot gives them: a text ``Message``, or integer ``Subsys`` and ``ECode``."""
+    layout = fmt.layout
+    if layout is None:
+        return None
+    chars = dict(zip(layout.labels, layout.chars, strict=True))
+    if fmt.name == "MSG" and chars.get(MESSAGE_LABEL, "") in _TEXT_CHARS:
+        return StatusConvention.ARDUPILOT_MESSAGE
+    if fmt.name == "ERR" and all(chars.get(label, "") in _INTEGER_CHARS for label in ERROR_LABELS):
+        return StatusConvention.ARDUPILOT_ERROR
+    return None
 
 
 def _labels_place(fmt: Fmt) -> Place:
@@ -749,6 +840,7 @@ def ingest(source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOu
     records.extend(walk.tables.records())
     if unit_table is not None:
         records.extend(unit_table.records())
+    records.extend(walk.statuses)
     return ChunkOutput(records=tuple(records), series=tuple(series))
 
 

@@ -63,6 +63,7 @@ from neptune.adapters.mcap.records import (
 )
 from neptune.adapters.mcap.report import LOG_TIME_MAX
 from neptune.adapters.mcap.summary import summarize
+from neptune.adapters.rosmsg.status import STATUS_CONVENTION, STATUS_FINDINGS, STATUS_OPTIONS
 from neptune.adapters.rosmsg.streams import with_decode_options
 
 DEFAULT_CHUNK_BYTES: Final = 64 * 1024 * 1024
@@ -78,15 +79,28 @@ def _code(name: str, description: str) -> Documented:
     return Documented(f"mcap.{name}", description)
 
 
+def _sorted(*documented: Documented) -> tuple[Documented, ...]:
+    return tuple(sorted(documented, key=lambda item: item.name))
+
+
 DESCRIPTOR: Final = AdapterDescriptor(
     id="mcap",
-    version="0.2.0",
+    version="0.3.0",
     abi=ABI_VERSION,
     summary="MCAP recordings: a run, a stream per channel with every message's clocks and exact"
     " bytes, metadata as tables.",
     formats=(FormatSpec("MCAP", extensions=(".mcap",), magic=(Magic(0, MAGIC),)),),
-    record_kinds=("run", "stream", "structured_record", "structured_table", "timestamp_domain"),
+    record_kinds=(
+        "run",
+        "safety_state",
+        "status_report",
+        "stream",
+        "structured_record",
+        "structured_table",
+        "timestamp_domain",
+    ),
     config=with_decode_options(
+        *STATUS_OPTIONS,
         ConfigOption(
             "log_time_end",
             LOG_TIME_MAX,
@@ -111,7 +125,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
     ),
     libraries=LIBRARIES,
-    finding_codes=(
+    finding_codes=_sorted(
+        *(_code(name, text) for name, text in STATUS_FINDINGS),
         _code(
             "attachment_not_extracted",
             "an Attachment: an embedded file no record kind holds yet, cited with its name,"
@@ -256,7 +271,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " what declares the clock: the magic or a Channel record",
         ),
     ),
-    conventions=(
+    conventions=_sorted(
+        Documented(*STATUS_CONVENTION),
         Documented(
             "chunks",
             "planned chunk 0 holds the declarations; the others are byte ranges of the data"

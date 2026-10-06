@@ -15,7 +15,14 @@ from neptune.identity.provenance import evidence_record_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotApplicable, Unknown
+from neptune.model.knowledge import (
+    AssertionKind,
+    Knowledge,
+    Known,
+    NotApplicable,
+    NotCovered,
+    Unknown,
+)
 from neptune.model.provenance import (
     ByteRange,
     EvidenceRef,
@@ -35,7 +42,14 @@ from neptune.model.series import (
     step_template,
     time_column,
 )
-from neptune.model.time import INT64_MAX
+from neptune.model.status import (
+    SafetyCondition,
+    SafetyState,
+    StatusConvention,
+    StatusReport,
+    StatusValue,
+)
+from neptune.model.time import INT64_MAX, Timestamp
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
 
 BLOCK: Final = 1024 * 1024
@@ -421,3 +435,84 @@ __all__ = [
     "Tables",
     "Window",
 ]
+
+
+# --- Status and safety-state records (ADR 0071) --------------------------------------------------
+
+NOMINAL_OPTION: Final = "nominal_status_records"
+# The ULog specification's names for a logged message's level, the Linux kernel's, written as
+# the ASCII digits '0' to '7'.
+ULOG_LEVELS: Final = {
+    ord("0"): "EMERG",
+    ord("1"): "ALERT",
+    ord("2"): "CRIT",
+    ord("3"): "ERR",
+    ord("4"): "WARNING",
+    ord("5"): "NOTICE",
+    ord("6"): "INFO",
+    ord("7"): "DEBUG",
+}
+
+
+def sample_time(time: int | None, clock: RecordId | None) -> Knowledge[Timestamp]:
+    """A row's time on its one clock, as the row holds it: ``NotCovered`` where its format has
+    no time, ``Unknown`` past 2^63 - 1."""
+    if clock is None:
+        return NotCovered()
+    if time is None or time > INT64_MAX:
+        return Unknown()
+    return Known(Timestamp(time, clock))
+
+
+def status_report(
+    cite: Cite,
+    place: Place,
+    stream: RecordId,
+    convention: StatusConvention,
+    time: Knowledge[Timestamp],
+    *,
+    level: Knowledge[int],
+    level_names: Knowledge[tuple[str, ...]],
+    name: Knowledge[str],
+    message: Knowledge[str],
+    hardware_id: Knowledge[str],
+    values: Knowledge[tuple[StatusValue, ...]],
+) -> StatusReport:
+    """One status a log message reports, citing the whole message."""
+    return StatusReport(
+        id=cite.record_id(StatusReport.kind, place),
+        provenance=cite.provenance(place),
+        stream=stream,
+        convention=convention,
+        times=(time,),
+        level=level,
+        level_names=level_names,
+        name=name,
+        message=message,
+        hardware_id=hardware_id,
+        values=values,
+    )
+
+
+def safety_state(
+    cite: Cite,
+    place: Place,
+    stream: RecordId,
+    declared_type: str,
+    field_path: str,
+    condition: SafetyCondition,
+    time: Knowledge[Timestamp],
+    value: bool,
+) -> SafetyState:
+    """One sample of a boolean safety field, citing the whole message."""
+    return SafetyState(
+        id=cite.record_id(SafetyState.kind, place),
+        provenance=cite.provenance(place),
+        stream=stream,
+        declared_type=declared_type,
+        field=field_path,
+        condition=condition,
+        times=(time,),
+        value=Known(value),
+        value_names=NotApplicable(),
+    )
