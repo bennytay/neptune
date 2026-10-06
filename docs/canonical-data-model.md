@@ -4,14 +4,15 @@ Status: **authoritative**; frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, 
 `docs/reviews/m1-stress-test.md`) and grown only by addition since: version 2 adds configuration snapshots
 (MVL-23, ADR 0037), version 3 alignment records (MVL-82, ADR 0050), version 4 deployment lifecycle records
 (MVL-83, ADR 0051), version 5 human assertions (MVL-183, ADR 0062), version 6 declared civil time zones and
-list states (MVL-202, ADR 0061), version 7 task records (MVL-33, ADR 0063) and version 8 robot descriptions
-(MVL-24, ADR 0039). Primitives are specified by
+list states (MVL-202, ADR 0061), version 7 task records (MVL-33, ADR 0063), version 8 robot descriptions
+(MVL-24, ADR 0039) and version 10 status and safety-state records (MVL-204, ADR 0071; 9 is MVL-205's, ADR
+0072). Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
 an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (schema version 8)
+## Record kinds (schema version 10)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -22,7 +23,7 @@ domains.
 | `lineage` | `TransformRecord` | `model/provenance.py` (ADR 0016) |
 | `finding` | `IngestFinding` | `model/finding.py` |
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform`; since version 6 `CivilTimeZone` | `model/reference.py` (ADR 0061) |
-| `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
+| `run` | `Run`, `Stream`; since version 10 `StatusReport`, `SafetyState` | `model/run.py`, series contract in `model/series.py` (ADR 0018), `model/status.py` (ADR 0071) |
 | `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue`; since version 8 `HardwareSpecification`, `DescriptionExtension`, `DescriptionExpansion` | `model/machine.py` (ADRs 0019, 0039), `model/configuration.py` (ADR 0037) |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord`; since version 4 `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`, `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment` | `model/world.py` (ADR 0020), `model/lifecycle.py` (ADR 0051) |
 | `task` | `TaskBrief`, `Requirement`, `SOPSection`, `WorkOrder` (since 7) | `model/task.py` (ADR 0063) |
@@ -51,9 +52,9 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 8 (2: configuration, ADR 0037; 3: alignment, ADR 0050; 4: deployment lifecycle, ADR 0051;
+- `SCHEMA_VERSION` is 10 (2: configuration, ADR 0037; 3: alignment, ADR 0050; 4: deployment lifecycle, ADR 0051;
   5: assertion, ADR 0062; 6: civil time zones and list states, ADR 0061; 7: task, ADR 0063; 8: robot
-  descriptions, ADR 0039).
+  descriptions, ADR 0039; 9: manifest run declarations, ADR 0072; 10: status and safety states, ADR 0071).
   It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from then on. The model grows
   only by addition (new record kinds, including companion kinds naming the record they
   extend, new enum members, new locator steps, new states a list field may hold), each through an ADR and a
@@ -209,6 +210,24 @@ a bug, not a value.
 - `SeriesBatch` carries rows from an adapter to the store column by column (ADR 0024 §5). Each
   `SeriesColumn` has a `ColumnType` as the source encodes it (bool, int8–64, uint8–64, float32, float64,
   string, binary), `repeated` for arrays; Neptune's own columns keep the types above.
+
+## Status and safety states (ADR 0071; `model/status.py`)
+
+- `StatusReport` (since version 10): one status a message's *declared* type reports, `observed`: a
+  `diagnostic_msgs/DiagnosticStatus` (alone or an item of a `DiagnosticArray`), a PX4 ULog logged message, an
+  ArduPilot `MSG` or `ERR` (`convention`). `level` is the integer on the wire, `level_names` the names the
+  stream's definition declares for it as constants (ULog: its specification's), `name`, `message`,
+  `hardware_id` verbatim, `values` the key/values in order (an `ERR`'s `Subsys`/`ECode`, a tagged ULog
+  message's `tag`). A blank is `Unknown`; what the format has no place for is `NotCovered`.
+- `SafetyState` (since version 10): one sample of a field its declared type defines as a stop or safety state
+  (`declared_type`, `field` path, `condition` `emergency_stop`/`fault`/`safety_mode`, `value` boolean or
+  integer, `value_names` from the definition's constants). Only types in the adapters' catalogue
+  (`rosmsg.status.SAFETY_TYPES`, PX4's `actuator_armed`); never a topic name.
+- `times`: the sample's time on every clock of its `stream`, in the stream's order, as its row holds them;
+  nothing converted or chosen. Provenance cites the row's message, plus one `byte_range` to the item's own
+  bytes for a status of an array or one field; the times then cite the message.
+- A status at its definition's `OK` level and a state at its declared normal value stay rows only unless
+  `nominal_status_records`.
 
 ## Machine context (ADR 0019; `model/machine.py`)
 
