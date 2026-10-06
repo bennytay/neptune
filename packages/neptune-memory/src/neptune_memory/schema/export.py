@@ -20,6 +20,8 @@ from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import (
     DELTA_FORMS,
     MAX_DELTA_VALUES,
+    MAX_PATH_STEPS,
+    DeclaredType,
     DeltaAdjustment,
     DeltaQuantity,
     ValueType,
@@ -126,20 +128,22 @@ def _inherited(value: JsonObject) -> JsonObject:
 def _memory_defs() -> dict[str, JsonValue]:
     not_applicable = _obj({"knowledge": _const("not_applicable")})
     number = {"anyOf": [{"type": "number"}, _ref("NonFinite")]}
+    unit_states: list[JsonValue] = [
+        _obj({"knowledge": _const("known"), "value": _ref("Unit")}),
+        _obj({"knowledge": _const("unknown")}),
+        _obj(
+            {
+                "candidates": _array(_obj({"value": _ref("Unit")}), min_items=2),
+                "knowledge": _const("ambiguous"),
+            }
+        ),
+    ]
     quantity_unit: JsonObject = {
-        "anyOf": [
-            _obj({"knowledge": _const("known"), "value": _ref("Unit")}),
-            _obj({"knowledge": _const("unknown")}),
-            _obj(
-                {
-                    "candidates": _array(_obj({"value": _ref("Unit")}), min_items=2),
-                    "knowledge": _const("ambiguous"),
-                }
-            ),
-        ],
+        "anyOf": unit_states,
         "description": "a quantity's unit exactly as declared; it inherits the claim's provenance",
     }
     na: JsonObject = _ref("NotApplicable")
+    path_step: JsonObject = {"anyOf": [{"type": "string"}, {"minimum": 0, "type": "integer"}]}
     delta_unit: JsonObject = {
         "anyOf": [_obj({"knowledge": _const("known"), "value": _ref("Unit")}), na],
         "description": (
@@ -218,6 +222,31 @@ def _memory_defs() -> dict[str, JsonValue]:
             ),
         },
         "ClaimId": _pattern("claim:"),
+        "DeclaredValue": {
+            "anyOf": [
+                _obj(
+                    {
+                        "path": {**_array(path_step, min_items=1), "maxItems": MAX_PATH_STEPS},
+                        "type": _const(str(kind)),
+                        "value": value,
+                    }
+                )
+                for kind, value in (
+                    (DeclaredType.BOOLEAN, {"type": "boolean"}),
+                    (DeclaredType.INTEGER, {"type": "integer"}),
+                    (DeclaredType.REAL, number),
+                    (
+                        DeclaredType.REALS,
+                        {**_array(number, min_items=1), "maxItems": MAX_DELTA_VALUES},
+                    ),
+                    (DeclaredType.TEXT, {"type": "string"}),
+                )
+            ],
+            "description": (
+                "one value a record declares at a key path (keys verbatim, positions as"
+                " integers), as its record types it; never converted (ADR 0025)"
+            ),
+        },
         "Delta": {
             "anyOf": [
                 _obj(
@@ -452,6 +481,17 @@ def _memory_defs() -> dict[str, JsonValue]:
                 _literal(ValueType.INSTANT, _ref("Timestamp"), na),
                 _literal(ValueType.CLOCK_MAP, _ref("ClockMap"), na),
                 _literal(ValueType.DELTA, _ref("Delta"), delta_unit),
+                _literal(
+                    ValueType.DECLARED_VALUE,
+                    _ref("DeclaredValue"),
+                    {
+                        "anyOf": [*unit_states, na],
+                        "description": (
+                            "a declared number's unit exactly as declared (unknown where the"
+                            " source states none); not_applicable for text and booleans"
+                        ),
+                    },
+                ),
             ]
         },
         "ValueType": {"enum": sorted(str(t) for t in ValueType)},

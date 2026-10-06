@@ -279,6 +279,7 @@
                   "continues",
                   "continues_candidate",
                   "declared_kind",
+                  "declared_value",
                   "deployed_at",
                   "drift",
                   "ends_at",
@@ -327,13 +328,14 @@
                   "sensor_presence_unknown",
                   "sensor_recorded",
                   "starts_at",
+                  "stated_cause",
                   "stated_severity",
                   "succeeds",
                   "zone_of"
                 ],
                 "type": "string"
               },
-              "maxItems": 65,
+              "maxItems": 67,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true

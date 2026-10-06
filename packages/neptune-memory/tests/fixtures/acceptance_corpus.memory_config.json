@@ -26,6 +26,13 @@
           "Protective stop": "protective_stop"
         }
       },
+      "ros_diagnostic_status": {
+        "text": {
+          "ERROR": "fault",
+          "STALE": "stale",
+          "WARN": "warning"
+        }
+      },
       "syslog": {
         "text": {
           "ESTOP": "emergency_stop",

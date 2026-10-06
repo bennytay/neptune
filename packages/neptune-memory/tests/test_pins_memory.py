@@ -18,7 +18,7 @@ def test_compiler_pin_tracks_the_compiler() -> None:
 
 def test_graph_schema_v2_is_published_and_active() -> None:
     assert pins.GRAPH_SCHEMA_VERSION == GRAPH_SCHEMA_VERSION == 2
-    assert pins.GRAPH_SCHEMA_RELEASE == GRAPH_SCHEMA_RELEASE == "2.1.0"
+    assert pins.GRAPH_SCHEMA_RELEASE == GRAPH_SCHEMA_RELEASE == "2.2.0"
     contract = tomllib.loads((REGISTRY / "contract.toml").read_text(encoding="utf-8"))
     assert contract["status"] == "active"
     assert contract["owner"]["version_constant"] == "neptune_memory.schema:GRAPH_SCHEMA_VERSION"
@@ -29,6 +29,7 @@ def test_graph_schema_v2_is_published_and_active() -> None:
     # 1.9.0: the graph document's builds, for withdrawal (ADR 0016).
     # 2.0.0 (major): succeeds narrowed to configurations, and graph_schema (ADR 0019).
     # 2.1.0: golden-only, identity v4 (ADR 0021, ADR 0023).
+    # 2.2.0: declared_value and stated_cause, the declared_value literal (ADR 0025).
     for published in (
         "1.0.0",
         "1.1.0",
@@ -42,6 +43,7 @@ def test_graph_schema_v2_is_published_and_active() -> None:
         "1.9.0",
         "2.0.0",
         "2.1.0",
+        "2.2.0",
     ):
         version = json.loads(
             (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")

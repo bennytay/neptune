@@ -23,4 +23,4 @@ from typing import Final
 
 # 2: ``succeeds`` changed meaning (ADR 0019 §2), and documents name their release (§3).
 GRAPH_SCHEMA_VERSION: Final = 2
-GRAPH_SCHEMA_RELEASE: Final = "2.1.0"
+GRAPH_SCHEMA_RELEASE: Final = "2.2.0"

@@ -591,6 +591,195 @@
         "pattern": "^sha256:[0-9a-f]{64}$",
         "type": "string"
       },
+      "DeclaredValue": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": {
+                "const": "boolean"
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": {
+                "const": "integer"
+              },
+              "value": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "path",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": {
+                "const": "real"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "$ref": "#/$defs/NonFinite"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": {
+                "const": "reals"
+              },
+              "value": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "$ref": "#/$defs/NonFinite"
+                    }
+                  ]
+                },
+                "maxItems": 100000,
+                "minItems": 1,
+                "type": "array"
+              }
+            },
+            "required": [
+              "path",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": {
+                "const": "text"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "one value a record declares at a key path (keys verbatim, positions as integers), as its record types it; never converted (ADR 0025)"
+      },
       "Delta": {
         "anyOf": [
           {
@@ -1198,6 +1387,7 @@
           "fault",
           "incident",
           "intervention",
+          "maintenance",
           "mode_change",
           "near_miss",
           "protective_stop",
@@ -1957,7 +2147,7 @@
             "$ref": "#/$defs/PredicateRegistry"
           },
           "vocabulary_version": {
-            "description": "the core vocabulary's version: 11 when this schema was exported (VOCABULARY_VERSION)",
+            "description": "the core vocabulary's version: 12 when this schema was exported (VOCABULARY_VERSION)",
             "minimum": 1,
             "type": "integer"
           }
@@ -2404,6 +2594,92 @@
               "value"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "datatype": {
+                "const": "declared_value"
+              },
+              "kind": {
+                "const": "literal"
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "knowledge": {
+                        "const": "known"
+                      },
+                      "value": {
+                        "$ref": "#/$defs/Unit"
+                      }
+                    },
+                    "required": [
+                      "knowledge",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "knowledge": {
+                        "const": "unknown"
+                      }
+                    },
+                    "required": [
+                      "knowledge"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "candidates": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "value": {
+                              "$ref": "#/$defs/Unit"
+                            }
+                          },
+                          "required": [
+                            "value"
+                          ],
+                          "type": "object"
+                        },
+                        "minItems": 2,
+                        "type": "array"
+                      },
+                      "knowledge": {
+                        "const": "ambiguous"
+                      }
+                    },
+                    "required": [
+                      "candidates",
+                      "knowledge"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "$ref": "#/$defs/NotApplicable"
+                  }
+                ],
+                "description": "a declared number's unit exactly as declared (unknown where the source states none); not_applicable for text and booleans"
+              },
+              "value": {
+                "$ref": "#/$defs/DeclaredValue"
+              }
+            },
+            "required": [
+              "datatype",
+              "kind",
+              "unit",
+              "value"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -2415,6 +2691,7 @@
         "enum": [
           "boolean",
           "clock_map",
+          "declared_value",
           "delta",
           "instant",
           "integer",
@@ -2468,6 +2745,7 @@
       "continues",
       "continues_candidate",
       "declared_kind",
+      "declared_value",
       "deployed_at",
       "drift",
       "ends_at",
@@ -2516,6 +2794,7 @@
       "sensor_presence_unknown",
       "sensor_recorded",
       "starts_at",
+      "stated_cause",
       "stated_severity",
       "succeeds",
       "zone_of"
@@ -2636,6 +2915,15 @@
         "range": [
           "integer",
           "text"
+        ]
+      },
+      "declared_value": {
+        "domain": [
+          "configuration",
+          "event"
+        ],
+        "range": [
+          "declared_value"
         ]
       },
       "deployed_at": {
@@ -3155,6 +3443,14 @@
           "instant"
         ]
       },
+      "stated_cause": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "text"
+        ]
+      },
       "stated_severity": {
         "domain": [
           "event"
@@ -3181,6 +3477,6 @@
         ]
       }
     },
-    "version": "2.0.0"
+    "version": "2.2.0"
   }
 }

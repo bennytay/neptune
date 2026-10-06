@@ -11,4 +11,4 @@ from typing import Final
 CATALOG_API_VERSION: Final = "1.7.0"
 
 # Memory graph schema (contracts/graph-schema): the registry version of the claim graph read.
-GRAPH_SCHEMA_VERSION: Final = "2.0.0"
+GRAPH_SCHEMA_VERSION: Final = "2.2.0"
