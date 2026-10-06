@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from neptune.identity import canonical_json
-from neptune.sdk.result import read_package
+from neptune.store.package import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport, ThreadsOf, threads_of_from_json
 
