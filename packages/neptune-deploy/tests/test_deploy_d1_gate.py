@@ -871,7 +871,7 @@ def test_one_column_read_at_two_resolutions_is_two_clocks() -> None:
     minute = _named(package, "maintenance_event", "WO-26-0301").performed.value
     assert day.domain_id != minute.domain_id
     assert domains[day.domain_id].resolution == Known(Fraction(86400))
-    assert domains[minute.domain_id].resolution == Known(Fraction(1))
+    assert domains[minute.domain_id].resolution == Known(Fraction(60))  # to the minute (0016 §9)
     assert domains[day.domain_id].field == domains[minute.domain_id].field == "Completed"
     # Both cite the column's first cell; the step after it says how that clock reads.
     first = [

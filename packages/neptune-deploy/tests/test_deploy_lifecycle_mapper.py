@@ -191,13 +191,13 @@ def test_civil_times_keep_their_own_clock_and_record_the_declared_zone() -> None
     package = _mapped("warehouse_amr")
     (event,) = _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0311")
     stamp = event.performed.value
-    # 2026-03-02 09:40 on its own civil clock, never moved to UTC.
-    assert stamp.ticks == 20514 * 86400 + 9 * 3600 + 40 * 60
+    # 2026-03-02 09:40 on its own civil clock, never moved to UTC, in minutes (ADR 0016 §9).
+    assert stamp.ticks == 20514 * 1440 + 9 * 60 + 40
     (domain,) = [d for d in _of(package, "timestamp_domain") if d.id == stamp.domain_id]
     assert domain.field == "Completed"
     assert domain.scope == ()  # the declared zone is the mapping's, never the clock's scope
     assert isinstance(domain.timescale, Unknown)
-    assert domain.resolution == Known(Fraction(1))
+    assert domain.resolution == Known(Fraction(60))
 
 
 def test_stated_offsets_are_instants_on_a_posix_clock() -> None:

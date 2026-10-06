@@ -111,8 +111,10 @@ def _cited(state: Any) -> EvidenceRef:
 
 
 def _civil(text: str, pattern: str = "%Y-%m-%d %H:%M:%S") -> int:
-    """Seconds from 1970-01-01T00:00:00 of the text's own civil clock, never UTC."""
-    return int((datetime.strptime(text, pattern) - datetime(1970, 1, 1)).total_seconds())
+    """Ticks from 1970-01-01T00:00:00 of the text's own civil clock, never UTC, at the precision
+    the text states: seconds, or minutes for a time to the minute (ADR 0016 §9)."""
+    seconds = int((datetime.strptime(text, pattern) - datetime(1970, 1, 1)).total_seconds())
+    return seconds if "%S" in pattern else seconds // 60
 
 
 def _with_cells(base: IngestPackage, edit: Callable[[str], str | None]) -> IngestPackage:
@@ -185,7 +187,8 @@ def test_every_hmi_time_of_the_arm_cell_report_reads_on_its_own_civil_clock() ->
     assert isinstance(clock.timescale, Unknown)
     (zone,) = [z for z in _of(package, "civil_time_zone") if z.domain == clock_id]
     assert isinstance(zone.zone, Unknown)
-    assert domains[incident.occurred.value.domain_id].field == "Occurred at"
+    occurred = domains[incident.occurred.value.domain_id]
+    assert occurred.field == "Occurred at" and occurred.resolution.value == 60  # to the minute
 
 
 def test_each_timeline_value_cites_its_own_cell_and_is_stated() -> None:

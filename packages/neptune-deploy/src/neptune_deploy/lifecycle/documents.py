@@ -56,7 +56,7 @@ from neptune_deploy.lifecycle.mapping import (
 from neptune_deploy.lifecycle.templates import DocumentTemplate, config_of, rows_read
 
 DOCUMENT_MAPPER_ID: Final = "deploy_document_map"
-DOCUMENT_MAPPER_VERSION: Final = "0.2.0"
+DOCUMENT_MAPPER_VERSION: Final = "0.3.0"
 STATED: Final = AssertionKind.STATED
 OBSERVED: Final = AssertionKind.OBSERVED
 # Page furniture: a running header or footer is neither a label nor part of a section.

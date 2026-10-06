@@ -3,7 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-06
 - Issue: MVL-191
-- Amends: ADR 0004 §5 (the inspection work order is now read). Builds on ADR 0002 §3 to §6, ADR 0003
+- Amends: ADR 0004 §5 (the inspection work order is now read); ADR 0002 §5 and `lifecycle.times`
+  (a time's resolution is the precision its text states, §9); ADR 0012 §5 (mapper versions 0.3.0). Builds on ADR 0002 §3 to §6, ADR 0003
   §2 and §4, ADR 0012 §2, root ADR 0051 and root ADR 0061.
 
 ## Context
@@ -106,6 +107,20 @@ mistake a template can make, so the rule is fixed here before any template needs
      prior configuration would be a compiler change, and none is raised for Demo v1.
    - The archetype goldens change in their change records (`configuration` is now stated and leaves
      `fields_not_covered`) and in the preset's transform id.
+9. **A time's resolution is the precision its text states.**
+   - `2026-09-14 14:32` is read as minutes: ticks count minutes and the resolution is 60 s.
+     `14:32:38` counts seconds (1 s), a fraction counts what `%f` states, and a date alone counts
+     days, as before. ADR 0002 §5 read every date-time in seconds. That made `14:32` look exactly
+     as precise as `14:32:38` (as `14:32:00`), so a timeline would see two readings of one stop as
+     38 s apart when the first only says "some time in that minute".
+   - One column read at two precisions is two clocks, as ADR 0005 §7 already does for a date among
+     date-times. Nothing is rounded or converted: the ticks are the text's own digits.
+   - Both mappers go to `0.3.0` (`deploy_lifecycle_map`, `deploy_document_map`, ADR 0005 §9),
+     because their output bytes change. The preset and template files are not bumped: their bytes
+     are unchanged, and the new lineage is the transform's mapper version. The archetype goldens
+     change in every minute-precision time (ticks, the clock's resolution and id) and every
+     transform id. The Formant connector's default formats state seconds, so its output does not
+     change.
 
 ## Alternatives considered
 
