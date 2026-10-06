@@ -84,9 +84,11 @@ SHIPPED = [
     "configuration-lineage@2",
     "configuration-traceability@1",
     "configuration-traceability@2",
+    "configuration-traceability@3",
     "event-timeline@1",
     "incident-timeline@1",
     "incident-timeline@2",
+    "incident-timeline@3",
 ]
 
 
@@ -208,7 +210,7 @@ def test_malformed_templates_are_refused(path: list[Any], value: Any, pointer: s
 
 def test_an_unknown_template_names_the_registered_ones() -> None:
     with pytest.raises(PackError, match=", ".join(SHIPPED)) as caught:
-        builtin_registry().get("incident-timeline", 3)
+        builtin_registry().get("incident-timeline", 4)
     assert caught.value.code == "template_unknown"
 
 
@@ -229,7 +231,7 @@ def test_the_majors_a_section_reads() -> None:
     for template in registry.templates():
         for section in template.sections:
             names = {*section.predicates, *(h.predicate for p in section.about for h in p)}
-            if template.version == 2 and section.kind == "changes":
+            if template.version >= 2 and section.kind == "changes":
                 assert section.majors_declared and section.graph_schema_majors == (2,)
             elif "succeeds" in names:
                 assert not section.majors_declared
@@ -243,11 +245,13 @@ def test_the_majors_a_section_reads() -> None:
     assert changes == [
         ("configuration-lineage@2", "configuration-changes"),
         ("configuration-traceability@2", "configuration-changes"),
+        ("configuration-traceability@3", "configuration-changes"),
         ("incident-timeline@2", "configuration-changes"),
+        ("incident-timeline@3", "configuration-changes"),
     ]
-    # No @2 template selects succeeds anywhere.
+    # No @2 or @3 template selects succeeds anywhere.
     for template in registry.templates():
-        if template.version == 2:
+        if template.version >= 2:
             assert all("succeeds" not in s.predicates for s in template.sections)
 
 

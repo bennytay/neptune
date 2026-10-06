@@ -3,7 +3,9 @@
   "configuration-lineage@2": "sha256:89e9ae8c0789a2d696318ab4f08751908a1190a5300c693ddc79145a625479d6",
   "configuration-traceability@1": "sha256:8c2875ae2ea03f30f3123121675e0152867d2ccef1e804858654b356594c3018",
   "configuration-traceability@2": "sha256:1b15a5b33322475fde686691453feb9a92dd88be493c5ab49592f680210c691d",
+  "configuration-traceability@3": "sha256:e83a6026c91c76a730ffa9aa1d15091df9ae4b5124041f806c0a7e079aadff39",
   "event-timeline@1": "sha256:5ee5cbab8c4a7424a4d9d7cb03d353af499e23f84ac5cce14436d4db87be3021",
   "incident-timeline@1": "sha256:75a3744df6c388e3c93d2663197307ad8b94a0ffc20aed0f91cdd4950d560284",
-  "incident-timeline@2": "sha256:1730343539c0b39053868d33612e781850dcf4ecca80027d81544cfb41c2f270"
+  "incident-timeline@2": "sha256:1730343539c0b39053868d33612e781850dcf4ecca80027d81544cfb41c2f270",
+  "incident-timeline@3": "sha256:3c8f5ded2cafeec93d98341798ee80b470bc45441c82d39c16e13c1163e30ebd"
 }

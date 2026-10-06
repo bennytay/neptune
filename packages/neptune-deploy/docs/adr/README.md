@@ -25,3 +25,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0016](0016-shipped-incident-template-requalification-preset-and-time-only-values.md) | Shipped incident template, requalification preset, INSP work orders, and time-only values | Accepted |
 | [0017](0017-log-exports-are-typed-event-tables-and-a-caller-declares-a-zone-per-source.md) | Log exports are typed event tables, and a caller declares a zone per source | Accepted |
 | [0018](0018-graph-schema-2-machine-scoped-changes-and-sections-that-declare-their-majors.md) | Graph-schema 2: machine-scoped changes, and template sections that declare the majors they read | Accepted |
+| [0019](0019-templates-at-3-follow-a-machines-stated-same-as-through-a-closure-hop.md) | Templates @3 follow a machine's stated same_as through a closure hop | Accepted |
