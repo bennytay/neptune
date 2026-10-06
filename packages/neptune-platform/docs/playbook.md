@@ -42,7 +42,8 @@ the current wave, and raises a cap only when the weekly check (§ 6) shows the b
   2. adds a `blocks` edge from that issue to its own consuming issue;
   3. waits. The owner's coordinator schedules it (contract work is Opus tier and is never paused); its PR
      bumps the owner's version constant and runs `scripts/contracts.py bump` (ADR 0002 §7), whose
-     announcement lands on each consumer's current gate issue (`contracts/packages.toml`);
+     announcement lands on each consumer's current gate issue (`contracts/packages.toml`); a change that
+     moves the goldens but not the schema (a new lineage) runs `bump --golden-only` instead (ADR 0010);
   4. on the announcement, each consumer's coordinator files an issue in its own project to raise its entry in
      `contracts/lock.toml`. Nobody edits another package's lock entry.
 
