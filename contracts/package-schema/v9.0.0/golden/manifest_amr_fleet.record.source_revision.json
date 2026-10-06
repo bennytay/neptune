@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e",
+  "id": "rec:sha256:2712767eee87e0e627997e8e2632f721d3064ff66a8b6110e422a56cd9276719",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "fleet/run_001/amr_01/drive.mcap"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}
