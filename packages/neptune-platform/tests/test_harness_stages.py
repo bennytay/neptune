@@ -603,9 +603,10 @@ def test_presets_are_discovered_in_every_family_deploy_ships(
     family.PRESETS = ("syslog_csv", "cmms_generic")  # type: ignore[attr-defined]
     family.preset = lambda name: types.SimpleNamespace(sha256=f"sha256:{name}")  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "fake_eventlogs", family)
-    monkeypatch.setattr(
-        stages, "PRESET_FAMILIES", ("neptune_deploy.lifecycle", "fake_eventlogs", "no_such_family")
-    )
+    # A namespace package (a directory holding only a stale __pycache__) is not a family.
+    monkeypatch.setitem(sys.modules, "fake_empty", types.ModuleType("fake_empty"))
+    families = ("neptune_deploy.lifecycle", "fake_eventlogs", "fake_empty", "no_such_family")
+    monkeypatch.setattr(stages, "PRESET_FAMILIES", families)
     shipped, problems = stages._shipped_presets()
     assert set(shipped) == {*PRESETS, "syslog_csv"}
     assert shipped["syslog_csv"] == "sha256:syslog_csv"
@@ -630,7 +631,9 @@ def test_event_table_rows_are_counted_by_table_and_attributed_to_their_preset(
         "structured_table",
         [{"header": _known(["Seq"]), "id": "t", "name": _known("syslog events")}],
     )
-    rows = [{"cells": [], "provenance": {"transform": "tr"}, "table": "t"} for _ in range(4)]
+    rows: list[dict[str, object]] = [
+        {"cells": [], "provenance": {"transform": "tr"}, "table": "t"} for _ in range(4)
+    ]
     _write(root, "structured_record", [*rows, {"cells": [], "provenance": {}, "table": "u"}])
     _write(root, "transform_record", [{"config": {"mapping_sha256": "sha256:s"}, "id": "tr"}])
     tables, transforms = stages._event_rows(root)

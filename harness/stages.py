@@ -408,6 +408,8 @@ def _shipped_presets() -> tuple[dict[str, str], list[str]]:
             if error.name == family:
                 continue  # a family this Deploy does not ship
             raise
+        if not hasattr(module, "PRESETS") or not callable(getattr(module, "preset", None)):
+            continue  # not a family (a namespace package left by a cache, a renamed module)
         for name in module.PRESETS:
             if name in shipped:
                 problems.append(f"Deploy ships preset {name!r} in two families")
