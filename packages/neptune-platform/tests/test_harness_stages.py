@@ -549,9 +549,31 @@ def test_the_scope_check_is_never_green_on_nothing(tmp_path: Path) -> None:
     assert stages._dangling_scopes(compiled, mapped) == [
         "require_assertion_scopes, but the package holds no stated same-event assertion"
     ]
-    _write(compiled, "assertion", [_assertion(["not a pair"])])  # type: ignore[list-item]
+    _write(compiled, "assertion", [_assertion([{"namespace": "x"}])])
     assert stages._dangling_scopes(compiled, mapped) == [
         "assertion ops.review/ASR-1: a scope entry is not a namespace and value"
+    ]
+    # A scope that is not a non-empty Known list is never green on nothing.
+    unknown = {**_assertion([]), "scope": {"knowledge": "unknown"}}
+    _write(compiled, "assertion", [_assertion([]), unknown])
+    assert (
+        stages._dangling_scopes(compiled, mapped)
+        == ["assertion ops.review/ASR-1: its scope is not a non-empty known list"] * 2
+    )
+
+
+def test_a_scope_entry_naming_a_record_must_be_a_record_either_package_holds(
+    tmp_path: Path,
+) -> None:
+    """Root ADR 0062's scope entry may be a record id (a string), not only a logical id."""
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    mapped = _mapped(tmp_path / "mapped")  # holds records "i" and "t"
+    _write(compiled, "assertion", [_assertion(["i", "rec:sha256:gone"])])  # type: ignore[list-item]
+    assert stages._dangling_scopes(compiled, mapped) == [
+        "assertion ops.review/ASR-1: scope rec:sha256:gone is no record either package holds"
+        " (a dangling link)"
     ]
 
 

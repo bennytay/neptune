@@ -89,7 +89,10 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
    declare those identifiers. With the key set, after the map the case is red when:
    - the compiled package holds no stated `same_identity` assertion whose payload's `relation` is
      `same_event`;
-   - or any scope entry's `(namespace, value)` pair is not declared by the mapped package.
+   - or such an assertion's scope is not a non-empty `Known` list;
+   - or any scope entry's `(namespace, value)` pair is not declared by the mapped package;
+   - or a scope entry that names a record (root ADR 0062's `RecordId`, a string) is no record of
+     either package.
 
    What counts as declared:
    - a lifecycle record's own `identifiers` (a bare list or a `Known` list);

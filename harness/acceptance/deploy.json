@@ -2,14 +2,15 @@
   "deploy_format": 1,
   "corpus": "acceptance",
   "corpus_version": "2.1.0",
-  "description": "What the harness's deploy stage maps over the acceptance corpus's compiled package (Platform ADR 0008): Deploy's shipped presets by name, and document templates by repository path (a file or a directory). Adding one is an edit here, never to harness/stages.py. Each declaration must map at least one record, and each kind under at_least must reach its count (structured_record: event-table rows), or the stage is red.",
+  "description": "What the harness's deploy stage maps over the acceptance corpus's compiled package (Platform ADR 0008): Deploy's shipped presets by name, and document templates by repository path (a file or a directory). Adding one is an edit here, never to harness/stages.py. Each declaration must map at least one record, and each kind under at_least must reach its count (structured_record: event-table rows), or the stage is red. sources declares the civil zone a preset reads a zone-less source in, and require_assertion_scopes makes every stated same-event assertion's scope an identifier the mapped package declares (Platform ADR 0009).",
   "presets": [
     "cmms_downtime",
     "cmms_generic",
     "jira_json",
     "register_zone",
     "requalification_csv",
-    "servicenow_csv"
+    "servicenow_csv",
+    "syslog_csv"
   ],
   "templates": [
     "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/templates/incident_report.json"
@@ -20,6 +21,20 @@
     "incident_record": 3,
     "intervention": 3,
     "maintenance_event": 16,
-    "requalification_record": 4
-  }
+    "requalification_record": 4,
+    "structured_record": 4
+  },
+  "sources": [
+    {
+      "preset": "cmms_downtime",
+      "source": "sites/PLANT-2/cmms/downtime_log.csv",
+      "civil_time_zone": "America/New_York"
+    },
+    {
+      "preset": "syslog_csv",
+      "source": "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv",
+      "civil_time_zone": "America/New_York"
+    }
+  ],
+  "require_assertion_scopes": true
 }

@@ -294,8 +294,7 @@ def test_the_gold_document_is_sound(gold: dict[str, Any]) -> None:
     morphologies = {t for q in gold["questions"] for t in q["tags"]}
     assert {"manipulator", "mobile-base", "legged"} <= morphologies
     kinds = {item["select"]["kind"] for item in gold["evidence"].values()}
-    # ``declaration`` joins with deploy.json's sources, which need Deploy's --source-zone (#149).
-    assert kinds == set(resolve.SELECTORS) - {"declaration"}
+    assert kinds == set(resolve.SELECTORS)
     for item in gold["evidence"].values():
         assert item["select"]["path"] in acceptance.read_lock()["files"]
     assert {trap["kind"] for trap in gold["traps"]} >= {
@@ -486,7 +485,7 @@ def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None
     shipped, clashes = stages._shipped_presets()  # every family: lifecycle and event-log
     assert set(plan.presets) <= set(shipped) and clashes == []
     assert {"cmms_generic", "jira_json", "register_zone", "servicenow_csv"} <= set(plan.presets)
-    assert {"cmms_downtime", "requalification_csv"} <= set(plan.presets)
+    assert {"cmms_downtime", "requalification_csv", "syslog_csv"} <= set(plan.presets)
     assert plan.templates == (
         "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/templates/incident_report.json",
     )
@@ -498,7 +497,19 @@ def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None
         "intervention": 3,  # the downtime log's three stops
         "maintenance_event": 16,
         "requalification_record": 4,
+        "structured_record": 4,  # the syslog export's four events (syslog_csv)
     }
+    # The two zone-less exports of the same-event join are read in PLANT-2's zone, and the join
+    # may not dangle (Platform ADR 0009).
+    assert {(z.preset, z.source, z.civil_time_zone) for z in plan.sources} == {
+        ("cmms_downtime", "sites/PLANT-2/cmms/downtime_log.csv", generate.PLANT_ZONE),
+        (
+            "syslog_csv",
+            "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv",
+            generate.PLANT_ZONE,
+        ),
+    }
+    assert plan.require_assertion_scopes
 
 
 _ZONE: Final = {"preset": "x", "source": "sites/a/log.csv", "civil_time_zone": "Europe/Berlin"}

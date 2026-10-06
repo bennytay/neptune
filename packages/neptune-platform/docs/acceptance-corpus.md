@@ -15,8 +15,10 @@ uv run --all-packages python -m harness.acceptance build /tmp/corpus     # write
 uv run --all-packages neptune ingest /tmp/corpus --out /tmp/corpus-pkg  # one package; one error finding
 uv run --all-packages python -m harness.acceptance resolve /tmp/corpus-pkg   # gold evidence -> record ids
 uv run --all-packages python -m neptune_deploy map /tmp/corpus-pkg -p cmms_downtime -p cmms_generic \
-    -p jira_json -p register_zone -p requalification_csv -p servicenow_csv \
+    -p jira_json -p register_zone -p requalification_csv -p servicenow_csv -p syslog_csv \
     -t packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/templates/incident_report.json \
+    --source-zone cmms_downtime sites/PLANT-2/cmms/downtime_log.csv America/New_York \
+    --source-zone syslog_csv sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv America/New_York \
     -o /tmp/corpus-deploy                                               # what the deploy stage runs
 uv run --all-packages python -m harness.acceptance check                # build == corpus.lock.json?
 make harness                                                            # the harness ingests it by default
@@ -81,9 +83,11 @@ pointer) is ADR 0008 §6.
 `harness/acceptance/deploy.json` lists the Deploy presets (by name) and document templates (by repository path)
 that the harness's deploy stage maps the compiled corpus with. `at_least` gives the lifecycle record counts the
 mapped package must reach. It declares `cmms_downtime`, `cmms_generic`, `jira_json`, `register_zone`,
-`requalification_csv` and `servicenow_csv`, and Deploy's `incident_report` template. `at_least` pins what
-they map: 3 `incident_record`, 3 `intervention`, 16 `maintenance_event`, 4 `requalification_record`, 5
-`change_record` and 5 `authorisation_envelope`. The stage is red when a declaration maps nothing
+`requalification_csv`, `servicenow_csv` and `syslog_csv` (an event-log preset: a typed `syslog events`
+table), and Deploy's `incident_report` template. `at_least` pins what they map: 3 `incident_record`, 3
+`intervention`, 16 `maintenance_event`, 4 `requalification_record`, 5 `change_record`, 5
+`authorisation_envelope` and 4 `structured_record` (the syslog events). It declares both `sources` zones and
+`require_assertion_scopes`. The stage is red when a declaration maps nothing
 ([harness](harness.md#deploy-stage), ADR 0008).
 
 ### Declared source zones
@@ -101,8 +105,8 @@ about a source that states nothing itself. Today the only field is the civil tim
 The preset must be in `presets`, the source a plain corpus path, the zone an IANA name (spelling only). The
 stage passes each entry as `--source-zone PRESET SOURCE ZONE`, and is red unless the mapped package holds that
 preset's `civil_time_zone` for that source stating that zone. Gold cites an entry with the `declaration`
-selector `{path, preset, field: "civil_time_zone", equals}`. Both
-entries join `deploy.json` with Deploy's `--source-zone` and `syslog_csv`.
+selector `{path, preset, field: "civil_time_zone", equals}`. Gold Q7
+cites both (`zone.downtime`, `zone.syslog`).
 
 ### No dangling same-event links
 
@@ -110,7 +114,7 @@ entries join `deploy.json` with Deploy's `--source-zone` and `syslog_csv`.
 assertion (`INC-C3-0011.assertions.json`) is an identifier the mapped package declares, compared as a
 `(namespace, value)` pair. `{cmms.downtime, DT-26-0914-01}` is declared by `cmms_downtime`'s intervention, and
 `{syslog, 4182}` by `syslog_csv`'s `@id:syslog` column (the raw Seq cell: never pad or reformat it in
-`generate.py`). It is set together with those two presets.
+`generate.py`). The acceptance corpus sets it.
 
 ## Change it
 
@@ -123,8 +127,9 @@ assertion (`INC-C3-0011.assertions.json`) is an identifier the mapped package de
 4. Say in the PR what changed for consumers (an answer, an evidence id, a new question).
 
 2.1.0 (MVL-191) added the syslog export's `MsgID` column and renamed the assertion's scope to Deploy's generic
-namespaces (`cmms.downtime`, `syslog`) and its ticket to `cmms.work_order`. No evidence id or answer changed;
-a consumer that matches the scope's namespaces matches the new spelling.
+namespaces (`cmms.downtime`, `syslog`) and its ticket to `cmms.work_order`. It added evidence `zone.downtime` and
+`zone.syslog` (the `declaration` selector), cited by Q7.C4. No existing evidence id or answer changed meaning; a
+consumer that matches the scope's namespaces matches the new spelling.
 
 2.0.0 (MVL-191) moved `cal.0818.z`, `cal.0911.z` (now `/transformation/z`) and `cal.0818.error`, `cal.0911.error`
 (now calibration-log rows). It added the PLANT-2 envelopes, the downtime log, the syslog export, the assertion,

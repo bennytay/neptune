@@ -551,9 +551,10 @@ def _declared_identifiers(root: Path) -> set[Pair]:
     return out
 
 
-def _same_event_scopes(root: Path) -> list[tuple[Pair | None, list[Any]]]:
+def _same_event_scopes(root: Path) -> list[tuple[Pair | None, list[Any] | None]]:
     """Each stated same-event assertion of the compiled package (root ADR 0062: ``same_identity``
-    whose payload's ``relation`` is ``same_event``): its own identifier and its scope entries."""
+    whose payload's ``relation`` is ``same_event``): its own identifier and its scope entries,
+    or None when the scope is not a ``Known`` list."""
     from harness.acceptance.resolve import Package, _known
 
     out = []
@@ -572,25 +573,49 @@ def _same_event_scopes(root: Path) -> list[tuple[Pair | None, list[Any]]]:
             continue
         scope = _known(record.get("scope"))
         out.append(
-            (_pair(_known(record.get("identifier"))), scope if isinstance(scope, list) else [])
+            (_pair(_known(record.get("identifier"))), scope if isinstance(scope, list) else None)
         )
+    return out
+
+
+def _record_ids(*roots: Path) -> set[str]:
+    """Every record id the packages hold: what a scope entry naming a record (root ADR 0062's
+    ``RecordId``, a string) must be."""
+    out: set[str] = set()
+    for root in roots:
+        for path in sorted((root / "records").glob("*.jsonl")):
+            with path.open(encoding="utf-8") as lines:  # one record at a time (ADR 0070)
+                out.update(str(json.loads(line).get("id")) for line in lines if line.strip())
     return out
 
 
 def _dangling_scopes(compiled: Path, mapped: Path) -> list[str]:
     """Why a same-event link would dangle: a scope entry whose ``(namespace, value)`` no record of
-    the mapped package declares, so Memory has nothing to join it to (ADR 0009). Never green on
-    nothing: a case that requires the check and holds no such assertion is a problem too."""
+    the mapped package declares, or a record id (a string entry) neither package holds, so Memory
+    has nothing to join it to (ADR 0009). Never green on nothing: a case that requires the check
+    and holds no such assertion, or one whose scope is not a non-empty ``Known`` list, is a problem
+    too."""
     assertions = _same_event_scopes(compiled)
     if not assertions:
         return ["require_assertion_scopes, but the package holds no stated same-event assertion"]
     declared = _declared_identifiers(mapped)
+    records: set[str] | None = None  # read only when a scope names a record
     problems = []
     for ident, scope in assertions:
         name = "/".join(ident) if ident else "an assertion without an identifier"
+        if not scope:
+            problems.append(f"assertion {name}: its scope is not a non-empty known list")
+            continue
         for entry in scope:
             pair = _pair(entry)
-            if pair is None:
+            if isinstance(entry, str):
+                records = _record_ids(compiled, mapped) if records is None else records
+                if entry not in records:
+                    problems.append(
+                        f"assertion {name}: scope {entry} is no record either package holds"
+                        " (a dangling link)"
+                    )
+            elif pair is None:
                 problems.append(f"assertion {name}: a scope entry is not a namespace and value")
             elif pair not in declared:
                 problems.append(
