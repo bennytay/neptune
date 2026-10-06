@@ -5,6 +5,8 @@ Platform ADR 0007. ``build()`` returns every file of the corpus by its path unde
 bytes are the same on every host; ``corpus.lock.json`` pins them, and a changed byte without a new
 ``VERSION`` fails the tests. ``gold.json`` holds the questions the corpus is built to answer, with
 claims that cite evidence by source path and selector (``harness.acceptance.resolve``).
+``deploy.json`` declares the Deploy presets and templates the harness maps the compiled corpus with
+(Platform ADR 0008); like ``gold.json`` it names the corpus version it was written for.
 """
 
 from __future__ import annotations
@@ -18,10 +20,12 @@ from typing import Any, Final
 NAME: Final = "acceptance"
 # MAJOR: a gold answer changes meaning or evidence is removed. MINOR: files or questions are added
 # and every existing answer still holds. PATCH: bytes change and no answer does. ADR 0007 section 3.
-VERSION: Final = "1.0.0"
+VERSION: Final = "2.0.0"
 HERE: Final = Path(__file__).resolve().parent
 LOCK: Final = HERE / "corpus.lock.json"
 GOLD: Final = HERE / "gold.json"
+# What the harness's deploy stage maps over the compiled corpus (Platform ADR 0008).
+DEPLOY: Final = HERE / "deploy.json"
 MAX_FILE_BYTES: Final = 512 * 1024
 LOCK_FORMAT: Final = 1
 
@@ -66,7 +70,7 @@ def read_lock() -> dict[str, Any]:
 
 
 def label() -> str:
-    """What a gate quotes: ``acceptance 1.0.0 (tree sha256:...)``, from the committed lock."""
+    """What a gate quotes: ``acceptance 2.0.0 (tree sha256:...)``, from the committed lock."""
     lock = read_lock()
     return f"{lock['corpus']} {lock['version']} (tree {lock['tree']})"
 
