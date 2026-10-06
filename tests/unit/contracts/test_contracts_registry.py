@@ -627,3 +627,139 @@ def test_register_regenerates_the_matrix(registry: Any) -> None:
     assert tool.main([*root, "matrix", "--check"]) == 0
     assert "| `neptune-learn` | not declared |" in _text(registry.root / "compatibility.md")
     assert tool.register(registry, "neptune-learn") == []
+
+
+# --- Golden-only releases (platform ADR 0010) -----------------------------------------------------
+
+
+def _toy_at_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, golden: Any = None, schema: Any = None
+) -> Any:
+    """The toy shaped like graph-schema before a consolidator bump: latest 2.0.0, constant 2,
+    and a generator whose goldens differ from the published ones unless ``golden`` says so."""
+    registry = _toy(tmp_path, monkeypatch, version=2)
+    published = {"n": 1, "lineage": "consolidator 1"} if golden is None else golden
+    tool.write_version(
+        registry.root / "toy" / "v2.0.0",
+        "toy",
+        (2, 0, 0),
+        "stable",
+        2,
+        {"type": "object"},
+        {"one.json": ("#", published)},
+    )
+    registry.write_lock({"toy-consumer": {"toy": "2.0.0"}})
+    _owner(tmp_path, {"type": "object"} if schema is None else schema, 2)
+    tool.write_matrix(registry)
+    return registry
+
+
+def test_golden_only_bump_publishes_new_goldens_over_the_same_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = _toy_at_two(tmp_path, monkeypatch)
+    published = registry.root / "toy" / "v2.0.0"
+    before = _files(published)
+    root = ["--root", str(registry.root)]
+    assert tool.main([*root, "bump", "toy", "2.1.0"]) == 1  # a plain bump points here
+    assert "--golden-only" in capsys.readouterr().err
+    assert tool.main([*root, "bump", "toy", "2.1.0", "--golden-only"]) == 0
+    assert _files(published) == before  # the published version is never rewritten
+    new = registry.root / "toy" / "v2.1.0"
+    meta = json.loads(_text(new / "version.json"))
+    assert (meta["release"], meta["owner_version"], meta["status"]) == ("golden-only", 2, "stable")
+    assert _text(new / "schema.json") == _text(published / "schema.json")
+    assert json.loads(_text(new / "golden" / "one.json")) == {"n": 1}
+    out = capsys.readouterr().out
+    assert "golden-only release: the schema is byte-identical to 2.0.0" in out
+    assert "comment for MVL-1 (toy-consumer)" in out and "declares 2.0.0" in out
+    assert registry.lock() == {"toy-consumer": {"toy": "2.0.0"}}  # a minor leaves locks alone
+    assert tool.check_registry(registry).ok
+    assert tool.check_owner(registry, "toy-owner").ok
+    assert tool.main([*root, "matrix", "--check"]) == 0
+    matrix = _text(registry.root / "compatibility.md")
+    assert "| `toy` | `toy-owner` | active | 2.1.0 (golden-only, schema of 2.0.0) | — |" in matrix
+    assert "| `toy-consumer` | 2.0.0 behind |" in matrix
+
+
+def test_golden_only_bump_is_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two fresh copies of the same registry bumped the same way give byte-identical files."""
+    first = _toy_at_two(tmp_path / "a", monkeypatch)
+    shutil.copytree(tmp_path / "a", tmp_path / "b")
+    second = tool.Registry(tmp_path / "b" / "contracts")
+    for registry in (first, second):
+        tool.bump(registry, "toy", "2.0.1", golden_only=True)
+    assert _files(first.root) == _files(second.root)
+    assert (first.root / "toy" / "v2.0.1" / "version.json").is_file()
+
+
+@pytest.mark.parametrize(
+    ("version", "schema", "golden", "expected"),
+    [
+        ("3.0.0", None, None, "is a major version"),
+        ("2.1.0", {"type": "object", "required": ["n"]}, None, "not a golden-only release"),
+        ("2.1.0", None, {"n": 1}, "goldens equal 2.0.0's; nothing to release"),
+        ("2.0.0", None, None, "not newer"),
+    ],
+)
+def test_golden_only_bump_refusals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    schema: Any,
+    golden: Any,
+    expected: str,
+) -> None:
+    registry = _toy_at_two(tmp_path, monkeypatch, golden=golden, schema=schema)
+    before = _files(registry.root)
+    with pytest.raises(tool.ContractError, match=expected):
+        tool.bump(registry, "toy", version, golden_only=True)
+    assert _files(registry.root) == before  # nothing written
+
+
+@pytest.mark.parametrize(
+    ("release", "schema", "golden", "expected"),
+    [
+        ("golden-only", {"type": "object", "required": ["n"]}, {"n": 2}, "keep the schema"),
+        ("golden-only", {"type": "object"}, {"n": 1, "lineage": "consolidator 1"}, "change a"),
+        ("schema-only", {"type": "object"}, {"n": 2}, "release must be absent or one of"),
+    ],
+)
+def test_check_reverifies_golden_only_releases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    release: str,
+    schema: Any,
+    golden: Any,
+    expected: str,
+) -> None:
+    """A hand-written version.json cannot claim a golden-only release that is not one."""
+    registry = _toy_at_two(tmp_path, monkeypatch)
+    tool.write_version(
+        registry.root / "toy" / "v2.1.0",
+        "toy",
+        (2, 1, 0),
+        "stable",
+        2,
+        schema,
+        {"one.json": ("#", golden)},
+        release=release,
+    )
+    problems = tool.check_registry(registry).problems
+    assert any(expected in p and "v2.1.0" in p for p in problems), problems
+
+
+def test_check_refuses_a_golden_only_major(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _toy(tmp_path, monkeypatch)
+    tool.write_version(
+        registry.root / "toy" / "v2.0.0",
+        "toy",
+        (2, 0, 0),
+        "stable",
+        2,
+        {"type": "object"},
+        {"one.json": ("#", {"n": 2})},
+        release="golden-only",
+    )
+    problems = tool.check_registry(registry).problems
+    assert any("must keep the major of 1.0.0" in p for p in problems), problems
