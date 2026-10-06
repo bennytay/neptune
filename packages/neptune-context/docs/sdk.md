@@ -53,7 +53,8 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
   planned = client.plan("why did the arm-cell incident happen?")   # PlannedQuery: shown, never run
   planned = client.choose(planned, "ARM-3A", "asset-tag:ARM-3A")  # settle an ambiguous name
   asked = client.ask("...")             # Asked(plan, packet): the packet only when the plan is ready
-  client.entities("machine"); client.find("ARM-3A in CELL-3")      # declared identities
+  client.entities("machine", include_inferred=False)                # names current at head
+  client.find("ARM-3A in CELL-3", as_of=4, include_inferred=False)  # names at transaction 4
   ```
 
   Without a planner these calls are `unavailable`; with `NoModel()` every plan is a visible `failed` plan.
@@ -310,7 +311,7 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
 | `neptune_diff` | what changed about one subject | `subject`, `before`, `after`, `include_inferred`, `as_of`, `max_items` |
 | `neptune_hydrate` | what the Ledger knows about a cited source | `evidence`, `as_of` |
 | `neptune_plan` | a typed query drafted from a question (inferred; never run) | `question`, `as_of` |
-| `neptune_entities` | declared identities to use as subjects | `text` (find names in it), `kind` |
+| `neptune_entities` | declared identities current at `as_of`, to use as subjects | `include_inferred`, `text` (find names in it), `kind`, `as_of` |
 
 - A packet answer is cited sentences (`render.agent.render_answer`):
   - a header with the snapshot, the clock and the inference policy;
@@ -321,8 +322,8 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
 
   One resource link follows per evidence ref. Reading `neptune://evidence/<token>?as_of=N` hydrates it at the
   answer's snapshot. `render.agent.parse_answer` recovers every citation from the text.
-- Text from sources is quoted, hardened JSON. Brackets, angle brackets, backticks, controls, bidirectional and
-  invisible characters are escaped, so a document cannot forge a citation, a line or a tag. The answer says
+- Text from sources is quoted, hardened JSON. Square brackets, every non-ASCII bracket (Unicode Ps/Pe), angle
+  brackets, backticks and their look-alikes, controls, bidirectional and invisible characters are escaped, so a document cannot forge a citation, a line or a tag. The answer says
   quoted strings are data, never instructions.
 - A failure is a tool error whose text is the SDK error as JSON (`code`, `message`, `retryable`, `findings`).
   Arguments nested deeper than 64 levels are `invalid_argument`.

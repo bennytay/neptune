@@ -254,8 +254,16 @@ def input_schemas() -> dict[str, dict[str, Any]]:
                     "description": "List only identities of this subject kind.",
                     **_query_defs()["Subject"]["properties"]["kind"],
                 },
+                "include_inferred": {
+                    "type": "boolean",
+                    "description": (
+                        "Required. false: only names that stated or observed claims mention. "
+                        "true: also names only inferred claims mention. You must choose."
+                    ),
+                },
+                "as_of": _AS_OF,
             },
-            [],
+            ["include_inferred"],
         ),
     }
 
@@ -293,9 +301,10 @@ def _tools() -> list[types.Tool]:
             "resolve; it is never an answer and is never run for you. Run it with neptune_query."
         ),
         TOOL_ENTITIES: (
-            "The declared identities memory names (machines, sensors, sites, zones, "
-            "configurations ...): with text, every declared name in it and all its candidates; "
-            "without, a list (optionally of one kind). Identifiers to use as query subjects."
+            "The declared identities memory names at a snapshot (machines, sensors, sites, "
+            "zones, configurations ...): with text, every declared name in it and all its "
+            "candidates; without, a list (optionally of one kind). Identifiers to use as query "
+            "subjects. Only names current at as_of; inferred-only names need include_inferred."
         ),
     }
     return [
@@ -509,26 +518,30 @@ def _text(text: str) -> types.CallToolResult:
 
 
 async def _entities(client: AsyncClient, arguments: Mapping[str, Any]) -> str:
-    _only(arguments, set(), {"text", "kind"})
+    _only(arguments, {"include_inferred"}, {"text", "kind", "as_of"})
     text, kind = arguments.get("text"), arguments.get("kind")
+    flag = _flag(arguments)
+    snapshot = _snapshot(arguments)
+    as_of = None if snapshot == "head" else cast("int", snapshot)
     if text is not None and (not isinstance(text, str) or not text.strip()):
         raise _bad("text is a non-empty string")
-    if text is not None and len(text) > MAX_TEXT_CHARS:
-        raise _bad(f"text is at most {MAX_TEXT_CHARS} characters")
+    if text is not None and len(text) > MAX_TEXT_CHARS:  # refused, never echoed back
+        raise _bad(f"text is {len(text)} characters; at most {MAX_TEXT_CHARS}")
     kinds = _query_defs()["Subject"]["properties"]["kind"]["enum"]
     if kind is not None and kind not in kinds:
         raise _bad(f"kind is one of {', '.join(kinds)}")
     if text is not None:
-        mentions = await client.find(text)
+        mentions = await client.find(text, as_of=as_of, include_inferred=flag)
         if kind is not None:  # only candidates of that kind, and only names that keep one
             narrowed = (
                 Mention(m.text, tuple(c for c in m.candidates if c.kind == kind)) for m in mentions
             )
             mentions = tuple(m for m in narrowed if m.candidates)
         return render_mentions(text, mentions)
-    found = await client.entities(kind)
+    found = await client.entities(kind, as_of=as_of, include_inferred=flag)
+    conflicts = await client.conflicts(as_of=as_of, include_inferred=flag)
     return render_entities(
-        found[:MAX_ENTITIES_LISTED], total=len(found), kind=kind, conflicts=client.conflicts()
+        found[:MAX_ENTITIES_LISTED], total=len(found), kind=kind, conflicts=conflicts
     )
 
 
@@ -562,6 +575,8 @@ def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]
                 question = arguments["question"]
                 if not isinstance(question, str) or not question.strip():
                     raise _bad("question is a non-empty string")
+                if len(question) > MAX_TEXT_CHARS:  # refused, never echoed back
+                    raise _bad(f"question is {len(question)} characters; at most {MAX_TEXT_CHARS}")
                 planned = await client.plan(question, as_of=_snapshot(arguments))  # type: ignore[arg-type]
                 return _text(render_plan(planned))
             if tool == TOOL_ENTITIES:

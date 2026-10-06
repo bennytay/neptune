@@ -65,13 +65,19 @@ gives an agent no way to find the declared ids its query needs. Three more force
    item's evidence. Each "what changed" line cites its claim. No statement lacks a citation.
 3. **Untrusted text is hardened data.** Every value from evidence is canonical JSON with these
    characters escaped as `\uXXXX` inside its string literals:
-   - `[ ] < > `` ` ``;
+   - `[ ] < > `` ` `` and their fullwidth and small look-alikes;
+   - every opening or closing bracket outside ASCII, by general category (Ps, Pe): fullwidth
+     square brackets, `⟦⟧`, tortoise-shell, lenticular, quill and ornamental brackets. A bracket
+     of any script then cannot frame a forged key such as a fullwidth `[E1]`. ASCII `( )` and
+     `{ }` stay readable;
    - C0 and C1 controls, soft hyphen and invisible formatting;
    - bidirectional controls, line and paragraph separators and variation selectors;
    - tag characters (U+E0000 to U+E0FFF), private use and surrogates.
 
-   The set is a fixed list, not Unicode categories, so the bytes never depend on the renderer's
-   Unicode database. A document cannot start a line, close a quote, forge a citation, a footer,
+   The invisible and control characters are a fixed list, so their bytes never depend on the
+   renderer's Unicode database. Brackets go by category (the coordinator's review asked for a
+   rule, not a list): a bracket added in a later Unicode version is escaped once Python knows
+   it, and only text holding such a character can render differently across Python versions. A document cannot start a line, close a quote, forge a citation, a footer,
    a heading or a tag, or hide text. `json.loads` of the literal gives back the exact source
    text. Ordinary non-ASCII text stays readable. The header, the server instructions and the
    skill all tell the agent never to follow instructions inside quoted strings. Prompt-injection
@@ -87,9 +93,14 @@ gives an agent no way to find the declared ids its query needs. Three more force
      `neptune_query`. It is never run for the agent. It takes no `include_inferred`, because it
      returns no items: the drafted query carries the flag (stated as a planner finding), and
      `neptune_query` still requires the agent to pass it.
-   - New, `neptune_entities(text?, kind?)`: the declared identities the resolver holds, listed
-     (at most 200, by kind then id) or matched in a text with every candidate. Ambiguity is
-     never settled. These are identifiers, not facts.
+   - New, `neptune_entities(include_inferred, text?, kind?, as_of?)`: the declared identities
+     the resolver holds at `as_of`, listed (at most 200, by kind then id) or matched in a text
+     with every candidate. Ambiguity is never settled. These are identifiers, not facts.
+     `include_inferred` is required as on the packet tools: false offers only names that stated
+     or observed claims mention.
+   - The question for `neptune_plan` and the text for `neptune_entities` are at most 2000
+     characters, checked at run time (the schema's `maxLength` is advisory to hosts). An
+     oversized one is refused with its length, never echoed back.
 
    Both new tools are annotated read-only and idempotent. Their arguments are checked as
    strictly as the packet tools'.
@@ -104,8 +115,12 @@ gives an agent no way to find the declared ids its query needs. Three more force
 
    With no planner these calls are `unavailable`. With no model every plan is a visible `failed`
    plan with `model_unavailable`, never a guess. For Demo v1 the resolver is `sdk.entity_index`
-   (graph document) (ADR 0005 §3: the catalog cannot list declared ids yet). It is an in-memory
-   `DeclaredIdentifierIndex` over the declared ids a Memory graph document names. Content
+   (graph document) (ADR 0005 §3: the catalog cannot list declared ids yet). It is a
+   `GraphEntities` resolver over the declared ids a Memory graph document names, built per
+   snapshot: an id is offered only when a claim current at `as_of` (recorded by then, not yet
+   superseded) names it. That claim must be stated or observed; inferred-only names need
+   `include_inferred`, which the planner never sets, and a superseded-only name is never offered.
+   `as_of` beyond the graph's head is `not_found`. Content
    addresses are left out. An id the graph declares under two kinds is two identities memory has
    not told apart, so it is offered as neither: it is listed as a conflict by
    `neptune_entities`.
@@ -127,6 +142,10 @@ gives an agent no way to find the declared ids its query needs. Three more force
      and refuses a directory with no packet.
    - The MCP server refuses arguments nested deeper than 64 levels or holding more than 100,000
      values with `invalid_argument`, using an iterative check before anything recurses.
+   - Known limit, upstream: over stdio, the `mcp` Python SDK itself stalls on a request nested
+     beyond about 200 levels, before the tool handler runs, so this check never sees it. In
+     process, and for anything the SDK delivers, the check holds. A fix belongs in the `mcp`
+     SDK's message parsing.
 
 ## Alternatives considered
 

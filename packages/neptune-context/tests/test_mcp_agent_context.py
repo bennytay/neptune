@@ -151,7 +151,8 @@ def _error(result: dict[str, Any]) -> dict[str, Any]:
 def test_without_a_planner_plan_and_entities_say_unavailable() -> None:
     client = AsyncClient(golden_stub())
     assert _error(_one(client, "neptune_plan", {"question": "why"}))["code"] == "unavailable"
-    assert _error(_one(client, "neptune_entities", {}))["code"] == "unavailable"
+    entities = _one(client, "neptune_entities", {"include_inferred": False})
+    assert _error(entities)["code"] == "unavailable"
 
 
 def test_without_a_model_a_plan_is_a_visible_failure_not_a_guess() -> None:
@@ -165,10 +166,11 @@ def test_without_a_model_a_plan_is_a_visible_failure_not_a_guess() -> None:
 def test_tool_arguments_are_checked() -> None:
     client = demo_client()
     bad: list[tuple[str, dict[str, Any]]] = [
-        ("neptune_entities", {"kind": "spaceship"}),
-        ("neptune_entities", {"text": ""}),
-        ("neptune_entities", {"text": 7}),
-        ("neptune_entities", {"filter": "x"}),
+        ("neptune_entities", {"kind": "spaceship", "include_inferred": False}),
+        ("neptune_entities", {"text": "", "include_inferred": False}),
+        ("neptune_entities", {"text": 7, "include_inferred": False}),
+        ("neptune_entities", {"filter": "x", "include_inferred": False}),
+        ("neptune_entities", {"include_inferred": "no"}),
         ("neptune_plan", {}),
         ("neptune_plan", {"question": "   "}),
         ("neptune_plan", {"question": "why", "as_of": -1}),
@@ -181,7 +183,8 @@ def test_tool_arguments_are_checked() -> None:
 def test_entities_filter_matches_by_kind() -> None:
     client = demo_client()
     text = "ARM-3A and CELL-3"
-    zone_only = _one(client, "neptune_entities", {"text": text, "kind": "zone"})["text"]
+    arguments = {"text": text, "kind": "zone", "include_inferred": False}
+    zone_only = _one(client, "neptune_entities", arguments)["text"]
     assert "zone-code:CELL-3" in zone_only and "asset-tag:ARM-3A" not in zone_only
 
 
@@ -271,3 +274,25 @@ def test_the_export_script_writes_a_graph_the_server_reads(tmp_path: Path) -> No
     from neptune_context.engine import read_graph_document
 
     assert read_graph_document(out).head == F.demo_document().head
+
+
+def test_an_oversized_question_is_refused_and_never_echoed() -> None:
+    marker = "SECRET-PAYLOAD-" + "y" * 2000
+    for tool, arguments in (
+        ("neptune_plan", {"question": marker}),
+        ("neptune_entities", {"text": marker, "include_inferred": False}),
+    ):
+        result = _one(demo_client(), tool, arguments)
+        error = _error(result)
+        assert error["code"] == "invalid_argument"
+        assert "SECRET" not in result["text"] and "at most 2000" in error["message"]
+
+
+def test_entities_needs_the_inference_choice_and_honours_as_of() -> None:
+    client = demo_client()
+    assert _error(_one(client, "neptune_entities", {}))["code"] == "invalid_argument"
+    at_head = _one(client, "neptune_entities", {"include_inferred": False})["text"]
+    early = _one(client, "neptune_entities", {"include_inferred": False, "as_of": 0})["text"]
+    assert "asset-tag:ARM-3A" in at_head and "asset-tag:ARM-3A" not in early
+    beyond = _one(client, "neptune_entities", {"include_inferred": True, "as_of": 10**6})
+    assert _error(beyond)["code"] == "not_found"

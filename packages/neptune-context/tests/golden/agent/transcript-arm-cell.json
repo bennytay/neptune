@@ -3,7 +3,9 @@
   "snapshot": "packages/neptune-deploy/tests/fixtures/packs/acceptance_corpus.graph.json",
   "steps": [
     {
-      "arguments": {},
+      "arguments": {
+        "include_inferred": false
+      },
       "exact": true,
       "is_error": false,
       "links": [],
@@ -12,6 +14,7 @@
     },
     {
       "arguments": {
+        "include_inferred": false,
         "kind": "configuration"
       },
       "exact": true,
@@ -22,6 +25,7 @@
     },
     {
       "arguments": {
+        "include_inferred": false,
         "text": "What happened to ARM-3A in CELL-3 at PLANT-2?"
       },
       "exact": true,

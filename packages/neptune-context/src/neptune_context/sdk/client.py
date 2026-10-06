@@ -34,7 +34,17 @@ from neptune_context.answer import answer_problems
 from neptune_context.packets.model import EvidenceItem
 from neptune_context.query.decode import accept
 from neptune_context.query.findings import Refused
-from neptune_context.query.model import HEAD, AsOf, Budget, Diff, Instant, Query, Subject, Why
+from neptune_context.query.model import (
+    HEAD,
+    MAX_TEXT_CHARS,
+    AsOf,
+    Budget,
+    Diff,
+    Instant,
+    Query,
+    Subject,
+    Why,
+)
 from neptune_context.sdk.engine import AsyncEngine, Engine, to_async
 from neptune_context.sdk.errors import ErrorCode, SdkError
 from neptune_context.sdk.http import DEFAULT_TIMEOUT_S, HttpEngine
@@ -217,8 +227,15 @@ def _checked_planner(planner: object) -> Planner | None:
 
 
 def _question(question: object) -> str:
+    """A question or text to plan or match: a string of at most ``MAX_TEXT_CHARS`` characters.
+    An oversized one is refused without being echoed back."""
     if not isinstance(question, str):
         raise SdkError(ErrorCode.INVALID_ARGUMENT, "the question is a string")
+    if len(question) > MAX_TEXT_CHARS:
+        raise SdkError(
+            ErrorCode.INVALID_ARGUMENT,
+            f"the text is {len(question)} characters; at most {MAX_TEXT_CHARS}",
+        )
     return question
 
 
@@ -342,19 +359,30 @@ class Client:
             return Asked(planned, None)
         return Asked(planned, self.query(planned.query))
 
-    def entities(self, kind: str | None = None) -> tuple[Entity, ...]:
-        """The declared identities the planner's resolver lists, optionally of one kind."""
-        planner = _planner(self._planner)
-        return _planned(lambda: planner.entities(kind))
+    def entities(
+        self, kind: str | None = None, *, as_of: int | None = None, include_inferred: bool
+    ) -> tuple[Entity, ...]:
+        """The declared identities current at ``as_of`` (``None``: head), optionally of one
+        kind; names only inferred claims mention need ``include_inferred``."""
+        planner, tx, flag = _planner(self._planner), _transaction(as_of), _flag(include_inferred)
+        return _planned(lambda: planner.entities(kind, as_of=tx, include_inferred=flag))
 
-    def find(self, text: str) -> tuple[Mention, ...]:
+    def find(
+        self, text: str, *, as_of: int | None = None, include_inferred: bool
+    ) -> tuple[Mention, ...]:
         """The declared names in ``text`` with every candidate (never a choice)."""
         planner, words = _planner(self._planner), _question(text)
-        return _planned(lambda: planner.find(words))
+        tx, flag = _transaction(as_of), _flag(include_inferred)
+        return _planned(lambda: planner.find(words, as_of=tx, include_inferred=flag))
 
-    def conflicts(self) -> tuple[str, ...]:
+    def conflicts(
+        self, *, as_of: int | None = None, include_inferred: bool = False
+    ) -> tuple[str, ...]:
         """Identifiers the planner's resolver declines to offer as names."""
-        return () if self._planner is None else self._planner.conflicts
+        if self._planner is None:
+            return ()
+        planner = self._planner
+        return _planned(lambda: planner.conflicts(as_of=as_of, include_inferred=include_inferred))
 
     def __repr__(self) -> str:
         return f"Client({self._engine!r})"
@@ -479,17 +507,33 @@ class AsyncClient:
             return Asked(planned, None)
         return Asked(planned, await self.query(planned.query))
 
-    async def entities(self, kind: str | None = None) -> tuple[Entity, ...]:
-        planner = _planner(self._planner)
-        return await asyncio.to_thread(_planned, lambda: planner.entities(kind))
+    async def entities(
+        self, kind: str | None = None, *, as_of: int | None = None, include_inferred: bool
+    ) -> tuple[Entity, ...]:
+        planner, tx, flag = _planner(self._planner), _transaction(as_of), _flag(include_inferred)
+        return await asyncio.to_thread(
+            _planned, lambda: planner.entities(kind, as_of=tx, include_inferred=flag)
+        )
 
-    async def find(self, text: str) -> tuple[Mention, ...]:
+    async def find(
+        self, text: str, *, as_of: int | None = None, include_inferred: bool
+    ) -> tuple[Mention, ...]:
         planner, words = _planner(self._planner), _question(text)
-        return await asyncio.to_thread(_planned, lambda: planner.find(words))
+        tx, flag = _transaction(as_of), _flag(include_inferred)
+        return await asyncio.to_thread(
+            _planned, lambda: planner.find(words, as_of=tx, include_inferred=flag)
+        )
 
-    def conflicts(self) -> tuple[str, ...]:
+    async def conflicts(
+        self, *, as_of: int | None = None, include_inferred: bool = False
+    ) -> tuple[str, ...]:
         """Identifiers the planner's resolver declines to offer as names."""
-        return () if self._planner is None else self._planner.conflicts
+        if self._planner is None:
+            return ()
+        planner = self._planner
+        return await asyncio.to_thread(
+            _planned, lambda: planner.conflicts(as_of=as_of, include_inferred=include_inferred)
+        )
 
     def __repr__(self) -> str:
         return f"AsyncClient({self._engine!r})"

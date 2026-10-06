@@ -120,11 +120,18 @@ def steps(packet_query_text: str) -> list[dict[str, Any]]:
         next(line for line in packet_query_text.splitlines() if line.startswith("[E1] "))[5:]
     )
     return [
-        {"tool": "neptune_entities", "arguments": {}, "exact": True},
-        {"tool": "neptune_entities", "arguments": {"kind": "configuration"}, "exact": True},
+        {"tool": "neptune_entities", "arguments": {"include_inferred": False}, "exact": True},
         {
             "tool": "neptune_entities",
-            "arguments": {"text": "What happened to ARM-3A in CELL-3 at PLANT-2?"},
+            "arguments": {"kind": "configuration", "include_inferred": False},
+            "exact": True,
+        },
+        {
+            "tool": "neptune_entities",
+            "arguments": {
+                "text": "What happened to ARM-3A in CELL-3 at PLANT-2?",
+                "include_inferred": False,
+            },
             "exact": True,
         },
         {"tool": "neptune_plan", "arguments": {"question": QUESTION}, "exact": True},

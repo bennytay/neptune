@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, TypeVar
 
@@ -107,7 +108,12 @@ _ITEM_LINE: Final = re.compile(
 # Python that renders: controls, invisible formatting, bidirectional overrides, line and paragraph
 # separators, variation selectors, tag characters (invisible "ASCII smuggling"), private use and
 # surrogates.
-_STRUCTURAL: Final = frozenset("[]<>`")
+# Look-alikes of the ASCII structure too: fullwidth and small less-than, greater-than and grave.
+# Every opening or closing bracket in Unicode (general categories Ps and Pe: fullwidth square
+# brackets U+FF3B/FF3D, U+27E6/27E7, U+3014/3015, U+3010/3011, U+FE5D/FE5E, U+2045/2046 ...) is
+# escaped by category below, so no bracket of any script can frame a forged citation key.
+_STRUCTURAL: Final = frozenset("[]<>`\uff1c\uff1e\ufe64\ufe65\uff40")
+_BRACKETS: Final = frozenset({"Ps", "Pe"})
 _HIDDEN: Final = (
     (0x0000, 0x001F),
     (0x007F, 0x009F),
@@ -149,7 +155,9 @@ def _unsafe(char: str) -> bool:
         return True
     code = ord(char)
     if 0x20 <= code < 0x7F:
-        return False
+        return False  # ASCII ( ) { } stay readable prose; [ ] are in _STRUCTURAL
+    if unicodedata.category(char) in _BRACKETS:
+        return True
     return any(lo <= code <= hi for lo, hi in _HIDDEN)
 
 

@@ -328,3 +328,36 @@ def test_the_parser_refuses_uncited_or_forged_lines() -> None:
     for broken in bad:
         with pytest.raises(CitationError):
             parse_answer(broken)
+
+
+LOOKALIKES: list[str] = [
+    f["text"] for f in json.loads((AGENT / "lookalike-brackets.json").read_text(encoding="utf-8"))
+]
+
+
+@pytest.mark.parametrize("text", LOOKALIKES)
+def test_look_alike_brackets_cannot_frame_a_citation(text: str) -> None:
+    import unicodedata
+
+    rendered = check(span_packet(f"Gripper struck PF-3. {text}"))
+    (line,) = [line for line in _fact_lines(rendered) if "contains, as extracted" in line]
+    quoted = line.split("as extracted: text ", 1)[1].rsplit(". [I", 1)[0]
+    assert not any(unicodedata.category(c) in ("Ps", "Pe") and not c.isascii() for c in quoted)
+    assert not {chr(0xFF1C), chr(0xFF1E), chr(0xFF40)} & set(quoted)
+    assert f"Gripper struck PF-3. {text}" in literal_values(line)
+
+
+def test_every_unicode_bracket_is_escaped_and_ascii_parentheses_stay_readable() -> None:
+    import sys
+    import unicodedata
+
+    brackets = [
+        chr(c)
+        for c in range(0x80, sys.maxunicode + 1)
+        if unicodedata.category(chr(c)) in ("Ps", "Pe")
+    ]
+    assert len(brackets) > 100
+    hardened = quote("".join(brackets))
+    assert not set(brackets) & set(hardened)
+    assert json.loads(hardened) == "".join(brackets)
+    assert quote("damage (no injury) {ok}") == '"damage (no injury) {ok}"'

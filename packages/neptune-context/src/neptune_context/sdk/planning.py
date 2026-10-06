@@ -9,7 +9,8 @@ beside the packet, and runs the planned query only when the plan is ``ready``.
 declared identifiers a Memory graph document names (``asset-tag:ARM-3A``, ``site-code:PLANT-2``),
 because the catalog API cannot list declared identifiers yet (ADR 0005 §3). Content-addressed
 node ids (runs, events, clocks: ``record:rec:sha256:...``) are not names anyone types and are left
-out, and so is an identifier the graph declares under two kinds (never settled silently).
+out, and so is an identifier the graph declares under two kinds (never settled silently). Only
+names that stated or observed claims current at the snapshot mention are offered.
 ``NoModel`` stands in when no model is configured: every plan is then a visible ``failed`` plan
 with ``model_unavailable``, never a guess.
 """
@@ -20,7 +21,10 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
+from neptune_memory.schema.claim import is_inferred
+from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.nodes import NodeRef
+from neptune_memory.schema.supersede import as_of as snapshot_of
 
 from neptune_context.pinned import node_types
 from neptune_context.query.model import HEAD, AsOf, Query
@@ -47,6 +51,7 @@ if TYPE_CHECKING:
     from neptune_context.query.plan import ModelRequest, ModelResponse
 
 MAX_ENTITIES: Final = 10_000
+_SNAPSHOTS_CACHED: Final = 16
 # A declared identifier: a namespace, a colon, a value; never a content address.
 _DECLARED: Final = re.compile(r"[A-Za-z][A-Za-z0-9_.-]*:[^\s:][^\s]*")
 
@@ -84,20 +89,35 @@ class Planner:
         except ValueError as error:
             raise SdkError(ErrorCode.INVALID_ARGUMENT, str(error)) from None
 
-    def find(self, text: str) -> tuple[Mention, ...]:
-        """Every declared name in ``text`` with all its candidates; ambiguity is never settled."""
-        return tuple(self.resolver.find(text, as_of=None))
+    def find(
+        self, text: str, *, as_of: int | None = None, include_inferred: bool = False
+    ) -> tuple[Mention, ...]:
+        """Every declared name in ``text`` with all its candidates at ``as_of`` (``None``: the
+        head); ambiguity is never settled. Inferred-only names need ``include_inferred``."""
+        if isinstance(self.resolver, GraphEntities):
+            return self.resolver.find(text, as_of=as_of, include_inferred=include_inferred)
+        return tuple(self.resolver.find(text, as_of=as_of))
 
-    @property
-    def conflicts(self) -> tuple[str, ...]:
+    def conflicts(
+        self, *, as_of: int | None = None, include_inferred: bool = False
+    ) -> tuple[str, ...]:
         """Identifiers the resolver declines to offer as names (declared under several kinds)."""
+        if isinstance(self.resolver, GraphEntities):
+            return self.resolver.conflicts(as_of, include_inferred=include_inferred)
         return tuple(getattr(self.resolver, "conflicts", ()))
 
-    def entities(self, kind: str | None = None) -> tuple[Entity, ...]:
-        """The declared identities the resolver can list (by kind, then id); ``()`` when it
-        cannot list (a resolver backed by a store with no listing call)."""
-        listing = getattr(self.resolver, "entities", None)
-        found: tuple[Entity, ...] = tuple(listing()) if callable(listing) else ()
+    def entities(
+        self, kind: str | None = None, *, as_of: int | None = None, include_inferred: bool = False
+    ) -> tuple[Entity, ...]:
+        """The declared identities the resolver can list at ``as_of`` (by kind, then id);
+        ``()`` when it cannot list (a resolver backed by a store with no listing call)."""
+        found: tuple[Entity, ...]
+        if isinstance(self.resolver, GraphEntities):
+            found = self.resolver.entities(as_of, include_inferred=include_inferred)
+        elif isinstance(self.resolver, ListingIndex):
+            found = self.resolver.entities()
+        else:
+            found = ()
         return tuple(e for e in found if kind is None or e.kind == kind)
 
 
@@ -121,26 +141,9 @@ def _declared(node: NodeRef) -> Entity | None:
     return Entity(str(node.node_type), node.node_id)
 
 
-def entity_index(document: GraphDocument) -> ListingIndex:
-    """The declared identities a Memory graph document names, as an in-memory resolver.
-
-    Every node that is a claim's subject or object counts, whatever the claim's kind: a
-    declared identifier is a name, not a fact. An identifier under several node kinds is left
-    out and named in ``conflicts``. At most ``MAX_ENTITIES``; beyond that is ``ValueError`` (a
-    graph that size needs the Ledger's listing call, not a scan).
-    """
-    kinds: dict[str, set[str]] = {}
-    for claim in document.resolution.claims:
-        for node in (claim.subject, claim.object):
-            if isinstance(node, NodeRef) and (entity := _declared(node)) is not None:
-                kinds.setdefault(entity.declared_id, set()).add(entity.kind)
-    if len(kinds) > MAX_ENTITIES:
-        raise ValueError(f"more than {MAX_ENTITIES} declared identities; use a Ledger listing")
-    # One identifier under two kinds is two identities memory has not told apart: offering
-    # either would settle that silently, so neither is a name (they are listed as conflicts).
-    conflicts = tuple(sorted(i for i, k in kinds.items() if len(k) > 1))
-    single = (Entity(next(iter(k)), i) for i, k in sorted(kinds.items()) if len(k) == 1)
-    return ListingIndex(single, conflicts=conflicts)
+def entity_index(document: GraphDocument) -> GraphEntities:
+    """The declared identities a Memory graph document names, as an ``as_of``-aware resolver."""
+    return GraphEntities(document)
 
 
 class ListingIndex(DeclaredIdentifierIndex):
@@ -157,3 +160,75 @@ class ListingIndex(DeclaredIdentifierIndex):
 
     def entities(self) -> tuple[Entity, ...]:
         return self._listed
+
+
+class GraphEntities:
+    """An ``EntityResolver`` over one Memory graph document, at the snapshot each call names.
+
+    An identifier is offered only when a claim **current at** ``as_of`` (recorded by then, not
+    yet superseded) names it as subject or object, and that claim is ``stated`` or ``observed``.
+    A name that only inferred claims mention is left out unless ``include_inferred`` is set; a
+    name only superseded claims mention is not current and is never offered. Every node counts
+    whatever the claim says: a declared identifier is a name, not a fact. An identifier under
+    several node kinds at that snapshot is left out and named in ``conflicts``. At most
+    ``MAX_ENTITIES`` per snapshot; beyond that is ``ValueError`` (a graph that size needs the
+    Ledger's listing call, not a scan). ``as_of`` beyond the document's head is ``not_found``.
+    """
+
+    def __init__(self, document: GraphDocument) -> None:
+        self._history = document.resolution
+        self._head = int(document.head)
+        self._cache: dict[tuple[int, bool], ListingIndex] = {}
+
+    def index(self, as_of: int | None = None, *, include_inferred: bool = False) -> ListingIndex:
+        tx = self._head if as_of is None else int(as_of)
+        if tx > self._head:
+            raise SdkError(
+                ErrorCode.NOT_FOUND,
+                f"as_of {tx} is beyond the latest transaction this graph holds ({self._head})",
+            )
+        key = (tx, include_inferred)
+        found = self._cache.get(key)
+        if found is None:
+            if len(self._cache) >= _SNAPSHOTS_CACHED:
+                self._cache.pop(next(iter(self._cache)))
+            found = self._cache[key] = self._build(tx, include_inferred)
+        return found
+
+    def _build(self, tx: int, include_inferred: bool) -> ListingIndex:
+        kinds: dict[str, set[str]] = {}
+        for claim in snapshot_of(self._history, ledger_tx(tx)).claims:
+            if is_inferred(claim.assertion_kind) and not include_inferred:
+                continue
+            for node in (claim.subject, claim.object):
+                if isinstance(node, NodeRef) and (entity := _declared(node)) is not None:
+                    kinds.setdefault(entity.declared_id, set()).add(entity.kind)
+        if len(kinds) > MAX_ENTITIES:
+            raise ValueError(f"more than {MAX_ENTITIES} declared identities; use a Ledger listing")
+        # One identifier under two kinds is two identities memory has not told apart: offering
+        # either would settle that silently, so neither is a name (they are listed as conflicts).
+        conflicts = tuple(sorted(i for i, k in kinds.items() if len(k) > 1))
+        single = (Entity(next(iter(k)), i) for i, k in sorted(kinds.items()) if len(k) == 1)
+        return ListingIndex(single, conflicts=conflicts)
+
+    # EntityResolver (the planner's seam): evidence only, at the plan's snapshot.
+    def find(
+        self, text: str, *, as_of: int | None, include_inferred: bool = False
+    ) -> tuple[Mention, ...]:
+        return self.index(as_of, include_inferred=include_inferred).find(text, as_of=as_of)
+
+    def lookup(
+        self, declared_id: str, *, as_of: int | None, include_inferred: bool = False
+    ) -> Entity | None:
+        index = self.index(as_of, include_inferred=include_inferred)
+        return index.lookup(declared_id, as_of=as_of)
+
+    def entities(
+        self, as_of: int | None = None, *, include_inferred: bool = False
+    ) -> tuple[Entity, ...]:
+        return self.index(as_of, include_inferred=include_inferred).entities()
+
+    def conflicts(
+        self, as_of: int | None = None, *, include_inferred: bool = False
+    ) -> tuple[str, ...]:
+        return self.index(as_of, include_inferred=include_inferred).conflicts

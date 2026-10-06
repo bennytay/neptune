@@ -61,8 +61,8 @@ def test_a_client_without_a_planner_says_unavailable() -> None:
     for call in (
         lambda: client.plan("why"),
         lambda: client.ask("why"),
-        lambda: client.entities(),
-        lambda: client.find("ARM-3A"),
+        lambda: client.entities(include_inferred=False),
+        lambda: client.find("ARM-3A", include_inferred=False),
     ):
         with pytest.raises(SdkError) as raised:
             call()
@@ -111,8 +111,8 @@ def test_the_async_client_plans_too() -> None:
 
     async def go() -> tuple[object, ...]:
         asked = await client.ask(QUESTION)
-        found = await client.find("ARM-3A in CELL-3")
-        listed = await client.entities("site")
+        found = await client.find("ARM-3A in CELL-3", include_inferred=False)
+        listed = await client.entities("site", include_inferred=False)
         chose = await client.plan(QUESTION)
         return asked, found, listed, chose
 
@@ -125,11 +125,11 @@ def test_the_async_client_plans_too() -> None:
 
 def test_the_entity_index_holds_declared_names_only() -> None:
     index = entity_index(F.demo_document())
-    assert isinstance(index, ListingIndex)
     ids = [e.declared_id for e in index.entities()]
     assert "asset-tag:ARM-3A" in ids and "zone-code:CELL-3" in ids
     assert not any("sha256:" in i for i in ids)  # runs, events, clocks are content addresses
-    assert ids == sorted(ids, key=lambda i: (index.lookup(i, as_of=None).kind, i))  # type: ignore[union-attr]
+    kinds = {e.declared_id: e.kind for e in index.entities()}
+    assert ids == sorted(ids, key=lambda i: (kinds[i], i))
     assert index.lookup("asset-tag:ARM-3A", as_of=None) == Entity("machine", "asset-tag:ARM-3A")
 
 
@@ -143,6 +143,81 @@ def test_one_identifier_under_two_kinds_is_never_offered_as_a_name() -> None:
     index = entity_index(document)
     assert index.lookup("tag:X1", as_of=None) is None
     assert index.find("is X1 ok?", as_of=None) == ()
-    assert index.conflicts == ("tag:X1",)
+    assert index.conflicts() == ("tag:X1",)
+    assert index.conflicts(1) == ()  # at transaction 1 only the machine claim existed
+    assert index.lookup("tag:X1", as_of=1) == Entity("machine", "tag:X1")
     planner = Planner(index, AGENT_DEFAULTS)
     assert Client(golden_stub(), planner=planner).conflicts() == ("tag:X1",)
+
+
+def snapshot_document() -> GraphDocument:
+    """Names that appear only in inferred claims, only in superseded ones, or only later."""
+    old = F.claim(
+        NodeRef(NodeType.MACHINE, "asset-tag:OLD-1"),
+        "located_at",
+        F.SITE_A,
+        F.FEB_1,
+        superseded_at=3,
+    )
+    new = F.claim(
+        NodeRef(NodeType.MACHINE, "asset-tag:NEW-1"),
+        "located_at",
+        F.SITE_A,
+        F.FEB_1,
+        tx=3,
+        supersedes=(old.id,),
+    )
+    guess = F.claim(
+        NodeRef(NodeType.MACHINE, "asset-tag:GUESS-9"),
+        "located_at",
+        F.SITE_B,
+        F.FEB_1,
+        inferred=0.6,
+    )
+    later = F.claim(NodeRef(NodeType.SENSOR, "serial:LATE-2"), "mounted_on", F.ARM, F.FEB_1, tx=4)
+    claims = sorted([old, new, guess, later], key=lambda c: (c.recorded_at, c.id))
+    return GraphDocument(History(tuple(claims), ()), F.RESOLVER_CONFIG, F.HEAD)
+
+
+def test_names_are_those_current_and_declared_at_the_snapshot() -> None:
+    index = entity_index(snapshot_document())
+
+    def names(as_of: int | None = None, inferred: bool = False) -> set[str]:
+        return {e.declared_id for e in index.entities(as_of, include_inferred=inferred)}
+
+    head = names()
+    assert "asset-tag:NEW-1" in head and "serial:LATE-2" in head
+    assert "asset-tag:OLD-1" not in head  # only a superseded claim names it
+    assert "asset-tag:GUESS-9" not in head  # only an inferred claim names it
+    assert "asset-tag:GUESS-9" in names(inferred=True)
+    assert "asset-tag:OLD-1" not in names(inferred=True)  # superseded is never current
+    at_two = names(2)
+    assert "asset-tag:OLD-1" in at_two and "asset-tag:NEW-1" not in at_two
+    assert "serial:LATE-2" not in names(3)
+    assert index.find("where is GUESS-9?", as_of=None) == ()
+    assert [m.text for m in index.find("GUESS-9", as_of=None, include_inferred=True)] == ["GUESS-9"]
+    with pytest.raises(SdkError) as raised:
+        index.entities(99)
+    assert raised.value.code is ErrorCode.NOT_FOUND
+
+
+def test_the_planner_resolves_names_at_the_plans_snapshot() -> None:
+    planner = Planner(entity_index(snapshot_document()), AGENT_DEFAULTS)
+    client = Client(golden_stub(), planner=planner)
+    assert client.find("OLD-1", as_of=2, include_inferred=False)
+    assert not client.find("OLD-1", include_inferred=False)
+    assert client.entities("sensor", as_of=3, include_inferred=False) == ()
+
+
+def test_oversized_questions_are_refused_without_being_echoed() -> None:
+    client = demo_sdk(demo_planner())
+    marker = "SECRET-PAYLOAD-" + "x" * 2000
+    for call in (
+        lambda: client.plan(marker),
+        lambda: client.ask(marker),
+        lambda: client.find(marker, include_inferred=False),
+    ):
+        with pytest.raises(SdkError) as raised:
+            call()
+        assert raised.value.code is ErrorCode.INVALID_ARGUMENT
+        assert "SECRET" not in raised.value.message and "2015 characters" in raised.value.message
