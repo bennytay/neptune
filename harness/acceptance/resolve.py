@@ -18,7 +18,10 @@ Selectors (``select.kind``):
 - ``source`` ``{path}``: the path's ``source_revision``.
 - ``document_text`` ``{path, contains, page?}``: ``document_block`` records whose text contains
   ``contains`` (``page`` counts from 1).
-- ``table_row`` ``{path, key}``: ``structured_record`` rows with a cell equal to ``key``.
+- ``table_row`` ``{path, key, column?}``: ``structured_record`` rows with a cell equal to ``key``.
+  With ``column`` (a header name of the row's table) the item is that one cell of the row, located
+  ``{row, column}``: a citation of another cell of the row does not support it (Platform ADR
+  0011 §4).
 - ``no_table_row`` ``{path, key}``: the path's ``structured_table`` records, only when no row of
   the path has a cell equal to ``key`` (a cited absence).
 - ``config_value`` ``{path, pointer, equals?}``: ``configuration_value`` records at the JSON
@@ -150,6 +153,15 @@ def _cells(record: Json) -> list[str]:
     return [str(_known(cell)) for cell in record.get("cells", []) if _known(cell) is not None]
 
 
+def _header(package: Package, row: Json) -> list[Any]:
+    """The header of the table ``row`` belongs to (empty when it states none)."""
+    for table in package.kind("structured_table"):
+        if table["id"] == row.get("table"):
+            header = _known(table.get("header"))
+            return header if isinstance(header, list) else []
+    return []
+
+
 def _need(select: Json, *names: str) -> list[Any]:
     missing = [name for name in names if name not in select]
     if missing:
@@ -221,6 +233,8 @@ def resolve_one(package: Package, select: Json) -> Json:
         ]
         if kind == "table_row":
             found = rows
+            if "column" in select:
+                found = [r for r in rows if select["column"] in _header(package, r)]
         elif not rows:
             found = [t for t in package.kind("structured_table") if _source(t) == content]
     elif kind == "config_value":
@@ -365,7 +379,10 @@ def _entry_id(entry: Json) -> str:
 def _locator(kind: str, record: Json, select: Json) -> Json | None:
     """Where a record sits in its source, in terms a package without base records can match."""
     if kind == "table_row":
-        return {"row": record["row"]}
+        return {
+            "row": record["row"],
+            **({"column": select["column"]} if "column" in select else {}),
+        }
     if kind == "document_text":
         locator = record["provenance"]["evidence"]["locator"]
         index = next((part["index"] for part in locator if part.get("kind") == "page"), None)

@@ -10,14 +10,21 @@ A case's answer declaration (``Case.answers``; the acceptance corpus's is
 ``harness/acceptance/answers.json``) lists, per gold question, the tool calls an agent makes and
 what the answers must hold. Each answer is read back with Context's own parser
 (``render.agent.parse_answer``): every cited statement names its items and evidence refs. A
-statement's citations, in the terms of Platform ADR 0007 §6, are the record ids its claims rest on
-and, per evidence ref, the corpus path of its source with its row, page or JSON pointer. A gold
-claim is **supported** when a statement's citations support one of its evidence items
-(``harness.acceptance.resolve.supports``); the declaration pins, per gold claim, the claim ids that
-support it, or names it a **gap** with the reason and whether the graph holds a claim that would
-support it at all (``in_graph``). The stage fails when an answer is an error or holds a statement
-without evidence, when supports differ from the pins, when a gap has no reason, when an answer
-cites what a question says must never be cited, or when a cited source does not hydrate.
+A statement's citations, in the terms of Platform ADR 0007 §6, are the records its claims are about
+(a subject or object that is a record; never the other records a claim was built from) and, per
+evidence ref, the corpus path of its source with its row, page or JSON pointer; a single cell is
+cited as its row and column, never as the whole row. A gold
+claim is **cited** when a statement's citations support one of its evidence items
+(``harness.acceptance.resolve.supports``). That rule cannot tell a statement that carries the gold
+fact from one that shares its row or record while stating something else, so the declaration pins
+each gold claim in one of three classes, each with a reason (ADR 0011 §4): **supported** (the claim
+ids citing it, and a statement among them carries the fact), **co_cited** (the claim ids citing
+it, none of which carries it) or a **gap** (nothing cites it; ``in_graph`` says whether any claim
+of the graph would). The stage fails when an answer is an error or holds a statement without
+evidence, when the ids citing a gold claim differ from its pin, when a pin has no reason, when an
+answer cites what a question says must never be cited, or when a cited source does not hydrate.
+Re-pinning never moves a claim between classes: whatever changed is left without a reason, which
+fails until a person classifies it.
 
 One more check proves the path Claude Code takes: ``python -m neptune_context.mcp --memory
 <graph>`` is spawned over stdio, lists its tools and answers the first question's first query with
@@ -155,6 +162,19 @@ class Statement:
     evidence: int
 
 
+def _about(claim: Json) -> list[str]:
+    """The record ids a claim's subject and object are: a ``record`` object, or a node whose id is
+    a record (``record:<id>``, or a part of one, ``record:<id>/timeline/0``)."""
+    out = []
+    for end in (claim.get("subject", {}), claim.get("object", {})):
+        if end.get("kind") == "record" and isinstance(end.get("record_id"), str):
+            out.append(end["record_id"])
+        node = end.get("node_id")
+        if isinstance(node, str) and node.startswith("record:"):
+            out.append(node.removeprefix("record:").split("/", 1)[0])
+    return out
+
+
 class Scorer:
     """Turns answers into citations and scores them against the gold evidence (ADR 0007 §6)."""
 
@@ -179,8 +199,12 @@ class Scorer:
         out: list[Json] = []
         for part in ref.get("locator", []):
             kind = part.get("kind")
-            if kind in ("row", "row_cell") and isinstance(part.get("row"), int):
+            if kind == "row" and isinstance(part.get("row"), int):
                 out.append({"locator": {"row": part["row"]}, "path": path})
+            elif kind == "row_cell" and isinstance(part.get("row"), int):
+                # one cell is never the whole row: it meets only an item naming its column
+                column = part.get("column_name")
+                out.append({"locator": {"column": column, "row": part["row"]}, "path": path})
             elif kind == "page" and isinstance(part.get("index"), int):
                 out.append({"locator": {"page": part["index"] + 1}, "path": path})
             elif kind == "json_pointer" and isinstance(part.get("pointer"), str):
@@ -190,13 +214,12 @@ class Scorer:
         return out
 
     def claim_citations(self, claim_id: str) -> list[Json]:
-        """The records a claim rests on, and its own evidence refs."""
+        """The records a claim is about (its subject or object, when that is a record) and its
+        own evidence refs. The other records it was built from (``provenance.records``) are not
+        citations: a claim built from a work order states one of its cells, not the work order."""
         claim = self.claims.get(claim_id, {})
-        provenance = claim.get("provenance", {})
-        out: list[Json] = [{"record": r} for r in provenance.get("records", [])]
-        if claim.get("object", {}).get("kind") == "record":
-            out.append({"record": claim["object"]["record_id"]})
-        for ref in provenance.get("evidence", []):
+        out: list[Json] = [{"record": r} for r in _about(claim)]
+        for ref in claim.get("provenance", {}).get("evidence", []):
             out += self.ref_citations(ref)
         return out
 
@@ -269,7 +292,8 @@ class Asked:
     question: Json
     calls: list[Called]
     statements: list[Statement]
-    supported: dict[str, list[str]]
+    # each gold claim's id -> the claim ids whose statements cite its evidence (ADR 0007 §6)
+    cited: dict[str, list[str]]
     problems: list[str]
 
 
@@ -280,11 +304,11 @@ def ask(client: AsyncClient, question: Json, declared: Json, scorer: Scorer) -> 
 
     def score() -> None:
         for claim in gold_claims:
-            asked.supported[claim["id"]] = scorer.supporting(claim["evidence"], asked.statements)
+            asked.cited[claim["id"]] = scorer.supporting(claim["evidence"], asked.statements)
 
     for number, call in enumerate(declared.get("calls", []), start=1):
         try:
-            arguments = _resolve_refs(copy.deepcopy(call.get("arguments", {})), asked.supported)
+            arguments = _resolve_refs(copy.deepcopy(call.get("arguments", {})), asked.cited)
         except LookupError as error:
             asked.problems.append(f"call {number} ({call.get('tool')}): {error}")
             continue
@@ -307,8 +331,25 @@ def _first(result: Called) -> str:
         return result.text.splitlines()[0] if result.text else "no text"
 
 
+# The classes a gold claim is pinned in (ADR 0011 §4). ``supported``: a cited statement carries the
+# gold fact. ``co_cited``: statements cite the gold claim's evidence (ADR 0007 §6) but none carries
+# the fact: they share a row, page or record with it while stating something else. ``gaps``: no
+# statement cites its evidence.
+CITED_CLASSES: Final = ("supported", "co_cited")
+CLASSES: Final = (*CITED_CLASSES, "gaps")
+
+
+def _entry(declared: Json, cid: str) -> tuple[str | None, Json]:
+    """The class ``cid`` is pinned in and its entry; (None, {}) when it is pinned in none."""
+    found = [(c, declared.get(c, {})[cid]) for c in CLASSES if cid in declared.get(c, {})]
+    if len(found) != 1:
+        return None, {"classes": [c for c, _ in found]}
+    klass, entry = found[0]
+    return klass, entry if isinstance(entry, dict) else {}
+
+
 def check(asked: Asked, declared: Json, scorer: Scorer, must_not: Sequence[str]) -> list[str]:
-    """What the pins say against what the answers support (see the module docstring)."""
+    """What the pins say against what the answers cite (see the module docstring)."""
     qid = asked.question["id"]
     problems = [f"{qid}: {p}" for p in asked.problems]
     uncited = sum(1 for s in asked.statements if not s.evidence or not s.items)
@@ -319,52 +360,55 @@ def check(asked: Asked, declared: Json, scorer: Scorer, must_not: Sequence[str])
     for key in must_not:
         if scorer.supporting([key], asked.statements):
             problems.append(f"{qid}: an answer cites {key}, which it must never cite")
-    pinned, gaps = declared.get("supported", {}), declared.get("gaps", {})
     for claim in asked.question.get("claims", []):
-        cid, found = claim["id"], asked.supported.get(claim["id"], [])
-        if cid in pinned and cid in gaps:
-            problems.append(f"{cid}: pinned as both supported and a gap")
-        elif cid in pinned:
-            if sorted(pinned[cid]) != found:
-                problems.append(
-                    f"{cid}: supported by {len(found)} cited claim(s), not the {len(pinned[cid])}"
-                    " pinned (re-pin with `make demo-pin` and review the diff)"
-                )
-        elif cid in gaps:
-            gap = gaps[cid]
+        cid, found = claim["id"], asked.cited.get(claim["id"], [])
+        klass, entry = _entry(declared, cid)
+        if klass is None:
+            where = " and ".join(entry["classes"]) or "no class"
+            problems.append(f"{cid}: pinned in {where}; a gold claim is pinned in exactly one")
+            continue
+        if not str(entry.get("reason", "")).strip():
+            problems.append(f"{cid}: a {klass} pin needs a reason (re-pinned: review it)")
+        if klass == "gaps":
             if found:
-                problems.append(
-                    f"{cid}: pinned as a gap, but {len(found)} cited claim(s) support it"
-                )
-            if not isinstance(gap, dict) or not str(gap.get("reason", "")).strip():
-                problems.append(f"{cid}: a gap needs a reason")
-            elif gap.get("in_graph") != (held := scorer.in_graph(claim["evidence"])):
-                problems.append(f"{cid}: the gap's in_graph is {gap.get('in_graph')}, not {held}")
-        else:
-            problems.append(f"{cid}: neither pinned as supported nor declared a gap")
+                problems.append(f"{cid}: pinned as a gap, but {len(found)} cited claim(s) cite it")
+            elif entry.get("in_graph") != (held := scorer.in_graph(claim["evidence"])):
+                problems.append(f"{cid}: the gap's in_graph is {entry.get('in_graph')}, not {held}")
+        elif not found:
+            problems.append(f"{cid}: pinned as {klass}, but no cited claim cites it any more")
+        elif sorted(entry.get("claims", [])) != found:
+            problems.append(
+                f"{cid}: cited by {len(found)} claim(s), not the {len(entry.get('claims', []))}"
+                f" pinned as {klass} (re-pin with `make demo-pin` and review the diff)"
+            )
     known = {c["id"] for c in asked.question.get("claims", [])}
-    problems += [
-        f"{qid}: pins name unknown gold claim {c}"
-        for c in sorted((set(pinned) | set(gaps)) - known)
-    ]
+    named = {cid for c in CLASSES for cid in declared.get(c, {})}
+    problems += [f"{qid}: pins name unknown gold claim {c}" for c in sorted(named - known)]
     return problems
 
 
 def pinned(asked: Asked, declared: Json, scorer: Scorer) -> Json:
-    """``declared`` with its pins rewritten from what the answers support: a supported claim's
-    ids, and for a gap its reason (kept; empty for a new gap, which the check then refuses) and
-    ``in_graph``."""
-    out = {k: v for k, v in declared.items() if k not in ("supported", "gaps")}
-    gaps: Json = {}
-    supported: Json = {}
+    """``declared`` with its pins rewritten from what the answers cite. A pin never moves between
+    classes by itself: a claim whose cited ids are unchanged keeps its class and reason; one whose
+    ids changed keeps its class with an empty reason; one newly cited is pinned ``co_cited`` and
+    one no longer cited a gap, both with an empty reason. The check refuses an empty reason, so
+    every change needs a person to (re)classify it."""
+    out: Json = {k: v for k, v in declared.items() if k not in CLASSES}
+    classes: dict[str, Json] = {c: {} for c in CLASSES}
     for claim in asked.question.get("claims", []):
-        cid = claim["id"]
-        if asked.supported.get(cid):
-            supported[cid] = asked.supported[cid]
-        else:
-            reason = declared.get("gaps", {}).get(cid, {}).get("reason", "")
-            gaps[cid] = {"in_graph": scorer.in_graph(claim["evidence"]), "reason": reason}
-    return {**out, "gaps": gaps, "supported": supported}
+        cid, found = claim["id"], asked.cited.get(claim["id"], [])
+        klass, entry = _entry(declared, cid)
+        reason = str(entry.get("reason", "")) if klass is not None else ""
+        if not found:
+            keep = reason if klass == "gaps" else ""
+            classes["gaps"][cid] = {"in_graph": scorer.in_graph(claim["evidence"]), "reason": keep}
+            continue
+        if klass not in CITED_CLASSES:
+            klass, reason = "co_cited", ""
+        elif sorted(entry.get("claims", [])) != found:
+            reason = ""
+        classes[klass][cid] = {"claims": found, "reason": reason}
+    return {**out, **classes}
 
 
 # --- The stage -------------------------------------------------------------------------------
@@ -492,10 +536,11 @@ def run_answers(
             "asked_as": declared.get("asked_as"),
             "calls": [c.tool for c in asked.calls],
             "cited_claims": len({c for s in asked.statements for c in s.claims}),
+            "co_cited": sorted(declared.get("co_cited", {})),
             "gaps": sorted(declared.get("gaps", {})),
             "hydrated": hydrated,
             "statements": len(asked.statements),
-            "supported": sorted(k for k, v in asked.supported.items() if v),
+            "supported": sorted(declared.get("supported", {})),
         }
         transcript.append(
             {
@@ -509,10 +554,11 @@ def run_answers(
                     }
                     for c in asked.calls
                 ],
+                "co_cited": declared.get("co_cited", {}),
                 "gaps": declared.get("gaps", {}),
                 "id": qid,
                 "question": question["question"],
-                "supported": {k: v for k, v in asked.supported.items() if v},
+                "supported": declared.get("supported", {}),
             }
         )
     generation = document.get("generation")

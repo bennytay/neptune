@@ -99,34 +99,41 @@ declaration passed as `--config`), `verify` (`memory verify`), and for the accep
 the graph is Memory's committed `acceptance_corpus.graph.json.gz` byte for byte (`equal`; anything else is red).
 The graph is `work/memory/graph.json`.
 
-The context's `output` has `answers` (per gold question: the tools called, `supported` and `gaps` gold claims,
-how many claims and statements the answers cite, and whether its first cited source `hydrated` through the
-Ledger) and `stdio` (a spawned `python -m neptune_context.mcp` lists its tools and answers as in process). Every
-answer, call by call, is `work/context/answers.json`.
+The context's `output` has `answers` (per gold question: the tools called, its `supported`, `co_cited` and `gaps`
+gold claims, how many claims and statements the answers cite, and whether its first cited source `hydrated`
+through the Ledger) and `stdio` (a spawned `python -m neptune_context.mcp` lists its tools and answers as in
+process). Every answer, call by call, is `work/context/answers.json`.
 
 ## Demo v1: `make demo`
 
 ```bash
-make demo        # = uv run python -m harness.demo --out demo; about 25 s after `make setup`
-make demo-pin    # rewrite harness/acceptance/answers.json from the answers; review the diff
+make demo        # = uv run --all-packages --all-groups python -m harness.demo --out demo; about 25 s
+make demo-pin    # rewrite harness/acceptance/answers.json from the answers; review and classify the diff
 ```
 
 The acceptance corpus through every real stage (owner contract tests skipped), then Deploy's `pack` command over
 the graph just built. `demo/` (git-ignored) gets `incident-timeline-INC-C3-0011.pdf`,
 `configuration-traceability-ARM-3A.pdf`, `graph.json` (what `python -m neptune_context.mcp --memory` serves),
 `answers.md` and `answers.json` (each gold question's tool calls and the cited text they returned), the report and
-`demo.md`. Two runs give the same bytes. The README's quickstart is `scripts/quickstart.sh`; CI runs it on a
-clean runner (`harness.yml`, job `quickstart`, 15 minutes).
+`demo.md`. Two runs in two directories give the same top-level bytes and `packs/`; `work/` is scratch (the
+compiler's workspace records where it ran). The README's quickstart is `scripts/quickstart.sh`, which calls the
+two `uv` commands directly (the Makefile needs GNU make 3.82+; macOS ships 3.81); CI runs it on a clean runner
+(`harness.yml`, job `quickstart`, 15 minutes).
 
 ### The pinned answers
 
 `harness/acceptance/answers.json` lists, per gold question, the MCP tool calls an agent makes (subjects by
-declared id; `"$support:Q7.C3"` is the first claim id an earlier answer cites in support of Q7.C3) and, per gold
-claim, either the claim ids whose cited statements support it (Platform ADR 0007 §6's rule over each statement's
-evidence refs and records) or a gap with its `reason` and `in_graph` (whether any claim of the graph would
-support it). When the graph moves (Memory regenerates its snapshot, an adapter or a Deploy mapping changes it),
-the context stage is red until `make demo-pin` is run and its diff reviewed in the same PR: a gold claim that
-lost support shows up there. A new gap is pinned with an empty reason, which stays red until someone writes why.
+declared id; `"$support:Q7.C3"` is the first claim id an earlier answer cites for Q7.C3) and pins each gold claim
+in one class with a written reason: `supported` (the claim ids whose statements cite it, by Platform ADR 0007 §6's
+rule over each statement's evidence refs, a single cell only by its column, and the records its claims are
+about, and one of them carries the fact), `co_cited` (the claim
+ids citing it, none of which states it: they share a row, page or record while saying something else) or a gap
+(`in_graph`: whether any claim of the graph would cite it). Only `supported` counts as answered. When the graph
+moves (Memory regenerates its snapshot, an adapter or a Deploy mapping changes it), the context stage is red
+until `make demo-pin` is run in the same PR. Re-pinning never moves a claim between classes: a pin whose ids
+changed, a newly cited claim (pinned `co_cited`) and a claim no longer cited (a gap) all come back with an empty
+reason, which stays red until someone classifies it; a move between classes also edits `EXPECTED_CLASSES` in
+`test_harness_answers.py`.
 
 ## Add a stage
 

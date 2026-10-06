@@ -94,9 +94,11 @@ Scoring: ADR 0007 §6; the `assertion` selector (an assertion by its declared id
 pointer) is ADR 0008 §6.
 
 `harness/acceptance/answers.json` (ADR 0011) is the gold questions asked through Context's MCP tools over the
-graph Memory builds from this corpus: per question, the tool calls; per gold claim, the claim ids whose cited
-statements support it, or a gap with its reason. For 2.1.0: 28 of 40 claims supported, 12 gaps. Changing the
-corpus moves the graph, so the same PR runs `make demo-pin` ([harness](harness.md#the-pinned-answers)).
+graph Memory builds from this corpus: per question, the tool calls; per gold claim, its class with a reason:
+`supported` (a cited statement carries the fact), `co_cited` (statements cite its evidence but state something
+else) or a gap. For 2.1.0: 7 supported, 21 co-cited, 12 gaps of 40. `cmms.WO-26-0911.work` and `.firmware` name single cells
+of WO-26-0911's row (the `table_row` selector's `column`), next to the whole-row `cmms.WO-26-0911`. Changing the corpus moves the graph, so the
+same PR runs `make demo-pin` and classifies what moved ([harness](harness.md#the-pinned-answers)).
 
 ## The Deploy declaration
 

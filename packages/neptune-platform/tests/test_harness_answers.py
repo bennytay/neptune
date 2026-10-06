@@ -28,6 +28,26 @@ def _gold(qid: str) -> dict[str, Any]:
 
 # --- The declaration -------------------------------------------------------------------------
 
+# Each gold claim's class, by hand (ADR 0011 §4): a pin that moves between classes in
+# answers.json must move here too, so a reclassification is always a deliberate, reviewed edit.
+EXPECTED_CLASSES: Final = {
+    "supported": {"Q1.C1", "Q2.C7", "Q3.C6", "Q5.C2", "Q7.C1", "Q7.C2", "Q7.C3"},
+    "co_cited": {
+        *("Q1.C3", "Q1.C4", "Q1.C6", "Q1.C7"),
+        *("Q2.C1", "Q2.C2", "Q2.C3", "Q2.C8"),
+        *("Q3.C1", "Q3.C2"),
+        *("Q4.C1", "Q4.C2", "Q4.C3", "Q4.C5", "Q4.C6"),
+        "Q5.C1",
+        *("Q6.C1", "Q6.C2", "Q6.C3"),
+        "Q7.C4",
+        "Q8.C3",
+    },
+    "gaps": {
+        *("Q1.C2", "Q1.C5", "Q2.C4", "Q2.C5", "Q2.C6", "Q3.C3", "Q3.C4", "Q3.C5"),
+        *("Q4.C4", "Q5.C3", "Q8.C1", "Q8.C2"),
+    },
+}
+
 
 def test_every_gold_question_is_asked_and_every_gold_claim_is_pinned_once() -> None:
     assert ANSWERS["answers_format"] == agent.ANSWERS_FORMAT
@@ -37,30 +57,40 @@ def test_every_gold_question_is_asked_and_every_gold_claim_is_pinned_once() -> N
     assert asked == [q["id"] for q in GOLD["questions"]]
     for question in ANSWERS["questions"]:
         claims = {c["id"] for c in _gold(question["id"])["claims"]}
-        supported, gaps = set(question["supported"]), set(question["gaps"])
-        assert supported | gaps == claims and not supported & gaps, question["id"]
+        pinned = [set(question[k]) for k in agent.CLASSES]
+        assert set().union(*pinned) == claims, question["id"]
+        assert sum(len(c) for c in pinned) == len(claims), question["id"]  # one class each
         assert question["calls"] and question["asked_as"] in _gold(question["id"])["asked_as"]
 
 
-def test_pins_are_claim_ids_and_every_gap_says_why() -> None:
+def test_each_gold_claim_is_in_the_class_reviewed_for_it() -> None:
+    for klass, expected in EXPECTED_CLASSES.items():
+        assert {c for q in ANSWERS["questions"] for c in q[klass]} == expected, klass
+
+
+def test_pins_are_claim_ids_and_every_pin_says_why() -> None:
     for question in ANSWERS["questions"]:
-        for claim, ids in question["supported"].items():
-            assert ids and ids == sorted(set(ids)), claim
-            assert all(i.startswith("claim:sha256:") and len(i) == 77 for i in ids), claim
+        for klass in agent.CITED_CLASSES:
+            for claim, pin in question[klass].items():
+                assert set(pin) == {"claims", "reason"}, claim
+                ids = pin["claims"]
+                assert ids and ids == sorted(set(ids)), claim
+                assert all(i.startswith("claim:sha256:") and len(i) == 77 for i in ids), claim
+                assert len(pin["reason"]) > 40, claim
         for claim, gap in question["gaps"].items():
             assert set(gap) == {"in_graph", "reason"} and isinstance(gap["in_graph"], bool)
             assert len(gap["reason"]) > 40, claim
 
 
-def test_the_two_demo_questions_are_answered() -> None:
-    """Demo v1's acceptance: "why did the arm-cell incident happen" and "what changed since the
-    last good run" come back with cited claims (MVL-191)."""
+def test_why_and_what_changed_are_not_claimed_as_answered() -> None:
+    """Demo v1's two headline questions: until the calibrations and WO-26-0911's work reach a
+    statement, their cause and change claims are co-cited at best (MVL-191 review)."""
     by_id = {q["id"]: q for q in ANSWERS["questions"]}
     assert by_id["Q1"]["asked_as"] == "why did the arm-cell incident happen"
     assert by_id["Q2"]["asked_as"] == "what changed since the last good run"
-    # the incident itself, the WO-26-0911 refit, and the calibrations of the two runs
-    assert {"Q1.C1", "Q1.C3", "Q1.C4"} <= set(by_id["Q1"]["supported"])
-    assert {"Q2.C1", "Q2.C2", "Q2.C3"} <= set(by_id["Q2"]["supported"])
+    assert set(by_id["Q1"]["supported"]) == {"Q1.C1"}  # what happened, not why
+    for claim in ("Q1.C3", "Q1.C4", "Q1.C7", "Q2.C1", "Q2.C2", "Q2.C3"):
+        assert claim not in by_id[claim[:2]]["supported"], claim
 
 
 def test_the_calls_use_the_mcp_tools_and_name_subjects_by_declared_id() -> None:
@@ -74,12 +104,13 @@ def test_the_calls_use_the_mcp_tools_and_name_subjects_by_declared_id() -> None:
                 assert ":" in subject["declared_id"]
 
 
-def test_a_support_reference_names_a_supported_gold_claim_of_its_question() -> None:
+def test_a_support_reference_names_a_cited_gold_claim_of_its_question() -> None:
     for question in ANSWERS["questions"]:
+        cited = set(question["supported"]) | set(question["co_cited"])
         for call in question["calls"]:
             for value in json.dumps(call["arguments"]).split('"'):
                 if value.startswith(agent.SUPPORT_REF):
-                    assert value.removeprefix(agent.SUPPORT_REF) in question["supported"]
+                    assert value.removeprefix(agent.SUPPORT_REF) in cited
 
 
 def test_the_pins_are_for_the_graph_memory_committed() -> None:
@@ -92,8 +123,9 @@ def test_the_pins_are_for_the_graph_memory_committed() -> None:
     }
     claims = {c["id"] for c in document["claims"]}
     for question in ANSWERS["questions"]:
-        for ids in question["supported"].values():
-            assert set(ids) <= claims
+        for klass in agent.CITED_CLASSES:
+            for pin in question[klass].values():
+                assert set(pin["claims"]) <= claims
 
 
 # --- Citations -------------------------------------------------------------------------------
@@ -117,6 +149,16 @@ def scorer(tmp_path: Path) -> Scorer:
             ],
             "kind": "table_row",
         },
+        "wo.firmware": {
+            "citations": [
+                {
+                    "locator": {"column": "Firmware After", "row": 6},
+                    "path": "cmms/work_orders.csv",
+                    "record": "rec:wo",
+                }
+            ],
+            "kind": "table_row",
+        },
         "page": {
             "citations": [{"locator": {"page": 2}, "path": "incidents/INC.pdf", "record": "rec:p"}],
             "kind": "document_text",
@@ -133,12 +175,37 @@ def scorer(tmp_path: Path) -> Scorer:
                 "object": {"kind": "record", "record_id": "rec:obj"},
                 "provenance": {
                     "evidence": [
-                        {"locator": [{"kind": "row_cell", "row": 6}], "source": "sha256:aa"}
+                        {
+                            "locator": [
+                                {"column_name": "Firmware After", "kind": "row_cell", "row": 6}
+                            ],
+                            "source": "sha256:aa",
+                        },
                     ],
-                    "records": ["rec:x"],
+                    "records": ["rec:wo"],  # built from the work order: not a citation of it
                 },
+                "subject": {"kind": "node", "node_id": "record:rec:subject/timeline/0"},
             },
-            {"id": "claim:trap", "provenance": {"evidence": [], "records": ["rec:trap"]}},
+            {
+                "id": "claim:trap",
+                "object": {"kind": "node", "node_id": "record:rec:trap"},
+                "provenance": {"evidence": [], "records": []},
+                "subject": {"kind": "node", "node_id": "machine:x"},
+            },
+            {
+                "id": "claim:cell",
+                "object": {"kind": "node", "node_id": "firmware:5.6.0"},
+                "provenance": {
+                    "evidence": [
+                        {
+                            "locator": [{"column_name": "WO", "kind": "row_cell", "row": 6}],
+                            "source": "sha256:aa",
+                        }
+                    ],
+                    "records": [],
+                },
+                "subject": {"kind": "node", "node_id": "cmms.asset:X"},
+            },
         ]
     }
     return Scorer([tmp_path / "package"], resolved, graph)
@@ -153,9 +220,10 @@ def test_an_evidence_ref_cites_its_sources_path_with_its_row_page_or_pointer(
     assert scorer.ref_citations(ref("sha256:aa", {"kind": "row", "row": 3})) == [
         {"locator": {"row": 3}, "path": "cmms/work_orders.csv"}
     ]
+    # a single cell is its row and column, never the whole row (ADR 0011 §4)
     cell = {"column": 0, "column_name": "WO", "kind": "row_cell", "row": 6}
     assert scorer.ref_citations(ref("sha256:aa", cell)) == [
-        {"locator": {"row": 6}, "path": "cmms/work_orders.csv"}
+        {"locator": {"column": "WO", "row": 6}, "path": "cmms/work_orders.csv"}
     ]
     page = ref("sha256:bb", {"index": 1, "kind": "page"}, {"end": 4, "kind": "span", "start": 0})
     assert scorer.ref_citations(page) == [{"locator": {"page": 2}, "path": "incidents/INC.pdf"}]
@@ -174,11 +242,12 @@ def test_an_evidence_ref_cites_its_sources_path_with_its_row_page_or_pointer(
     assert scorer.ref_citations(ref("sha256:zz", {"kind": "row", "row": 1})) == []
 
 
-def test_a_claim_cites_its_records_its_record_object_and_its_evidence(scorer: Scorer) -> None:
+def test_a_claim_cites_the_records_it_is_about_and_its_evidence(scorer: Scorer) -> None:
+    """Its subject or object when that is a record, never the records it was built from."""
     assert scorer.claim_citations("claim:one") == [
-        {"record": "rec:x"},
+        {"record": "rec:subject"},
         {"record": "rec:obj"},
-        {"locator": {"row": 6}, "path": "cmms/work_orders.csv"},
+        {"locator": {"column": "Firmware After", "row": 6}, "path": "cmms/work_orders.csv"},
     ]
     assert scorer.claim_citations("claim:unknown") == []
 
@@ -196,7 +265,10 @@ def test_support_is_adr_0007s_rule_over_a_statements_citations(scorer: Scorer) -
     assert scorer.supporting(["page"], statements) == ["claim:three"]
     assert scorer.supporting(["wo", "page"], statements) == ["claim:one", "claim:three"]
     assert scorer.supporting(["unknown"], statements) == []
-    assert scorer.in_graph(["wo"]) and scorer.in_graph(["trap"]) and not scorer.in_graph(["page"])
+    assert scorer.in_graph(["trap"]) and not scorer.in_graph(["page"])
+    # claim:one was built from the work order's row and cites one cell of it: it meets the
+    # Firmware After item, not the whole row; claim:cell's other cell meets neither
+    assert scorer.in_graph(["wo.firmware"]) and not scorer.in_graph(["wo"])
 
 
 def test_a_support_reference_is_replaced_by_the_first_supporting_claim() -> None:
@@ -213,92 +285,94 @@ def test_a_support_reference_is_replaced_by_the_first_supporting_claim() -> None
 # --- The check -------------------------------------------------------------------------------
 
 
-def _asked(supported: dict[str, list[str]], statements: list[Statement] | None = None) -> Asked:
+def _asked(cited: dict[str, list[str]], statements: list[Statement] | None = None) -> Asked:
     question = {
         "claims": [{"evidence": ["wo"], "id": "Q9.C1"}, {"evidence": ["page"], "id": "Q9.C2"}],
         "id": "Q9",
     }
-    cited = [Statement(("claim:one",), ({"record": "rec:wo"},), 1, 1)]
-    return Asked(question, [], cited if statements is None else statements, supported, [])
+    default = [Statement(("claim:one",), ({"record": "rec:wo"},), 1, 1)]
+    return Asked(question, [], default if statements is None else statements, cited, [])
 
 
-def test_answers_that_match_their_pins_pass(scorer: Scorer) -> None:
-    declared = {
-        "gaps": {"Q9.C2": {"in_graph": False, "reason": "the page is not consolidated"}},
-        "supported": {"Q9.C1": ["claim:one"]},
-    }
+def _pin(*ids: str, reason: str = "the statement carries the fact") -> dict[str, Any]:
+    return {"claims": list(ids), "reason": reason}
+
+
+GAP: Final = {"in_graph": False, "reason": "the page is not consolidated"}
+GOOD: Final = {"co_cited": {}, "gaps": {"Q9.C2": GAP}, "supported": {"Q9.C1": _pin("claim:one")}}
+
+
+@pytest.mark.parametrize("klass", ["supported", "co_cited"])
+def test_answers_that_match_their_pins_pass(scorer: Scorer, klass: str) -> None:
+    other = "co_cited" if klass == "supported" else "supported"
+    declared = {klass: {"Q9.C1": _pin("claim:one")}, other: {}, "gaps": {"Q9.C2": GAP}}
     asked = _asked({"Q9.C1": ["claim:one"], "Q9.C2": []})
     assert agent.check(asked, declared, scorer, []) == []
-    assert agent.pinned(asked, declared, scorer) == declared
+    assert agent.pinned(asked, declared, scorer) == declared  # nothing moves
 
 
 @pytest.mark.parametrize(
-    ("declared", "problem"),
+    ("change", "problem"),
     [
+        ({"supported": {"Q9.C1": _pin("claim:z")}}, "Q9.C1: cited by 1 claim(s), not the 1 pinned"),
+        ({"supported": {"Q9.C1": _pin("claim:one", reason=" ")}}, "Q9.C1: a supported pin needs"),
+        ({"gaps": {"Q9.C2": {**GAP, "reason": ""}}}, "Q9.C2: a gaps pin needs a reason"),
+        ({"gaps": {"Q9.C2": {**GAP, "in_graph": True}}}, "Q9.C2: the gap's in_graph is True, not"),
         (
-            {
-                "gaps": {"Q9.C2": {"in_graph": False, "reason": "x"}},
-                "supported": {"Q9.C1": ["claim:z"]},
-            },
-            "Q9.C1: supported by 1 cited claim(s), not the 1 pinned",
+            {"supported": {}, "gaps": {"Q9.C1": GAP, "Q9.C2": GAP}},
+            "Q9.C1: pinned as a gap, but 1 cited claim(s) cite it",
         ),
+        ({"gaps": {}}, "Q9.C2: pinned in no class"),
         (
-            {
-                "gaps": {"Q9.C2": {"in_graph": False, "reason": " "}},
-                "supported": {"Q9.C1": ["claim:one"]},
-            },
-            "Q9.C2: a gap needs a reason",
+            {"co_cited": {"Q9.C1": _pin("claim:one")}},
+            "Q9.C1: pinned in supported and co_cited",
         ),
-        (
-            {
-                "gaps": {"Q9.C2": {"in_graph": True, "reason": "x"}},
-                "supported": {"Q9.C1": ["claim:one"]},
-            },
-            "Q9.C2: the gap's in_graph is True, not False",
-        ),
-        (
-            {"gaps": {"Q9.C1": {"in_graph": True, "reason": "x"}}, "supported": {}},
-            "Q9.C1: pinned as a gap, but 1 cited claim(s) support it",
-        ),
-        ({"gaps": {}, "supported": {"Q9.C1": ["claim:one"]}}, "Q9.C2: neither pinned"),
-        (
-            {
-                "gaps": {"Q9.C2": {"in_graph": False, "reason": "x"}, "Q9.C7": {}},
-                "supported": {"Q9.C1": ["claim:one"]},
-            },
-            "Q9: pins name unknown gold claim Q9.C7",
-        ),
+        ({"gaps": {"Q9.C2": GAP, "Q9.C7": GAP}}, "Q9: pins name unknown gold claim Q9.C7"),
     ],
 )
 def test_answers_that_differ_from_their_pins_fail(
-    scorer: Scorer, declared: dict[str, Any], problem: str
+    scorer: Scorer, change: dict[str, Any], problem: str
 ) -> None:
+    declared = {**GOOD, **change}
     problems = agent.check(_asked({"Q9.C1": ["claim:one"], "Q9.C2": []}), declared, scorer, [])
     assert any(p.startswith(problem) for p in problems), problems
 
 
+def test_a_cited_pin_whose_claim_is_no_longer_cited_fails(scorer: Scorer) -> None:
+    problems = agent.check(_asked({"Q9.C1": [], "Q9.C2": []}), GOOD, scorer, [])
+    assert "Q9.C1: pinned as supported, but no cited claim cites it any more" in problems
+
+
 def test_a_statement_without_evidence_and_a_forbidden_citation_fail(scorer: Scorer) -> None:
-    declared = {
-        "gaps": {"Q9.C2": {"in_graph": False, "reason": "x"}},
-        "supported": {"Q9.C1": ["claim:one"]},
-    }
     statements = [
         Statement(("claim:one",), ({"record": "rec:wo"},), 1, 1),
         Statement(("claim:bare",), (), 1, 0),
         Statement(("claim:trap",), ({"record": "rec:trap"},), 1, 1),
     ]
     asked = _asked({"Q9.C1": ["claim:one"], "Q9.C2": []}, statements)
-    problems = agent.check(asked, declared, scorer, ["trap"])
+    problems = agent.check(asked, GOOD, scorer, ["trap"])
     assert "Q9: 1 statement(s) cite no item or no evidence" in problems
     assert "Q9: an answer cites trap, which it must never cite" in problems
-    assert agent.check(_asked({}, []), declared, scorer, [])[0] == (
+    assert agent.check(_asked({}, []), GOOD, scorer, [])[0] == (
         "Q9: no answer holds a cited statement"
     )
 
 
-def test_a_new_gap_is_pinned_without_a_reason_so_the_check_refuses_it(scorer: Scorer) -> None:
+def test_re_pinning_never_moves_a_claim_between_classes_by_itself(scorer: Scorer) -> None:
+    """Whatever changed comes back without a reason, which the check refuses until a person
+    classifies it: new ids keep their class, a newly cited gap becomes co_cited (never
+    supported), a claim no longer cited becomes a gap."""
+    co = {"co_cited": {"Q9.C1": _pin("claim:one")}, "gaps": {"Q9.C2": GAP}, "supported": {}}
+    moved = agent.pinned(_asked({"Q9.C1": ["claim:one", "claim:two"], "Q9.C2": []}), co, scorer)
+    assert moved["co_cited"]["Q9.C1"] == {"claims": ["claim:one", "claim:two"], "reason": ""}
+    assert moved["supported"] == {}
+    fresh = agent.pinned(_asked({"Q9.C1": ["claim:one"], "Q9.C2": ["claim:p"]}), co, scorer)
+    assert fresh["co_cited"]["Q9.C2"] == {"claims": ["claim:p"], "reason": ""}
+    assert "Q9.C2" not in fresh["supported"] and "Q9.C2" not in fresh["gaps"]
+    lost = agent.pinned(_asked({"Q9.C1": [], "Q9.C2": []}), GOOD, scorer)
+    assert lost["gaps"]["Q9.C1"] == {"in_graph": False, "reason": ""}
+    assert lost["supported"] == {} and lost["gaps"]["Q9.C2"] == GAP
     asked = _asked({"Q9.C1": [], "Q9.C2": []})
-    declared = agent.pinned(asked, {"calls": [], "supported": {"Q9.C1": ["claim:one"]}}, scorer)
-    assert declared["supported"] == {}
-    assert declared["gaps"]["Q9.C1"] == {"in_graph": True, "reason": ""}
-    assert "Q9.C1: a gap needs a reason" in agent.check(asked, declared, scorer, [])
+    assert "Q9.C1: a gaps pin needs a reason (re-pinned: review it)" in agent.check(
+        asked, lost, scorer, []
+    )

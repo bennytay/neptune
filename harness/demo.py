@@ -6,8 +6,8 @@ and Context's agent tools answering the gold questions, checked by the claims th
 then renders two evidence packs over the graph just built: the incident reconstruction of
 INC-C3-0011 and ARM-3A's configuration traceability report.
 
-Everything lands in the demo directory (default ``demo/``, git-ignored), and nothing in it depends
-on the clock or the host, so two runs give the same bytes:
+Everything lands in the demo directory (default ``demo/``, git-ignored). The top-level outputs and
+``packs/`` depend on no clock, host or path, so two runs give the same bytes; ``work/`` is scratch:
 
 - ``incident-timeline-INC-C3-0011.pdf`` and ``configuration-traceability-ARM-3A.pdf``, with each
   pack's ``pack.json``, ``claims.json`` and spec under ``packs/<name>/``;
@@ -15,10 +15,12 @@ on the clock or the host, so two runs give the same bytes:
 - ``answers.json`` (every tool call and the cited text it returned) and ``answers.md`` (the same,
   to read);
 - ``report.json`` and ``report.md`` (the harness report) and ``demo.md`` (this run in short);
-- ``work/``: the run's scratch (the corpus, the packages, the Ledger's and Memory's files).
+- ``work/``: the run's scratch (the corpus, the packages, the Ledger's and Memory's files; the
+  compiler's workspace under it records where it ran).
 
 ``--pin`` rewrites ``harness/acceptance/answers.json`` from the answers instead of checking it
-(``make demo-pin``); review its diff. Exit 0 only when the harness is green and both packs render.
+(``make demo-pin``); it never moves a gold claim between classes, so review and classify its
+diff. Exit 0 only when the harness is green and both packs render.
 """
 
 from __future__ import annotations
@@ -202,17 +204,17 @@ def answers_markdown(transcript: Json) -> str:
         "",
         "Each answer is what the `neptune` MCP server returns to an agent. Every fact ends with",
         "its citations: `[I<n>]` is the item (the Items footer gives the claim id), `[E<k>]` the",
-        "source (the Evidence footer gives the exact evidence ref). Supported gold claims and",
-        "pinned gaps are checked by those ids, never by the text (Platform ADR 0011).",
+        "source (the Evidence footer gives the exact evidence ref). Each gold claim is pinned by",
+        "those ids, never by the text (Platform ADR 0011): supported (a cited statement carries",
+        "the fact), co-cited (statements cite its evidence but state something else) or a gap.",
         "",
     ]
     for question in transcript.get("questions", []):
         lines += [f"## {question['id']}: {question['question']}", ""]
         lines += [f'Asked as: "{question["asked_as"]}".', ""]
-        supported = ", ".join(sorted(question["supported"])) or "none"
-        lines += [f"Gold claims supported by cited claims: {supported}.", ""]
-        for gap, why in sorted(question["gaps"].items()):
-            lines += [f"- Gap {gap}: {why['reason']}"]
+        for label, key in (("Supported", "supported"), ("Co-cited", "co_cited"), ("Gap", "gaps")):
+            for gold, pin in sorted(question.get(key, {}).items()):
+                lines += [f"- {label} {gold}: {pin['reason']}"]
         lines += [""]
         for number, call in enumerate(question["calls"], start=1):
             arguments = json.dumps(call["arguments"], sort_keys=True)
@@ -226,8 +228,9 @@ def summary_markdown(document: Json, packs: list[Json], problems: list[str]) -> 
     memory = stages.get("memory", {}).get("output", {})
     context = stages.get("context", {}).get("output", {})
     answered = context.get("answers", {})
-    supported = sum(len(a["supported"]) for a in answered.values())
-    gaps = sum(len(a["gaps"]) for a in answered.values())
+    counts = {
+        k: sum(len(a[k]) for a in answered.values()) for k in ("supported", "co_cited", "gaps")
+    }
     lines = [
         f"# Demo v1: {'green' if not problems else 'RED'}",
         "",
@@ -237,8 +240,8 @@ def summary_markdown(document: Json, packs: list[Json], problems: list[str]) -> 
         f"- Graph: `graph.json`, graph-schema {memory.get('graph_schema')}, "
         f"{memory.get('claims')} claims, generation `{memory.get('generation')}`; "
         f"Memory's committed snapshot: {memory.get('snapshot', {}).get('verdict', 'not compared')}",
-        f"- Gold questions asked: {len(answered)}; gold claims supported by cited claims: "
-        f"{supported}; pinned gaps: {gaps} (`answers.md`)",
+        f"- Gold questions asked: {len(answered)}; gold claims supported: {counts['supported']},"
+        f" co-cited only: {counts['co_cited']}, gaps: {counts['gaps']} (`answers.md`)",
         f"- MCP over stdio: {context.get('stdio', {}).get('same_as_in_process')}",
     ]
     lines += [

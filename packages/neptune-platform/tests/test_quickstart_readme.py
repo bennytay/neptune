@@ -36,8 +36,11 @@ def test_the_script_is_strict_and_ends_with_the_demo_wired_into_claude_code() ->
     text = SCRIPT.read_text(encoding="utf-8")
     assert text.startswith("#!/usr/bin/env bash\n") and "\nset -euo pipefail\n" in text
     lines = _script_block().splitlines()
-    assert "make setup" in lines and "make demo" in lines
-    assert lines.index("make setup") < lines.index("make demo")
+    # uv, not make: the Makefile needs GNU make 3.82+, and macOS ships 3.81 (ADR 0011 §6)
+    setup = "uv sync --all-packages --all-groups"
+    demo = "uv run --all-packages --all-groups python -m harness.demo --out demo"
+    assert setup in lines and demo in lines and lines.index(setup) < lines.index(demo)
+    assert not any(line.startswith(("make ", "gmake ")) for line in lines)
     # what it copies exists, and what it serves is what `make demo` writes
     for path in ("packages/neptune-context/claude/mcp.sample.json",):
         assert path in _script_block() and (REPO / path).is_file()
@@ -52,18 +55,24 @@ def test_what_the_quickstart_writes_is_ignored_by_git() -> None:
         assert entry in ignored, entry
 
 
-def test_the_makefile_has_the_demo_targets() -> None:
+def test_the_makefile_targets_run_the_same_commands_as_the_script() -> None:
     makefile = (REPO / "Makefile").read_text(encoding="utf-8")
     assert re.search(r"^demo: ## ", makefile, re.MULTILINE)
     assert re.search(r"^demo-pin: ## ", makefile, re.MULTILINE)
-    assert "python -m harness.demo" in makefile
+    assert "> $(UV) sync --all-packages --all-groups" in makefile
+    assert '> $(RUN) python -m harness.demo --out "$(DEMO_DIR)"' in makefile
+    assert "RUN := $(UV) run --all-packages --all-groups" in makefile
 
 
 def test_the_readme_status_counts_are_the_pinned_answers() -> None:
+    """The README counts only ``supported`` as answered (ADR 0011 §4)."""
     answers = json.loads(acceptance.ANSWERS.read_text(encoding="utf-8"))
-    supported = sum(len(q["supported"]) for q in answers["questions"])
-    gaps = sum(len(q["gaps"]) for q in answers["questions"])
+    count = {
+        k: sum(len(q[k]) for q in answers["questions"]) for k in ("supported", "co_cited", "gaps")
+    }
     status = README.split("## Status\n", 1)[1].split("\n## ", 1)[0]
-    assert f"{supported} of {supported + gaps} gold claims" in status
-    assert f"the other {gaps}," in status
-    assert "make demo" in status
+    total = sum(count.values())
+    assert f"({count['supported']} of {total} gold claims supported)" in status
+    assert f"for {count['co_cited']} more gold claims" in status
+    assert f"{count['gaps']} more are gaps" in status
+    assert "neptune_hydrate" in README and "unavailable" in README

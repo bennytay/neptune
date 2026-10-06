@@ -251,6 +251,15 @@ def test_every_item_lists_citations_that_support_it(
     # The base package's locators are what Deploy D3 matches its own records on.
     wo = resolved["cmms.WO-26-0911"]["citations"][0]
     assert wo["locator"] == {"row": 6}
+    # a column item is one cell of that row: another cell's citation does not meet it (ADR 0011)
+    work = resolved["cmms.WO-26-0911.work"]
+    assert work["citations"][0]["locator"] == {"column": "Work Performed", "row": 6}
+    assert work["records"] == resolved["cmms.WO-26-0911"]["records"]
+    firmware = {"locator": {"column": "Firmware After", "row": 6}, "path": wo["path"]}
+    assert resolve.supports(resolved["cmms.WO-26-0911.firmware"], firmware)
+    assert not resolve.supports(work, firmware) and not resolve.supports(
+        resolved["cmms.WO-26-0911"], firmware
+    )
     page = resolved["inc.timeline.estop"]["citations"][0]["locator"]
     assert page == {"page": 1}
     log_time = generate.local_ns(2026, 9, 14, 14, 32, 41) + generate.IPC_AHEAD_2026_09_14
