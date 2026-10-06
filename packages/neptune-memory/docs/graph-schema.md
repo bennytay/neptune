@@ -1,7 +1,7 @@
-# Graph schema v1
+# Graph schema v2
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.10.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v2.0.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.0.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -14,9 +14,8 @@ calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-c
 §4, §6); 1.8.0 (minor) adds the coverage and health predicates
 ([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6); 1.9.0 (minor) adds the graph document's optional
 `builds` and `#/$defs/Build`, for withdrawal ([ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md);
-the vocabulary is unchanged); 1.10.0 (minor) is vocabulary 11: `succeeds` is narrowed to a statement about two
-configurations, and a machine's changes are its own `has_configuration` spans (rule 12;
-[ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §2). Earlier goldens still
+the vocabulary is unchanged). **2.0.0 (major)** narrows `succeeds` and names the release in every document
+(below; [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3). Within major 1, earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -161,7 +160,25 @@ edge (`parent`, `child`), in the `representation` both declare, with the transfo
   head may be later than every `recorded_at`, because a transaction can produce no claim. From 1.9.0 it may hold
   `builds` (`#/$defs/Build`), ordered by `(recorded_at, consolidator_id)`: each consolidator run it was resolved
   with, its lineage (consolidator id, version, config hash), its transaction and every claim id it emitted, possibly
-  none. A document without builds writes no `builds` key and reads exactly as 1.8.0.
+  none. A document without builds writes no `builds` key and reads exactly as 1.8.0. From 2.0.0 it names the
+  full release it was written to, `graph_schema` (`"2.0.0"`), beside the major `graph_schema_version`, so a
+  consumer can tell minors apart; any 2.x minor reads it.
+
+## Migrating from 1.x to 2.0.0
+
+2.0.0 is a major release because a claim changed meaning, not shape
+([ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3):
+
+- **`succeeds`** no longer marks a change on a machine's chain; configuration nodes are shared, so it read
+  fleet-wide. A consumer that selected `succeeds` for "what changed" reads a machine's changes from its own
+  `has_configuration` spans (guarantee 12); `succeeds` now holds only where a source states it of two
+  configurations, and no consolidator claims it today.
+- **`graph_schema`**: a 2.x graph document carries its release; a reader checks the major and may branch on it.
+- **Identity** (consolidator version 3) may join `event` nodes an assertion names (guarantee 11). A consumer that
+  assumed `same_as` joins only thread nodes follows it for events too.
+- Shapes are otherwise unchanged. 1.x documents stay valid against their own published schemas, and
+  `schema.codec.graph_from_json` still reads one as written, labelled major 1 and never relabelled. A consumer
+  moves its lock to 2.0.0 when it reads `has_configuration` for changes; until then it is a major behind.
 
 ## Reading: `MemoryReader`
 
@@ -196,7 +213,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.9.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v2.0.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):

@@ -10,6 +10,7 @@ version and the resolver configuration that produced it (its *generation*, ADR 0
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NoReturn
@@ -23,7 +24,7 @@ from neptune.model.provenance import evidence_ref_from_json
 from neptune.model.scalars import real_from_json
 from neptune.model.time import timestamp_from_json
 from neptune.model.units import Unit, unit_from_json
-from neptune_memory.schema import GRAPH_SCHEMA_VERSION
+from neptune_memory.schema import GRAPH_SCHEMA_RELEASE, GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import (
     Claim,
     ClaimAssertionKind,
@@ -58,6 +59,9 @@ if TYPE_CHECKING:
     from neptune.model.time import Timestamp
 
 GRAPH_DOCUMENT_KIND: Final = "memory.graph"
+# A published graph-schema version, MAJOR.MINOR.PATCH (ADR 0019 §3).
+_MAJOR_1: Final = 1  # a graph-schema 1.x document, read as written (ADR 0019 §3)
+_RELEASE: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 
 
 def _object(data: object, what: str) -> Mapping[str, JsonValue]:
@@ -310,12 +314,18 @@ class GraphDocument:
     ``builds`` (graph-schema 1.9.0, ADR 0016) are the consolidator runs the history was resolved
     with, in ``(recorded_at, consolidator_id)`` order: what lets a later build withdraw a claim
     (ADR 0007 §5). A document without them is a 1.8.0 document and writes no ``builds`` key.
+
+    ``release`` is the graph-schema version the document was written to (``graph_schema``, ADR
+    0019 §3): this package writes ``GRAPH_SCHEMA_RELEASE``. ``None`` is a major-1 document read as
+    written, whose minor it never recorded: its ``succeeds`` has 1.x's meaning, so it is labelled
+    major 1 and written back as one, never relabelled 2.x.
     """
 
     resolution: Resolution
     resolver_config: JsonObject
     head: LedgerTx
     builds: tuple[Build, ...] = ()
+    release: str | None = GRAPH_SCHEMA_RELEASE
 
     def __post_init__(self) -> None:
         head = ledger_tx(self.head)
@@ -334,23 +344,35 @@ class GraphDocument:
         if late:
             raise ValueError(f"a build at transaction {late[0]} after the head {head}")
         object.__setattr__(self, "builds", builds)
+        if self.release is not None and (
+            _RELEASE.fullmatch(self.release) is None
+            or int(self.release.split(".")[0]) != GRAPH_SCHEMA_VERSION
+        ):
+            raise ValueError(f"release {self.release!r} is not a {GRAPH_SCHEMA_VERSION}.x version")
 
     @property
     def generation(self) -> ConfigHash:
         return config_hash(self.resolver_config)
+
+    @property
+    def graph_schema_version(self) -> int:
+        """The major the document was written to: 1 for a document read as written from 1.x."""
+        return _MAJOR_1 if self.release is None else GRAPH_SCHEMA_VERSION
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {
             "claims": [claim.to_json() for claim in self.resolution.claims],
             "findings": [finding.to_json() for finding in self.resolution.findings],
             "generation": self.generation,
-            "graph_schema_version": GRAPH_SCHEMA_VERSION,
+            "graph_schema_version": self.graph_schema_version,
             "head": self.head,
             "kind": GRAPH_DOCUMENT_KIND,
             "resolver_config": self.resolver_config,
         }
         if self.builds:
             out["builds"] = [build.to_json() for build in self.builds]
+        if self.release is not None:
+            out["graph_schema"] = self.release
         return out
 
 
@@ -381,27 +403,32 @@ def build_from_json(data: JsonValue) -> Build:
 
 
 def graph_from_json(data: JsonValue) -> GraphDocument:
-    """A graph document; its version, generation, ids and order are all checked."""
-    obj = _exact(
-        data,
-        "graph document",
-        {
-            "claims",
-            "findings",
-            "generation",
-            "graph_schema_version",
-            "head",
-            "kind",
-            "resolver_config",
-        },
-        frozenset({"builds"}),
-    )
+    """A graph document; its version, generation, ids and order are all checked.
+
+    A 2.x document names its release (``graph_schema``); any minor of major 2 reads. A 1.x
+    document (no ``graph_schema``) is read as written and stays labelled major 1, so a consumer
+    pinned to 1.x keeps reading its graphs; its ``succeeds`` keeps 1.x's meaning (ADR 0019 §3).
+    Any other major is refused before anything else.
+    """
+    major = data.get("graph_schema_version") if isinstance(data, dict) else None
+    if major not in (_MAJOR_1, GRAPH_SCHEMA_VERSION) or isinstance(major, bool):
+        raise ValueError(
+            f"graph_schema_version {major!r} is not supported: this reader reads graph_schema"
+            f" 1.x and {GRAPH_SCHEMA_VERSION}.x documents"
+        )
+    keys = {"claims", "findings", "generation", "graph_schema_version", "head", "kind"}
+    keys |= {"resolver_config", *(("graph_schema",) if major == GRAPH_SCHEMA_VERSION else ())}
+    obj = _exact(data, "graph document", keys, frozenset({"builds"}))
     if "builds" in obj and not _list(obj["builds"], "builds"):
         raise ValueError("an empty builds list is written as no builds key")
     if obj["kind"] != GRAPH_DOCUMENT_KIND:
         raise ValueError(f"graph document kind must be {GRAPH_DOCUMENT_KIND!r}")
-    if _int(obj["graph_schema_version"], "graph_schema_version") != GRAPH_SCHEMA_VERSION:
-        raise ValueError(f"graph_schema_version {obj['graph_schema_version']!r} is not supported")
+    release: str | None = None
+    if major == GRAPH_SCHEMA_VERSION:
+        release = _str(obj["graph_schema"], "graph_schema")
+        # Any minor of this major reads: a later minor only adds (ADR 0006 §2, ADR 0019 §3).
+        if _RELEASE.fullmatch(release) is None or int(release.split(".")[0]) != major:
+            raise ValueError(f"graph_schema {release!r} is not a {major}.x release")
     claims = tuple(claim_from_json(c) for c in _list(obj["claims"], "claims"))
     findings = tuple(finding_from_json(f) for f in _list(obj["findings"], "findings"))
     if list(claims) != sorted(claims, key=lambda c: (c.recorded_at, c.id)):
@@ -413,6 +440,7 @@ def graph_from_json(data: JsonValue) -> GraphDocument:
         dict(_object(obj["resolver_config"], "resolver_config")),
         _tx(obj["head"], "head"),
         tuple(build_from_json(b) for b in _list(obj.get("builds", []), "builds")),
+        release,
     )
     if parse_config_hash(_str(obj["generation"], "generation")) != document.generation:
         raise ValueError("generation does not match the resolver configuration")

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from neptune.model.record import SCHEMA_VERSION
 from neptune_memory import pins
-from neptune_memory.schema import GRAPH_SCHEMA_VERSION
+from neptune_memory.schema import GRAPH_SCHEMA_RELEASE, GRAPH_SCHEMA_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT.parents[1] / "contracts" / "graph-schema"
@@ -16,8 +16,9 @@ def test_compiler_pin_tracks_the_compiler() -> None:
     assert pins.COMPILER_SCHEMA_VERSION == SCHEMA_VERSION
 
 
-def test_graph_schema_v1_is_published_and_active() -> None:
-    assert pins.GRAPH_SCHEMA_VERSION == GRAPH_SCHEMA_VERSION == 1
+def test_graph_schema_v2_is_published_and_active() -> None:
+    assert pins.GRAPH_SCHEMA_VERSION == GRAPH_SCHEMA_VERSION == 2
+    assert pins.GRAPH_SCHEMA_RELEASE == GRAPH_SCHEMA_RELEASE == "2.0.0"
     contract = tomllib.loads((REGISTRY / "contract.toml").read_text(encoding="utf-8"))
     assert contract["status"] == "active"
     assert contract["owner"]["version_constant"] == "neptune_memory.schema:GRAPH_SCHEMA_VERSION"
@@ -26,7 +27,7 @@ def test_graph_schema_v1_is_published_and_active() -> None:
     # 1.5.0: episode predicates (ADR 0012); 1.6.0: events (ADR 0013).
     # 1.7.0: calibration history and the delta (ADR 0014); 1.8.0: coverage and health (ADR 0015).
     # 1.9.0: the graph document's builds, for withdrawal (ADR 0016).
-    # 1.10.0: vocabulary 11, succeeds narrowed to configurations (ADR 0019).
+    # 2.0.0 (major): succeeds narrowed to configurations, and graph_schema (ADR 0019).
     for published in (
         "1.0.0",
         "1.1.0",
@@ -38,15 +39,21 @@ def test_graph_schema_v1_is_published_and_active() -> None:
         "1.7.0",
         "1.8.0",
         "1.9.0",
-        "1.10.0",
+        "2.0.0",
     ):
         version = json.loads(
             (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")
         )
         assert (version["version"], version["owner_version"]) == (
             published,
-            pins.GRAPH_SCHEMA_VERSION,
+            int(published.split(".")[0]),
         )
+    # The release documents name is the latest published version: what this code reproduces.
+    latest = max(
+        (p.name[1:] for p in REGISTRY.glob("v*")),
+        key=lambda v: tuple(int(n) for n in v.split(".")),
+    )
+    assert latest == pins.GRAPH_SCHEMA_RELEASE
 
 
 def test_catalog_pin_is_pending() -> None:
@@ -56,8 +63,12 @@ def test_catalog_pin_is_pending() -> None:
 def test_docs_state_the_same_pins() -> None:
     # docs/contracts.md is the live mirror of pins.py; accepted ADRs keep the pins as written.
     contracts = (ROOT / "docs" / "contracts.md").read_text(encoding="utf-8")
+    # ADR 0006 set the major at 1; ADR 0019 raised it to 2, and ADRs are not edited.
     graph_adr = (
-        ROOT / "docs" / "adr" / "0006-graph-schema-v1-contract-surface-and-memory-reader.md"
+        ROOT
+        / "docs"
+        / "adr"
+        / "0019-events-in-identity-and-machine-scoped-configuration-changes.md"
     ).read_text(encoding="utf-8")
     assert f"SCHEMA_VERSION = {pins.COMPILER_SCHEMA_VERSION}" in contracts
     assert 'CATALOG_API_VERSION = "pending' in contracts

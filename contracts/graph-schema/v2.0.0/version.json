@@ -8,8 +8,8 @@
     "result.node.json": "#/$defs/NodeResult",
     "vocabulary.json": "#/$defs/PredicateRegistry"
   },
-  "owner_version": 1,
-  "schema_sha256": "sha256:14c479986fe092d383cf8fcab4ec9d507534a239d16bc2e96603dcbfe0872807",
+  "owner_version": 2,
+  "schema_sha256": "sha256:c095d1a6da26340ea333a953ef43db84a08eff310d60bd6ee0688ccaa6679410",
   "status": "stable",
-  "version": "1.10.0"
+  "version": "2.0.0"
 }

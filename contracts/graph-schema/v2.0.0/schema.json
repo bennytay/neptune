@@ -1386,8 +1386,13 @@
         "generation": {
           "$ref": "#/$defs/ConfigHash"
         },
+        "graph_schema": {
+          "description": "the full graph-schema release the document was written to; any minor of this major reads it (ADR 0019 §3)",
+          "pattern": "^2\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
         "graph_schema_version": {
-          "const": 1
+          "const": 2
         },
         "head": {
           "$ref": "#/$defs/LedgerTx"
@@ -1403,6 +1408,7 @@
         "claims",
         "findings",
         "generation",
+        "graph_schema",
         "graph_schema_version",
         "head",
         "kind",
@@ -2429,7 +2435,7 @@
       "type": "object"
     }
   },
-  "$id": "urn:neptune:schema:graph:1",
+  "$id": "urn:neptune:schema:graph:2",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
@@ -2437,5 +2443,5 @@
     }
   ],
   "description": "Neptune Memory's graph schema (neptune-memory ADR 0002, 0005, 0006): a graph document; claims, findings and the vocabulary are #/$defs/Claim, #/$defs/ResolutionFinding and #/$defs/PredicateRegistry; MemoryReader results are #/$defs/NodeResult, ClaimsResult, NeighboursResult, EpisodesResult and SpatialResult. Generated from neptune_memory.schema; the Python readers in neptune_memory.schema.codec are stricter.",
-  "title": "Neptune Memory graph schema, version 1"
+  "title": "Neptune Memory graph schema, version 2"
 }

@@ -15,8 +15,12 @@ claims are produced under ``derived/`` and merely carry ``assertion_kind = infer
 - ``export``: the JSON Schema published under ``contracts/graph-schema/``.
 
 ``GRAPH_SCHEMA_VERSION`` is the registry major of graph-schema: raise it for a breaking change.
+``GRAPH_SCHEMA_RELEASE`` is the full published version a graph document names (``graph_schema``),
+so a consumer can tell minors apart; it changes with every published version (ADR 0019 §3).
 """
 
 from typing import Final
 
-GRAPH_SCHEMA_VERSION: Final = 1
+# 2: ``succeeds`` changed meaning (ADR 0019 §2), and documents name their release (§3).
+GRAPH_SCHEMA_VERSION: Final = 2
+GRAPH_SCHEMA_RELEASE: Final = "2.0.0"

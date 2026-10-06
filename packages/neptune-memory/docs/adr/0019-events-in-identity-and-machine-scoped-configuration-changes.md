@@ -75,9 +75,28 @@ Memory's own callers. Graph-schema rule 12 states the same rule, for consumers t
 
 `succeeds` stays in the vocabulary, narrowed to a statement about two configurations themselves (a release note
 saying 4.3.1 replaces 4.2.0, or compiler configuration lineage once MVL-38 lands). It holds wherever both nodes
-appear. No consolidator claims it today. Its description changes, so the vocabulary goes to **11** and graph-schema
-to **1.10.0** (minor: no domain, range or cardinality changes, and every earlier golden validates). The golden
-graph changes only by identity's version, which re-ids its claims.
+appear. No consolidator claims it today. Its description changes, so the vocabulary goes to **11**.
+
+### 3. Contract: graph-schema 2.0.0, a major release
+
+`GRAPH_SCHEMA_VERSION = 2`. Every 1.x golden still validates against its own schema, but `succeeds` changes
+meaning. Consumers' change sections (Deploy's @1 templates, Context's what-changed view) select it, and against a
+2.x graph they would silently fall empty. ADR 0006 §2 calls narrowing a predicate a major change, and a meaning
+change is one even when no shape changes.
+
+- **Release in the document.** A graph document names the full release it was written to: `graph_schema`
+  (`"2.0.0"`, `schema.GRAPH_SCHEMA_RELEASE`), required in 2.x beside `graph_schema_version`. A consumer can then
+  tell minors apart from the file alone. Any minor of major 2 reads. A later minor raises the constant with its
+  goldens.
+- **1.x documents.** `graph_from_json` still reads a 1.x document as written. It is labelled major 1 (`release`
+  `None`; a reader reports `graph_schema_version` 1) and is written back unchanged, never relabelled 2.x. In-repo
+  consumers on 1.x keep working until they move. Any other major is refused.
+- **Migration.** `graph-schema.md` § Migrating from 1.x to 2.0.0. Consumers' locks are raised by their own
+  coordinators. Until then they are a major behind, and `contracts.py check` says so.
+- **Not in 2.0.0.** The claim-id derivation vectors (MVL-137) come later in an additive 2.x.
+
+The golden graph changes only by vocabulary 11 (a new resolver generation), identity's version (re-ided
+`same_as` claims) and `graph_schema`.
 
 ## Alternatives considered
 
@@ -85,6 +104,8 @@ graph changes only by identity's version, which re-ids its claims.
   existing predicate (a breaking change). Deploy's `has_configuration` paths would no longer reach it.
 - **A machine qualifier on the claim.** Claims have no qualifiers. Adding one changes the claim model, its id and
   the codec for every consumer, to say what two existing claims already say.
+- **Publish the narrowing as a 1.x minor.** Every golden still validates, but a consumer pinned to 1.x would get
+  an empty change section with no signal. A major tells it.
 - **Keep `succeeds` and document it as fleet-wide.** The claim cites one machine's work orders and is false for the
   others. Documentation would not stop a pack placing it on AMR-05.
 - **Map a record id in a scope to every claim citing that record.** That would join a run, an episode and an event

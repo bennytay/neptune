@@ -12,11 +12,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from jsonschema import Draft202012Validator
 
-from memory_golden_fixtures import EARLIER, PUBLISHED, built, generator, published
+from memory_golden_fixtures import EARLIER, MAJOR_1, PUBLISHED, built, generator, published
 from neptune.identity import canonical_json
 from neptune_memory.contract._fixture_model import FIXTURE_MODEL
 from neptune_memory.contract.golden import TRANSACTIONS, build_golden
 from neptune_memory.contract.suite import CHECKS, load_golden
+from neptune_memory.schema import GRAPH_SCHEMA_RELEASE
 from neptune_memory.schema.claim import is_inferred
 from neptune_memory.schema.export import graph_schema
 from neptune_memory.schema.interval import OPEN, ledger_tx
@@ -68,13 +69,32 @@ def test_schema_export_is_published_and_validates_every_golden() -> None:
     )
 
 
-@pytest.mark.parametrize("earlier", EARLIER, ids=lambda p: p.name)
-def test_every_earlier_published_golden_still_loads_and_passes_the_suite(earlier: Path) -> None:
-    """1.1.0 to 1.10.0 are minor releases: a consumer pinned to an earlier minor keeps
-    its golden and its answers."""
+def test_every_earlier_published_golden_of_this_major_still_loads_and_passes_the_suite() -> None:
+    """Minor releases of one major: a consumer pinned to an earlier minor keeps its golden and its
+    answers. 2.0.0 is the first of major 2, so there is none yet (ADR 0019 §3)."""
+    for earlier in EARLIER:
+        golden = load_golden(earlier / "golden" / "graph.json")
+        for check in CHECKS:
+            check(ReferenceReader, golden)
+
+
+@pytest.mark.parametrize("earlier", MAJOR_1, ids=lambda p: p.name)
+def test_a_major_1_document_is_read_as_written_and_never_relabelled(earlier: Path) -> None:
+    """A consumer pinned to 1.x keeps reading its graphs: a 1.x document loads, passes the suite,
+    reports major 1 and writes back byte for byte, never as 2.x (ADR 0019 §3)."""
+    text = (earlier / "golden" / "graph.json").read_text(encoding="utf-8")
     golden = load_golden(earlier / "golden" / "graph.json")
+    assert golden.release is None and golden.graph_schema_version == 1
+    assert ReferenceReader(golden).graph_schema_version == 1
+    assert _canonical(golden.to_json()) == text
     for check in CHECKS:
         check(ReferenceReader, golden)
+
+
+def test_the_document_names_its_full_release() -> None:
+    document = built().to_json()
+    assert document["graph_schema"] == GRAPH_SCHEMA_RELEASE == PUBLISHED.name[1:]
+    assert document["graph_schema_version"] == 2
 
 
 def test_input_order_does_not_change_the_golden() -> None:

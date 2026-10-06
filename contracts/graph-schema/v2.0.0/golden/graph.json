@@ -1877,7 +1877,8 @@
     }
   ],
   "generation": "sha256:d33d6a4c718105f9d06ca1ef014b21baa7356442eb0228a3befed6e7854e4943",
-  "graph_schema_version": 1,
+  "graph_schema": "2.0.0",
+  "graph_schema_version": 2,
   "head": 5,
   "kind": "memory.graph",
   "resolver_config": {

@@ -339,6 +339,16 @@ def _memory_defs() -> dict[str, JsonValue]:
                     "claims": _array(_ref("Claim")),
                     "findings": _array(_ref("ResolutionFinding")),
                     "generation": _ref("ConfigHash"),
+                    "graph_schema": {
+                        "type": "string",
+                        "pattern": (
+                            f"^{GRAPH_SCHEMA_VERSION}\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+                        ),
+                        "description": (
+                            "the full graph-schema release the document was written to; any"
+                            " minor of this major reads it (ADR 0019 §3)"
+                        ),
+                    },
                     "graph_schema_version": {"const": GRAPH_SCHEMA_VERSION},
                     "head": _ref("LedgerTx"),
                     "kind": _const("memory.graph"),
