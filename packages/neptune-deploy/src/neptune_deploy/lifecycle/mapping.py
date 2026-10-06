@@ -36,7 +36,7 @@ operator's declaration, and a wrong one fails loudly.
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final, TypeAlias
 
@@ -138,6 +138,20 @@ class LifecycleMapping:
     rules: tuple[Rule, ...]
     document: JsonObject
     sha256: ContentId
+    # The civil zone a caller declares for one source's tables, by source path (ADR 0017 §2):
+    # sorted ``(path, zone)`` pairs. Empty unless ``with_source_zones`` adds some.
+    source_zones: tuple[tuple[str, str], ...] = ()
+
+    def with_source_zones(self, zones: Mapping[str, str]) -> "LifecycleMapping":
+        """This mapping with a declared civil zone (an IANA name or ``unstated``) for the tables of
+        each source path. It enters the transform's config, so it is new lineage; a zone that is
+        not a zone is a ``MappingError``."""
+        merged = dict(self.source_zones)
+        for path, zone in zones.items():
+            if not isinstance(path, str) or not path or not path.isprintable():
+                raise MappingError(f"civil_time_zone: {path!r} is not a source path")
+            merged[path] = check_zone(zone, f"civil_time_zone for {path!r}")
+        return replace(self, source_zones=tuple(sorted(merged.items())))
 
 
 def spec_refs(spec: Spec) -> set[tuple[str, str]]:
@@ -472,21 +486,38 @@ def _scalar(
         declared = _text(obj["zone"], f"{where}.zone") if "zone" in obj else zone
         if declared is None:
             raise MappingError(f"{where}: a time needs its civil zone declared (or 'unstated')")
-        if declared.lower() in _NOT_A_ZONE and declared != UNSTATED:
-            raise MappingError(f"{where}.zone: {declared!r} states no zone; declare 'unstated'")
-        if declared != UNSTATED:
-            try:
-                check_iana_zone("zone", declared)
-            except ValueError as exc:
-                raise MappingError(f"{where}.zone: {exc}; or declare 'unstated'") from exc
-        return Scalar(name, required, formats=checked, zone=declared, via=via)
+        return Scalar(
+            name, required, formats=checked, zone=check_zone(declared, f"{where}.zone"), via=via
+        )
     return Scalar(name, required, via=via)
 
 
+def check_zone(zone: object, where: str) -> str:
+    """A declared civil zone: an IANA name, or exactly ``unstated`` (ADR 0012 §2)."""
+    if not isinstance(zone, str):
+        raise MappingError(f"{where}: a zone is text")
+    if zone.lower() in _NOT_A_ZONE and zone != UNSTATED:
+        raise MappingError(f"{where}: {zone!r} states no zone; declare 'unstated'")
+    if zone != UNSTATED:
+        try:
+            check_iana_zone("zone", zone)
+        except ValueError as exc:
+            raise MappingError(f"{where}: {exc}; or declare 'unstated'") from exc
+    return zone
+
+
 def config_of(mapping: LifecycleMapping, base_package: ContentId) -> JsonObject:
-    """The transform config of one mapping applied to one package (ADR 0002 §7)."""
+    """The transform config of one mapping applied to one package (ADR 0002 §7), with the zones a
+    caller declared per source (ADR 0017 §2) when there are any."""
     document: JsonValue = mapping.document
-    return {"base_package": base_package, "mapping": document, "mapping_sha256": mapping.sha256}
+    out: JsonObject = {
+        "base_package": base_package,
+        "mapping": document,
+        "mapping_sha256": mapping.sha256,
+    }
+    if mapping.source_zones:
+        out["civil_time_zones"] = dict(mapping.source_zones)
+    return out
 
 
 def match_pattern(pattern: str, column: str) -> bool:

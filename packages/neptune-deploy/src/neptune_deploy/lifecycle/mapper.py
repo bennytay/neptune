@@ -9,7 +9,7 @@ row's and whose every value cites its cell. What does not map is a finding (ADR 
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
@@ -486,13 +486,15 @@ class _Values:
         if reading is None:
             return None
         assert spec.zone is not None
+        zone, stated_by = self.mapper.zone_of(self.table, spec.zone)
         domain = self.mapper.domain(
             self.table.record.id,
             spec.column,
             reading.instant,
             reading.resolution,
-            spec.zone,
+            zone,
             self.clock_place(spec.column, place),
+            stated_by,
         )
         return Known(Timestamp(reading.ticks, domain), provenance)
 
@@ -803,6 +805,17 @@ class _Clocks:
     transform: TransformRecord
     domains: dict[tuple[Any, ...], TimestampDomain]
     zones: dict[RecordId, CivilTimeZone]
+    # The zone a caller declared for a source's tables, by the source's content id (ADR 0017 §2).
+    source_zones: Mapping[ContentId, str] = {}
+
+    def zone_of(self, table: Any, declared: str) -> tuple[str, EvidenceRef | None]:
+        """The civil zone of a time read from ``table``: the caller's for the table's source when
+        it declared one (with the table, which the zone record then cites), else the declaration's
+        own."""
+        if not self.source_zones:
+            return declared, None
+        zone = self.source_zones.get(table.evidence.source)
+        return (declared, None) if zone is None else (zone, table.evidence)
 
     def domain(
         self,
@@ -812,6 +825,7 @@ class _Clocks:
         resolution: Any,
         zone: str,
         place: EvidenceRef,
+        stated_by: EvidenceRef | None = None,
     ) -> RecordId:
         key = (scope, column, instant, resolution, "" if instant else zone)
         if key not in self.domains:
@@ -839,13 +853,21 @@ class _Clocks:
             if not instant:
                 # What the mapping declares, as declared; the domain's ticks still count the civil
                 # clock (root ADR 0061 §2). "unstated" is the mapping saying the export does not.
+                # A zone the caller declared for the source cites the table it applies to, under
+                # this transform, whose config holds it (ADR 0017 §2).
+                cited = place if stated_by is None else self._zone_place(stated_by, domain.id)
                 self.zones[domain.id] = CivilTimeZone(
-                    id=evidence_record_id(CivilTimeZone.kind, place, self.transform),
-                    provenance=provenance,
+                    id=evidence_record_id(CivilTimeZone.kind, cited, self.transform),
+                    provenance=Provenance(cited, self.transform.id, STATED),
                     domain=domain.id,
                     zone=Unknown() if zone == UNSTATED else Known(zone),
                 )
         return self.domains[key].id
+
+    def _zone_place(self, table: EvidenceRef, domain: RecordId) -> EvidenceRef:
+        """The table, with a step naming the clock: one table may hold several clocks."""
+        step = adapter_locator(f"{self.transform.adapter_id}:civil_time_zone", {"domain": domain})
+        return EvidenceRef(table.source, (*table.locator, step))
 
 
 def unique_domains(domains: Iterable[TimestampDomain]) -> dict[RecordId, TimestampDomain]:
@@ -860,8 +882,15 @@ def unique_domains(domains: Iterable[TimestampDomain]) -> dict[RecordId, Timesta
 class _Mapper(_Clocks):
     """One mapping applied to one package's tables."""
 
-    def __init__(self, mapping: LifecycleMapping, base: ContentId, tables: list[_Table]) -> None:
+    def __init__(
+        self,
+        mapping: LifecycleMapping,
+        base: ContentId,
+        tables: list[_Table],
+        paths: Mapping[str, ContentId] | None = None,
+    ) -> None:
         self.mapping = mapping
+        self.source_zones = source_zones(mapping.source_zones, paths or {})
         self.applicable = {
             table.record.id: [r for r in mapping.rules if all(table.has(c) for c in r.requires)]
             for table in tables
@@ -1116,6 +1145,28 @@ class TablePlan:
             yield from findings.build(transform)
 
 
+def source_paths(base: IngestPackage) -> dict[str, ContentId]:
+    """Each local source path of the package, to the content id it held."""
+    return {
+        r.location.path: r.content_id
+        for r in base.records
+        if r.kind == "source_revision" and getattr(r.location, "path", None)
+    }
+
+
+def source_zones(
+    declared: Sequence[tuple[str, str]], paths: Mapping[str, ContentId]
+) -> dict[ContentId, str]:
+    """The caller's zones by source content id. A path the package does not hold is refused: a
+    zone for nothing is the caller's mistake, and silently unused it would look applied."""
+    out: dict[ContentId, str] = {}
+    for path, zone in declared:
+        if path not in paths:
+            raise MappingError(f"civil_time_zone: the package has no source at {path!r}")
+        out[paths[path]] = zone
+    return out
+
+
 def plan_tables(
     base: IngestPackage, mappings: Sequence[LifecycleMapping], claimed: Iterable[RecordId] = ()
 ) -> TablePlan:
@@ -1133,8 +1184,9 @@ def plan_tables(
     usable = [t for t in named if t.record.id not in taken]
     unnamed = [t for t in nameless if t.id not in taken]
     mappers: list[_Mapper] = []
+    paths = source_paths(base)
     for mapping in sorted(mappings, key=lambda m: m.sha256):
-        mapper = _Mapper(mapping, base.id, usable)
+        mapper = _Mapper(mapping, base.id, usable, paths)
         taken.update(table.record.id for table in mapper.tables)
         mappers.append(mapper)
     unclaimed = [t for t in usable if t.record.id not in taken]
