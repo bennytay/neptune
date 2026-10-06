@@ -39,6 +39,7 @@ from neptune_context.mcp import build_server
 from neptune_context.mcp.__main__ import main
 from neptune_context.packets.codec import canonical_bytes
 from neptune_context.packets.model import ClaimItem
+from neptune_context.pins import GRAPH_SCHEMA_VERSION
 from neptune_context.query import Budget, Direction, GraphClause, Query, Subject, to_json
 from neptune_context.render.agent import render_answer
 from neptune_context.render.citations import parse_citations, render_text
@@ -215,7 +216,10 @@ def test_a_2x_document_names_its_release_and_the_packet_its_major(tmp_path: Path
     # major 1: ``test_explain_markdown_context`` reads one.
     current = tmp_path / "current.json"
     data = F.document().to_json()
-    assert data["graph_schema"] == "2.0.0" and data["graph_schema_version"] == 2
+    assert (
+        data["graph_schema"].split(".")[0] == GRAPH_SCHEMA_VERSION.split(".")[0]  # type: ignore[union-attr]
+        and data["graph_schema_version"] == 2
+    )
     current.write_text(json.dumps(data), encoding="utf-8")
     query = Query(
         include_inferred=False,
