@@ -2,12 +2,16 @@
   "corpus": "acceptance",
   "files": {
     "neptune.yaml": {
-      "sha256": "sha256:1279658641566e0b752c487a4ff6ca85f6895996d94ed6fb9134572011382dba",
-      "size": 1575
+      "sha256": "sha256:279b7ab6cea08b67e4d779a1a96c2fcca93a2a5c762bfe40b0e9f917dc9ca203",
+      "size": 2330
     },
     "records/asset_register.csv": {
       "sha256": "sha256:b24e816567ecca2d15afb5da6c046d7d666538c8327cafd247ed738311869e7d",
       "size": 1133
+    },
+    "sites/PLANT-2/authorisation/zone_register.csv": {
+      "sha256": "sha256:aa0ed65ddb415d415ff71436f4d4b78b45f71ebcd923dd2e196261b7385de511",
+      "size": 743
     },
     "sites/PLANT-2/cell3/bags/pallet_2026-09-09/metadata.yaml": {
       "sha256": "sha256:13b72327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49",
@@ -34,24 +38,28 @@
       "size": 22273
     },
     "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0226.yaml": {
-      "sha256": "sha256:fecc413f15fd281f9a58cdd7f88e51751b6ddc0e5ae2b11eab85184cd112a077",
-      "size": 313
+      "sha256": "sha256:2c61329f2a5087717d9568bb0b6739812bf059f9b9dd0e0ed0dfde1568c57f14",
+      "size": 402
     },
     "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0415.yaml": {
-      "sha256": "sha256:7734a681a3f12e6046524b1de00867ea2d66cf0a86d76082dc7f3c74dafcf42d",
-      "size": 326
+      "sha256": "sha256:121b40151595a8d92373b25dd7aea5e1ae3043aec1989894c754e9e3d6593814",
+      "size": 403
     },
     "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0623.yaml": {
-      "sha256": "sha256:530ef05aaa164117044f3192bcafcb24737c65212fb9771ba8f205894aacdf80",
-      "size": 334
+      "sha256": "sha256:80e1c9ecdeecf18427eec4207795e7e8332c6e164ef1cbde88ea8acad1a19069",
+      "size": 405
     },
     "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml": {
-      "sha256": "sha256:a2d19ecfbcda50ea0d69888d09d5f529e747ed4eb2434641837f09f657b175e9",
-      "size": 334
+      "sha256": "sha256:70f5b31af5fe51cfa69474fca9534370d57dcc1232f862519609ef16ab09056d",
+      "size": 405
     },
     "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml": {
-      "sha256": "sha256:0ac61f856e5f99b1a8e8231bcfcfe5a7ad4497f50da2c4ad8b3a994f14fdbfa4",
-      "size": 370
+      "sha256": "sha256:3e6ee0535a7ac7bd69af0c7a67d80bf18431c355b73f1a17bd80655132d25f1d",
+      "size": 405
+    },
+    "sites/PLANT-2/cell3/calibration/handeye_calibration_log.csv": {
+      "sha256": "sha256:7b054ccaa659778406a901cabd02fe8af1c5df3a0bcf3679f4902bbc0843bf75",
+      "size": 1007
     },
     "sites/PLANT-2/cell3/config/cell_config.yaml": {
       "sha256": "sha256:57ea0f32041ae257fcb6bfed1c7c5a6738203f6290e7c0beccf3180a2245fb25",
@@ -77,9 +85,17 @@
       "sha256": "sha256:962616825f67fd5f73c4d078fcc412cfbb027ffd69749a7dd61a4ed8b7c70b28",
       "size": 6551
     },
+    "sites/PLANT-2/cell3/incidents/INC-C3-0011.assertions.json": {
+      "sha256": "sha256:3d24ad090b6d2f55d26c6ef117f51b6b96319dd12c626c50b9b539145cb70a82",
+      "size": 1004
+    },
     "sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf": {
       "sha256": "sha256:bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e19c97908",
       "size": 7915
+    },
+    "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv": {
+      "sha256": "sha256:217e60ba3ee71743b597bce99b37473176c53acace1fb68c4f3d8d851d7ee7cb",
+      "size": 437
     },
     "sites/PLANT-2/cell3/requalification/requalification_tests.csv": {
       "sha256": "sha256:30be864d249a145a23a78fc8b38686e09a3ca1d3c8b4c9f08c08feb847a3f2be",
@@ -104,6 +120,10 @@
     "sites/PLANT-2/changes/servicenow_changes.csv": {
       "sha256": "sha256:fdca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f1ef16",
       "size": 626
+    },
+    "sites/PLANT-2/cmms/downtime_log.csv": {
+      "sha256": "sha256:3dc72a6d8664f88e5197d03dc16b955a7b439302b609e6d9b30114035bb3ba58",
+      "size": 545
     },
     "sites/PLANT-2/cmms/work_orders.csv": {
       "sha256": "sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3",
@@ -207,6 +227,6 @@
     }
   },
   "lock_format": 1,
-  "tree": "sha256:d85cd2e5aa704c07951ea9e1191692ebf3b08e813e21da3fe1834ddf19373a5a",
-  "version": "1.0.0"
+  "tree": "sha256:9956c032dffb39123f3d7887c77e23fad7b81323cada676b0c0c5ee35584c681",
+  "version": "2.0.0"
 }
