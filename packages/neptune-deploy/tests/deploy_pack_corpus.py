@@ -1196,7 +1196,7 @@ def acceptance_corpus() -> dict[str, Any]:
     }
 
 
-NAME: Final = "acceptance_corpus.test_double"
+NAME: Final = "acceptance_corpus"
 
 
 def fixture_bytes() -> bytes:
