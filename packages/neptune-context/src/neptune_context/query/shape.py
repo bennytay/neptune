@@ -4,12 +4,20 @@
 ``Subject("machine", 5)``; ``shape_findings`` reports each such member as ``shape`` at its JSON
 pointer so ``validate`` never raises on it. Integers exclude ``bool``; coordinates may be any
 ``int`` or ``float`` here (``validate`` judges their values).
+
+A plain string equal to an enum member's value (``"out"`` for ``Direction.OUT``) is that member:
+the two are equal in Python, so the queries are equal, encode to the same bytes and share one
+``query_id``, and one id has one verdict (C1 gate, ADR 0006 §5). ``with_enum_members`` swaps such
+strings for the members so an engine only ever sees the enums. Any other string is ``shape``.
+A set member's pointer index is its position in the canonical JSON (the codec's order).
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+from enum import StrEnum
 from fractions import Fraction
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from neptune_context.query.codec import (
     clock_bridge_to_json,
@@ -42,7 +50,29 @@ from neptune_context.query.model import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from neptune_context.query.model import Query
+
+E = TypeVar("E", bound=StrEnum)
+
+
+def _member(value: object, kind: type[E]) -> E | None:
+    """``value`` as a member of ``kind``: the member itself, or a plain string equal to one."""
+    if isinstance(value, kind):
+        return value
+    if type(value) is str and value in {str(m) for m in kind}:
+        return kind(value)
+    return None
+
+
+def _codec_order(values: Iterable[object]) -> list[object]:
+    """String set members in the order ``codec.to_json`` writes them (sorted as themselves)."""
+    members = list(values)
+    try:
+        return sorted(members)  # type: ignore[type-var]
+    except TypeError:  # mixed types have no canonical JSON; refused at "/" before this runs
+        return sorted(members, key=repr)
 
 
 class _Shape:
@@ -110,14 +140,19 @@ class _Shape:
     def strings(self, value: object, at: str) -> None:
         if self.frozenset_(value, at):
             assert isinstance(value, frozenset)
-            for index, member in enumerate(sorted(value, key=repr)):
+            for index, member in enumerate(_codec_order(value)):
                 self.str_(member, f"{at}/{index}")
 
-    def enums(self, value: object, kind: type, at: str) -> None:
+    def enum(self, value: object, kind: type[StrEnum], at: str) -> None:
+        if _member(value, kind) is None:
+            self.fail(at, f"a {kind.__name__}")
+
+    def enums(self, value: object, kind: type[StrEnum], at: str) -> None:
         if self.frozenset_(value, at):
             assert isinstance(value, frozenset)
-            for index, member in enumerate(sorted(value, key=repr)):
-                self.is_(member, kind, f"{at}/{index}", f"a {kind.__name__}")
+            # The codec writes ``sorted(str(member))``; index by that order.
+            for index, member in enumerate(sorted(value, key=str)):
+                self.enum(member, kind, f"{at}/{index}")
 
     def query(self, query: Query) -> None:
         self.is_(query.include_inferred, bool, "/include_inferred", "true or false")
@@ -172,7 +207,7 @@ class _Shape:
             if query.graph.predicates is not None:
                 self.strings(query.graph.predicates, "/graph/predicates")
             self.int_(query.graph.hops, "/graph/hops")
-            self.is_(query.graph.direction, Direction, "/graph/direction", "a Direction")
+            self.enum(query.graph.direction, Direction, "/graph/direction")
         if query.text is not None and self.is_(query.text, TextClause, "/text", "a TextClause"):
             self.str_(query.text.text, "/text/text")
             self.enums(query.text.fields, TextField, "/text/fields")
@@ -193,3 +228,23 @@ def shape_findings(query: Query) -> list[QueryFinding]:
     checker = _Shape()
     checker.query(query)
     return checker.findings
+
+
+def with_enum_members(query: Query) -> Query:
+    """``query`` with every plain string that equals an enum member's value replaced by the
+    member. Equal to ``query`` (same canonical bytes, same id); call it on a validated query."""
+    graph, text = query.graph, query.text
+    if isinstance(graph, GraphClause):
+        direction = _member(graph.direction, Direction)
+        if direction is not None and direction is not graph.direction:
+            graph = replace(graph, direction=direction)
+    if isinstance(text, TextClause) and not (
+        all(type(f) is TextField for f in text.fields)
+        and all(type(c) is TextChannel for c in text.channels)
+    ):
+        fields = frozenset(_member(f, TextField) or f for f in text.fields)
+        channels = frozenset(_member(c, TextChannel) or c for c in text.channels)
+        text = replace(text, fields=fields, channels=channels)
+    if graph is query.graph and text is query.text:
+        return query
+    return replace(query, graph=graph, text=text)

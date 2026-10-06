@@ -10,6 +10,10 @@ particular id order and the writer must sort them.
 streaming writer, spilling under ``SCRATCH``; or with ``--memory`` the in-memory ``package_files``
 then ``write_package``) and prints one JSON line: rows, seconds spent writing, this process's peak
 resident memory in MiB, and the package id. Each run is its own process, so each peak is its own.
+
+With ``--read`` it writes nothing: it reads and verifies the package already in ``OUT`` as the job
+does (ADR 0070), spilling under ``SCRATCH``, reads every record once as a consumer would, and runs
+validation over it; the line then gives the seconds spent and the peak of reading and validating.
 """
 
 import json
@@ -101,6 +105,24 @@ def main(argv: list[str]) -> int:
 
     rows, out, scratch = int(argv[0]), Path(argv[1]), Path(argv[2])
     start = time.perf_counter()
+    if "--read" in argv:
+        from neptune.store.package import read_package
+        from neptune.validate import validate_package
+
+        package = read_package(out, scratch=scratch)
+        held = sum(1 for _ in package.records)
+        report = validate_package(package, spill=scratch)
+        seconds = time.perf_counter() - start
+        result = {
+            "rows": rows,
+            "seconds": round(seconds, 2),
+            "peak_mib": round(_peak_mib()),
+            "id": package.id,
+            "records": held,
+            "findings": len(report.findings),
+        }
+        sys.stdout.write(json.dumps(result) + "\n")
+        return 0
     if "--memory" in argv:
         identity = write_package(out, package_files(scale_records(rows)))
     else:

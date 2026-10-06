@@ -935,8 +935,8 @@ class BudgetUse:
 
 @dataclass(frozen=True)
 class Superseded:
-    """A claim in the packet that has changed since ``as_of``: the transaction that superseded
-    it (``as_of < superseded_at <= head``) and the claim versions that did, by id."""
+    """A claim in the packet that has changed since the snapshot it was read at: the transaction
+    that superseded it (``memory.as_of < superseded_at <= head``) and the versions that did."""
 
     claim: ClaimId
     superseded_at: LedgerTx
@@ -1035,7 +1035,7 @@ class ContextPacket:
     - ``memory`` / ``ledger``: the snapshots read; Memory's ``as_of`` may trail the packet's.
     - ``produced_by``: the engine; ``inference_included``: whether inferred items may appear.
     - ``budget``: limits, use and truncation; ``items``: by fused score, then id.
-    - ``superseded_since``: claim items changed in ``(as_of, head]``, by claim id.
+    - ``superseded_since``: claim items changed in ``(memory.as_of, head]``, by claim id.
     - ``findings``: Memory resolver findings active at the snapshot (conflicts, clock
       mismatches) that name a claim item, in resolver order.
     - ``gaps``: what the packet does not answer, and why.
@@ -1104,11 +1104,22 @@ class ContextPacket:
             if isinstance(item, ClaimItem) and item.claim.recorded_at > self.memory.as_of:
                 raise _fail(Code.NOT_AS_OF, f"{item.claim.id} was recorded after the snapshot")
         claims = self.claim_ids
+        inferred = frozenset(
+            i.claim.id for i in self.items if isinstance(i, ClaimItem) and i.is_inferred
+        )
         for item in self.items:
             missing = sorted(set(item.claim_refs()) - claims)
             if missing:
                 raise _fail(
                     Code.DANGLING_REFERENCE, f"{item.id} names claims not carried: {missing}"
+                )
+            resting = sorted(set(item.claim_refs()) & inferred)
+            if resting and not item.is_inferred:
+                # A scene or configuration is no stronger than the claims it rests on: one that
+                # names an inferred claim is inferred itself, so it renders INFERRED.
+                raise _fail(
+                    Code.ASSERTION_MISMATCH,
+                    f"{item.id} is {item.assertion_kind} but rests on inferred claims: {resting}",
                 )
         size, tokens = measure(self.items)
         if (self.budget.items, self.budget.bytes, self.budget.tokens) != (
@@ -1132,8 +1143,10 @@ class ContextPacket:
         for entry in self.superseded_since:
             if entry.claim not in claims:
                 raise _fail(Code.DANGLING_REFERENCE, f"{entry.claim} is not a claim item")
-            if not self.as_of < entry.superseded_at <= self.head:
-                raise _fail(Code.NOT_AS_OF, "superseded_at is in (as_of, head]")
+            # The claims are as Memory knew them at its snapshot, which may trail as_of: every
+            # supersession Memory has made since then, up to head, is listed (C1 gate, ADR 0006).
+            if not self.memory.as_of < entry.superseded_at <= self.head:
+                raise _fail(Code.NOT_AS_OF, "superseded_at is in (memory_snapshot.as_of, head]")
         if not isinstance(self.findings, tuple) or not all(
             isinstance(f, ResolutionFinding) for f in self.findings
         ):
@@ -1152,6 +1165,11 @@ class ContextPacket:
         if not isinstance(self.gaps, tuple) or not all(isinstance(g, Gap) for g in self.gaps):
             raise _fail(Code.SHAPE, "gaps must be a tuple of Gaps")
         _sorted_unique([g.sort_key() for g in self.gaps], "gaps")
+        if self.inference_included and any(g.code is GapCode.INFERRED_WITHHELD for g in self.gaps):
+            raise _fail(
+                Code.INFERENCE_EXCLUDED,
+                "an inferred_withheld gap says inference was excluded; this packet includes it",
+            )
 
     @property
     def claim_ids(self) -> frozenset[ClaimId]:

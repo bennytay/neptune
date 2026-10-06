@@ -122,6 +122,23 @@ def _summary(item: Item) -> str:
     return f"{item.record_kind} {item.record} configures {subject}; claims {list(item.claims)}"
 
 
+def _snapshot_lines(packet: ContextPacket) -> list[str]:
+    """What a reader needs to scope the answer: Memory's snapshot when it trails the Ledger's,
+    and the world-time window on its named clock (C1 gate, ADR 0006 §4)."""
+    lines = []
+    if packet.memory.as_of < packet.as_of:
+        lines.append(
+            f"Claims as Memory knew them at transaction {packet.memory.as_of}"
+            f" (it trails the Ledger's {packet.as_of})."
+        )
+    if packet.during is not None:
+        end = "open" if packet.during.end is None else str(packet.during.end)
+        lines.append(
+            f"World time: ticks [{packet.during.start}, {end}) on clock {packet.during.domain_id}."
+        )
+    return lines
+
+
 def render_text(packet: ContextPacket) -> str:
     """The packet as cited plain text. Deterministic: the same packet, the same text."""
     keys = {ref: index for index, ref in enumerate(packet.evidence_refs(), start=1)}
@@ -129,6 +146,7 @@ def render_text(packet: ContextPacket) -> str:
     lines = [
         f"Context packet {packet.id}",
         f"Query {packet.query_id}, as of transaction {packet.as_of} (head {packet.head}).",
+        *_snapshot_lines(packet),
         "Inferred items: "
         + ("included, each marked INFERRED." if packet.inference_included else "excluded."),
         f"Items: {budget.items} of {budget.items + budget.dropped} found"
@@ -145,7 +163,7 @@ def render_text(packet: ContextPacket) -> str:
             f"{number}. {item.kind} {item.id} ({_epistemics(item)}): {_summary(item)} {cites}"
         )
     if packet.superseded_since:
-        lines += ["", f"Changed since transaction {packet.as_of}:"]
+        lines += ["", f"Changed since transaction {packet.memory.as_of}:"]
         lines += [
             f"- {s.claim} superseded at transaction {s.superseded_at} by {', '.join(s.by)}"
             for s in packet.superseded_since

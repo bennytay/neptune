@@ -130,6 +130,8 @@ def test_a_missing_source_folder_fails_the_compiler_stage_with_a_code(tmp_path: 
 def test_the_context_stub_serves_a_published_query_packet_golden(tmp_path: Path) -> None:
     copy = tmp_path / "contracts"
     shutil.copytree(REPO / "contracts", copy)
+    for published in (copy / "query-packet").glob("v*"):  # only the draft below is published
+        shutil.rmtree(published)
     version = copy / "query-packet" / "v0.0.1"
     (version / "golden").mkdir(parents=True)
     (version / "schema.json").write_text("{}\n", encoding="utf-8")
@@ -192,10 +194,11 @@ def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Pa
     ctx = _compiled(tmp_path / "work", registry)
     assert LEDGER.real is not None
     outcome = LEDGER.real(ctx)  # resolve() would make it a stub: a lock a major behind
-    # The manipulator and quadruped packages need package-schema 2 (compiler ADR 0037).
+    # The manipulator package needs package-schema 2 (compiler ADR 0037); the quadruped's
+    # robot.urdf gives robot-description records, which need package-schema 8 (compiler ADR 0039).
     assert outcome.problems == (
         "manipulator: the package needs package-schema 2, neptune-ledger locks 1.0.0",
-        "quadruped: the package needs package-schema 2, neptune-ledger locks 1.0.0",
+        "quadruped: the package needs package-schema 8, neptune-ledger locks 1.0.0",
     )
 
 

@@ -1,7 +1,8 @@
 """The context packet's JSON Schema (draft 2020-12): what ``ContextPacket.to_json`` writes.
 
 Upstream definitions a packet embeds are copied from their owners' exports under their own
-names: a claim, a resolver finding, a node and a model ref from Memory's graph-schema export,
+names: a claim, a resolver finding, a node and a model ref from graph-schema's export at the
+pinned version (``neptune_context.pinned``, ADR 0006 §9), never Memory's live code,
 and the compiler types those reuse (``EvidenceRef``, ``FrameRef``, ``Timestamp``, the ids), so
 one evidence ref validates the same in all three contracts. The Python reader
 (``packets.codec.decode``) is stricter: it recomputes ids, budgets and cross-references.
@@ -14,8 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Final
 
-from neptune_memory.schema.export import graph_schema
-
+from neptune_context import pinned
 from neptune_context.packets.model import (
     MAX_ITEMS,
     PACKET_KIND,
@@ -109,7 +109,7 @@ def _knowledge(value: JsonObject) -> JsonObject:
 
 
 def _upstream_defs() -> dict[str, JsonValue]:
-    defs: dict[str, Any] = graph_schema()["$defs"]  # type: ignore[assignment]
+    defs: dict[str, Any] = pinned.graph_schema_defs()
     wanted: dict[str, JsonValue] = {}
     stack = list(UPSTREAM_DEFS)
     while stack:

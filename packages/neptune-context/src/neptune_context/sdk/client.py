@@ -1,11 +1,13 @@
 """The Python SDK (ADR 0004): ``Client`` and ``AsyncClient``, identical types, one set of rules.
 
-``query`` validates the query before any engine sees it and verifies the answer after: the packet
-must name this query by its id, answer the snapshot the query pinned, and agree on whether
-inference is included. ``why`` and ``diff`` are conveniences that build the typed ``Query`` a
-caller could have written (ADR 0002 Q09 and Q04); there is no second request type. ``hydrate``
-resolves one evidence ref through the Ledger. Every call is a read, so a transient failure
-(``unavailable``, ``timeout``) is retried under the ``RetryPolicy``; nothing else is.
+``query`` validates the query before any engine sees it and verifies the answer after
+(``answer.answer_problems``): the packet must name this query by its id, answer the snapshot the
+query pinned, agree on whether inference is included, echo the query's budget and window, and
+keep every timed item on a clock the query asked for or bridged. ``why`` and ``diff`` are
+conveniences that build the typed ``Query`` a caller could have written (ADR 0002 Q09 and Q04);
+there is no second request type. ``hydrate`` resolves one evidence ref through the Ledger. Every
+call is a read, so a transient failure (``unavailable``, ``timeout``) is retried under the
+``RetryPolicy``; nothing else is.
 
 ``include_inferred`` has no default anywhere (ADR 0002 §5): the caller chooses on every call.
 A local client is ``Client(engine)``; a remote one ``Client("https://...", token=...)``. Local
@@ -15,13 +17,15 @@ mode has an implicit tenant and takes no token.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, TypeVar
 
+from neptune.identity.canonical_json import dumps
 from neptune.model.provenance import EvidenceRef
+from neptune_context.answer import answer_problems
 from neptune_context.packets.model import EvidenceItem
-from neptune_context.query.codec import query_id
 from neptune_context.query.decode import accept
 from neptune_context.query.findings import Refused
 from neptune_context.query.model import HEAD, AsOf, Budget, Diff, Instant, Query, Subject, Why
@@ -90,14 +94,10 @@ def _verified(query: Query, packet: object) -> ContextPacket:
 
     if not isinstance(packet, ContextPacket):
         raise SdkError(ErrorCode.INVALID_RESPONSE, "the engine did not return a ContextPacket")
-    if packet.query_id != query_id(query):
-        raise SdkError(ErrorCode.INVALID_RESPONSE, "the packet answers a different query")
-    if isinstance(query.as_of, int) and packet.as_of != query.as_of:
-        raise SdkError(ErrorCode.INVALID_RESPONSE, "the packet answers a different snapshot")
-    if packet.inference_included != query.include_inferred:
-        raise SdkError(
-            ErrorCode.INVALID_RESPONSE, "the packet disagrees with the query on inferred items"
-        )
+    problems = answer_problems(query, packet)
+    if problems:
+        extra = f" (and {len(problems) - 1} more)" if len(problems) > 1 else ""
+        raise SdkError(ErrorCode.INVALID_RESPONSE, problems[0] + extra)
     return packet
 
 
@@ -158,12 +158,16 @@ def _transaction(as_of: int | None) -> int | None:
 
 
 def _resolved(ref: EvidenceRef, resolution: object) -> Resolution:
+    """The Ledger's answer for exactly ``ref`` (source and locator); else ``invalid_response``."""
     from neptune_ledger.api import Resolution
 
     if not isinstance(resolution, Resolution):
         raise SdkError(ErrorCode.INVALID_RESPONSE, "the engine did not return a Resolution")
     if isinstance(ref.source, str) and resolution.evidence_ref.source != ref.source:
         raise SdkError(ErrorCode.INVALID_RESPONSE, "the resolution is for a different source")
+    locator = [step.to_json() for step in ref.locator]
+    if dumps(list(resolution.evidence_ref.locator)) != dumps(locator):
+        raise SdkError(ErrorCode.INVALID_RESPONSE, "the resolution is for a different locator")
     return resolution
 
 
@@ -282,7 +286,7 @@ class Client:
 
 
 def _sync(engine: Engine | AsyncEngine) -> Engine:
-    if asyncio.iscoroutinefunction(getattr(engine, "query", None)):
+    if any(inspect.iscoroutinefunction(getattr(engine, m, None)) for m in ("query", "hydrate")):
         raise SdkError(ErrorCode.INVALID_ARGUMENT, "Client needs a sync engine; use AsyncClient")
     return engine  # type: ignore[return-value]
 
@@ -306,7 +310,7 @@ class AsyncClient:
         resolved = _split_target(target, token)
         if isinstance(resolved, str):
             self._engine: AsyncEngine = to_async(HttpEngine(resolved, token=token, timeout=timeout))
-        elif asyncio.iscoroutinefunction(getattr(resolved, "query", None)):
+        elif inspect.iscoroutinefunction(getattr(resolved, "query", None)):
             self._engine = resolved  # type: ignore[assignment]
         else:
             self._engine = to_async(resolved)  # type: ignore[arg-type]

@@ -58,6 +58,10 @@ on:
       - "packages/neptune-ledger/tests/test_ledger_api_contract.py"
       - "packages/neptune-memory/tests/test_reader_contract_memory.py"
       - "packages/neptune-memory/tests/test_golden_graph_memory.py"
+      - "packages/neptune-context/tests/test_contract_context.py"
+      - "packages/neptune-context/tests/test_packet_goldens_context.py"
+      - "packages/neptune-context/tests/test_answer_context.py"
+      - "packages/neptune-context/tests/golden/**"
 
 permissions:
   contents: read

@@ -2,12 +2,13 @@
 
 ```mermaid
 flowchart LR
-  LED[("Ledger catalog API 1.6.0")]
-  MEM[("Memory graph schema 1.0.0")]
+  LED[("Ledger catalog API 1.7.0")]
+  MEM[("Memory graph schema 1.6.0")]
   subgraph P["neptune-context"]
     PIN["pins.py + contract suites on stubs"]
     QRY["query/ language + validation (ADR 0002)"]
-    RET["retrieve/"]
+    RET["retrieve/ channel interface + graph channel (ADR 0007)"]
+    ENG["engine.py LocalEngine (ADR 0007)"]
     PKT["packets/"]
     RND["render/"]
     SDK["sdk/ Client + engine seam (ADR 0004)"]
@@ -24,7 +25,7 @@ flowchart LR
   RET --> EXP
   PKT --> SDK
   MCP --> SDK
-  RET -.->|engine seam| SDK
+  RET --> ENG -->|engine seam| SDK
   EVA -.-> RET
   PKT --> CON --> OUT
   SDK & MCP --> OUT
@@ -41,8 +42,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1,PIN,PKT built
-  class K2,QRY,RND,SDK,MCP partial
-  class RET,EXP,EVA,K3 todo
+  class K2,QRY,RND,SDK,MCP,RET,ENG partial
+  class EXP,EVA,K3 todo
   class LED,MEM,OUT,CON ext
   style P fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

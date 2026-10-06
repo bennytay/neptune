@@ -435,6 +435,8 @@ def test_evidence_uris_round_trip_and_refuse_everything_else() -> None:
         uri + "?as_of=05",
         uri + "?as_of=1&as_of=2",
         uri + "?as_of=1.5",
+        uri + "?as_of=9223372036854775808",  # 2^63: not a transaction
+        uri + "?as_of=" + "1" * 5000,  # beyond Python's int-string limit: still invalid_argument
         uri + "?other=1",
         uri + "?as_of=\u0665",
     ]

@@ -21,8 +21,15 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
 - `AsyncClient` has the same methods and types, awaitable. A sync `Engine` serves it in a worker thread.
 - `include_inferred` has no default on any call: you choose evidence-only or inferences-included, every time.
 - `query` validates first (a refused query never reaches an engine; `SdkError.findings` has the reasons) and
-  verifies the answer after: the packet must carry this query's id, the snapshot the query pinned, and the
-  same inference choice. A packet that does not is `invalid_response`, never data.
+  verifies the answer after (`answer_problems`, ADR 0006 §2). The packet must carry:
+  - this query's id;
+  - the snapshot the query pinned;
+  - the same inference choice;
+  - the query's budget, echoed exactly;
+  - the query's `during` window on its clock.
+
+  Every timed item must be on that clock or on a clock the query bridges to it, and every gap must point
+  into the query. A packet that fails any check is `invalid_response`, never data.
 - Errors are `SdkError(code, message, findings)` with `ErrorCode`: `invalid_argument`, `query_refused`,
   `unauthenticated`, `forbidden`, `not_found`, `unavailable`, `timeout`, `invalid_response`, `engine_error`.
 - Every call is a read, so `unavailable` and `timeout` are retried under `RetryPolicy` (default 3 tries,
@@ -30,8 +37,12 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
   does not retry unless you pass a `RetryPolicy`.
 - A token is sent only over `https` or to a loopback host, never followed through a redirect or a proxy,
   never printed. `timeout` bounds the whole answer.
-- Build against `StubEngine.from_directory(Path("tests/golden/packets"))` before the engine (C2) exists: it
-  answers exactly the queries it has recorded packets for and says `not_found` for anything else.
+- The in-process engine is `neptune_context.engine.LocalEngine(memory_reader, catalog=None)` (ADR 0007): it
+  runs the graph channel over a Memory reader (and the Ledger's indexes when a `CatalogApi` is given), fuses,
+  cuts to the budget and assembles the packet. `read_graph(path)` loads a Memory graph document into Memory's
+  reference reader. Lexical and vector channels join through `LocalEngine(..., channels=[...])`.
+- `StubEngine.from_directory(Path("tests/golden/packets"))` answers exactly the queries it has recorded
+  packets for and says `not_found` for anything else: for fixtures and offline builds.
 
 ## The ten worked queries in SDK form
 
@@ -254,12 +265,16 @@ packet = client.query(query)
 
 ## MCP server
 
-`python -m neptune_context.mcp --url https://neptune.example` (token from `$NEPTUNE_TOKEN`) or
-`--packets DIR` (recorded packets, for trying it out) serves four read-only tools over stdio. Claude Code:
+`python -m neptune_context.mcp --url https://neptune.example` (token from `$NEPTUNE_TOKEN`),
+`--memory GRAPH.json` (the local engine over a Memory graph document, ADR 0007) or `--packets DIR` (recorded
+packets, for trying it out) serves four read-only tools over stdio. Claude Code:
 
 ```
-claude mcp add neptune -- python -m neptune_context.mcp --url https://neptune.example
+claude mcp add neptune -- python -m neptune_context.mcp --memory graph.json
 ```
+
+With `--memory` and no Ledger catalog attached, series windows, frames and `neptune_hydrate` answer with gaps
+or `unavailable`; a catalog is attached in code (`build_server(AsyncClient(LocalEngine(reader, catalog)))`).
 
 | Tool | Asks | Arguments |
 |---|---|---|
