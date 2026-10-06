@@ -36,8 +36,9 @@ Selectors (``select.kind``):
   ``civil_time_zone``), whose value equals ``equals`` when given: what the reading transform's
   configuration states about a source that states nothing itself (root ADR 0061 §3). Its record id
   is ``declaration:sha256:`` and the digest of the entry's canonical JSON, its locator
-  ``{"declaration": "harness/acceptance/deploy.json", "pointer": "/sources/<i>/<field>"}``; the
-  path must still be a source of the package. Platform ADR 0009.
+  ``{"declaration": <the declaration's path, harness/acceptance/deploy.json by default>,
+  "pointer": "/sources/<i>/<field>"}``; the path must still be a source of the package. Platform
+  ADR 0009.
 - ``clock_mapping`` ``{path, offset_s}``: derived ``clock_mapping`` lines evidenced by the path
   whose anchor offset, target minus source in seconds by each clock's stated resolution, lies in
   ``[low, high]``; a clock without a known resolution is never compared.
@@ -45,7 +46,6 @@ Selectors (``select.kind``):
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -84,8 +84,10 @@ class Package:
 
     root: Path
     _kinds: dict[str, list[Json]] = field(default_factory=dict)
-    # The Deploy declaration ``declaration`` items resolve against; the corpus's own when None.
+    # The Deploy declaration ``declaration`` items resolve against, and the repository path their
+    # citations name; the corpus's own ``deploy.json`` when None.
     declaration: Json | None = None
+    declaration_path: str = DECLARATION
 
     def declared_sources(self) -> list[Any]:
         if self.declaration is None:
@@ -272,7 +274,10 @@ def resolve_one(package: Package, select: Json) -> Json:
         out["records"] = sorted(_entry_id(entry) for _, entry in entries)
         out["citations"] = [
             {
-                "locator": {"declaration": DECLARATION, "pointer": f"/sources/{i}/{name}"},
+                "locator": {
+                    "declaration": package.declaration_path,
+                    "pointer": f"/sources/{i}/{name}",
+                },
                 "path": path,
                 "record": _entry_id(entry),
             }
@@ -320,9 +325,11 @@ def resolve_one(package: Package, select: Json) -> Json:
 
 
 def _entry_id(entry: Json) -> str:
-    """A declaration entry's id: the sha256 of its canonical JSON (sorted keys, no spaces)."""
-    canonical = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return "declaration:sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+    """A declaration entry's id: the sha256 of its canonical JSON (the compiler's encoding)."""
+    from neptune.identity import canonical_json
+    from neptune.identity.hashing import content_id
+
+    return "declaration:" + str(content_id(canonical_json.dumps(entry)))
 
 
 def _locator(kind: str, record: Json, select: Json) -> Json | None:

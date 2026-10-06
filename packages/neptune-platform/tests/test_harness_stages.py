@@ -390,6 +390,14 @@ def test_a_declared_source_zone_is_passed_to_the_map_by_preset_and_corpus_path(
     assert entry["problems"] == [
         "manipulator: neptune_deploy map exited 2: map: unrecognized arguments"
     ]
+    # A zone for a preset Deploy does not ship is never passed: that preset is the problem.
+    seen.clear()
+    unshipped = {**zone, "preset": "no_such_preset"}
+    declaration = {"deploy_format": 1, "presets": ["cmms_generic", "no_such_preset"]}
+    (tmp_path / "deploy.json").write_text(json.dumps({**declaration, "sources": [unshipped]}))
+    entry = run_stage(DEPLOY, ctx, services_up=False, upstream_ok=True)
+    assert "--source-zone" not in seen[0]
+    assert "manipulator: Deploy ships no preset 'no_such_preset'" in entry["problems"]
 
 
 def _zones_package(root: Path, records: list[dict[str, object]]) -> Path:

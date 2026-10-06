@@ -303,8 +303,11 @@ def _plain_path(path: str) -> bool:
     return "\\" not in path and "\0" not in path and all(p not in ("", ".", "..") for p in parts)
 
 
-def _read_sources(value: Any, presets: list[str]) -> tuple[tuple[SourceZone, ...], list[str]]:
-    """The ``sources`` entries, and why any cannot be used."""
+def _read_sources(
+    value: Any, presets: list[str] | None
+) -> tuple[tuple[SourceZone, ...], list[str]]:
+    """The ``sources`` entries, and why any cannot be used; ``presets`` is None when the
+    declaration's own presets did not read, so membership is not judged against them."""
     from neptune.model.reference import check_iana_zone
 
     if not isinstance(value, list):
@@ -319,7 +322,7 @@ def _read_sources(value: Any, presets: list[str]) -> tuple[tuple[SourceZone, ...
             problems.append(f"sources[{i}] has a value that is not a name")
             continue
         zone = SourceZone(entry["preset"], entry["source"], entry["civil_time_zone"])
-        if zone.preset not in presets:
+        if presets is not None and zone.preset not in presets:
             problems.append(f"sources[{i}] names preset {zone.preset}, which is not declared")
         if not _plain_path(zone.source):
             problems.append(f"sources[{i}] source {zone.source} is not a plain corpus path")
@@ -367,7 +370,10 @@ def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
         at_least = {}
     if not names["presets"] and not names["templates"]:
         problems.append("the deploy declaration names no preset and no template")
-    sources, refused = _read_sources(document.get("sources", []), names["presets"])
+    presets_read = not any(problem.startswith("presets ") for problem in problems)
+    sources, refused = _read_sources(
+        document.get("sources", []), names["presets"] if presets_read else None
+    )
     problems += refused
     if problems:
         return None, problems
@@ -428,7 +434,7 @@ def _zone_problems(
     """Why a declared source zone was not applied: the mapped package must hold, for each
     ``sources`` entry, a ``civil_time_zone`` record citing that source and made by that preset's
     transform, and every such record must state the declared zone (ADR 0009)."""
-    from harness.acceptance.resolve import Package
+    from harness.acceptance.resolve import Package, _known, _source
 
     base, out = Package(compiled), Package(mapped)
     problems: list[str] = []
@@ -440,19 +446,18 @@ def _zone_problems(
             )
             continue
         states = [
-            record.get("zone", {})
+            record.get("zone")
             for record in out.kind("civil_time_zone")
-            if record.get("provenance", {}).get("evidence", {}).get("source") == content
-            and labels.get(applied.get(str(record["provenance"].get("transform")), ""))
+            if _source(record) == content
+            and labels.get(applied.get(str(record.get("provenance", {}).get("transform")), ""))
             == f"preset:{zone.preset}"
         ]
-        declared = {"knowledge": "known", "value": zone.civil_time_zone}
         if not states:
             problems.append(
                 f"preset:{zone.preset} wrote no civil time zone for {zone.source}"
                 f" (declared {zone.civil_time_zone})"
             )
-        elif any(state != declared for state in states):
+        elif any(_known(state) != zone.civil_time_zone for state in states):
             problems.append(
                 f"preset:{zone.preset} did not apply the declared zone {zone.civil_time_zone}"
                 f" to every clock of {zone.source}"
@@ -494,9 +499,10 @@ def _map(
     argv = [sys.executable, "-m", "neptune_deploy", "map", str(ctx.package_root(case.id))]
     argv += [arg for name in plan.presets if name in PRESETS for arg in ("-p", name)]
     argv += [arg for path in plan.templates for arg in ("-t", str(REPO / path))]
-    argv += [
+    argv += [  # only for presets the run maps: Deploy refuses a zone for any other
         arg
         for zone in plan.sources
+        if zone.preset in PRESETS
         for arg in ("--source-zone", zone.preset, zone.source, zone.civil_time_zone)
     ]
     argv += ["-o", str(out)]

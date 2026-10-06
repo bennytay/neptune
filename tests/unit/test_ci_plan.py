@@ -327,19 +327,30 @@ def test_the_deploy_stage_inputs_exist() -> None:
         "harness/acceptance/deploy.json",
         "tests/fixtures/mcap/make_mcap.py",
         "packages/neptune-deploy/src/neptune_deploy/lifecycle/mapper.py",
+        "harness/stages.py",
+        "harness/run.py",
     ],
 )
 def test_what_memorys_acceptance_snapshot_is_built_through_runs_memory(path: str) -> None:
     """Memory's snapshot is rebuilt from the harness's compiled and mapped corpus packages
-    (platform ADR 0009), so an adapter, the corpus or the deploy stage's code runs its job."""
-    members = {**MEMBERS, "neptune-memory": frozenset({"neptune"}), "neptune-deploy": frozenset()}
+    (platform ADR 0009), so an adapter, the corpus, the stages or Deploy's code runs its job, and
+    not its dependents' (Memory's code did not change)."""
+    members = {
+        **MEMBERS,
+        "neptune-memory": frozenset({"neptune"}),
+        "neptune-context": frozenset({"neptune-memory"}),
+        "neptune-deploy": frozenset(),
+    }
     packages = ci_plan.plan([path], members).packages
     assert "neptune-memory" in packages
+    # a compiler path outside one adapter's own subpackage is core: every compiler dependent runs
+    core = path in ("src/neptune/adapters/registry.py", "tests/fixtures/mcap/make_mcap.py")
+    assert ("neptune-context" in packages) is core
 
 
 def test_the_rest_of_the_harness_does_not_run_memory() -> None:
     members = {**MEMBERS, "neptune-memory": frozenset({"neptune"})}
-    for path in ("harness/stages.py", "harness/acceptancy/x.py"):
+    for path in ("harness/publish.py", "harness/report.py", "harness/acceptancy/x.py"):
         assert "neptune-memory" not in ci_plan.plan([path], members).packages
 
 

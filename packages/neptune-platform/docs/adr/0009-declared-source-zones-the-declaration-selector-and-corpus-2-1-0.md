@@ -41,9 +41,12 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
    - its zone is not spelled as an IANA name (root ADR 0061 §1: syntax only, never looked up);
    - one preset's source is declared twice.
 
-   Entries are kept sorted by preset and source.
+   Entries are kept sorted by preset and source. When `presets` itself does not read, membership
+   is not judged, so its own problem is the one reported.
 2. **The run** (amends ADR 0008 §3). Each entry is passed to the map as
-   `--source-zone PRESET SOURCE ZONE`. That is Deploy's per-source zone option: the mapper reads the
+   `--source-zone PRESET SOURCE ZONE`, for presets Deploy ships (an unshipped one is already the
+   case's problem, and Deploy refuses a zone for a preset the run does not map). That is Deploy's
+   per-source zone option (Deploy ADR 0017 §2): the mapper reads the
    source's zone-less times in that zone and writes `civil_time_zone` `Known(zone)`, which is
    `stated` and cites the table. After the map, the case is red when, for an entry:
    - the compiled package holds no source at its path;
@@ -71,9 +74,12 @@ PR #145) and its upcoming `syslog_csv` mapping read these two tables. MVL-191 tr
    - PLANT-2's zone is `generate.PLANT_ZONE` (`America/New_York`), which the assertion's
      `authored_zone` also uses.
 5. **CI** (amends ADR 0008 §5). `ci_plan.py`'s `MEMORY_SNAPSHOT_INPUTS` covers every format adapter
-   (`src/neptune/adapters/`), `harness/acceptance/` and the deploy stage's inputs. With `CORPUS_INPUTS`,
-   a change to any of them also runs `neptune-memory`. `harness.yml` already covers them
-   (`src/neptune/**`, `harness/**`), and a workflow test keeps it so.
+   (`src/neptune/adapters/`), `harness/acceptance/`, the harness modules Memory's snapshot generator
+   runs (`stages.py`, `run.py`, `corpus.py`, `contracts.py`) and the deploy stage's inputs. With
+   `CORPUS_INPUTS`, a change to any of them also runs `neptune-memory`. It is added after the
+   dependency propagation: the snapshot moved, not Memory's code, so Memory's dependents (Context)
+   do not run for it. `harness.yml` already covers these paths (`src/neptune/**`, `harness/**`), and
+   a workflow test keeps it so.
 
 ## Alternatives considered
 

@@ -511,6 +511,15 @@ def test_a_deploy_declaration_states_the_civil_zone_of_sources_that_state_none(
     ]
     path.write_text(json.dumps(_ZONED), encoding="utf-8")
     assert read_deploy(path)[0] == stages.DeployPlan(("x",), (), {}, ())
+    # Presets that do not read are the problem; the zones are not judged against them.
+    path.write_text(json.dumps({**_ZONED, "presets": [""], "sources": [_ZONE]}), encoding="utf-8")
+    assert read_deploy(path) == (
+        None,
+        [
+            "presets is not a list of names",
+            "the deploy declaration names no preset and no template",
+        ],
+    )
 
 
 @pytest.mark.parametrize(
@@ -632,6 +641,8 @@ def test_the_declaration_selector_cites_a_zone_the_deploy_declaration_states(
     )
     with pytest.raises(resolve.GoldError, match="needs preset, field"):
         resolve.resolve_one(package, {"kind": "declaration", "path": "a.csv"})
-    # The id is the entry's content: the same entry elsewhere in the list keeps it.
-    moved = resolve.Package(root, declaration={"sources": [entry]})
-    assert resolve.resolve_one(moved, select)["records"] == [record]
+    # The id is the entry's content: the same entry elsewhere in the list keeps it, and the
+    # locator names the declaration the package was given.
+    moved = resolve.Package(root, declaration={"sources": [entry]}, declaration_path="d.json")
+    (citation,) = resolve.resolve_one(moved, select)["citations"]
+    assert citation["record"] == record and citation["locator"]["declaration"] == "d.json"
