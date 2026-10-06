@@ -1,0 +1,22 @@
+{
+  "as_of": 2051,
+  "budget": {
+    "items": 20
+  },
+  "clock_bridges": [],
+  "explain": [
+    {
+      "claim_id": "claim:sha256:f518ff4505c681dc943a6caffbec442a9d81619f6aea7ada18707213293b82c3",
+      "kind": "why"
+    },
+    {
+      "claim_id": "claim:sha256:78a4f821a2d1e119d4ed770a9e0c6473e8d140db7e27d938137a9c08e8264edc",
+      "kind": "why"
+    }
+  ],
+  "frame_bridges": [],
+  "include_inferred": true,
+  "query_version": 1,
+  "regions": [],
+  "subjects": []
+}

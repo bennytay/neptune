@@ -52,8 +52,8 @@ def test_today_the_compiler_and_the_ledger_resolve_to_real() -> None:
     assert resolved["ledger"].reason == f"neptune_ledger.api is importable and matches {catalog}"
     assert resolved["ledger"].contract_version == catalog
     assert resolved["context"].mode == "stub"
-    assert resolved["memory"].mode == "stub"  # graph-schema 1.6.0 published; no driver yet
-    assert resolved["memory"].contract_version == "1.6.0"
+    assert resolved["memory"].mode == "stub"  # graph-schema published; no driver yet
+    assert resolved["memory"].contract_version == latest("graph-schema")
 
 
 def test_an_importable_package_without_a_driver_is_still_a_stub() -> None:
@@ -194,10 +194,11 @@ def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Pa
     ctx = _compiled(tmp_path / "work", registry)
     assert LEDGER.real is not None
     outcome = LEDGER.real(ctx)  # resolve() would make it a stub: a lock a major behind
-    # The manipulator and quadruped packages need package-schema 2 (compiler ADR 0037).
+    # The manipulator package needs package-schema 2 (compiler ADR 0037); the quadruped's
+    # robot.urdf gives robot-description records, which need package-schema 8 (compiler ADR 0039).
     assert outcome.problems == (
         "manipulator: the package needs package-schema 2, neptune-ledger locks 1.0.0",
-        "quadruped: the package needs package-schema 2, neptune-ledger locks 1.0.0",
+        "quadruped: the package needs package-schema 8, neptune-ledger locks 1.0.0",
     )
 
 

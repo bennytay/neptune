@@ -1,7 +1,7 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.6.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.8.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -9,7 +9,10 @@ run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continu
 type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
 ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.5.0 (minor) adds the
 episode predicates ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md) §5); 1.6.0 (minor) adds the
-`event` node type, the event predicates and `EventKind` ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §6). Earlier goldens still
+`event` node type, the event predicates and `EventKind` ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §6); 1.7.0 (minor) adds the
+calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
+§4, §6); 1.8.0 (minor) adds the coverage and health predicates
+([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -45,7 +48,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 8`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 10`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -56,6 +59,9 @@ major version (ADR 0002 §5).
 | `at_site` | event, run | site | one | the site a run or event took place at, as declared |
 | `at_site_candidate` | event, run | site | many | ambiguous: the evidence names several sites |
 | `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
+| `calibrated_by` | configuration | record | many | the maintenance or requalification record that states the calibration resulted from it |
+| `calibrated_with` | sensor | configuration | many | a calibration of the sensor, from its valid_from to its stated end or the next one |
+| `calibration_candidate` | sensor | configuration | many | ambiguous: the calibration could be the sensor's over the interval; one claim per reading |
 | `clock_map` | clock | clock_map | many | a `maps_to`'s parameters as the evidence states them, or the chain it composes |
 | `co_occurs_within` | event | event | many | both events began inside the claim's valid interval, which is the configured window on that clock; different sources; never a cause |
 | `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
@@ -65,13 +71,15 @@ major version (ADR 0002 §5).
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `declared_kind` | event | text, integer | one | the event's kind exactly as its source declares it: a level, a code, a mode |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
-| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
+| `drift` | sensor | delta | many | observed: two consecutive calibrations' declared values differ by the delta; no judgement |
 | `ends_at_candidate` | episode | instant | many | ambiguous: may end here (a stated end, or a stop event inside it) |
+| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `event_kind` | event | text | one | a registered event kind (`EventKind`), through a vendor mapping the config declares |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
 | `executes_task_candidate` | episode, run | task | many | ambiguous: the evidence names several tasks |
+| `gap` | stream | run | many | the stream's declared first or last instant predicts samples here and its series holds none |
 | `governed_by` | deployment, fleet, machine, site | policy | many | an operating rule or control policy that applies |
 | `has_calibration` | sensor | configuration | one | the calibration in force |
 | `has_clock` | machine | clock | many | a clock the machine's records carry, over the interval they observe it |
@@ -82,6 +90,7 @@ major version (ADR 0002 §5).
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
 | `in_zone` | event | zone | one | the zone an event took place in, as declared |
 | `in_zone_candidate` | event | zone | many | ambiguous: the record names several zones |
+| `integrity_finding` | run, stream | text | many | a compiler finding about the evidence (truncation, corruption, a dropout); the object is its severity, verbatim |
 | `intervened` | episode | record | many | a human intervention during the episode (an `Intervention` record) |
 | `intervened_candidate` | episode | record | many | ambiguous: the intervention may have been during the episode |
 | `involves` | event | asset, machine | many | a machine or asset the record names as involved, or the machine whose log it is |
@@ -95,13 +104,19 @@ major version (ADR 0002 §5).
 | `operated_by` | run | person | many | a declared operator or supervisor |
 | `outcome` | episode | text | one | the outcome a record declares for the episode, verbatim; never inferred |
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
+| `rate_declared` | stream | quantity | many | the mean sample rate the source's index declares: (count - 1) over its first-to-last span, in Hz, on a clock with a stated resolution |
+| `rate_observed` | stream | quantity | many | the mean sample rate the series holds: (known rows - 1) over its first-to-last known span, in Hz |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
+| `recorded` | stream | run | many | the stream's series holds samples over this interval: first to last known sample on one clock (the Ledger's series coverage) |
 | `recorded_by` | run | machine | one | the machine whose log a run is |
 | `recorded_by_candidate` | run | machine | many | ambiguous: the evidence names several machines for the run |
 | `runs_model` | machine | model_version | many | a learned model it runs |
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
+| `sensor_not_recorded` | run | sensor | many | known absent: a sensor of a configuration bound to the run recorded nothing in it, and the recording covers the run |
+| `sensor_presence_unknown` | run | sensor | many | unknown: the evidence does not decide whether a configured sensor recorded in the run |
+| `sensor_recorded` | run | sensor | many | a sensor of a configuration bound to the run recorded in it: a run's file declares its identifier |
 | `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
 | `stated_severity` | event | text, integer | one | the severity a record states, verbatim; never ranked or compared |
 | `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
@@ -113,10 +128,16 @@ major version (ADR 0002 §5).
 version and never renamed or removed within a major.
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
-`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record` and `clock_map` (`#/$defs/ClockMap`:
+`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record`, `delta` and `clock_map` (`#/$defs/ClockMap`:
 a mapping's `anchor`, `rate` and `residual_bound` exactly as stated, each a `Knowledge` state inheriting the
 claim's provenance, with `method` `stated` or `co_sampled`; or a `composed` chain naming its mapping records in
-`chain` and the clocks between in `via`, with no parameters of its own).
+`chain` and the clocks between in `via`, with no parameters of its own). A `delta`
+(`#/$defs/Delta`) is `later - earlier`, component by component, between two calibration records (`earlier`,
+`later`): a parameter by its declared `name`, or the `translation` or `rotation` of the transforms both bind to one
+edge (`parent`, `child`), in the `representation` both declare, with the transforms' own frames and direction
+(`transform`). A rotation states its `adjustment`: a quaternion negated when the two point opposite ways
+(`later_negated`), Euler angles wrapped into a half turn (`wrapped`), else `none`. Its unit is the one both declare
+(`Known`), or `not_applicable` for a form without one (a quaternion, a rotation matrix); it is never converted.
 
 ## The claim and the finding
 
@@ -168,7 +189,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.6.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.8.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
@@ -255,6 +276,20 @@ def test_graph_schema_contract(check):
     its valid interval is the window. Events on clocks no mapping relates are never compared. A mapping that is
     too coarse to decide, or that states no residual bound, gives a finding, never a claim. An end that is
     declared but not stated (blank or ambiguous) leaves the event open and is never an instant.
+17. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
+    places a calibration on a sensor only through its declared machine and subject and the hardware configurations
+    the machine declares or its chain places; several readings are `calibration_candidate`s, and so is a calibration
+    whose frame binding contradicts its sensor's configuration graph. A `calibrated_with` starts at a stated
+    `valid_from` only, and its unstated end is the next calibration's stated start only where no calibration whose
+    start or placement is in doubt may come first; otherwise it is candidates or no interval, and no drift is
+    claimed across the doubt. `drift` exists only between equal declared units (or forms without one) and equal declared
+    interpretations; anything else is a finding, never a converted value, and no threshold is applied.
+18. **Coverage is never inferred** ([ADR 0015](adr/0015-coverage-and-health-consolidator.md)). `recorded` spans and
+    `rate_observed` come from the Ledger's series coverage; `gap` only where the stream's declared first or last
+    instant predicts samples the series does not reach, and never while a sample lacks a tick on that clock.
+    `rate_declared` and `rate_observed` stand side by side; nothing judges a tolerance. `integrity_finding` carries
+    the compiler's severity verbatim. A configured sensor is `sensor_not_recorded` only when nothing in the run could
+    be its data and the recording is closed and unflagged; otherwise `sensor_presence_unknown`, never absent.
 
 ## Caveat: a resolver configuration is a store generation
 

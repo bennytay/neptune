@@ -2855,21 +2855,23 @@ class IngestJob:
         with self._enter(Phase.VALIDATE):
             self._check_cancel()
             assert self._staged is not None
-            try:
-                package = read_package(self._staged.path)
-                report = validate_package(package)
-                receipt, identity = package.manifest.receipt, package.id
-                if report.findings:  # amend verifies the whole before it moves anything
-                    self._staged = amend(self._staged, package, report.records())
-                    manifest = package_manifest_from_json(
-                        canonical_json.loads((self._staged.path / MANIFEST).read_bytes())
-                    )
-                    receipt, identity = manifest.receipt, self._staged.id
+            try:  # read, validated and amended as streams, spilling to scratch (ADR 0070)
+                with scratch_space(self.workspace.scratch, ingest_root=self._local_root) as spill:
+                    package = read_package(self._staged.path, scratch=spill)
+                    report = validate_package(package, spill=spill)
+                    receipt, identity = package.manifest.receipt, package.id
+                    if report.findings:  # amend verifies the whole before it moves anything
+                        self._staged = amend(self._staged, package, report.records(), spill=spill)
+                        manifest = package_manifest_from_json(
+                            canonical_json.loads((self._staged.path / MANIFEST).read_bytes())
+                        )
+                        receipt, identity = manifest.receipt, self._staged.id
             except (PackageError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the assembled package does not verify: {exc}") from exc
             added = report.records()
+            counted = dict(package.manifest.tables)  # the package's files may have moved by now
             summary: dict[str, JsonValue] = {
-                "findings": len(package.receipt.findings) + len(report.findings),
+                "findings": counted.get("ingest_finding", 0) + len(report.findings),
                 "package": identity,
                 "records": len(package.records) + len(added),
                 "series": len(package.series),

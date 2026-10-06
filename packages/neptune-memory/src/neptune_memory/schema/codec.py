@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NoReturn
 
 from neptune.identity.ids import config_hash
+from neptune.model.frames import TransformDirection, frame_ref_from_json
 from neptune.model.ids import ConfigHash, parse_config_hash, parse_record_id
 from neptune.model.knowledge import AssertionKind, Knowledge
 from neptune.model.knowledge import from_json as knowledge_from_json
@@ -28,6 +29,10 @@ from neptune_memory.schema.claim import (
     ClaimAssertionKind,
     ClaimObject,
     ClaimProvenance,
+    DeclaredTransform,
+    Delta,
+    DeltaAdjustment,
+    DeltaQuantity,
     LedgerRecordRef,
     LiteralValue,
     ModelRef,
@@ -107,11 +112,54 @@ def node_from_json(data: JsonValue) -> NodeRef:
     return NodeRef(NodeType(_str(obj["node_type"], "node_type")), _str(obj["node_id"], "node_id"))
 
 
+def delta_from_json(data: JsonValue) -> Delta:
+    """A ``Delta``: a parameter's (``name``) or a transform part's (``parent``, ``child``)."""
+    keys = {"earlier", "later", "quantity", "representation", "values"}
+    quantity = DeltaQuantity(_str(_object(data, "delta").get("quantity", ""), "quantity"))
+    edge = quantity is not DeltaQuantity.PARAMETER
+    extra = {"child", "parent", "transform"} if edge else {"name"}
+    if quantity is DeltaQuantity.ROTATION:
+        extra.add("adjustment")
+    obj = _exact(data, "delta", keys | extra)
+    values = []
+    for item in _list(obj["values"], "values"):
+        value = real_from_json(item)
+        if not isinstance(value, float):
+            raise ValueError(f"a difference is a finite number, got {item!r}")
+        values.append(value)
+    return Delta(
+        earlier=parse_record_id(_str(obj["earlier"], "earlier")),
+        later=parse_record_id(_str(obj["later"], "later")),
+        quantity=quantity,
+        representation=_str(obj["representation"], "representation"),
+        values=tuple(values),
+        name=None if edge else _str(obj["name"], "name"),
+        edge=(frame_ref_from_json(obj["parent"]), frame_ref_from_json(obj["child"]))
+        if edge
+        else None,
+        transform=_declared_transform(obj["transform"]) if edge else None,
+        adjustment=DeltaAdjustment(_str(obj["adjustment"], "adjustment"))
+        if "adjustment" in obj
+        else None,
+    )
+
+
+def _declared_transform(data: JsonValue) -> DeclaredTransform:
+    obj = _exact(data, "transform", {"child", "direction", "parent"})
+    return DeclaredTransform(
+        _str(obj["parent"], "parent"),
+        _str(obj["child"], "child"),
+        TransformDirection(_str(obj["direction"], "direction")),
+    )
+
+
 def _literal_value(datatype: ValueType, value: JsonValue) -> LiteralValue:
     if datatype is ValueType.INSTANT:
         return timestamp_from_json(value)
     if datatype is ValueType.CLOCK_MAP:
         return clock_map_from_json(value)
+    if datatype is ValueType.DELTA:
+        return delta_from_json(value)
     if datatype in (ValueType.REAL, ValueType.QUANTITY) and not (
         isinstance(value, int) and not isinstance(value, bool)
     ):

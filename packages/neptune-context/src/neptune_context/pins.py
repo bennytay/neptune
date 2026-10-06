@@ -8,7 +8,7 @@ alongside the code that adapts to it. ``contracts/lock.toml`` states the same tw
 from typing import Final
 
 # Ledger catalog API (contracts/catalog-api): the registry version Context reads packages through.
-CATALOG_API_VERSION: Final = "1.6.0"
+CATALOG_API_VERSION: Final = "1.7.0"
 
 # Memory graph schema (contracts/graph-schema): the registry version of the claim graph read.
-GRAPH_SCHEMA_VERSION: Final = "1.0.0"
+GRAPH_SCHEMA_VERSION: Final = "1.6.0"
