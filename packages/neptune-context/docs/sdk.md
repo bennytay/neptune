@@ -57,10 +57,10 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
   planner = Planner(entity_index(graph_document), Defaults(Caller.AGENT), AnthropicClient())
   client = Client(engine, planner=planner)
   planned = client.plan("why did the arm-cell incident happen?")   # PlannedQuery: shown, never run
-  planned = client.choose(planned, "ARM-3A", "asset-tag:ARM-3A")  # settle an ambiguous name
+  planned = client.choose(planned, "ARM-3A", "servicenow.ci:ARM-3A")  # settle an ambiguous name
   asked = client.ask("...")             # Asked(plan, packet): the packet only when the plan is ready
   client.entities("machine", include_inferred=False)                # names current at head
-  client.find("ARM-3A in CELL-3", as_of=4, include_inferred=False)  # names at transaction 4
+  client.find("ARM-3A at PLANT-2", as_of=2, include_inferred=False)  # names at transaction 2
   ```
 
   Without a planner these calls are `unavailable`; with `NoModel()` every plan is a visible `failed` plan.

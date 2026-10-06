@@ -31,22 +31,22 @@ SNAPSHOT = (
 from neptune_context.engine import read_graph_document  # noqa: E402
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], snapshot: Path = SNAPSHOT) -> int:
     target = argv[0] if argv else os.environ.get("NEPTUNE_MEMORY_GRAPH")
     try:
-        document = read_graph_document(
-            SNAPSHOT
-        )  # the server's own reader accepts it, or this raises
+        # The server's own reader accepts the snapshot, or this raises.
+        document = read_graph_document(snapshot)
         if target:
             out = Path(target)
             out.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(SNAPSHOT, out)
+            shutil.copyfile(snapshot, out)
             read_graph_document(out)
     except (OSError, ValueError) as error:
         print(f"export_demo_graph: {error}", file=sys.stderr)
         return 2
     where = f"copied to {target}" if target else "serve it as it is"
-    print(f"{SNAPSHOT.relative_to(ROOT)}: head {int(document.head)}, {where}")
+    name = snapshot.relative_to(ROOT) if snapshot.is_relative_to(ROOT) else snapshot
+    print(f"{name}: head {int(document.head)}, {where}")
     return 0
 
 

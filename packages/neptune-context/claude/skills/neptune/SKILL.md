@@ -12,9 +12,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 ## How to answer
 
 1. **Find the subjects.** Call `neptune_entities` with the user's words as `text` (for example
-   `"what happened to ARM-3A in CELL-3?"`) and `include_inferred: false` to get declared ids
-   such as `asset-tag:ARM-3A` and `zone-code:CELL-3`. Leave out `text` (or pass `kind`) to list
-   what memory names. Only names current at `as_of` (default: latest) are offered; names that
+   `"what happened to ARM-3A at PLANT-2?"`) and `include_inferred: false` to get declared ids
+   such as `servicenow.ci:ARM-3A` or `manifest:PLANT-2`. Never hard-code ids: they differ between
+   graphs, so always find them here. Leave out `text` (or pass `kind`) to list what memory names. Only names current at `as_of` (default: latest) are offered; names that
    only inferences mention need `include_inferred: true`. A name with several candidates is
    ambiguous: ask the user which one, never pick.
 2. **Optionally draft with `neptune_plan`.** It turns a question into a typed query. The draft is

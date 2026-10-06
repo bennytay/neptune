@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import sys
 from datetime import timedelta
@@ -295,31 +294,26 @@ def test_the_sample_mcp_json_launches_the_cli_with_a_configurable_graph() -> Non
     assert server["command"] == "uv" and graph in args
     cli = args[args.index("neptune_context.mcp") + 1 :]
     parsed = build_parser().parse_args(cli)
-    assert parsed.memory == Path(graph)
-    assert (F.ROOT / live).is_file()  # the default is a real file, relative to ${NEPTUNE_REPO}
+    assert parsed.memory == Path(graph)  # wiring only: the live file is the smoke test's to read
 
 
-def test_the_export_script_checks_memorys_snapshot_and_copies_it_where_asked(
-    tmp_path: Path,
-) -> None:
-    import subprocess
+def test_the_export_script_checks_a_snapshot_and_copies_it_where_asked(tmp_path: Path) -> None:
+    import importlib.util
 
-    out = tmp_path / "demo.json.gz"
     script = PACKAGE / "scripts" / "export_demo_graph.py"
-    env = {**os.environ, "NEPTUNE_MEMORY_GRAPH": str(out)}
-    done = subprocess.run(
-        [sys.executable, str(script)], env=env, capture_output=True, text=True, check=False
-    )
-    assert done.returncode == 0, done.stderr
-    assert out.read_bytes() == F.MEMORY_SNAPSHOT.read_bytes()  # copied as it is, not rewritten
-    from neptune_context.engine import read_graph_document
-
-    assert read_graph_document(out).head == read_graph_document(F.MEMORY_SNAPSHOT).head
-    env.pop("NEPTUNE_MEMORY_GRAPH")  # neither an argument nor the variable: check and say so
-    checked = subprocess.run(
-        [sys.executable, str(script)], env=env, capture_output=True, text=True, check=False
-    )
-    assert checked.returncode == 0 and "serve it as it is" in checked.stdout
+    spec = importlib.util.spec_from_file_location("export_demo_graph", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # The frozen copy stands in for Memory's live file, so a Memory regeneration moves nothing here.
+    assert module.SNAPSHOT.name == "acceptance_corpus.graph.json.gz"
+    out = tmp_path / "demo.json.gz"
+    assert module.main([str(out)], F.DEMO_SNAPSHOT) == 0
+    assert out.read_bytes() == F.DEMO_SNAPSHOT.read_bytes()  # copied as it is, not rewritten
+    assert module.main([], F.DEMO_SNAPSHOT) == 0  # no target: check only
+    bad = tmp_path / "bad.json.gz"
+    bad.write_bytes(b"not gzip")
+    assert module.main([str(tmp_path / "x.json.gz")], bad) == 2  # a snapshot the server refuses
 
 
 def test_an_oversized_question_is_refused_and_never_echoed() -> None:
