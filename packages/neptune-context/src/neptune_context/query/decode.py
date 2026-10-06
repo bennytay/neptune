@@ -24,6 +24,7 @@ from neptune_context.query.model import (
     CivilTime,
     Clock,
     ClockBridge,
+    CompareRuns,
     Diff,
     Direction,
     DomainClock,
@@ -387,7 +388,16 @@ class _Decoder:
             if subject is None or before is None or after is None:
                 return None
             return Diff(subject, before, after)
-        self.fail(at, "expected an explain item: kind 'why' or 'diff'")
+        if isinstance(value, dict) and value.get("kind") == "compare_runs":
+            data = self.obj(value, at, ("after", "before", "kind"))
+            if data is None:
+                return None
+            first = self.subject(data["before"], f"{at}/before")
+            second = self.subject(data["after"], f"{at}/after")
+            if first is None or second is None:
+                return None
+            return CompareRuns(first, second)
+        self.fail(at, "expected an explain item: kind 'why', 'diff' or 'compare_runs'")
         return None
 
     def query(self, value: Any) -> Query | None:

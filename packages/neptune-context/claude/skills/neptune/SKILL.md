@@ -17,6 +17,23 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    graphs, so always find them here. Leave out `text` (or pass `kind`) to list what memory names. Only names current at `as_of` (default: latest) are offered; names that
    only inferences mention need `include_inferred: true`. A name with several candidates is
    ambiguous: ask the user which one, never pick.
+   **"What changed since the last good run?" or "Why did this incident happen?"** Compare the
+   two runs instead of walking the graph:
+   - List the runs by name: `neptune_entities {"kind": "run", "include_inferred": false}` (each
+     line reads `run "<id>" named "<run name>"`). If the user names an incident or work order
+     (`INC-C3-0011`, `WO-26-0911`), `neptune_entities` with their words finds it by that number;
+     read it first with `neptune_query` (`subjects` the event, `graph` 1 hop, any predicate).
+   - Take the run in question (the incident's run, or the latest) and the last good run before
+     it, by name. Two runs with the same name are copies of one recording: either will do.
+   - Call `neptune_compare_runs` with them as `before` and `after` (each
+     `{"kind": "run", "declared_id": "<id from the listing>"}`) and `include_inferred`. Its
+     default budget holds the whole comparison: the configurations each run ran with and their
+     names, the declared values that differ (each run's own copy, so a change shows on both
+     sides), and the maintenance on the machine (work orders, each action, the stated cause).
+     State each difference with its keys. Neptune states differences, never causes: say "the
+     calibration changed from ... to ... [I..][E..]", not "the calibration caused ...". A gap
+     saying maintenance is "not ordered against the two runs" means its clock is unrelated to
+     the runs': say when the work order states it was done, not that it fell between them.
 2. **Optionally draft with `neptune_plan`.** It turns a question into a typed query. The draft is
    a model's proposal, not an answer. Read its findings, fix anything `needs_input` or
    `needs_choice`, then run the query yourself. If it says no model is configured, write the

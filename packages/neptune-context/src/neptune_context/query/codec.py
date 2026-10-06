@@ -19,6 +19,7 @@ from neptune_context.query.model import (
     Box,
     Clock,
     ClockBridge,
+    CompareRuns,
     DomainClock,
     Explain,
     FrameBridge,
@@ -130,6 +131,12 @@ def subject_to_json(subject: Subject) -> JsonObject:
 def _explain_to_json(item: Explain) -> JsonObject:
     if isinstance(item, Why):
         return {"claim_id": item.claim_id, "kind": "why"}
+    if isinstance(item, CompareRuns):
+        return {
+            "after": subject_to_json(item.after),
+            "before": subject_to_json(item.before),
+            "kind": "compare_runs",
+        }
     return {
         "after": _point_to_json(item.after),
         "before": _point_to_json(item.before),
