@@ -26,6 +26,14 @@ from neptune_context.packets.model import (
     GapCode,
     Limit,
 )
+from neptune_context.packets.trails import (
+    MAX_DIFF_NODES,
+    MAX_TRAILS,
+    MAX_WHY_DEPTH,
+    MAX_WHY_STEPS,
+    Change,
+    Relation,
+)
 
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -40,6 +48,7 @@ UPSTREAM_DEFS: Final = (
     "ConfigHash",
     "ContentId",
     "EvidenceRef",
+    "FindingId",
     "FrameRef",
     "LedgerTx",
     "ModelRef",
@@ -319,6 +328,68 @@ def _packet_defs() -> dict[str, JsonValue]:
             },
             optional=("model",),
         ),
+        "DiffTrail": {
+            **_obj(
+                {
+                    "after": _ref("DiffPoint"),
+                    "at": _ref("TrailAt"),
+                    "before": _ref("DiffPoint"),
+                    "changes": _array(
+                        _obj(
+                            {
+                                "after": _array(_ref("ClaimId")),
+                                "before": _array(_ref("ClaimId"), max_items=1),
+                                "change": _enum([str(c) for c in Change]),
+                                "predicate": _enum(sorted(pinned.predicates())),
+                            }
+                        )
+                    ),
+                    "kind": _const("diff"),
+                    "nodes": _array(_ref("NodeRef"), min_items=1, max_items=MAX_DIFF_NODES),
+                    "subject": _ref("NodeRef"),
+                }
+            ),
+            "description": "what changed about a subject between two points (ADR 0010)",
+        },
+        "DiffPoint": {
+            "oneOf": [
+                _obj({"tx": _ref("LedgerTx")}),
+                _obj({"clock": _ref("RecordId"), "ticks": _ticks()}),
+            ]
+        },
+        "Trail": {"oneOf": [_ref("DiffTrail"), _ref("WhyTrail")]},
+        "TrailAt": {"pattern": "^/explain/(0|[1-9][0-9]?)$", "type": "string"},
+        "WhyTrail": {
+            **_obj(
+                {
+                    "at": _ref("TrailAt"),
+                    "claim": _ref("ClaimId"),
+                    "kind": _const("why"),
+                    "steps": _array(
+                        _obj(
+                            {
+                                "assertion_kind": _enum(["inferred", "observed", "stated"]),
+                                "claim": _ref("ClaimId"),
+                                "depth": {
+                                    "maximum": MAX_WHY_DEPTH,
+                                    "minimum": 0,
+                                    "type": "integer",
+                                },
+                                "evidence": _array(_ref("EvidenceRef"), min_items=1),
+                                "finding": _ref("FindingId"),
+                                "parent": _ref("ClaimId"),
+                                "relation": _enum([str(r) for r in Relation]),
+                                "repeat": {"type": "boolean"},
+                            },
+                            optional=("finding", "parent"),
+                        ),
+                        min_items=1,
+                        max_items=MAX_WHY_STEPS,
+                    ),
+                }
+            ),
+            "description": "why memory holds one claim: a tree of claims and evidence (ADR 0010)",
+        },
         "ContextPacket": _obj(
             {
                 "findings": _array(_ref("ResolutionFinding")),
@@ -337,7 +408,9 @@ def _packet_defs() -> dict[str, JsonValue]:
                         }
                     )
                 ),
-            }
+                "trails": _array(_ref("Trail"), min_items=1, max_items=MAX_TRAILS),
+            },
+            optional=("trails",),
         ),
         "Relevance": _obj(
             {
@@ -358,7 +431,8 @@ def packet_schema() -> JsonObject:
         "anyOf": [_ref("ContextPacket")],
         "description": (
             "Neptune Context's context packet (neptune-context ADR 0003): a header, items, claims"
-            " superseded since as_of, resolver findings and gaps. Claims, findings and the"
+            " superseded since as_of, resolver findings, gaps and, for explain clauses, trails"
+            " (ADR 0010). Claims, findings and the"
             " compiler types they reuse are copied from Memory's graph-schema export. Generated"
             " from neptune_context.packets; the Python reader in neptune_context.packets.codec"
             " is stricter (ids, budgets and cross-references are recomputed)."

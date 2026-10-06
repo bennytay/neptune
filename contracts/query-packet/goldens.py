@@ -3,8 +3,9 @@
 ``scripts/contracts.py bump query-packet <version>`` runs this file and stores its output under
 ``v<version>/golden/``. It reads the goldens neptune-context generates and tests
 (``packages/neptune-context/tests/golden/``): the ten persona queries and the packets answering
-them over Memory's golden graph and the compiler's worked examples (context ADR 0003 §10), and the
-ten worked queries of context ADR 0002. Nothing is hand-written here; the package's tests fail when
+them over Memory's golden graph and the compiler's worked examples (context ADR 0003 §10), the
+ten worked queries of context ADR 0002, and the why and diff packets with trails the local engine
+builds (context ADR 0010, ``trails/``). Nothing is hand-written here; the package's tests fail when
 those files drift from the code that builds them, and decode every query with the query reader and
 every packet with the packet reader.
 
@@ -27,6 +28,12 @@ def goldens(root: Path = GOLDEN) -> dict[str, dict[str, Any]]:
     for path in sorted((root / "queries").glob("*.json")):
         value = json.loads(path.read_text(encoding="utf-8"))
         out[f"query.{path.name}"] = {"target": "#/$defs/Query", "value": value}
+    for path in sorted((root / "trails").glob("packet.*.json")):
+        value = json.loads(path.read_text(encoding="utf-8"))
+        out[path.name] = {"target": "#/$defs/ContextPacket", "value": value}
+    for path in sorted((root / "trails").glob("query.*.json")):
+        value = json.loads(path.read_text(encoding="utf-8"))
+        out[path.name] = {"target": "#/$defs/Query", "value": value}
     for path in sorted((root / "worked-queries").glob("*.json")):
         value = json.loads(path.read_text(encoding="utf-8"))
         out[f"query.worked-{path.name}"] = {"target": "#/$defs/Query", "value": value}

@@ -1,0 +1,371 @@
+{
+  "findings": [
+    {
+      "claim": "claim:sha256:a0c4571e70d525d4a7e7610599a93f069ac3f275eebd9d0137c8d3d4275119c2",
+      "code": "clock_mismatch",
+      "id": "finding:sha256:d3785b7e94a2944b190b6015806dc868a88b71b9d04efe5230c77b1ab0ce7c7d",
+      "others": [
+        "claim:sha256:42d0b79f0a426a54dd250725febee928a822a4e8bfbf5226d95f0144954c18fd"
+      ],
+      "provenance": {
+        "config_hash": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
+        "resolver_id": "memory.supersede",
+        "resolver_version": "2"
+      },
+      "recorded_at": 2,
+      "superseded_at": "open"
+    }
+  ],
+  "gaps": [],
+  "header": {
+    "as_of": 4,
+    "budget": {
+      "dropped": 0,
+      "exhausted": [],
+      "limits": {
+        "items": 10
+      },
+      "tokenizer": "neptune-context.utf8-bytes-div-4/1",
+      "used": {
+        "bytes": 4423,
+        "items": 4,
+        "tokens": 1106
+      }
+    },
+    "head": 4,
+    "inference_included": true,
+    "ledger_snapshot": {
+      "catalog_api_version": "1.7.0"
+    },
+    "memory_snapshot": {
+      "as_of": 4,
+      "generation": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
+      "graph_schema_version": 1
+    },
+    "produced_by": {
+      "config_hash": "sha256:00942ee9ca1cd0d6f4b9335773b91877c593d07fce55f116d44f943e6aa4bc87",
+      "engine_id": "neptune-context.local",
+      "engine_version": "1"
+    },
+    "query_id": "query:sha256:bde038d6b496934a94db178c286a7f3a4bd0baa1a442f41d9a647ceaa7ab46a0"
+  },
+  "id": "packet:sha256:d2005868ba0cca509f7923c0ee5003e66e50f7e8f916a1b67caca99fdfa1d809",
+  "items": [
+    {
+      "assertion_kind": "stated",
+      "claim": {
+        "assertion_kind": "stated",
+        "confidence": {
+          "knowledge": "not_applicable"
+        },
+        "id": "claim:sha256:42d0b79f0a426a54dd250725febee928a822a4e8bfbf5226d95f0144954c18fd",
+        "object": {
+          "kind": "node",
+          "node_id": "site-code:YARD-4",
+          "node_type": "site"
+        },
+        "predicate": "located_at",
+        "provenance": {
+          "config_hash": "sha256:83d55db874ff65cc422aa4199572362c3195b159af2c64fba44cc232e702b2a5",
+          "consolidator_id": "fixture.register",
+          "consolidator_version": "1",
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 8
+                }
+              ],
+              "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+            }
+          ],
+          "records": []
+        },
+        "recorded_at": 1,
+        "subject": {
+          "kind": "node",
+          "node_id": "vin:av-2",
+          "node_type": "machine"
+        },
+        "superseded_at": "open",
+        "supersedes": [],
+        "valid": {
+          "end": "open",
+          "start": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1772323200000000000
+          }
+        }
+      },
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "item:sha256:d40cd1ef8bc8c0dfd6fa685dd99f6d5489d5653bbde13cec1763019b5140738e",
+      "kind": "claim",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 8
+              }
+            ],
+            "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:83d55db874ff65cc422aa4199572362c3195b159af2c64fba44cc232e702b2a5",
+          "producer_id": "fixture.register",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "graph",
+            "rank": 1,
+            "score": 1.0
+          }
+        ],
+        "score": 0.01639344262295082
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "row",
+            "row": 8
+          }
+        ],
+        "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+      },
+      "id": "item:sha256:d5b22b1caec2f7a818df4631992fdc9604bd007c69655689b6c0b62e1371f3bd",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 8
+              }
+            ],
+            "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:83d55db874ff65cc422aa4199572362c3195b159af2c64fba44cc232e702b2a5",
+          "producer_id": "fixture.register",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 1,
+            "score": 0.5
+          }
+        ],
+        "score": 0.01639344262295082
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    },
+    {
+      "assertion_kind": "observed",
+      "claim": {
+        "assertion_kind": "observed",
+        "confidence": {
+          "knowledge": "not_applicable"
+        },
+        "id": "claim:sha256:a0c4571e70d525d4a7e7610599a93f069ac3f275eebd9d0137c8d3d4275119c2",
+        "object": {
+          "kind": "node",
+          "node_id": "site-code:DEPOT-5",
+          "node_type": "site"
+        },
+        "predicate": "located_at",
+        "provenance": {
+          "config_hash": "sha256:853547ce298710008f74f09ef14dc13f0bcb2274147eb914ba00df3c59ba99f9",
+          "consolidator_id": "fixture.telemetry",
+          "consolidator_version": "1",
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 3
+                }
+              ],
+              "source": "sha256:a2147dd0b6406bb4305114bbdd28e24ec9019dc530130bfd545a28c12bb6dc0e"
+            }
+          ],
+          "records": []
+        },
+        "recorded_at": 2,
+        "subject": {
+          "kind": "node",
+          "node_id": "vin:av-2",
+          "node_type": "machine"
+        },
+        "superseded_at": "open",
+        "supersedes": [],
+        "valid": {
+          "end": "open",
+          "start": {
+            "domain_id": "rec:sha256:0bfb474d272de1fe8dae60451cee98be39c654f793efff7527f85b1758d41582",
+            "ticks": 1000
+          }
+        }
+      },
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "item:sha256:07cb5da394bd690fd5403b2557df028fd1f7a1043859f36ec16e0ea7a8e0936d",
+      "kind": "claim",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:a2147dd0b6406bb4305114bbdd28e24ec9019dc530130bfd545a28c12bb6dc0e"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:853547ce298710008f74f09ef14dc13f0bcb2274147eb914ba00df3c59ba99f9",
+          "producer_id": "fixture.telemetry",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "graph",
+            "rank": 2,
+            "score": 0.5
+          }
+        ],
+        "score": 0.016129032258064516
+      }
+    },
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "row",
+            "row": 3
+          }
+        ],
+        "source": "sha256:a2147dd0b6406bb4305114bbdd28e24ec9019dc530130bfd545a28c12bb6dc0e"
+      },
+      "id": "item:sha256:cf8edde3625faa0fe664bd299a408fa0ed30edbcde28756e510e127dc769cb8f",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 3
+              }
+            ],
+            "source": "sha256:a2147dd0b6406bb4305114bbdd28e24ec9019dc530130bfd545a28c12bb6dc0e"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:853547ce298710008f74f09ef14dc13f0bcb2274147eb914ba00df3c59ba99f9",
+          "producer_id": "fixture.telemetry",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 2,
+            "score": 0.25
+          }
+        ],
+        "score": 0.016129032258064516
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    }
+  ],
+  "kind": "context_packet",
+  "packet_version": 1,
+  "superseded_since": [],
+  "trails": [
+    {
+      "at": "/explain/0",
+      "claim": "claim:sha256:42d0b79f0a426a54dd250725febee928a822a4e8bfbf5226d95f0144954c18fd",
+      "kind": "why",
+      "steps": [
+        {
+          "assertion_kind": "stated",
+          "claim": "claim:sha256:42d0b79f0a426a54dd250725febee928a822a4e8bfbf5226d95f0144954c18fd",
+          "depth": 0,
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 8
+                }
+              ],
+              "source": "sha256:59048306bc238ea8b29eadf70dcd13bc52ed9b67a8f0a221bb7fee16ceee85ec"
+            }
+          ],
+          "relation": "root",
+          "repeat": false
+        },
+        {
+          "assertion_kind": "observed",
+          "claim": "claim:sha256:a0c4571e70d525d4a7e7610599a93f069ac3f275eebd9d0137c8d3d4275119c2",
+          "depth": 1,
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 3
+                }
+              ],
+              "source": "sha256:a2147dd0b6406bb4305114bbdd28e24ec9019dc530130bfd545a28c12bb6dc0e"
+            }
+          ],
+          "finding": "finding:sha256:d3785b7e94a2944b190b6015806dc868a88b71b9d04efe5230c77b1ab0ce7c7d",
+          "parent": "claim:sha256:42d0b79f0a426a54dd250725febee928a822a4e8bfbf5226d95f0144954c18fd",
+          "relation": "conflicts",
+          "repeat": false
+        }
+      ]
+    }
+  ]
+}

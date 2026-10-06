@@ -17,7 +17,7 @@ statement.
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `catalog-api` | `neptune-ledger` | active | 1.7.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
 | `graph-schema` | `neptune-memory` | active | 1.8.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
-| `query-packet` | `neptune-context` | active | 1.1.0 | — | `neptune-deploy`, `neptune-learn` |
+| `query-packet` | `neptune-context` | active | 1.2.0 | — | `neptune-deploy`, `neptune-learn` |
 | `dataset-manifest` | `neptune-learn` | planned | — | — | none in this repository |
 
 ## Consumer locks

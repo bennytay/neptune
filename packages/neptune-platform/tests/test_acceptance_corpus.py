@@ -1,11 +1,15 @@
 """The acceptance corpus without ingesting it: determinism, the lock, sizes, the storyline's
-ingredients in the bytes, and the gold document's shape (Platform ADR 0007)."""
+ingredients in the bytes, and the gold document's and deploy declaration's shape (Platform ADR 0007,
+ADR 0008)."""
 
 import copy
+import csv
 import importlib.util
+import io
 import json
 import struct
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -14,6 +18,7 @@ import yaml
 from harness import acceptance, corpus
 from harness.acceptance import __main__ as acceptance_cli
 from harness.acceptance import generate, resolve
+from harness.stages import read_deploy
 
 REQUIRED_QUESTIONS: Final = {
     "Q1": "why",
@@ -45,8 +50,10 @@ def test_two_builds_are_byte_identical_and_match_the_committed_lock(
 
 def test_the_lock_gold_and_version_agree(gold: dict[str, Any]) -> None:
     lock = acceptance.read_lock()
+    deploy = json.loads(acceptance.DEPLOY.read_text(encoding="utf-8"))
     assert lock["version"] == acceptance.VERSION == gold["corpus_version"]
-    assert lock["corpus"] == acceptance.NAME == gold["corpus"]
+    assert deploy["corpus_version"] == acceptance.VERSION
+    assert lock["corpus"] == acceptance.NAME == gold["corpus"] == deploy["corpus"]
     assert acceptance.label() == f"acceptance {acceptance.VERSION} (tree {lock['tree']})"
 
 
@@ -95,11 +102,22 @@ def test_two_sites_and_three_morphologies_are_declared(files: dict[str, bytes]) 
 def test_the_d1_archetypes_are_reused_not_forked(files: dict[str, bytes]) -> None:
     fleet = generate.A.fleet()
     cell = generate.A.cell()
-    # S-007's runs and the cell's bag, calibrations and documents are the D1 generator's bytes.
+    # S-007's runs and the cell's bag and documents are the D1 generator's bytes.
     for path in ("runs/S-007/amr-07_2026-04-02.mcap", "incidents/INC-0007.pdf"):
         assert files[f"sites/S-007/{path.replace('runs/S-007/', 'runs/')}"] == fleet[path]
-    for path in ("calibration/CAL-ARM3A-0818.yaml", "documents/sop_CELL-014_finger_set.pdf"):
+    for path in ("urdf/arm6.urdf", "documents/sop_CELL-014_finger_set.pdf"):
         assert files[f"sites/PLANT-2/cell3/{path}"] == cell[path]
+    # The D1 cell's calibrations are rewritten as easy_handeye output, with the D1's ids, frames
+    # and translations (corpus 2.0.0): nothing about them is invented anew.
+    d1 = {p: yaml.safe_load(d) for p, d in cell.items() if p.startswith("calibration/")}
+    assert d1
+    for path, before in d1.items():
+        after = yaml.safe_load(files[f"sites/PLANT-2/cell3/{path}"])
+        assert {k: after["transformation"][k] for k in "xyz"} == {
+            k: before["translation"][k] for k in "xyz"
+        }
+        frames = ("eye_on_hand", "robot_effector_frame", "tracking_base_frame")
+        assert {k: after["parameters"][k] for k in frames} == {k: before[k] for k in frames}
     # Narrowed to S-007: no S-012 row, run, map or robot config survives.
     s007 = [p for p in files if p.startswith("sites/S-007/")]
     assert not [p for p in s007 if "S-012" in p or "AMR-08" in p or "AMR-09" in p]
@@ -124,8 +142,96 @@ def test_the_storyline_ingredients_are_in_the_bytes(files: dict[str, bytes]) -> 
         b"ignore all previous instructions"
         in files["sites/PLANT-2/vendor/SB-2026-117_PG-80_finger_sets.md"]
     )
-    # Calibration history across the change.
-    assert b"reprojection_error_px: 1.86" in files[f"{cell}/calibration/CAL-ARM3A-0911.yaml"]
+    # Calibration history across the change: 1.86 px against 0.44 px, and the camera 4.3 mm lower.
+    log = _rows(files[f"{cell}/calibration/handeye_calibration_log.csv"], "Calibration ID")
+    assert log["CAL-ARM3A-0911"]["Reprojection Error px"] == "1.86"
+    assert log["CAL-ARM3A-0818"]["Reprojection Error px"] == "0.44"
+    z = {
+        ident: yaml.safe_load(files[f"{cell}/calibration/{ident}.yaml"])["transformation"]["z"]
+        for ident in ("CAL-ARM3A-0818", "CAL-ARM3A-0911")
+    }
+    assert round((z["CAL-ARM3A-0818"] - z["CAL-ARM3A-0911"]) * 1000, 6) == 4.3
+
+
+def _rows(data: bytes, key: str) -> dict[str, dict[str, str]]:
+    return {row[key]: row for row in csv.DictReader(io.StringIO(data.decode()))}
+
+
+# What easy_handeye's HandeyeCalibration.to_dict writes: vars() of HandeyeCalibrationParameters,
+# and the transform's translation and rotation (IFL-CAMP/easy_handeye, handeye_calibration.py).
+EASY_HANDEYE_PARAMETERS: Final = {
+    "eye_on_hand",
+    "freehand_robot_movement",
+    "move_group",
+    "move_group_namespace",
+    "namespace",
+    "robot_base_frame",
+    "robot_effector_frame",
+    "tracking_base_frame",
+    "tracking_marker_frame",
+}
+
+
+def test_the_calibrations_are_what_easy_handeye_writes(files: dict[str, bytes]) -> None:
+    """Its writer is ``yaml.dump(to_dict(c), default_flow_style=False)``: PyYAML, the official
+    reader and writer, reads each file to that shape and writes the same bytes back."""
+    cal = [p for p in files if "/calibration/CAL-ARM3A-" in p]
+    assert len(cal) == len(generate.HANDEYE) == 5
+    for path in cal:
+        loaded = yaml.safe_load(files[path])
+        assert yaml.dump(loaded, default_flow_style=False).encode() == files[path], path
+        assert set(loaded) == {"parameters", "transformation"}
+        assert set(loaded["parameters"]) == EASY_HANDEYE_PARAMETERS
+        assert set(loaded["transformation"]) == {"x", "y", "z", "qx", "qy", "qz", "qw"}
+        assert loaded["parameters"]["eye_on_hand"] is True  # so robot_effector_frame is the parent
+        q = loaded["transformation"]
+        assert abs(q["qx"] ** 2 + q["qy"] ** 2 + q["qz"] ** 2 + q["qw"] ** 2 - 1) < 1e-5
+        assert b"ARM-3A" not in files[path]  # the format names no robot: the manifest does
+
+
+def test_the_manifest_declares_the_machine_of_every_calibration(files: dict[str, bytes]) -> None:
+    runs = yaml.safe_load(files["neptune.yaml"])["runs"]
+    declared = {path: run for run in runs for path in run["paths"]}
+    for c in generate.HANDEYE:
+        run = declared[f"sites/PLANT-2/cell3/calibration/{c.ident}.yaml"]
+        assert (run["machine"], run["site"]) == ("ARM-3A", "PLANT-2")
+
+
+def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str, bytes]) -> None:
+    """The stop the operator joins: the CMMS's hand-entered time is 32 s after the controller's,
+    which is the incident report's HMI time and the bag's header stamp of the collision."""
+    stops = _rows(files["sites/PLANT-2/cmms/downtime_log.csv"], "Downtime ID")
+    syslog = _rows(files["sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv"], "Seq")
+    cmms = datetime.fromisoformat(stops["DT-26-0914-01"]["Stopped"])
+    pstop = datetime.fromisoformat(syslog["4182"]["Timestamp"])
+    assert (cmms - pstop).total_seconds() == 32
+    assert syslog["4182"]["Host"] == "ARM-3A" and "PSTOP" in syslog["4182"]["Message"]
+    assert stops["DT-26-0914-01"]["Restarted"] == ""  # a blank, never a restart time
+    seconds = int((pstop - datetime(1970, 1, 1)).total_seconds())  # local wall time, as written
+    assert generate.local_ns(2026, 9, 14, 14, 32, 38) == (seconds + 4 * 3600) * 10**9  # EDT
+    assert b"2026-09-14 14:32:38" in files["sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf"]
+    # The assertion joins exactly these two, and says who, when and about what.
+    document = json.loads(files["sites/PLANT-2/cell3/incidents/INC-C3-0011.assertions.json"])
+    assert (document["format"], document["version"]) == ("neptune.assertions", 1)
+    (entry,) = document["assertions"]
+    assert entry["assertion_type"] == "same_identity"
+    assert [s["value"] for s in entry["scope"]] == ["DT-26-0914-01", "4182"]
+    assert entry["author"] == {"namespace": "plant-2.staff", "value": "a.novak"}
+    assert entry["authored_at"] == "2026-09-15T09:05:00-04:00"
+    assert entry["payload"] == {"incident": "INC-C3-0011", "relation": "same_event"}
+
+
+def test_plant_2_keeps_its_envelopes_in_the_register_s_007_keeps(files: dict[str, bytes]) -> None:
+    plant = files["sites/PLANT-2/authorisation/zone_register.csv"]
+    s007 = files["sites/S-007/authorisation/zone_register.csv"]
+    assert plant.split(b"\n", 1)[0] == s007.split(b"\n", 1)[0]  # register_zone reads both
+    rows = _rows(plant, "Envelope ID")
+    assert sorted(rows) == ["ENV-P2-01", "ENV-P2-02", "ENV-P2-03"]
+    zones = json.loads(files["sites/PLANT-2/maps/PLANT-2_zones.geojson"])
+    names = {feature["properties"]["zone_id"] for feature in zones["features"]}
+    assert {row["Zone"] for row in rows.values()} <= names
+    machines = {m["id"] for m in yaml.safe_load(files["neptune.yaml"])["machines"]}
+    assert {row["Robots"] for row in rows.values()} <= machines
 
 
 def test_the_corrupt_bag_ends_inside_a_chunk_and_its_metadata_still_claims_everything(
@@ -223,6 +329,7 @@ def test_select_builds_the_acceptance_corpus_or_the_worked_examples(tmp_path: Pa
     assert label == f"acceptance {acceptance.VERSION}"
     assert [case.id for case in cases] == [f"acceptance-{acceptance.VERSION}"]
     assert cases[0].gold == acceptance.GOLD and (cases[0].sources / "neptune.yaml").is_file()
+    assert cases[0].deploy == acceptance.DEPLOY
     label, cases = corpus.select(name="worked-examples")
     assert label == "worked-examples" and [c.id for c in cases] == list(corpus.EXAMPLE_NAMES)
     with pytest.raises(ValueError, match="unknown corpus"):
@@ -360,3 +467,88 @@ def test_a_package_without_base_records_scores_by_path_and_locator() -> None:
     gap = {"kind": "no_table_row", "citations": [{"locator": None, "path": "c.csv", "record": "t"}]}
     assert not resolve.supports(gap, {"path": "c.csv", "locator": None})
     assert resolve.supports(gap, {"record": "t"})
+
+
+def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None:
+    from neptune_deploy.lifecycle import PRESETS
+
+    plan, problems = read_deploy(acceptance.DEPLOY)
+    assert problems == [] and plan is not None
+    assert set(plan.presets) <= set(PRESETS)
+    assert {"cmms_generic", "jira_json", "register_zone", "servicenow_csv"} <= set(plan.presets)
+    assert plan.at_least["authorisation_envelope"] == 5  # S-007's two and PLANT-2's three
+
+
+@pytest.mark.parametrize(
+    ("document", "problem"),
+    [
+        ({"deploy_format": 2, "presets": ["x"]}, "deploy_format is 2, not 1"),
+        ({"deploy_format": 1}, "names no preset and no template"),
+        ({"deploy_format": 1, "presets": ["a", "a"]}, "presets repeats an entry"),
+        ({"deploy_format": 1, "presets": [3]}, "presets is not a list of names"),
+        ({"deploy_format": 1, "templates": ["../../etc"]}, "is not a path inside the repository"),
+        ({"deploy_format": 1, "templates": ["/etc/passwd"]}, "is not a path inside the repository"),
+        ({"deploy_format": 1, "templates": ["harness/nope.json"]}, "does not exist"),
+        ({"deploy_format": 1, "presets": ["x"], "at_least": {"k": 0}}, "at_least is not"),
+        ({"deploy_format": 1, "presets": ["x"], "at_least": {"k": True}}, "at_least is not"),
+        ([], "is not a JSON object"),
+    ],
+)
+def test_a_malformed_deploy_declaration_is_refused_whole(
+    tmp_path: Path, document: Any, problem: str
+) -> None:
+    path = tmp_path / "deploy.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    plan, problems = read_deploy(path)
+    assert plan is None and any(problem in p for p in problems), problems
+
+
+def test_an_unreadable_deploy_declaration_is_a_problem_not_a_crash(tmp_path: Path) -> None:
+    path = tmp_path / "deploy.json"
+    path.write_bytes(b"\xff{")
+    assert read_deploy(path) == (
+        None,
+        ["the deploy declaration cannot be read (UnicodeDecodeError)"],
+    )
+    assert read_deploy(tmp_path / "absent.json")[1] == [
+        "the deploy declaration cannot be read (FileNotFoundError)"
+    ]
+
+
+def test_the_assertion_selector_matches_the_declared_id_and_locates_the_entry(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "package"
+    (root / "records").mkdir(parents=True)
+    source = "sha256:" + "1" * 64
+
+    def assertion(ident: str, value: str, at: int) -> dict[str, Any]:
+        evidence = {"locator": [{"kind": "json_pointer", "pointer": f"/assertions/{at}"}]}
+        return {
+            "id": ident,
+            "identifier": {"knowledge": "known", "value": {"namespace": "ops", "value": value}},
+            "provenance": {"evidence": {**evidence, "source": source}},
+        }
+
+    (root / "records" / "source_revision.jsonl").write_text(
+        json.dumps({"content_id": source, "id": "r", "location": {"path": "a.json"}}) + "\n"
+    )
+    (root / "records" / "assertion.jsonl").write_text(
+        "".join(
+            json.dumps(assertion(i, v, n)) + "\n"
+            for n, (i, v) in enumerate([("x", "A1"), ("y", "A2")])
+        )
+    )
+    package = resolve.Package(root)
+    select = {"kind": "assertion", "path": "a.json", "id": {"namespace": "ops", "value": "A2"}}
+    found = resolve.resolve_one(package, select)
+    assert found["records"] == ["y"]
+    assert found["citations"] == [
+        {"locator": {"pointer": "/assertions/1"}, "path": "a.json", "record": "y"}
+    ]
+    assert resolve.supports(found, {"path": "a.json", "locator": {"pointer": "/assertions/1"}})
+    assert not resolve.supports(found, {"path": "a.json", "locator": {"pointer": "/assertions/0"}})
+    other = {**select, "id": {"namespace": "ops", "value": "A3"}}
+    assert resolve.resolve_one(package, other)["records"] == []
+    with pytest.raises(resolve.GoldError, match="needs id"):
+        resolve.resolve_one(package, {"kind": "assertion", "path": "a.json"})
