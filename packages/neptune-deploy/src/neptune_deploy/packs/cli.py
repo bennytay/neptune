@@ -18,7 +18,7 @@ def add_parser(commands: "argparse._SubParsersAction[Any]") -> None:
         "pack",
         help="compile an evidence pack from a spec and a frozen Memory snapshot",
         description=(
-            "Compile a pack spec over a Memory graph document (graph-schema 1) and write"
+            "Compile a pack spec over a Memory graph document (graph-schema 1 or 2) and write"
             " pack.json (canonical JSON), pack.pdf and claims.json (the cited claims as a"
             " graph-schema ClaimsResult) to the output directory. The same spec and"
             " snapshot always give the same bytes; existing files with other bytes are refused."
@@ -32,9 +32,11 @@ def add_parser(commands: "argparse._SubParsersAction[Any]") -> None:
         "--snapshot-schema-version",
         metavar="X.Y.Z",
         help=(
-            "the graph-schema version Memory built the snapshot under (the document names only"
-            " the major). A newer minor of the pinned major has its unknown keys reported as"
-            " snapshot_key_unread, not refused (ADR 0015); omitted, any unknown key is refused"
+            "the graph-schema version Memory built a 1.x snapshot under (a 1.x document names"
+            " only the major). A newer 1.x minor has its unknown keys reported as"
+            " snapshot_key_unread, not refused (ADR 0015); omitted, any unknown key is refused."
+            " A 2.x document names its own release; a declaration naming another is refused"
+            " (ADR 0018)"
         ),
     )
     parser.add_argument("-o", "--out", type=Path, required=True, help="where to write the pack")

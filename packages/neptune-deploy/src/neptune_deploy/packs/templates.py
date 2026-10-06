@@ -10,9 +10,10 @@ they are grouped. It holds no code: a new report is a new template file. ::
       "subject_types": ["deployment", "machine", "site"],
       "sections": [
         {"id": "in-force", "title": "Configuration in force", "description": "…",
-         "kind": "states",                      # claims | states | timeline
+         "kind": "states",                      # claims | states | timeline | changes
          "subject_types": ["machine"],          # optional; default: the template's
          "same_event": ["same_as"],             # optional, timeline sections only
+         "graph_schema_majors": [2],            # optional; default: derived, see below
          "about": [[], [{"predicate": "located_at", "direction": "in"}]],
          "predicates": {"has_configuration": "known",
                         "configuration_candidate": "ambiguous",
@@ -29,6 +30,17 @@ incident to the timeline entries evidenced by the same record). ``[]`` is the su
 selects the claims about the nodes reached and says which missingness state each one expresses:
 Memory states ``Ambiguous`` and ``Unknown`` as predicates (``*_candidate``, ``*_unknown``), never
 as blank objects.
+
+A ``changes`` section reads one machine's configuration changes from its own spans (graph-schema
+2.x rule 12, ADR 0018 §3): a span of a ``known`` predicate ending at the instant a ``known`` span
+of another object starts on the same node is a change; where an ``ambiguous`` or ``unknown`` span
+meets a span at an instant, the boundary is shown in that state and no change is read across it.
+
+``graph_schema_majors`` names the snapshot majors a section reads (ADR 0018 §4). Omitted, it is
+every major Deploy reads in which each predicate the section names still means what it meant in
+graph-schema 1 (``snapshot.MEANING_CHANGED``): a section naming ``succeeds`` reads major 1 only.
+Over a snapshot of another major the section is ``not_covered`` with a ``section_not_covered``
+reason, never an empty section.
 
 The shipped templates live in ``packs/templates/<id>@<version>.json``, and ``lock.json`` pins the
 sha256 of each one's canonical JSON. Loading refuses a file whose hash is not its lock entry, so an
@@ -48,10 +60,11 @@ from neptune.identity.hashing import content_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune_deploy.packs._read import TOKEN, Reader, child, parse_document
 from neptune_deploy.packs.errors import PackError
+from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_MAJORS, MEANING_CHANGED
 from neptune_deploy.packs.spec import SUBJECT_TYPES
 
 TEMPLATE_SCHEMA: Final = "neptune-deploy.pack-template/1"
-SECTION_KINDS: Final = ("claims", "states", "timeline")
+SECTION_KINDS: Final = ("changes", "claims", "states", "timeline")
 KNOWLEDGE_ROLES: Final = ("ambiguous", "known", "unknown")
 DIRECTIONS: Final = ("in", "out", "shared")
 MAX_TEMPLATE_BYTES: Final = 1024 * 1024
@@ -79,6 +92,11 @@ class SectionTemplate:
     about: tuple[tuple[Hop, ...], ...]
     predicates: Mapping[str, str]  # predicate -> knowledge role
     same_event: tuple[str, ...] = ()  # timeline sections: predicates joining nodes into one event
+    # The snapshot majors the section reads (ADR 0018 §4); ``majors_declared`` says whether the
+    # template names them, and ``meaning_changed`` the predicates that limit derived ones.
+    graph_schema_majors: tuple[int, ...] = GRAPH_SCHEMA_MAJORS
+    majors_declared: bool = False
+    meaning_changed: tuple[str, ...] = ()
 
     def to_json(self) -> JsonObject:
         out: JsonObject = {
@@ -92,6 +110,8 @@ class SectionTemplate:
         }
         if self.same_event:
             out = {**out, "same_event": list(self.same_event)}
+        if self.majors_declared:
+            out = {**out, "graph_schema_majors": list(self.graph_schema_majors)}
         return out
 
 
@@ -163,7 +183,7 @@ def _section(value: JsonValue, pointer: str, template_types: tuple[str, ...]) ->
         value,
         pointer,
         ("about", "description", "id", "kind", "predicates", "title"),
-        ("same_event", "subject_types"),
+        ("graph_schema_majors", "same_event", "subject_types"),
     )
     subject_types = template_types
     if "subject_types" in section:
@@ -209,6 +229,13 @@ def _section(value: JsonValue, pointer: str, template_types: tuple[str, ...]) ->
         if not names or len(set(names)) != len(names):
             raise _R.fail("same_event is a non-empty list without repeats", at)
         same_event = tuple(sorted(names))
+    if kind == "changes" and "known" not in roles.values():
+        raise _R.fail("a changes section names at least one known (decided span) predicate", at)
+    named = {*roles, *same_event, *(hop.predicate for path in paths for hop in path)}
+    derived, changed = _derived_majors(named)
+    majors, declared = derived, "graph_schema_majors" in section
+    if declared:
+        majors = _majors(section["graph_schema_majors"], child(pointer, "graph_schema_majors"))
     return SectionTemplate(
         id=_R.string(section["id"], child(pointer, "id"), TOKEN),
         title=_R.text(section["title"], child(pointer, "title")),
@@ -218,7 +245,39 @@ def _section(value: JsonValue, pointer: str, template_types: tuple[str, ...]) ->
         about=tuple(paths),
         predicates={name: roles[name] for name in sorted(roles)},
         same_event=same_event,
+        graph_schema_majors=majors,
+        majors_declared=declared,
+        meaning_changed=() if declared else changed,
     )
+
+
+def _majors(value: JsonValue, pointer: str) -> tuple[int, ...]:
+    majors = [
+        _R.integer(item, child(pointer, i), 1) for i, item in enumerate(_R.array(value, pointer))
+    ]
+    if not majors or len(set(majors)) != len(majors):
+        raise _R.fail("graph_schema_majors is a non-empty list without repeats", pointer)
+    unread = sorted(set(majors) - set(GRAPH_SCHEMA_MAJORS))
+    if unread:
+        raise _R.fail(
+            f"graph-schema major {', '.join(map(str, unread))} is not one Deploy reads"
+            f" ({', '.join(map(str, GRAPH_SCHEMA_MAJORS))})",
+            pointer,
+        )
+    return tuple(sorted(majors))
+
+
+def _derived_majors(named: Iterable[str]) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """The majors, from the first, through which no predicate in ``named`` changed meaning, and the
+    predicates whose change stops them (empty when every major Deploy reads is read)."""
+    names = frozenset(named)
+    majors: list[int] = []
+    for major in GRAPH_SCHEMA_MAJORS:
+        changed = names & MEANING_CHANGED.get(major, frozenset())
+        if majors and changed:
+            return tuple(majors), tuple(sorted(changed))
+        majors.append(major)
+    return tuple(majors), ()
 
 
 class TemplateRegistry:

@@ -81,9 +81,12 @@ def test_a_spec_built_in_code_is_held_to_the_same_rules() -> None:
 
 SHIPPED = [
     "configuration-lineage@1",
+    "configuration-lineage@2",
     "configuration-traceability@1",
+    "configuration-traceability@2",
     "event-timeline@1",
     "incident-timeline@1",
+    "incident-timeline@2",
 ]
 
 
@@ -107,12 +110,16 @@ def test_a_changed_template_version_is_refused_and_a_new_version_is_not() -> Non
     with pytest.raises(PackError) as caught:
         registry.with_template(read_template(changed))
     assert caught.value.code == "template_version_changed"
-    changed["version"] = 2
+    changed["version"] = 2  # a shipped version: changing it is refused too
+    with pytest.raises(PackError) as caught:
+        registry.with_template(read_template(changed))
+    assert caught.value.code == "template_version_changed"
+    changed["version"] = 3
     newer = registry.with_template(read_template(changed))
-    assert newer.versions("configuration-lineage") == (1, 2)
+    assert newer.versions("configuration-lineage") == (1, 2, 3)
     # Version 1 is untouched, and the original registry is unchanged.
     assert newer.get("configuration-lineage", 1) == registry.get("configuration-lineage", 1)
-    assert registry.versions("configuration-lineage") == (1,)
+    assert registry.versions("configuration-lineage") == (1, 2)
 
 
 def test_an_edited_shipped_template_fails_its_lock(tmp_path: Path) -> None:
@@ -131,11 +138,11 @@ def test_a_template_file_without_a_lock_entry_is_refused(tmp_path: Path) -> None
     root = tmp_path / "templates"
     shutil.copytree(TEMPLATES, root)
     extra = _template()
-    extra["version"] = 2
-    (root / "configuration-lineage@2.json").write_text(json.dumps(extra), encoding="utf-8")
+    extra["version"] = 3
+    (root / "configuration-lineage@3.json").write_text(json.dumps(extra), encoding="utf-8")
     with pytest.raises(PackError, match="differ"):
         TemplateRegistry.from_directory(root)
-    (root / "configuration-lineage@2.json").unlink()
+    (root / "configuration-lineage@3.json").unlink()
     (root / "lock.json").write_text("[]", encoding="utf-8")
     with pytest.raises(PackError, match="not an object"):
         TemplateRegistry.from_directory(root)
@@ -180,6 +187,12 @@ def test_a_file_named_for_another_version_is_refused(tmp_path: Path) -> None:
         ),
         (["sections", 1, "id"], "configuration-in-force", "/sections/1"),
         (["sections", 0, "about", 1], [], "/sections/0/about/1"),
+        (["sections", 0, "graph_schema_majors"], [], "/sections/0/graph_schema_majors"),
+        (["sections", 0, "graph_schema_majors"], [2, 2], "/sections/0/graph_schema_majors"),
+        (["sections", 0, "graph_schema_majors"], [3], "/sections/0/graph_schema_majors"),
+        (["sections", 0, "graph_schema_majors"], [0], "/sections/0/graph_schema_majors/0"),
+        (["sections", 0, "graph_schema_majors"], ["2"], "/sections/0/graph_schema_majors/0"),
+        (["sections", 0, "graph_schema_majors"], 2, "/sections/0/graph_schema_majors"),
     ],
 )
 def test_malformed_templates_are_refused(path: list[Any], value: Any, pointer: str) -> None:
@@ -195,5 +208,57 @@ def test_malformed_templates_are_refused(path: list[Any], value: Any, pointer: s
 
 def test_an_unknown_template_names_the_registered_ones() -> None:
     with pytest.raises(PackError, match=", ".join(SHIPPED)) as caught:
-        builtin_registry().get("incident-timeline", 2)
+        builtin_registry().get("incident-timeline", 3)
     assert caught.value.code == "template_unknown"
+
+
+def test_a_changes_section_names_a_decided_span_predicate() -> None:
+    document = _template("configuration-lineage@2")
+    section = next(s for s in document["sections"] if s["kind"] == "changes")
+    section["predicates"] = {"configuration_candidate": "ambiguous"}
+    with pytest.raises(PackError, match="known") as caught:
+        read_template(document)
+    assert caught.value.code == "template_malformed"
+
+
+def test_the_majors_a_section_reads() -> None:
+    """Deploy ADR 0018 §4: a section declaring graph_schema_majors reads those; one that does not
+    reads every major in which its predicates keep graph-schema 1's meaning, so the @1 sections
+    naming succeeds read major 1 only and every other @1 section reads both."""
+    registry = builtin_registry()
+    for template in registry.templates():
+        for section in template.sections:
+            names = {*section.predicates, *(h.predicate for p in section.about for h in p)}
+            if template.version == 2 and section.kind == "changes":
+                assert section.majors_declared and section.graph_schema_majors == (2,)
+            elif "succeeds" in names:
+                assert not section.majors_declared
+                assert section.graph_schema_majors == (1,)
+                assert section.meaning_changed == ("succeeds",)
+            else:
+                assert section.graph_schema_majors == (1, 2), (template.key, section.id)
+    changes = [
+        (t.key, s.id) for t in registry.templates() for s in t.sections if s.kind == "changes"
+    ]
+    assert changes == [
+        ("configuration-lineage@2", "configuration-changes"),
+        ("configuration-traceability@2", "configuration-changes"),
+        ("incident-timeline@2", "configuration-changes"),
+    ]
+    # No @2 template selects succeeds anywhere.
+    for template in registry.templates():
+        if template.version == 2:
+            assert all("succeeds" not in s.predicates for s in template.sections)
+
+
+def test_the_new_versions_change_only_the_change_sections() -> None:
+    """Each @2 is its @1 with the succeeds section replaced by a changes section (and its
+    description naming the change); every other section is byte for byte the same."""
+    for name in ("configuration-lineage", "configuration-traceability", "incident-timeline"):
+        old, new = _template(f"{name}@1"), _template(f"{name}@2")
+        kept_old = [s for s in old["sections"] if "succeeds" not in s["predicates"]]
+        kept_new = [s for s in new["sections"] if s["kind"] != "changes"]
+        assert kept_old == kept_new
+        assert [s["id"] for s in old["sections"]].index(
+            next(s["id"] for s in old["sections"] if "succeeds" in s["predicates"])
+        ) == [s["kind"] for s in new["sections"]].index("changes")

@@ -9,7 +9,7 @@ graph-schema = "2.0.0"
 
 [neptune-deploy]
 catalog-api = "1.7.0"
-graph-schema = "1.6.0"
+graph-schema = "2.0.0"
 package-schema = "9.0.0"
 query-packet = "1.0.0"
 
