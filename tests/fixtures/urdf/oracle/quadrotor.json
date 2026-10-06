@@ -1,0 +1,130 @@
+{
+ "joints": [
+  {
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "child": "rotor_0",
+   "limit": null,
+   "name": "rotor_0_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.13,
+     -0.22,
+     0.023
+    ]
+   },
+   "parent": "base_link",
+   "type": "continuous"
+  },
+  {
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "child": "rotor_1",
+   "limit": null,
+   "name": "rotor_1_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     -0.13,
+     0.2,
+     0.023
+    ]
+   },
+   "parent": "base_link",
+   "type": "continuous"
+  },
+  {
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "child": "rotor_2",
+   "limit": null,
+   "name": "rotor_2_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.13,
+     0.22,
+     0.023
+    ]
+   },
+   "parent": "base_link",
+   "type": "continuous"
+  },
+  {
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "child": "rotor_3",
+   "limit": null,
+   "name": "rotor_3_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     -0.13,
+     -0.2,
+     0.023
+    ]
+   },
+   "parent": "base_link",
+   "type": "continuous"
+  },
+  {
+   "axis": null,
+   "child": "imu_link",
+   "limit": null,
+   "name": "imu_joint",
+   "origin": {
+    "rpy": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "xyz": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "parent": "base_link",
+   "type": "fixed"
+  }
+ ],
+ "links": [
+  "base_link",
+  "rotor_0",
+  "rotor_1",
+  "rotor_2",
+  "rotor_3",
+  "imu_link"
+ ],
+ "materials": [],
+ "name": "quadrotor"
+}

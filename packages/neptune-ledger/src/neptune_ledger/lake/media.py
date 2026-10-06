@@ -23,7 +23,9 @@ hydrations of one reference give byte-identical artefacts and rows.
 
 import hashlib
 import re
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO, Final, Literal
@@ -60,6 +62,9 @@ MEDIA_TABLE: Final = "media"
 DATA_STORAGE_VERSION: Final = "2.2"
 _ARTEFACT_ID: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _COMMIT_ATTEMPTS: Final = 8
+# Two writers that both find no table both create it, and Lance lets the later create replace
+# the earlier one with its rows; creation is serialised instead (see ``MediaStore._creating``).
+_CREATING: Final = threading.Lock()
 
 SCHEMA: Final = pa.schema(
     [
@@ -238,6 +243,21 @@ class MediaStore:
             _open=blob,
         )
 
+    @contextmanager
+    def _creating(self) -> Iterator[None]:
+        """Hold the table-creation lock: per process, and across processes for a local table."""
+        with _CREATING:
+            if "://" in self.uri and not self.uri.startswith("file://"):
+                yield  # an object store: one creating process per tenant is the deployment's job
+                return
+            import fcntl
+
+            lock = Path(self.uri.removeprefix("file://")).parent / f".{MEDIA_TABLE}.create.lock"
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            with lock.open("a") as held:
+                fcntl.flock(held, fcntl.LOCK_EX)
+                yield
+
     def put(self, row: dict[str, Any], data: bytes) -> None:
         """Store one artefact unless its id is already stored (Lance merge-insert)."""
         import lance
@@ -247,20 +267,23 @@ class MediaStore:
             schema=_schema(),
         )
         for attempt in range(_COMMIT_ATTEMPTS):
-            dataset = self._dataset()
             try:
+                dataset = self._dataset()
                 if dataset is None:
-                    lance.write_dataset(
-                        table,
-                        self.uri,
-                        schema=_schema(),
-                        mode="create",
-                        data_storage_version=DATA_STORAGE_VERSION,
-                        storage_options=self._options,
-                    )
-                else:
-                    merge = dataset.merge_insert("artefact_id").when_not_matched_insert_all()
-                    merge.execute(table)
+                    with self._creating():
+                        dataset = self._dataset()
+                        if dataset is None:
+                            lance.write_dataset(
+                                table,
+                                self.uri,
+                                schema=_schema(),
+                                mode="create",
+                                data_storage_version=DATA_STORAGE_VERSION,
+                                storage_options=self._options,
+                            )
+                            return
+                merge = dataset.merge_insert("artefact_id").when_not_matched_insert_all()
+                merge.execute(table)
                 return
             except OSError:
                 # Another writer created the table or committed first: re-read and retry.

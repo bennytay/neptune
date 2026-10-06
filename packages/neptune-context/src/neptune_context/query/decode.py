@@ -45,6 +45,7 @@ from neptune_context.query.model import (
     Vec3,
     Why,
 )
+from neptune_context.query.shape import with_enum_members
 from neptune_context.query.validate import validate
 
 if TYPE_CHECKING:
@@ -463,9 +464,10 @@ class _Decoder:
 
 
 def accept(query: Query) -> Query | Refused:
-    """``query`` if ``validate`` finds nothing, else every finding."""
+    """``query`` if ``validate`` finds nothing, else every finding. An accepted query comes back
+    with plain strings that equal enum members replaced by the members (an equal query)."""
     findings = validate(query)
-    return Refused(findings) if findings else query
+    return Refused(findings) if findings else with_enum_members(query)
 
 
 def from_json(value: JsonValue) -> Query | Refused:

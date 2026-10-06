@@ -25,14 +25,13 @@ writes for the acceptance corpus. Nothing in it is hand-written:
    consolidators and ``memory.time_estimates`` (ADR 0017) and writes the graph document with the
    codec; that file is copied byte for byte. Estimates become ``inferred`` claims only.
 
-Deterministic: the corpus, the compiler, Deploy and Memory read no clock, randomness or network. The
-bytes also depend on the library versions the compiler's adapters record in their transform records
-(provenance): the calibration adapter records the expat that Python is built with, so another
-CPython patch release changes transform and finding record ids, and every claim citing them.
-``acceptance_corpus.environment.json`` records those libraries. Where they match, a regeneration is
-byte-identical. Elsewhere, where only ``expat`` or ``python`` differ, it states the same facts under
-other record ids. ``tests/test_acceptance_snapshot_memory.py`` checks both. The committed files are
-made under the Python CI installs (``uv python install`` from ``.python-version``).
+Deterministic: the corpus, the compiler, Deploy and Memory read no clock, randomness or network, and
+no transform records a host-bound library version (compiler #139 dropped expat), so the same code
+gives the same bytes on any host. What the bytes still depend on is pinned by the repository: the
+corpus version, adapter versions, the libraries ``uv.lock`` pins and the Python minor version
+``.python-version`` pins, all of which transform records name.
+``acceptance_corpus.environment.json`` records them, so a failing regeneration says which moved.
+``tests/test_acceptance_snapshot_memory.py`` regenerates and compares, byte for byte.
 
 From the repository root, with ``G=packages/neptune-memory/tests/fixtures/<this file>``::
 

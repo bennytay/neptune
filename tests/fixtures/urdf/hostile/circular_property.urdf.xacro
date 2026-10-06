@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="circular">
+  <xacro:property name="a" value="${b + 1}"/>
+  <xacro:property name="b" value="${a + 1}"/>
+  <link name="base_link">
+    <inertial>
+      <mass value="${a}"/>
+    </inertial>
+  </link>
+</robot>

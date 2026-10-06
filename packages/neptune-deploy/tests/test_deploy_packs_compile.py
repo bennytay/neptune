@@ -210,6 +210,7 @@ def test_a_subject_with_no_claims_is_not_covered_with_its_reason() -> None:
         "inferred_excluded": 0,
         "missing_from_vocabulary": [],
         "nodes": [lone.to_json()],
+        "other_clock_restated": 0,
         "outside_interval": 0,
         "predicates": ["configuration_candidate", "configuration_unknown", "has_configuration"],
         "snapshot": configuration().id,
