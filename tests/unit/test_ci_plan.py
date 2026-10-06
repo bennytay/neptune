@@ -77,6 +77,13 @@ def test_harness_runs_the_platform_job_which_lints_it() -> None:
     assert _plan("harnessy/x.py")[0] is True  # only the harness/ directory itself
 
 
+def test_docsite_runs_the_platform_job_which_lints_and_tests_it() -> None:
+    """docsite/ (the documentation site's build, platform ADR 0012) is the platform's like harness/;
+    the site itself is built by ci.yml's unfiltered `docs` job, not selected here."""
+    assert _plan("docsite/pages/index.md") == (False, ("neptune-platform",), False)
+    assert _plan("docsitey/x.py")[0] is True  # only the docsite/ directory itself
+
+
 def test_member_dirs_agree_with_the_makefile() -> None:
     makefile = (Path(__file__).parents[2] / "Makefile").read_text()
     (line,) = [x for x in makefile.splitlines() if x.startswith("MEMBER_DIRS :=")]
