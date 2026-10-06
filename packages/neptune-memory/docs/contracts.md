@@ -31,8 +31,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
     (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
-    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 1.0.0. The pipeline:
-    1. The SDK compiles the corpus into one package, registered at tx 1.
+    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    1. The harness's compiler stage compiles the corpus into one package, registered at tx 1.
     2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
        `servicenow_csv` presets into a lifecycle package, registered at tx 2.
     3. Both are exported as the records the Ledger catalogs, plus the compiler's `derived/clock_mapping` fits.
@@ -55,7 +55,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
   - What it holds today:
     - 12 runs from both sites, with `evidenced_by` and `has_member`.
-    - 67 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
+    - 97 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
       2026-09-14.
     - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
       `stated_severity`, `has_description` and `evidenced_by`.
