@@ -47,6 +47,7 @@ class Caps:
     fan_out: int = 16  # why: related claims followed from one claim
     steps: int = 128  # why: claims one tree names
     diff_claims: int = 512  # diff: claims one diff names
+    scan: int = 64  # diff: snapshots between two transactions read one by one
 
     def __post_init__(self) -> None:
         bounds = {
@@ -54,6 +55,7 @@ class Caps:
             "fan_out": (1, MAX_WHY_STEPS),
             "steps": (1, MAX_WHY_STEPS),
             "diff_claims": (1, MAX_DIFF_CLAIMS),
+            "scan": (0, 4096),
         }
         for name, (low, high) in bounds.items():
             value = getattr(self, name)
@@ -65,6 +67,7 @@ class Caps:
             "depth": self.depth,
             "diff_claims": self.diff_claims,
             "fan_out": self.fan_out,
+            "scan": self.scan,
             "steps": self.steps,
         }
 

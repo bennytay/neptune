@@ -71,9 +71,14 @@ Four facts constrain the design:
        or a new lineage's restatement with the same start and an earlier end. A claim that nothing replaced
        (a retired lineage) is also `closed`.
      - `opened`: everything else that is new at `t2`.
-     - `between`: a version met on a `supersedes` chain that was recorded and replaced inside
-       `(t1, t2]`. Versions recorded and retired inside the window with no chain to a `t1` claim are not
-       listed: Memory's reader has no by-node history.
+     - `between`: a version recorded after `t1` and replaced by `t2`, held at neither point. It is found
+       three ways: every snapshot strictly between `t1` and `t2` is read one by one when there are at
+       most `Caps.scan` (64) of them, which is complete for a small window; `supersedes` chains are
+       walked forward from `t1`'s claims; and they are walked back from every claim new at `t2`. A larger
+       window is a `not_covered` gap that says versions retired there with no chain to a listed claim
+       may be missing. A replaced id that a reader without `ClaimHistory` cannot read is named in a gap.
+       Such versions go through the same inference and pin checks as every other claim, so nothing
+       vanishes.
    - **Instants on one clock.** The claims valid at `t1` are compared with those valid at `t2`, as known at
      the snapshot.
      - `closed` or `opened` as validity starts or ends.
@@ -81,8 +86,10 @@ Four facts constrain the design:
        ended.
      - The comparison is by fact (subject, predicate, object), so a fact held at both instants is no
        change, whichever claims carry it.
-     - `between`: a claim valid at neither instant that starts after `t1` and before `t2`. It opened and
-       closed inside the window and is listed, never dropped. On the demo, the cell's
+     - `between`: a claim valid at neither instant that starts after `t1` and before `t2`, and whose fact,
+       merged over every claim carrying it on that clock (overlapping or abutting), reaches neither
+       instant. It opened and closed inside the window and is listed, never dropped. A short claim of a
+       fact that held at an instant is part of that fact, not `between`. On the demo, the cell's
        `configuration_unknown` period between configurations 1.4 and 1.5 is listed this way.
      - Claims on other clocks are an `other_clock` gap.
    - **Refused as gaps.** Instants on two clocks are not compared, even when bridged: no conversion is

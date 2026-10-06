@@ -73,6 +73,23 @@ def _inside(claim: Claim, t1: int, t2: int) -> bool:
     return t1 < claim.valid_from.ticks < t2
 
 
+def _segment(spans: list[tuple[int, int | None]], tick: int) -> tuple[int, int | None]:
+    """The merged run of overlapping or abutting ``[start, end)`` spans (``None``: open) that
+    contains ``tick``."""
+    runs: list[tuple[int, int | None]] = []
+    for start, end in sorted(spans, key=lambda span: span[0]):
+        if runs and (runs[-1][1] is None or start <= runs[-1][1]):
+            head, tail = runs[-1]
+            longer = None if tail is None or end is None else max(tail, end)
+            runs[-1] = (head, longer)
+            continue
+        runs.append((start, end))
+    for head, tail in runs:
+        if head <= tick and (tail is None or tick < tail):
+            return head, tail
+    return tick, tick
+
+
 def _held(claim: Claim, ticks: int) -> bool:
     end = claim.valid_to
     return claim.valid_from.ticks <= ticks and (isinstance(end, Open) or ticks < end.ticks)
@@ -203,13 +220,80 @@ class _Diff:
         for new in sorted(held_after.values(), key=lambda c: c.id):
             if new.id not in held_before and new.id not in replacements:
                 changes.append(DiffChange(new.predicate, Change.OPENED, (), (new.id,)))
-        # Versions recorded and replaced between the two transactions, met on a chain.
+        # Versions recorded and replaced between the two transactions: every intermediate
+        # snapshot when the window is small, and every supersedes chain through it either way.
+        self.backward(held_before, held_after, before, after)
+        self.scan(nodes, before, after)
         for passing in sorted(self.passing.values(), key=lambda c: c.id):
+            if passing.id in held_before or passing.id in held_after:
+                continue
             if self.run.withheld(passing):
                 self.withheld.add(passing.id)
-            elif passing.id not in held_before and passing.id not in held_after:
+            elif (reason := pinned.claim_beyond_pin(passing)) is not None:
+                self.named.setdefault(
+                    f"{reason} is newer than Context's pinned graph-schema: not compared", set()
+                ).add(passing.id)
+            else:
                 changes.append(DiffChange(passing.predicate, Change.BETWEEN, (), (passing.id,)))
         return changes
+
+    def backward(
+        self,
+        held_before: dict[ClaimId, Claim],
+        held_after: dict[ClaimId, Claim],
+        before: int,
+        after: int,
+    ) -> None:
+        """Walk ``supersedes`` back from every claim new at ``after``: the versions it replaced
+        that were recorded after ``before`` came and went in between. Without a claim history a
+        replaced id cannot be read; it is named in a gap, never dropped."""
+        history = self.run.history
+        unread: set[str] = set()
+        seen: set[str] = set()
+        todo = [c for i, c in held_after.items() if i not in held_before]
+        while todo:
+            claim = todo.pop()
+            for old_id in claim.supersedes:
+                if old_id in seen or old_id in held_before or old_id in held_after:
+                    continue
+                seen.add(old_id)
+                old = history.version(old_id) if history is not None else None
+                if old is None:
+                    unread.add(old_id)
+                elif before < old.recorded_at <= after:
+                    self.passing.setdefault(old.id, old)
+                    todo.append(old)
+        if unread:
+            self.run.gap(
+                GapCode.NOT_COVERED,
+                self.at,
+                unread,
+                "versions a current claim replaced, which this Memory reader cannot read by id"
+                " (no ClaimHistory): named, not described",
+            )
+
+    def scan(self, nodes: tuple[NodeRef, ...], before: int, after: int) -> None:
+        """Every snapshot strictly between the two transactions, up to ``Caps.scan``: complete
+        for a small window. A larger one is a gap: versions recorded and retired there with no
+        supersedes chain to a listed claim (a retired lineage) may be missing."""
+        inner = after - before - 1
+        if inner <= 0:
+            return
+        if inner > self.run.caps.scan:
+            self.run.gap(
+                GapCode.NOT_COVERED,
+                self.at,
+                [],
+                f"{inner} transactions lie between the two points, more than the"
+                f" {self.run.caps.scan} this diff reads one by one; versions recorded and"
+                " retired between them with no supersedes chain to a listed claim are not"
+                " listed",
+            )
+            return
+        for tx in range(before + 1, after):
+            for node in nodes:
+                for claim in self.run.touching(node, tx):
+                    self.passing.setdefault(claim.id, claim)
 
     def instants(
         self, nodes: tuple[NodeRef, ...], clock: str, t1: int, t2: int
@@ -254,9 +338,18 @@ class _Diff:
         for new in opened:
             if new.id not in took_over:
                 changes.append(DiffChange(new.predicate, Change.OPENED, (), (new.id,)))
-        # Claims valid at neither instant but in between: opened and closed inside the window.
+        # Claims valid at neither instant but in between: opened and closed inside the window. A
+        # claim whose fact, merged over every claim carrying it, reaches either instant is part
+        # of a fact held there (no change, closed or opened), never "held at neither point".
+        spans: dict[tuple[NodeRef, str, bytes], list[tuple[int, int | None]]] = {}
+        for claim in on:
+            stop = None if isinstance(claim.valid_to, Open) else claim.valid_to.ticks
+            spans.setdefault(fact(claim), []).append((claim.valid_from.ticks, stop))
         for passing in on:
             if not _held(passing, t1) and not _held(passing, t2) and _inside(passing, t1, t2):
+                first, last = _segment(spans[fact(passing)], passing.valid_from.ticks)
+                if first <= t1 or last is None or last > t2:
+                    continue
                 changes.append(DiffChange(passing.predicate, Change.BETWEEN, (), (passing.id,)))
         return changes
 

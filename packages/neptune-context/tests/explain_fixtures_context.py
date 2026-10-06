@@ -10,7 +10,9 @@ than the pinned graph-schema is added as Memory would hold it:
   lineage restates it as ended on 1 May and adds firmware 3.2.0 from 1 May (tx 3);
 - mobile robot ``AMR-9``: moved from the dock to aisle 9 (tx 2), and a run it recorded;
 - humanoid ``HUM-1``: a run whose configuration is one of two undecided candidates;
-- marine ``USV-3``: its harbour berth stated by three sources (corroboration, a cycle);
+- marine ``USV-3``: its harbour berth stated by four sources (corroboration, a cycle), one of
+  them only for March;
+- mobile robot ``X9``: first seen at the dock (tx 2), moved to the aisle (tx 3);
 - autonomous truck ``AV-2``: its yard stated on UTC and contradicted on its own clock
   (a ``clock_mismatch`` finding);
 - aerial ``UAV-8``: an inferred location fully covered by a stated one on arrival
@@ -118,6 +120,7 @@ HUM = node(NodeType.MACHINE, "asset-tag:HUM-1")
 USV = node(NodeType.MACHINE, "asset-tag:USV-3")
 TRUCK = node(NodeType.MACHINE, "vin:av-2")
 UAV = node(NodeType.MACHINE, "asset-tag:UAV-8")
+X9 = node(NodeType.MACHINE, "asset-tag:X9")
 UAV_SERIAL = node(NodeType.MACHINE, "serial:uav-8-0042")
 UAV_SPARE = node(NodeType.MACHINE, "serial:uav-8-0043")
 CAL_A = node(NodeType.CONFIGURATION, "cfg:wcam-7-cal-2026-03")
@@ -313,6 +316,18 @@ def assertions() -> list[Claim]:
             by="fixture.calibration",
             kind=AssertionKind.OBSERVED,
         ),
+        claim(
+            USV,
+            "located_at",
+            HARBOUR,
+            MAR_1,
+            APR_1,
+            evidence=(ref(HARBOUR_LOG, 3),),
+            by="fixture.identity",
+        ),
+        # A second mobile robot first seen at the dock (tx 2) and moved to the aisle (tx 3).
+        claim(X9, "located_at", DOCK, FEB_1, evidence=(ref(REGISTER, 12),), tx=2),
+        claim(X9, "located_at", AISLE, MAR_1, evidence=(ref(AMR_LOG, 8),), tx=3),
         # Autonomous truck: the yard on UTC, the depot on its own clock (never compared).
         claim(TRUCK, "located_at", YARD, MAR_1, evidence=(ref(REGISTER, 8),)),
         claim(

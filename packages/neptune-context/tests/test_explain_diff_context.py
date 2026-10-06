@@ -258,3 +258,44 @@ def test_findings_survive_a_clause_that_failed_after_reading_the_same_node(
     packet = ask(query)
     assert [t.at for t in packet.trails] == ["/explain/1"]
     assert [str(f.code) for f in packet.findings] == ["clock_mismatch"]
+
+
+def test_a_short_claim_of_a_fact_held_at_both_instants_is_not_between() -> None:
+    usv = Subject("machine", "asset-tag:USV-3")
+    packet = ask(diff(usv, Instant(UTC_NS, X.FEB_1 + 1), Instant(UTC_NS, X.MAY_1)))
+    assert trail(packet).changes == ()  # the berth held at both; March's claim is part of it
+
+
+def test_abutting_segments_of_one_fact_that_reach_an_instant_are_not_between() -> None:
+    # 1 Jan → 15 Feb: the AMR's dock closure [1 Feb, 1 Mar) starts inside, ends after.
+    packet = ask(diff(AMR, Instant(UTC_NS, X.JAN_1), Instant(UTC_NS, X.FEB_1 + 10)))
+    assert all(c.change is not Change.BETWEEN for c in trail(packet).changes)
+
+
+def test_a_version_new_after_before_and_replaced_by_after_is_between() -> None:
+    x9 = Subject("machine", "asset-tag:X9")
+    dock = X.find(X.X9, "located_at", X.DOCK, current=False)  # recorded 2, replaced 3
+    closure = X.find(X.X9, "located_at", X.DOCK)
+    aisle = X.find(X.X9, "located_at", X.AISLE)
+    packet = ask(diff(x9, 1, 3))
+    assert changes(packet) == {
+        ("located_at", Change.OPENED, (), (closure.id,)),
+        ("located_at", Change.OPENED, (), (aisle.id,)),
+        ("located_at", Change.BETWEEN, (), (dock.id,)),
+    }
+    # Found by walking supersedes back too, when snapshots are not scanned one by one.
+    walked = ask(diff(x9, 1, 3), explain_caps=Caps(scan=0))
+    assert changes(walked) == changes(packet)
+    assert any("one by one" in g.detail for g in walked.gaps)
+
+
+def test_without_a_claim_history_a_replaced_version_is_named_in_a_gap() -> None:
+    from neptune_memory.schema.reference import ReferenceReader
+
+    x9 = Subject("machine", "asset-tag:X9")
+    dock = X.find(X.X9, "located_at", X.DOCK, current=False)
+    query = diff(x9, 1, 3)
+    plain = Client(LocalEngine(ReferenceReader(X.document()), explain_caps=Caps(scan=0)))
+    packet = plain.query(query)
+    assert all(dock.id not in c.after for c in trail(packet).changes)
+    assert any(dock.id in g.refs and "ClaimHistory" in g.detail for g in packet.gaps)

@@ -136,14 +136,14 @@ def test_corroborating_sources_form_a_cycle_shown_once_with_repeats() -> None:
         (c for c in X.document().resolution.claims if c.subject == X.USV),
         key=lambda c: c.id,
     )
-    assert len(berth) == 3
+    assert len(berth) == 4
     packet = why(berth[0].id)
     steps = trail(packet).steps
     full = [s for s in steps if not s.repeat]
     assert {s.claim for s in full} == {c.id for c in berth}
     assert all(s.relation is Relation.CORROBORATES for s in steps[1:])
     assert any(s.repeat for s in steps)  # the third source closes the cycle
-    assert max(s.depth for s in full) == 2  # A, then B, then C; C names A again as a repeat
+    assert max(s.depth for s in full) == 3  # A, B, C, D in a chain; D names A as a repeat
     assert {c.id for c in berth} <= packet.claim_ids
 
 
