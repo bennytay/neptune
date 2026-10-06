@@ -95,15 +95,16 @@ def test_a_planner_that_breaks_is_an_engine_error() -> None:
 
 
 def test_choose_settles_an_ambiguous_name_without_another_model_call() -> None:
-    twins = [Entity("machine", "asset-tag:ARM-3A"), Entity("machine", "fleet-id:ARM-3A")]
+    # The snapshot declares ARM-3A under three source systems' names; the bare name is ambiguous.
+    twins = [Entity(*name) for name in F.DEMO_ARM_NAMES]
     planner = Planner(ListingIndex(twins), AGENT_DEFAULTS, ScriptedModel())
     client = demo_sdk(planner)
-    planned = client.plan(QUESTION)
+    planned = client.plan("What changed on ARM-3A?")
     assert planned.status is PlanStatus.NEEDS_CHOICE
-    settled = client.choose(planned, "ARM-3A", "asset-tag:ARM-3A")
+    settled = client.choose(planned, "ARM-3A", F.DEMO_ARM[1])
     assert settled.status is PlanStatus.READY
     with pytest.raises(SdkError):
-        client.choose(planned, "ARM-3A", "asset-tag:NOPE")
+        client.choose(planned, "ARM-3A", "servicenow.ci:NOPE")
 
 
 def test_the_async_client_plans_too() -> None:
@@ -111,26 +112,26 @@ def test_the_async_client_plans_too() -> None:
 
     async def go() -> tuple[object, ...]:
         asked = await client.ask(QUESTION)
-        found = await client.find("ARM-3A in CELL-3", include_inferred=False)
+        found = await client.find("ARM-3A at PLANT-2", include_inferred=False)
         listed = await client.entities("site", include_inferred=False)
         chose = await client.plan(QUESTION)
         return asked, found, listed, chose
 
     asked, found, listed, chose = asyncio.run(go())
     assert asked.packet is not None  # type: ignore[attr-defined]
-    assert [m.text for m in found] == ["ARM-3A", "CELL-3"]  # type: ignore[attr-defined]
-    assert [e.declared_id for e in listed] == ["site-code:PLANT-2", "site-code:S-007"]  # type: ignore[attr-defined]
+    assert [m.text for m in found] == ["ARM-3A", "PLANT-2"]  # type: ignore[attr-defined]
+    assert [e.declared_id for e in listed] == ["manifest:PLANT-2", "manifest:S-007"]  # type: ignore[attr-defined]
     assert chose == asked.plan  # type: ignore[attr-defined]
 
 
 def test_the_entity_index_holds_declared_names_only() -> None:
     index = entity_index(F.demo_document())
     ids = [e.declared_id for e in index.entities()]
-    assert "asset-tag:ARM-3A" in ids and "zone-code:CELL-3" in ids
+    assert "servicenow.ci:ARM-3A" in ids and "manifest:PLANT-2" in ids
     assert not any("sha256:" in i for i in ids)  # runs, events, clocks are content addresses
     kinds = {e.declared_id: e.kind for e in index.entities()}
     assert ids == sorted(ids, key=lambda i: (kinds[i], i))
-    assert index.lookup("asset-tag:ARM-3A", as_of=None) == Entity("machine", "asset-tag:ARM-3A")
+    assert index.lookup("manifest:ARM-3A", as_of=None) == Entity("machine", "manifest:ARM-3A")
 
 
 def test_one_identifier_under_two_kinds_is_never_offered_as_a_name() -> None:
