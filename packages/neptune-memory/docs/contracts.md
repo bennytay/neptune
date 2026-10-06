@@ -30,10 +30,16 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
-    (`graph_schema_version: 1`, with `builds`), head 1, written by Memory's codec. It is what `memory rebuild`
-    makes of the MVL-181 acceptance corpus 1.0.0: the corpus is compiled by the SDK into one package, exported as
-    the records the Ledger catalogs (no `derived/`), registered at tx 1, and run through the default
-    consolidators. Copy it byte for byte; do not edit it.
+    (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
+    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 1.0.0. The pipeline:
+    1. The SDK compiles the corpus into one package, registered at tx 1.
+    2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
+       `servicenow_csv` presets into a lifecycle package, registered at tx 2.
+    3. Both are exported as the records the Ledger catalogs, plus the compiler's `derived/clock_mapping` fits.
+    4. The deterministic consolidators run, with `memory.time_estimates` alongside
+       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
+
+    Copy the file byte for byte; do not edit it.
   - Regenerate it from the repository root with
     `uv run --all-packages python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
@@ -43,20 +49,31 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     the expat bundled with CPython, so a different 3.12 patch release gives other finding record ids.
     `acceptance_corpus.environment.json` lists those libraries. The committed files are made under the Python CI
     installs, and CI requires a byte-identical regeneration. The byte check skips only on a local host whose
-    `expat` or `python` alone differ. It still checks the same facts, ignoring claim ids and record lists. Any
+    `expat` or `python` alone differ. It still checks the same facts with every record id masked. Any
     other change fails: the corpus, an adapter or its version, or a library `uv.lock` pins. Cite corpus evidence
     by source path and locator, not by record id.
   - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
-  - What it holds today: 12 runs from both sites, with `evidenced_by` and `has_member`, and 67 `integrity_finding`
-    claims on runs and streams. One of them is the `error` on LEG-01's truncated patrol of 2026-09-14. It holds no
-    events, `co_occurs_within`, configuration lineage, `authorisation_undecided`, calibration `drift`, `clock_map`
-    or `same_as`. The compiler does not yet emit the records those need for this corpus. Incidents, work orders,
-    changes and requalifications are generic CSV and PDF tables. Runs name no machine. The cell PC's clock offsets
-    are only `derived/` estimates. Those claims appear when the compiler emits the records; this file is then
-    regenerated, not edited.
+  - What it holds today:
+    - 12 runs from both sites, with `evidenced_by` and `has_member`.
+    - 67 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
+      2026-09-14.
+    - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
+      `stated_severity`, `has_description` and `evidenced_by`.
+    - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
+      drop them with `include_inferred=False`. One is the cell PC's ≈ −96.7 s on 2026-09-14.
+  - What it lacks:
+    - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
+      incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
+      inferred mapping.
+    - No configuration lineage and no `authorisation_undecided`. Deploy's 5 `change_record`, 15
+      `maintenance_event` (WO-26-0911 among them) and 2 `authorisation_envelope` records are in the Ledger
+      export. Memory places them on Ledger thread nodes, which it reads today only from the `ledger_thread`
+      stand-in (ADR 0003 §1); no real Ledger export carries those. Runs also name no machine (MVL-205).
+    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
 
+    This file is regenerated as those land, never edited.
 ## Consumes
 
 - Compiler package schema: `SCHEMA_VERSION = 7` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,

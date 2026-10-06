@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from functools import cache
@@ -18,8 +19,10 @@ from typing import TYPE_CHECKING, Final
 import pytest
 
 from neptune.identity import canonical_json
-from neptune_memory.consolidate.snapshot import default_registrations
+from neptune_memory.cli import registrations
+from neptune_memory.derived.clocks import CLOCKS_MODEL, ESTIMATES_CONSOLIDATOR_ID
 from neptune_memory.schema.codec import graph_from_json, graph_problems
+from neptune_memory.schema.reference import ReferenceReader
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -70,19 +73,19 @@ def regenerated(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes]
     return (out / "graph.json").read_bytes(), (out / "environment.json").read_bytes()
 
 
+RECORD_ID: Final = re.compile(rb"rec:sha256:[0-9a-f]{64}")
+
+
 def facts(data: bytes) -> list[bytes]:
-    """Each claim without its own id and its provenance's record list: subject, predicate, object,
-    validity, assertion kind, consolidator and evidence. Record ids inside those parts stay (a run's
-    node id, a record object, a clock's domain id), so this is stricter than ignoring record ids.
-    It holds across the expat change, which only renames transform and finding records."""
+    """Each claim's content with every Ledger record id masked: subject and object types and values,
+    predicate, validity ticks, assertion kind, consolidator and the evidence (source content ids and
+    locators). Record ids are what the host-bound libraries rename (a transform id, and every record
+    downstream of it, such as Deploy's lifecycle records); the byte check pins them in CI."""
     graph = graph_from_json(canonical_json.loads(data.rstrip(b"\n")))
-    out = []
-    for claim in graph.resolution.claims:
-        content = dict(claim.content_json())
-        provenance = dict(content.pop("provenance"))  # type: ignore[arg-type]
-        provenance.pop("records")
-        out.append(canonical_json.dumps({**content, "provenance": provenance}))
-    return sorted(out)
+    return sorted(
+        RECORD_ID.sub(b"rec:*", canonical_json.dumps(claim.content_json()))
+        for claim in graph.resolution.claims
+    )
 
 
 @pytest.mark.slow
@@ -248,15 +251,38 @@ def test_the_snapshot_decodes_with_the_codec_and_reencodes_to_its_bytes() -> Non
     graph = document()
     assert graph_problems(canonical_json.loads(committed().rstrip(b"\n"))) == ()
     assert canonical_json.dumps(graph.to_json()) + b"\n" == committed()
-    assert graph.head == generator().REGISTERED_AT
+    assert graph.head == generator().HEAD
 
 
-def test_the_snapshot_is_built_by_every_default_consolidator_and_nothing_else() -> None:
+def test_the_snapshot_is_built_by_memory_rebuild_with_estimates_and_nothing_else() -> None:
     graph = document()
-    registered = sorted(r.consolidator_id for r in default_registrations())
+    registered = sorted(r.consolidator_id for r in registrations(with_estimates=True))
     assert sorted(b.consolidator_id for b in graph.builds) == registered
     assert {c.provenance.consolidator_id for c in graph.resolution.claims} <= set(registered)
     assert graph.resolution.claims, "the corpus consolidates to no claim at all"
+
+
+def test_inferred_claims_are_exactly_the_relayed_estimates_and_one_flag_drops_them() -> None:
+    """The compiler's estimated clock fits arrive only as ``memory.time_estimates`` claims, every
+    one ``inferred`` with the compiler's model; nothing deterministic is inferred; and a reader
+    asked for ``include_inferred=False`` sees none of them."""
+    graph = document()
+    claims = graph.resolution.claims
+    inferred = [c for c in claims if str(c.assertion_kind) == "inferred"]
+    assert inferred, "the snapshot relays no estimated clock mapping"
+    assert {c.provenance.consolidator_id for c in inferred} == {ESTIMATES_CONSOLIDATOR_ID}
+    assert {c.provenance.model for c in inferred} == {CLOCKS_MODEL}
+    assert all(
+        str(c.assertion_kind) == "inferred"
+        for c in claims
+        if c.provenance.consolidator_id == ESTIMATES_CONSOLIDATOR_ID
+    )
+    reader = ReferenceReader(graph)
+    for subject in {c.subject for c in inferred}:
+        everything = reader.claims(subject, None, graph.head)
+        evidence_only = reader.claims(subject, None, graph.head, include_inferred=False)
+        assert {c.id for c in everything.claims} >= {c.id for c in inferred if c.subject == subject}
+        assert all(str(c.assertion_kind) != "inferred" for c in evidence_only.claims)
 
 
 def test_the_snapshot_stays_under_the_fixture_limit() -> None:

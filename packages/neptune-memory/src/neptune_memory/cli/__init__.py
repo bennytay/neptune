@@ -9,6 +9,10 @@ Rule: thin wrappers over the library; no logic of their own, and no direct packa
   result, changes nothing.
 - ``rebuild --snapshot N``: consolidate ``N`` from scratch and replace the tenant's graph with it
   (the old one stays if the rebuild is refused).
+- ``--with-estimates`` (``consolidate`` and ``rebuild``): also register ``memory.time_estimates``
+  (``derived.clocks``, ADR 0011 §4, ADR 0017), so the compiler's estimated clock mappings become
+  ``inferred`` claims beside the deterministic ones. Off by default; a graph built with it is
+  extended only with it (dropping a consolidator takes a rebuild).
 - ``dump [--as-of TX]``: every claim version of the tenant's graph (or the graph as of ``TX``) as
   canonical JSON Lines, ordered by claim id, to ``--out`` or stdout.
 - ``verify GRAPH``: check a graph document file someone else holds (a consumer's fixture) with the
@@ -35,10 +39,12 @@ from neptune.identity import canonical_json
 from neptune_memory.consolidate.snapshot import (
     GraphExtendError,
     PlanError,
+    Registration,
     consolidate,
     default_registrations,
     extend,
 )
+from neptune_memory.derived.clocks import CLOCKS_MODEL, EstimatedClocksConsolidator
 from neptune_memory.ledger import ledger_export_from_json
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.codec import graph_from_json, graph_problems
@@ -67,6 +73,12 @@ def _parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name)
         command.add_argument("--ledger", type=Path, required=True, help="a Ledger export")
         command.add_argument("--snapshot", type=int, required=True, help="a Ledger transaction")
+        command.add_argument(
+            "--with-estimates",
+            action="store_true",
+            dest="with_estimates",
+            help="also relay the compiler's estimated clock mappings as inferred claims",
+        )
     dump = commands.add_parser("dump")
     dump.add_argument("--as-of", type=int, default=None, dest="as_of")
     dump.add_argument("--out", type=Path, default=None)
@@ -126,10 +138,22 @@ def _verify(path: Path, out: TextIO) -> int:
     return OK
 
 
+def registrations(*, with_estimates: bool) -> tuple[Registration, ...]:
+    """The deterministic consolidators, and ``memory.time_estimates`` when asked (ADR 0017)."""
+    estimates = Registration(EstimatedClocksConsolidator(), {"model": CLOCKS_MODEL.to_json()})
+    return (*default_registrations(), *((estimates,) if with_estimates else ()))
+
+
 def _consolidate(
-    graphs: TenantGraphs, tenant: str, ledger: LedgerExport, snapshot: int, *, rebuild: bool
+    graphs: TenantGraphs,
+    tenant: str,
+    ledger: LedgerExport,
+    snapshot: int,
+    *,
+    rebuild: bool,
+    with_estimates: bool,
 ) -> bytes:
-    run = consolidate(ledger.at(snapshot), default_registrations(), snapshot)
+    run = consolidate(ledger.at(snapshot), registrations(with_estimates=with_estimates), snapshot)
     printed = canonical_json.dumps(run.snapshot.to_json())
     if rebuild:  # the new graph exists before the old one is replaced: a refusal keeps it
         graphs.save(tenant, extend(None, run), run, fresh=True)
@@ -182,7 +206,14 @@ def main(
             return OK
         ledger = _ledger(args.ledger)
         rebuild = args.command == "rebuild"
-        printed = _consolidate(graphs, args.tenant, ledger, args.snapshot, rebuild=rebuild)
+        printed = _consolidate(
+            graphs,
+            args.tenant,
+            ledger,
+            args.snapshot,
+            rebuild=rebuild,
+            with_estimates=args.with_estimates,
+        )
         out.write(printed.decode("utf-8") + "\n")
         return OK
     except (OSError, UnicodeDecodeError) as exc:
