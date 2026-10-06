@@ -4,8 +4,8 @@
 writes for the acceptance corpus. Nothing in it is hand-written:
 
 1. ``harness.acceptance`` generates the corpus (versioned and locked by Platform).
-2. The compiler's SDK ingests it, as the harness's compiler stage does, into one package, and reads
-   the package back verified.
+2. The harness's own ``compiler`` stage (``harness.stages``) ingests it into one package and checks
+   it; the package is read back verified (``neptune.store.package.read_package``).
 3. Deploy's lifecycle mapper (``python -m neptune_deploy map``, a subprocess: Memory never imports
    Deploy) maps that package's tables with the presets in ``DEPLOY_PRESETS`` into a second package
    of lifecycle records: change records, maintenance events, authorisation envelopes, incidents.
@@ -50,8 +50,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from neptune.identity import canonical_json
-from neptune.sdk import Neptune
-from neptune.sdk.result import read_package
+from neptune.store.package import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport
 
@@ -76,12 +75,17 @@ DEPLOY_PRESETS: Final = ("cmms_generic", "jira_json", "register_zone", "servicen
 DERIVED_KINDS: Final = ("clock_mapping",)
 
 
-def acceptance() -> Any:
-    """``harness.acceptance``, Platform's corpus module (the repository root is not on the path of
-    a package's tests; it is imported, never edited)."""
+def harness(module: str) -> Any:
+    """``harness.<module>``, Platform's (the repository root is not on the path of a package's
+    tests; it is imported, never edited)."""
     if str(REPO) not in sys.path:
         sys.path.insert(0, str(REPO))
-    return importlib.import_module("harness.acceptance")
+    return importlib.import_module(f"harness.{module}")
+
+
+def acceptance() -> Any:
+    """``harness.acceptance``, Platform's corpus module."""
+    return harness("acceptance")
 
 
 def corpus_label() -> str:
@@ -121,18 +125,31 @@ def deploy_map(package: Path, out: Path) -> Path:
     return out
 
 
+def compile_corpus(work: Path) -> Path:
+    """The acceptance corpus's package, as the harness's ``compiler`` stage writes and checks it
+    (members never run ingestion themselves). A stage that runs as a stub, or reports a problem,
+    stops the snapshot: it is never made from goldens."""
+    corpus, stages, run = harness("corpus"), harness("stages"), harness("run")
+    _, cases = corpus.select(into=work / "corpus")
+    if len(cases) != 1:
+        raise RuntimeError(f"the acceptance corpus is {len(cases)} cases, not one")
+    ctx = stages.Context(registry=harness("contracts").registry(), work=work, cases=cases)
+    (compiler,) = [stage for stage in stages.STAGES if stage.id == "compiler"]
+    entry = run.run_stage(compiler, ctx, services_up=False, upstream_ok=True)
+    if entry["mode"] != "real" or entry["status"] != "ok":
+        why = "; ".join(entry["problems"]) or entry["reason"]
+        raise RuntimeError(
+            f"the harness's compiler stage ran {entry['mode']}, {entry['status']}: {why}"
+        )
+    (case,) = cases
+    return Path(ctx.package_root(case.id))
+
+
 def ledger_export(work: Path) -> LedgerExport:
     """The acceptance corpus compiled, then mapped by Deploy: a two-package Ledger export."""
-    corpus = acceptance()
-    root = corpus.materialise(work / "corpus" / f"{corpus.NAME}-{corpus.VERSION}")
-    result = Neptune(work / "workspace").ingest(root, work / "package")
-    if not result.committed or result.destination is None:
-        raise RuntimeError(f"the compiler did not commit the acceptance corpus: {result.state}")
-    lifecycle = deploy_map(result.destination, work / "lifecycle")
-    packages = (
-        exported(result.destination, COMPILED_AT, DERIVED_KINDS),
-        exported(lifecycle, MAPPED_AT),
-    )
+    compiled = compile_corpus(work)
+    lifecycle = deploy_map(compiled, work / "lifecycle")
+    packages = (exported(compiled, COMPILED_AT, DERIVED_KINDS), exported(lifecycle, MAPPED_AT))
     return LedgerExport(HEAD, CATALOG_API, tuple(sorted(packages, key=lambda p: p.package_id)))
 
 
