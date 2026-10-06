@@ -12,7 +12,7 @@
         "-m",
         "neptune_context.mcp",
         "--memory",
-        "${NEPTUNE_MEMORY_GRAPH}"
+        "${NEPTUNE_MEMORY_GRAPH:-packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz}"
       ]
     }
   }

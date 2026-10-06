@@ -270,15 +270,73 @@ DEPLOY_FORMAT: Final = 1
 DEPLOY_TIMEOUT_S: Final = 900  # the mapper streams; the acceptance corpus maps in about a second
 
 
+SOURCE_KEYS: Final = frozenset({"preset", "source", "civil_time_zone"})
+
+
+@dataclass(frozen=True)
+class SourceZone:
+    """One ``sources`` entry (Platform ADR 0009): the civil time zone a declared preset reads one
+    source's zone-less times in. ``source`` is the corpus path of the source; the zone is an IANA
+    name, checked by spelling only (root ADR 0061 §1)."""
+
+    preset: str
+    source: str
+    civil_time_zone: str
+
+
 @dataclass(frozen=True)
 class DeployPlan:
     """A case's declaration (``deploy.json``, Platform ADR 0008): Deploy presets by name, document
-    templates by repository-relative path (a file or a directory of them), and the lifecycle
-    record counts the mapped package must reach."""
+    templates by repository-relative path (a file or a directory of them), the lifecycle
+    record counts the mapped package must reach, and the civil zones of sources whose exports
+    state none (ADR 0009)."""
 
     presets: tuple[str, ...]
     templates: tuple[str, ...]
     at_least: dict[str, int]
+    sources: tuple[SourceZone, ...] = ()
+    # Every scope entry of every stated same-event assertion must be an identifier the mapped
+    # package declares (``require_assertion_scopes``; ADR 0009).
+    require_assertion_scopes: bool = False
+
+
+def _plain_path(path: str) -> bool:
+    """A relative POSIX path with no empty, ``.`` or ``..`` part: a corpus path, never a way out."""
+    parts = path.split("/")
+    return "\\" not in path and "\0" not in path and all(p not in ("", ".", "..") for p in parts)
+
+
+def _read_sources(
+    value: Any, presets: list[str] | None
+) -> tuple[tuple[SourceZone, ...], list[str]]:
+    """The ``sources`` entries, and why any cannot be used; ``presets`` is None when the
+    declaration's own presets did not read, so membership is not judged against them."""
+    from neptune.model.reference import check_iana_zone
+
+    if not isinstance(value, list):
+        return (), ["sources is not a list of entries"]
+    out: list[SourceZone] = []
+    problems: list[str] = []
+    for i, entry in enumerate(value):
+        if not isinstance(entry, dict) or set(entry) != SOURCE_KEYS:
+            problems.append(f"sources[{i}] is not {{{', '.join(sorted(SOURCE_KEYS))}}}")
+            continue
+        if not all(isinstance(entry[key], str) and entry[key] for key in SOURCE_KEYS):
+            problems.append(f"sources[{i}] has a value that is not a name")
+            continue
+        zone = SourceZone(entry["preset"], entry["source"], entry["civil_time_zone"])
+        if presets is not None and zone.preset not in presets:
+            problems.append(f"sources[{i}] names preset {zone.preset}, which is not declared")
+        if not _plain_path(zone.source):
+            problems.append(f"sources[{i}] source {zone.source} is not a plain corpus path")
+        try:
+            check_iana_zone(f"sources[{i}] civil_time_zone", zone.civil_time_zone)
+        except ValueError as error:
+            problems.append(str(error))
+        out.append(zone)
+    if len({(z.preset, z.source) for z in out}) != len(out):
+        problems.append("sources declares one preset's source twice")
+    return tuple(sorted(out, key=lambda z: (z.preset, z.source))), problems
 
 
 def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
@@ -315,23 +373,63 @@ def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
         at_least = {}
     if not names["presets"] and not names["templates"]:
         problems.append("the deploy declaration names no preset and no template")
+    scopes = document.get("require_assertion_scopes", False)
+    if type(scopes) is not bool:
+        problems.append("require_assertion_scopes is not true or false")
+    presets_read = not any(problem.startswith("presets ") for problem in problems)
+    sources, refused = _read_sources(
+        document.get("sources", []), names["presets"] if presets_read else None
+    )
+    problems += refused
     if problems:
         return None, problems
-    return DeployPlan(tuple(names["presets"]), tuple(names["templates"]), dict(at_least)), []
+    plan = DeployPlan(
+        tuple(names["presets"]), tuple(names["templates"]), dict(at_least), sources, scopes
+    )
+    return plan, []
+
+
+# Deploy's preset families, by module: each publishes ``PRESETS`` (names) and ``preset(name)``
+# (a mapping with ``sha256``), and ``neptune_deploy map -p`` takes a name from any of them. A
+# family this Deploy does not have yet is passed over (Deploy ADR 0017 adds ``eventlogs``).
+PRESET_FAMILIES: Final = ("neptune_deploy.lifecycle", "neptune_deploy.eventlogs")
+
+
+def _shipped_presets() -> tuple[dict[str, str], list[str]]:
+    """Every preset Deploy ships, by name, mapped to its file's sha256 (what its transform
+    record's ``mapping_sha256`` names); and a name two families both ship, which ``-p`` could not
+    tell apart. Only each family's public ``PRESETS`` and ``preset`` are used."""
+    shipped: dict[str, str] = {}
+    problems: list[str] = []
+    for family in PRESET_FAMILIES:
+        try:
+            module = importlib.import_module(family)
+        except ModuleNotFoundError as error:
+            if error.name == family:
+                continue  # a family this Deploy does not ship
+            raise
+        if not hasattr(module, "PRESETS") or not callable(getattr(module, "preset", None)):
+            continue  # not a family (a namespace package left by a cache, a renamed module)
+        for name in module.PRESETS:
+            if name in shipped:
+                problems.append(f"Deploy ships preset {name!r} in two families")
+                continue
+            shipped[name] = str(module.preset(name).sha256)
+    return shipped, problems
 
 
 def _declarations(plan: DeployPlan) -> tuple[dict[str, str], list[str]]:
     """Each declared preset and template file, by the sha256 its transform record names, mapped to
     the declaration that brought it in (``preset:<name>``, ``template:<path>``); and why the
-    declaration cannot run: a preset Deploy does not ship, a file declared twice. Only Deploy's
-    public names are used (``PRESETS``, ``preset``, ``TemplateRegistry``)."""
-    from neptune_deploy.lifecycle import PRESETS, TemplateRegistry, preset
+    declaration cannot run: a preset Deploy does not ship in any family, a file declared twice.
+    Only Deploy's public names are used (each family's ``PRESETS`` and ``preset``,
+    ``TemplateRegistry``)."""
+    from neptune_deploy.lifecycle import TemplateRegistry
 
+    shipped, problems = _shipped_presets()
     labels: dict[str, str] = {}
-    problems = [f"Deploy ships no preset {name!r}" for name in plan.presets if name not in PRESETS]
-    declared = [
-        (str(preset(name).sha256), f"preset:{name}") for name in plan.presets if name in PRESETS
-    ]
+    problems += [f"Deploy ships no preset {name!r}" for name in plan.presets if name not in shipped]
+    declared = [(shipped[name], f"preset:{name}") for name in plan.presets if name in shipped]
     for path in plan.templates:
         declared += [
             (str(template.sha256), f"template:{path}")
@@ -363,6 +461,197 @@ def _lifecycle_records(root: Path) -> tuple[dict[str, int], Counter[str]]:
     return kinds, transforms
 
 
+def _zone_problems(
+    plan: DeployPlan,
+    compiled: Path,
+    mapped: Path,
+    labels: dict[str, str],
+    applied: dict[str, str],
+) -> list[str]:
+    """Why a declared source zone was not applied: the mapped package must hold, for each
+    ``sources`` entry, a ``civil_time_zone`` record citing that source and made by that preset's
+    transform, and every such record must state the declared zone (ADR 0009)."""
+    from harness.acceptance.resolve import Package, _known, _source
+
+    base, out = Package(compiled), Package(mapped)
+    problems: list[str] = []
+    for zone in plan.sources:
+        content = base.content(zone.source)
+        if content is None:
+            problems.append(
+                f"sources names {zone.source}, which the compiled package does not hold"
+            )
+            continue
+        states = [
+            record.get("zone")
+            for record in out.kind("civil_time_zone")
+            if _source(record) == content
+            and labels.get(applied.get(str(record.get("provenance", {}).get("transform")), ""))
+            == f"preset:{zone.preset}"
+        ]
+        if not states:
+            problems.append(
+                f"preset:{zone.preset} wrote no civil time zone for {zone.source}"
+                f" (declared {zone.civil_time_zone})"
+            )
+        elif any(_known(state) != zone.civil_time_zone for state in states):
+            problems.append(
+                f"preset:{zone.preset} did not apply the declared zone {zone.civil_time_zone}"
+                f" to every clock of {zone.source}"
+            )
+    return problems
+
+
+Pair = tuple[str, str]
+
+
+def _pair(value: Any) -> Pair | None:
+    """An identifier's ``(namespace, value)``, kept as two fields and never joined."""
+    if not isinstance(value, dict):
+        return None
+    namespace, text = value.get("namespace"), value.get("value")
+    return (namespace, text) if isinstance(namespace, str) and isinstance(text, str) else None
+
+
+def _declared_identifiers(root: Path) -> set[Pair]:
+    """Every ``(namespace, value)`` the mapped package declares: each lifecycle record's own
+    ``identifiers`` (a bare list or a ``Known`` list; ADR 0061 §5), and each row's cell of a typed
+    table's ``@id:<namespace>`` column (Deploy ADR 0017 §1), as the cell's text."""
+    from harness.acceptance.resolve import Package, _known
+    from neptune.model.lifecycle import LIFECYCLE_KINDS
+
+    package = Package(root)
+    out: set[Pair] = set()
+    for kind in sorted(k.kind for k in LIFECYCLE_KINDS):
+        for record in package.kind(kind):
+            listed = record.get("identifiers")
+            items = _known(listed) if isinstance(listed, dict) else listed
+            for item in items if isinstance(items, list) else []:
+                pair = _pair(
+                    _known(item) if isinstance(item, dict) and "knowledge" in item else item
+                )
+                if pair is not None:
+                    out.add(pair)
+    columns: dict[str, dict[int, str]] = {}
+    for table in package.kind("structured_table"):
+        header = _known(table.get("header"))
+        ids = {
+            i: name.removeprefix("@id:")
+            for i, name in enumerate(header if isinstance(header, list) else [])
+            if isinstance(name, str) and name.startswith("@id:") and len(name) > 4
+        }
+        if ids:
+            columns[str(table["id"])] = ids
+    for row in package.kind("structured_record"):
+        cells = row.get("cells", [])
+        for i, namespace in columns.get(str(row.get("table")), {}).items():
+            text = _known(cells[i]) if i < len(cells) else None
+            if isinstance(text, str):
+                out.add((namespace, text))
+    return out
+
+
+def _same_event_scopes(root: Path) -> list[tuple[Pair | None, list[Any] | None]]:
+    """Each stated same-event assertion of the compiled package (root ADR 0062: ``same_identity``
+    whose payload's ``relation`` is ``same_event``): its own identifier and its scope entries,
+    or None when the scope is not a ``Known`` list."""
+    from harness.acceptance.resolve import Package, _known
+
+    out = []
+    for record in Package(root).kind("assertion"):
+        if record.get("provenance", {}).get("assertion_kind") != "stated":
+            continue
+        if _known(record.get("assertion_type")) != "same_identity":
+            continue
+        payload = _known(record.get("payload"))
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(payload, dict) or payload.get("relation") != "same_event":
+            continue
+        scope = _known(record.get("scope"))
+        out.append(
+            (_pair(_known(record.get("identifier"))), scope if isinstance(scope, list) else None)
+        )
+    return out
+
+
+def _record_ids(*roots: Path) -> set[str]:
+    """Every record id the packages hold: what a scope entry naming a record (root ADR 0062's
+    ``RecordId``, a string) must be."""
+    out: set[str] = set()
+    for root in roots:
+        for path in sorted((root / "records").glob("*.jsonl")):
+            with path.open(encoding="utf-8") as lines:  # one record at a time (ADR 0070)
+                out.update(str(json.loads(line).get("id")) for line in lines if line.strip())
+    return out
+
+
+def _dangling_scopes(compiled: Path, mapped: Path) -> list[str]:
+    """Why a same-event link would dangle: a scope entry whose ``(namespace, value)`` no record of
+    the mapped package declares, or a record id (a string entry) neither package holds, so Memory
+    has nothing to join it to (ADR 0009). Never green on nothing: a case that requires the check
+    and holds no such assertion, or one whose scope is not a non-empty ``Known`` list, is a problem
+    too."""
+    assertions = _same_event_scopes(compiled)
+    if not assertions:
+        return ["require_assertion_scopes, but the package holds no stated same-event assertion"]
+    declared = _declared_identifiers(mapped)
+    records: set[str] | None = None  # read only when a scope names a record
+    problems = []
+    for ident, scope in assertions:
+        name = "/".join(ident) if ident else "an assertion without an identifier"
+        if not scope:
+            problems.append(f"assertion {name}: its scope is not a non-empty known list")
+            continue
+        for entry in scope:
+            pair = _pair(entry)
+            if isinstance(entry, str):
+                records = _record_ids(compiled, mapped) if records is None else records
+                if entry not in records:
+                    problems.append(
+                        f"assertion {name}: scope {entry} is no record either package holds"
+                        " (a dangling link)"
+                    )
+            elif pair is None:
+                problems.append(f"assertion {name}: a scope entry is not a namespace and value")
+            elif pair not in declared:
+                problems.append(
+                    f"assertion {name}: scope ({pair[0]}, {pair[1]}) is no identifier the mapped"
+                    " package declares (a dangling link)"
+                )
+    return problems
+
+
+def _event_rows(root: Path) -> tuple[dict[str, int], Counter[str]]:
+    """The mapped package's typed event-table rows (Deploy ADR 0017 §1: ``structured_record`` rows
+    a mapping writes, such as ``syslog_csv``'s ``syslog events``), counted by their table's name and
+    by the transform that made each. The base package's tables are not copied into a mapped
+    package, so every row here is Deploy's."""
+    from harness.acceptance.resolve import _known
+
+    names: dict[str, str] = {}
+    path = root / "records" / "structured_table.jsonl"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        if line.strip():
+            table = json.loads(line)
+            names[str(table["id"])] = str(_known(table.get("name")) or table["id"])
+    by_table: dict[str, int] = {}
+    transforms: Counter[str] = Counter()
+    path = root / "records" / "structured_record.jsonl"
+    if path.is_file():
+        with path.open(encoding="utf-8") as lines:  # one record at a time (ADR 0070)
+            for line in lines:
+                if line.strip():
+                    row = json.loads(line)
+                    name = names.get(str(row.get("table")), str(row.get("table")))
+                    by_table[name] = by_table.get(name, 0) + 1
+                    transforms[str(row.get("provenance", {}).get("transform"))] += 1
+    return dict(sorted(by_table.items())), transforms
+
+
 def _transform_sources(root: Path) -> dict[str, str]:
     """Each Deploy transform record's id, mapped to the sha256 of the mapping or template file it
     applied (its config's ``mapping_sha256`` or ``template_sha256``)."""
@@ -387,16 +676,21 @@ def _map(
 ) -> None:
     """``python -m neptune_deploy map`` over one compiled package, then the mapped package read
     back, verified, validated and counted."""
-    from neptune_deploy.lifecycle import PRESETS
-
     from neptune.store.package import PackageError, read_package
 
+    shipped, _ = _shipped_presets()
     labels, refused = _declarations(plan)
     problems.extend(f"{case.id}: {problem}" for problem in refused)
     out = ctx.deploy_root(case.id)
     argv = [sys.executable, "-m", "neptune_deploy", "map", str(ctx.package_root(case.id))]
-    argv += [arg for name in plan.presets if name in PRESETS for arg in ("-p", name)]
+    argv += [arg for name in plan.presets if name in shipped for arg in ("-p", name)]
     argv += [arg for path in plan.templates for arg in ("-t", str(REPO / path))]
+    argv += [  # only for presets the run maps: Deploy refuses a zone for any other
+        arg
+        for zone in plan.sources
+        if zone.preset in shipped
+        for arg in ("--source-zone", zone.preset, zone.source, zone.civil_time_zone)
+    ]
     argv += ["-o", str(out)]
     done = subprocess.run(
         argv, cwd=REPO, capture_output=True, text=True, timeout=DEPLOY_TIMEOUT_S, check=False
@@ -414,31 +708,46 @@ def _map(
         return
     receipt = json.loads((out / "receipt.json").read_text(encoding="utf-8"))
     kinds, by_transform = _lifecycle_records(out)
+    tables, row_transforms = _event_rows(out)
     applied = _transform_sources(out)
     made: Counter[str] = Counter({label: 0 for label in labels.values()})
-    for transform, count in by_transform.items():
+    for transform, count in (by_transform + row_transforms).items():
         label = labels.get(applied.get(transform, ""))
         if label is not None:
             made[label] += count
+    # What at_least counts: lifecycle records by kind, and event-table rows as structured_record.
+    counted = {**kinds, **({"structured_record": sum(tables.values())} if tables else {})}
     row.update(
         state="committed",
         package=str(package.id),
         package_verified=True,
         records=kinds,
+        event_rows=tables,
         by_declaration=dict(sorted(made.items())),
         findings=dict(sorted(Counter(f["code"] for f in receipt.get("findings", [])).items())),
     )
     schema.check(f"{case.id} (deploy)", out, row, problems)
-    if not kinds:  # never green on nothing: the case declares mappings, so records are owed
-        problems.append(f"{case.id}: the Deploy map wrote no lifecycle record")
+    if not kinds and not tables:  # never green on nothing: the case declares mappings
+        problems.append(f"{case.id}: the Deploy map wrote no lifecycle record or event-table row")
     problems.extend(
         f"{case.id}: {label} mapped no record" for label, count in sorted(made.items()) if not count
     )
     problems.extend(
-        f"{case.id}: {kind} records are {kinds.get(kind, 0)}, the declaration needs at least {n}"
+        f"{case.id}: {kind} records are {counted.get(kind, 0)}, the declaration needs at least {n}"
         for kind, n in sorted(plan.at_least.items())
-        if kinds.get(kind, 0) < n
+        if counted.get(kind, 0) < n
     )
+    if plan.sources:
+        row["zones"] = [
+            {"preset": z.preset, "source": z.source, "civil_time_zone": z.civil_time_zone}
+            for z in plan.sources
+        ]
+        zones = _zone_problems(plan, ctx.package_root(case.id), out, labels, applied)
+        problems.extend(f"{case.id}: {problem}" for problem in zones)
+    if plan.require_assertion_scopes:
+        dangling = _dangling_scopes(ctx.package_root(case.id), out)
+        row["assertion_scopes"] = "declared" if not dangling else "dangling"
+        problems.extend(f"{case.id}: {problem}" for problem in dangling)
 
 
 def deploy_real(ctx: Context) -> Outcome:

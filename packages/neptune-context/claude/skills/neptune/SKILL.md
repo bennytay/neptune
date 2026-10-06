@@ -12,9 +12,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 ## How to answer
 
 1. **Find the subjects.** Call `neptune_entities` with the user's words as `text` (for example
-   `"what happened to ARM-3A in CELL-3?"`) and `include_inferred: false` to get declared ids
-   such as `asset-tag:ARM-3A` and `zone-code:CELL-3`. Leave out `text` (or pass `kind`) to list
-   what memory names. Only names current at `as_of` (default: latest) are offered; names that
+   `"what happened to ARM-3A at PLANT-2?"`) and `include_inferred: false` to get declared ids
+   such as `servicenow.ci:ARM-3A` or `manifest:PLANT-2`. Never hard-code ids: they differ between
+   graphs, so always find them here. Leave out `text` (or pass `kind`) to list what memory names. Only names current at `as_of` (default: latest) are offered; names that
    only inferences mention need `include_inferred: true`. A name with several candidates is
    ambiguous: ask the user which one, never pick.
 2. **Optionally draft with `neptune_plan`.** It turns a question into a typed query. The draft is
@@ -22,19 +22,34 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    `needs_choice`, then run the query yourself. If it says no model is configured, write the
    query directly (step 3).
 3. **Ask with `neptune_query`.** Pass `include_inferred` (required; you must choose) and a
-   `query`. For "why did X happen / what changed", start from the machine and walk two hops both
-   ways:
+   `query`. For "why did X happen / what changed", first find the machine's ids, then start from
+   them and walk two hops both ways. The ids come from the call, not from this page:
+
+   ```text
+   neptune_entities {"text": "what happened to ARM-3A?", "include_inferred": false}
+   ```
+
+   then, with the ids it returned for that machine as `subjects` (the two below are placeholders
+   for them):
 
    ```json
    {
      "include_inferred": true,
      "query": {
        "budget": {"items": 50, "tokens": 20000},
-       "subjects": [{"kind": "machine", "declared_id": "asset-tag:ARM-3A", "same_as_depth": 1}],
+       "subjects": [
+         {"kind": "machine", "declared_id": "ns:id-from-neptune-entities"},
+         {"kind": "machine", "declared_id": "other-ns:same-machine-id-from-neptune-entities"}
+       ],
        "graph": {"hops": 2, "direction": "both", "predicates": "any"}
      }
    }
    ```
+
+   One machine can be declared under several source systems' names (above: ServiceNow, the CMMS,
+   the run manifests) with no stated link between them. Name each one you want answered; never
+   assume two names are the same machine. A claim that is not in the answer is not in Memory: if
+   no claim links an incident to the machine, say so, and query the incident's own node.
 
    Use `include_inferred: false` when the user wants evidence only, or when an inference could
    drive a safety decision.
@@ -48,7 +63,7 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 - Each fact is one sentence ending with citations: `[I6]` is the item, `[E6][E7]` its sources.
   The `Items:` footer maps `I6` to the item id (and a claim's id); the `Evidence:` footer maps
   `E6` to the exact source. **Every fact you repeat must keep its keys**, for example
-  "ARM-3A ran configuration cfg-c3-1.5 [I6][E6]". Never state anything the answer does not hold.
+  "ServiceNow records ARM-3A's configuration as `TCP z=145.5 mm` [I6][E6]". Never state anything the answer does not hold.
 - `neptune_why` answers an indented outline, root claim first: `Corroborated by`, `Conflicts with
   (resolver finding ...)` and `Alternative reading` lines, each citing its claim and sources. Say
   "Memory holds this, and these sources agree or conflict", never a cause: Neptune states
@@ -70,14 +85,16 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 
 ## Running the server
 
-The server answers over a Memory graph document (JSON). Point `NEPTUNE_MEMORY_GRAPH` at one and
-add the server to Claude Code from the repository root:
+The server answers over a Memory graph document: JSON, or gzipped JSON when the name ends `.gz`
+(one gzip member; the size cap applies to the decompressed bytes). For the Demo v1 two-site corpus
+serve Memory's pipeline-built snapshot, `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`,
+from the repository root:
 
 ```
-claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "$NEPTUNE_MEMORY_GRAPH"
+claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "${NEPTUNE_MEMORY_GRAPH:-packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz}"
 ```
 
-or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json`. For the Demo v1
-two-site corpus, write the snapshot first:
-`uv run --all-packages python packages/neptune-context/scripts/export_demo_graph.py "$NEPTUNE_MEMORY_GRAPH"`.
+or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json`. Set `NEPTUNE_MEMORY_GRAPH`
+to serve another graph document instead. `scripts/export_demo_graph.py` checks that the server can
+read the snapshot and, given a target, copies it there.
 Add `--planner anthropic` (the `anthropic` extra and an API key) to let `neptune_plan` call a model.

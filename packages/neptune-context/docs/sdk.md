@@ -57,10 +57,10 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
   planner = Planner(entity_index(graph_document), Defaults(Caller.AGENT), AnthropicClient())
   client = Client(engine, planner=planner)
   planned = client.plan("why did the arm-cell incident happen?")   # PlannedQuery: shown, never run
-  planned = client.choose(planned, "ARM-3A", "asset-tag:ARM-3A")  # settle an ambiguous name
+  planned = client.choose(planned, "ARM-3A", "servicenow.ci:ARM-3A")  # settle an ambiguous name
   asked = client.ask("...")             # Asked(plan, packet): the packet only when the plan is ready
   client.entities("machine", include_inferred=False)                # names current at head
-  client.find("ARM-3A in CELL-3", as_of=4, include_inferred=False)  # names at transaction 4
+  client.find("ARM-3A at PLANT-2", as_of=2, include_inferred=False)  # names at transaction 2
   ```
 
   Without a planner these calls are `unavailable`; with `NoModel()` every plan is a visible `failed` plan.
@@ -287,7 +287,7 @@ packet = client.query(query)
 ## MCP server
 
 `python -m neptune_context.mcp --url https://neptune.example` (token from `$NEPTUNE_TOKEN`),
-`--memory GRAPH.json` (the local engine over a Memory graph document, ADR 0007) or `--packets DIR` (recorded
+`--memory GRAPH.json` (the local engine over a Memory graph document, JSON or `.json.gz`, ADR 0007, [ADR 0013](adr/0013-demo-reads-memorys-gzip-snapshot.md)) or `--packets DIR` (recorded
 packets, for trying it out) serves six read-only tools over stdio
 ([ADR 0004](adr/0004-sdk-and-mcp-server.md), [ADR 0009](adr/0009-agent-renderer-and-mcp-tool-surface.md)).
 With `--memory`, `--planner anthropic` (the `anthropic` extra and an API key) or `--planner-recordings FILE`
@@ -296,14 +296,15 @@ gives `neptune_plan` a model; without one a plan says no model is configured.
 Claude Code, from the repository root, over the Demo v1 two-site corpus:
 
 ```
-export NEPTUNE_MEMORY_GRAPH=$HOME/.cache/neptune/demo-graph.json
-uv run --all-packages python packages/neptune-context/scripts/export_demo_graph.py "$NEPTUNE_MEMORY_GRAPH"
-claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "$NEPTUNE_MEMORY_GRAPH"
+# Memory's pipeline-built snapshot of the corpus, read as it is (set NEPTUNE_MEMORY_GRAPH to serve another)
+GRAPH=packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz
+uv run --all-packages python packages/neptune-context/scripts/export_demo_graph.py   # checks the server reads it
+claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "${NEPTUNE_MEMORY_GRAPH:-$GRAPH}"
 mkdir -p .claude/skills && cp -r packages/neptune-context/claude/skills/neptune .claude/skills/
 ```
 
-or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json` (it reads `${NEPTUNE_MEMORY_GRAPH}`
-and `${NEPTUNE_REPO}`). The skill (`claude/skills/neptune/SKILL.md`) tells Claude when to ask Neptune, how to
+or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json` (it reads `${NEPTUNE_MEMORY_GRAPH}`, defaulting to
+Memory's snapshot above, and `${NEPTUNE_REPO}`). The skill (`claude/skills/neptune/SKILL.md`) tells Claude when to ask Neptune, how to
 build the query and how to cite the answer.
 
 With `--memory` and no Ledger catalog attached, series windows, frames and `neptune_hydrate` answer with gaps
