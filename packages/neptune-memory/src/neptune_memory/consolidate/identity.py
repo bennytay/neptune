@@ -135,6 +135,7 @@ class _View:
     statements: list[Statement] = field(default_factory=list)  # sorted by record id
     clocks: dict[RecordId, CivilClock] = field(default_factory=dict)
     findings: list[ConsolidationFinding] = field(default_factory=list)
+    untyped: set[Key] = field(default_factory=set)  # threads disagree on its type: no node
 
     def place(self, stamp: Timestamp) -> Timestamp:
         """A stamp on a clock that declares itself civil, moved onto that ``CivilClock`` (the
@@ -231,6 +232,7 @@ def _read(ledger: LedgerReader) -> _View:
                     node_types=[str(t) for t in types],
                 )
             )
+            view.untyped.add(key)
             continue
         view.nodes[key] = _Node(node_ref(types[0], group_[0].node), group_)
     return view
@@ -646,6 +648,8 @@ def _declaration_link(
 def _machine_node(view: _View, declaration: parse.Declaration, node: LogicalId) -> bool:
     """Key a machine node for ``node`` unless a Ledger thread keys it as another type."""
     key = _key(node)
+    if key in view.untyped:  # its threads' types conflict, already a finding: still no node
+        return False
     existing = view.nodes.get(key)
     if existing is None:
         view.nodes[key] = _Node(node_ref(NodeType.MACHINE, node), ())

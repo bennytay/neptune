@@ -16,7 +16,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from memory_identity_records import Record, ledger
+from memory_identity_records import Record, ledger, thread
 from neptune.identity import canonical_json
 from neptune.model.ids import LogicalId
 from neptune.model.knowledge import Ambiguous, AssertionKind, Candidate
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from types import ModuleType
 
-    from neptune_memory.schema.claim import Claim
 
 ROOT: Final = Path(__file__).resolve().parents[3]
 GOLDEN: Final = ROOT / "tests" / "golden" / "manifest"
@@ -249,5 +248,15 @@ def test_machine_identity_is_deterministic_and_independent_of_package_layout() -
     assert text(split) == text(once)
 
 
-def claims_about(result: Consolidation, node: NodeRef) -> list[Claim]:
-    return [c for c in result.claims if node in (c.subject, c.object)]
+def test_threads_place_a_machine_first_and_a_contested_node_type_keys_no_node() -> None:
+    serial = LogicalId("serial", "20235400123")
+    placed = consolidate({"cell": golden("manipulator_cell"), "threads": [thread(serial, "reg")]})
+    (claim,) = placed.claims
+    assert claim.valid_from.ticks == 100  # the thread's start, before any run (ADR 0008 §2)
+    conflicting = [
+        thread(serial, "reg"),
+        thread(serial, "bom", node_type=NodeType.SENSOR, name="bom"),
+    ]
+    refused = consolidate({"cell": golden("manipulator_cell"), "threads": conflicting})
+    assert refused.claims == ()
+    assert codes(refused) == ["identity.node_type_conflict"]
