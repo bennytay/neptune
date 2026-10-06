@@ -100,8 +100,8 @@ mistake a template can make, so the rule is fixed here before any template needs
 - Platform's Deploy map stage can run with shipped names only: `-p cmms_generic -p
   requalification_csv -T incident_report`, plus the other presets it already uses.
 - On the corpus, every one of INC-C3-0011's five HMI times and INC-0007's four reads. Four
-  requalification records map (three PLANT-2, one S-007), and all 16 CMMS rows are maintenance
-  events, WO-26-0709 among them.
+  requalification records map (three PLANT-2, one S-007), and all 16 CMMS rows of the two sites
+  (10 at PLANT-2, 6 at S-007) are maintenance events, WO-26-0709 among them.
 - The archetype goldens and two tests moved with `cmms_generic` 2. The reasons are given in §5.
 - Revisit when a source prints time-only rows (§1's derivation, with tests for a missing date and for
   rows that cross midnight), or when the model gains a clock name.

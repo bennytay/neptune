@@ -22,10 +22,10 @@ import pytest
 
 from neptune.model.knowledge import Known, NotCovered, Unknown
 from neptune.model.provenance import EvidenceRef, Provenance, Span
-from neptune.model.reference import Timescale
 from neptune.store.package import IngestPackage, read_files, read_package
 from neptune_deploy.lifecycle import (
     PRESETS,
+    TEMPLATE_PRESET_DIR,
     TEMPLATE_PRESETS,
     LifecycleMapping,
     MappingError,
@@ -98,6 +98,12 @@ def _from(package: IngestPackage, kind: str, path: str) -> list[Any]:
 def _incident(package: IngestPackage, path: str = CELL_REPORT) -> Any:
     (incident,) = _from(package, "incident_record", path)
     return incident
+
+
+def _cited(state: Any) -> EvidenceRef:
+    """What a value cites: its own provenance, never one it inherits."""
+    assert isinstance(state.provenance, Provenance)
+    return state.provenance.evidence
 
 
 def _civil(text: str, pattern: str = "%Y-%m-%d %H:%M:%S") -> int:
@@ -181,7 +187,7 @@ def test_every_hmi_time_of_the_arm_cell_report_reads_on_its_own_civil_clock() ->
 def test_each_timeline_value_cites_its_own_cell_and_is_stated() -> None:
     incident = _incident(_mapped())
     cells = {
-        c.value: c.provenance.evidence
+        c.value: _cited(c)
         for r in _from(BASE, "structured_record", CELL_REPORT)
         for c in r.cells
         if isinstance(c, Known)
@@ -194,9 +200,10 @@ def test_each_timeline_value_cites_its_own_cell_and_is_stated() -> None:
 def test_the_template_reads_the_same_form_at_both_sites_and_leaves_nothing_unread() -> None:
     package = _mapped()
     fleet = _incident(package, FLEET_REPORT)
-    assert [e.time.value.ticks for e in fleet.timeline.value][0] == _civil(
-        "2026-04-02 14:05", "%Y-%m-%d %H:%M"
-    )
+    fleet_times = [e.time.value.ticks for e in fleet.timeline.value]
+    assert fleet_times == [
+        _civil(f"2026-04-02 {hm}", "%Y-%m-%d %H:%M") for hm in ("14:05", "14:07", "14:09", "14:31")
+    ]
     matched = _codes(package)["template_matched"]
     assert len(matched) == 2
     assert {f.details["template"] for f in matched} == {"incident.report"}
@@ -229,7 +236,7 @@ def test_a_time_of_day_without_a_date_is_never_completed_from_the_incident_date(
     assert isinstance(incident.occurred, Known)
     (finding,) = _codes(package)["value_unreadable"]
     assert finding.details["field"] == "/timeline/0/time"
-    assert finding.subject == first.provenance.evidence
+    assert finding.subject == _cited(first)
 
 
 def _relabel(old: str, new: str) -> IngestPackage:
@@ -254,7 +261,7 @@ def test_a_blank_incident_date_is_unknown_and_the_rows_keep_only_the_dates_they_
     assert all(isinstance(e.time, Known) for e in incident.timeline.value)
     (blank,) = [f for f in _codes(package)["value_blank"] if "reference" in f.details]
     assert blank.details["reference"] == "Occurred at"
-    assert blank.subject == incident.occurred.provenance.evidence
+    assert blank.subject == _cited(incident.occurred)
 
 
 def test_a_report_missing_its_date_field_is_unmatched_and_never_given_a_date() -> None:
@@ -280,7 +287,10 @@ def test_time_only_rows_across_midnight_get_no_inferred_date_change() -> None:
     times = [e.time for e in _incident(package).timeline.value]
     assert isinstance(times[3], Unknown) and isinstance(times[4], Unknown)
     unreadable = _codes(package)["value_unreadable"]
-    assert sorted(f.details["field"] for f in unreadable) == ["/timeline/3/time", "/timeline/4/time"]
+    assert sorted(f.details["field"] for f in unreadable) == [
+        "/timeline/3/time",
+        "/timeline/4/time",
+    ]
 
 
 # --- Item 2: the requalification preset ----------------------------------------------------------
@@ -322,7 +332,8 @@ def test_requalification_values_are_verbatim_and_a_blank_decision_time_is_unknow
 def test_the_insp_work_order_is_a_maintenance_event_and_no_cmms_row_is_left_unmatched() -> None:
     package = _mapped()
     events = {
-        r.identifiers.value[0].value.value: r for r in _from(package, "maintenance_event", CELL_CMMS)
+        r.identifiers.value[0].value.value: r
+        for r in _from(package, "maintenance_event", CELL_CMMS)
     }
     assert len(events) == len(_from(BASE, "structured_record", CELL_CMMS)) == 10
     inspection = events["WO-26-0709"]
@@ -365,6 +376,18 @@ def test_the_command_line_takes_shipped_templates_by_name(tmp_path: Path) -> Non
     package = read_package(out)
     assert len(_of(package, "incident_record")) == 2
     assert len(_of(package, "requalification_record")) == 4
+    # A shipped template named twice, or also loaded from its file, is one template.
+    again = [
+        *argv,
+        "-T",
+        "incident_report",
+        "-t",
+        str(TEMPLATE_PRESET_DIR),
+        "-o",
+        str(tmp_path / "y"),
+    ]
+    assert main(again) == 0
+    assert read_package(tmp_path / "y").id == package.id
     with pytest.raises(SystemExit):
         main(["map", str(PACKAGE), "-T", "no_such_template", "-o", str(tmp_path / "x")])
 
@@ -380,7 +403,4 @@ def test_shipped_presets_and_templates_are_listed_and_unknown_names_are_refused(
 def test_no_lifecycle_time_is_an_instant_or_carries_a_zone() -> None:
     package = _mapped()
     assert all(isinstance(d.timescale, Unknown) for d in _of(package, "timestamp_domain"))
-    assert not any(d.timescale == Known(Timescale.POSIX) for d in _of(package, "timestamp_domain"))
-    assert all(
-        isinstance(z.zone, Unknown | NotCovered) for z in _of(package, "civil_time_zone")
-    )
+    assert all(isinstance(z.zone, Unknown | NotCovered) for z in _of(package, "civil_time_zone"))

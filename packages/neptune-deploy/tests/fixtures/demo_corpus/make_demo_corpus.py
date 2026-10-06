@@ -69,12 +69,12 @@ def main() -> int:
         command = ingest_command(folder, out, Path(scratch) / "work")
         subprocess.run(command, check=True, capture_output=True)
         shutil.rmtree(PACKAGE, ignore_errors=True)
-        for path in sorted(out.rglob("*")):
-            relative = path.relative_to(out)
-            if path.is_file() and relative.parts[0] != "volatile":
-                target = PACKAGE / relative
+        for written in sorted(out.rglob("*")):
+            inside = written.relative_to(out)
+            if written.is_file() and inside.parts[0] != "volatile":
+                target = PACKAGE / inside
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(path.read_bytes())
+                target.write_bytes(written.read_bytes())
     sys.stdout.write(f"wrote {PACKAGE.relative_to(ROOT)}\n")
     return 0
 

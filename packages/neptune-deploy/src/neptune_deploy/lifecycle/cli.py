@@ -85,11 +85,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         mappings = [load_mapping(path) for path in args.mapping]
         mappings += [preset(name) for name in args.preset]
         registry = TemplateRegistry.from_paths(args.template)
-        for name in args.template_preset:
-            registry.add(template_preset(name))
+        for name in dict.fromkeys(args.template_preset):
+            shipped = template_preset(name)
+            known = registry.get(shipped.id, shipped.version)
+            if known is None or known.sha256 != shipped.sha256:
+                registry.add(shipped)  # a different file under the same id and version is refused
         templates = registry.templates()
         if not mappings and not templates:
-            raise MappingError("name at least one --mapping, --preset or --template")
+            raise MappingError(
+                "name at least one --mapping, --preset, --template or --template-preset"
+            )
         package = map_package(args.package, mappings, args.out, templates)
     except (MappingError, PackageError, OSError) as exc:
         sys.stderr.write(f"neptune-deploy map: {exc}\n")
