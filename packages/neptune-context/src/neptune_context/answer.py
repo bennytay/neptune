@@ -13,7 +13,9 @@ fails to answer the query, empty when it does:
 - with a ``during``, every timed item (a claim's valid interval, a series window, a sensor
   sample's instant) is on that clock or on one the query's ``clock_bridges`` join to it; anything
   else is an ``other_clock`` gap, never an item (ADR 0002 §3);
-- every gap points into the query's canonical JSON.
+- every gap points into the query's canonical JSON;
+- every trail answers the explain clause it points at: a ``why`` trail that clause's claim, a
+  ``diff`` trail its subject and its two points (ADR 0010).
 
 The SDK runs it on every answer (``invalid_response``); Deploy and Learn get it from
 ``neptune_context.contract``.
@@ -35,8 +37,9 @@ from neptune_context.packets.model import (
     Limits,
     SeriesWindowItem,
 )
+from neptune_context.packets.trails import DiffTrail, TxPoint, WhyTrail, WorldPoint, trail_index
 from neptune_context.query.codec import query_id, to_json
-from neptune_context.query.model import Clock, DomainClock, Instant, Query
+from neptune_context.query.model import Clock, Diff, DomainClock, Instant, Query, Why
 
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
@@ -68,6 +71,20 @@ def _reachable(query: Query, start: str) -> frozenset[str]:
                     seen.add(b)
                     todo.append(b)
     return frozenset(seen)
+
+
+def allowed_clocks(query: Query) -> frozenset[str] | None:
+    """The clocks a timed item may be on (``None``: the query sets no ``during``, so any): the
+    window's clock, every clock the query's bridges join to it, and a diff's instants' clocks
+    with theirs (ADR 0006 §2)."""
+    if query.during is None:
+        return None
+    allowed = set(_reachable(query, domain_id(query.during.clock)))
+    for explained in query.explain:
+        for point in (getattr(explained, "before", None), getattr(explained, "after", None)):
+            if isinstance(point, Instant):
+                allowed |= _reachable(query, domain_id(point.clock))
+    return frozenset(allowed)
 
 
 def _item_clock(item: Item) -> str | None:
@@ -119,11 +136,7 @@ def answer_problems(query: Query, packet: ContextPacket) -> tuple[str, ...]:
         got = packet.during
         if got is None or (got.domain_id, got.start, got.end) != (clock, asked.start, asked.end):
             problems.append("the packet's world-time window is not the query's during")
-        allowed = set(_reachable(query, clock))
-        for explained in query.explain:
-            for point in (getattr(explained, "before", None), getattr(explained, "after", None)):
-                if isinstance(point, Instant):
-                    allowed |= _reachable(query, domain_id(point.clock))
+        allowed = allowed_clocks(query) or frozenset()
         for item in packet.items:
             on = _item_clock(item)
             if on is not None and on not in allowed:
@@ -135,4 +148,38 @@ def answer_problems(query: Query, packet: ContextPacket) -> tuple[str, ...]:
     for gap in packet.gaps:
         if not _resolves(document, gap.at):
             problems.append(f"a {gap.code} gap points at {gap.at!r}, which the query does not have")
+    problems.extend(_trail_problems(query, packet))
     return tuple(problems)
+
+
+def _point_matches(asked: int | Instant, point: TxPoint | WorldPoint) -> bool:
+    if isinstance(asked, Instant):
+        return isinstance(point, WorldPoint) and (point.clock, point.ticks) == (
+            domain_id(asked.clock),
+            asked.ticks,
+        )
+    return isinstance(point, TxPoint) and point.tx == asked
+
+
+def _trail_problems(query: Query, packet: ContextPacket) -> list[str]:
+    """Each trail answers the explain clause at its pointer (ADR 0010)."""
+    problems: list[str] = []
+    for trail in packet.trails:
+        index = trail_index(trail.at)
+        clause = query.explain[index] if index < len(query.explain) else None
+        if isinstance(clause, Why):
+            if not isinstance(trail, WhyTrail) or trail.claim != clause.claim_id:
+                problems.append(f"the trail at {trail.at} does not explain claim {clause.claim_id}")
+        elif isinstance(clause, Diff):
+            subject = clause.subject
+            if (
+                not isinstance(trail, DiffTrail)
+                or (str(trail.subject.node_type), trail.subject.node_id)
+                != (subject.kind, subject.declared_id)
+                or not _point_matches(clause.before, trail.before)
+                or not _point_matches(clause.after, trail.after)
+            ):
+                problems.append(f"the trail at {trail.at} is not the diff that clause asks for")
+        else:
+            problems.append(f"a trail points at {trail.at}, which the query does not have")
+    return problems
