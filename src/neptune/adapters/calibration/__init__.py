@@ -5,14 +5,18 @@ What it reads, each claimed by the keys it must hold (``_formats``), never by na
 - ROS ``camera_info`` YAML (``camera_calibration_parsers``) and ``sensor_msgs/CameraInfo`` dumped
   as YAML or JSON;
 - Kalibr ``camchain`` / ``camchain-imucam`` and IMU YAML;
-- OpenCV ``cv::FileStorage`` YAML and XML (tutorial, stereo and Autoware-style names).
+- OpenCV ``cv::FileStorage`` YAML and XML (tutorial, stereo and Autoware-style names), with the
+  ``camera_name`` and ``calibration_time`` they state (ADR 0073);
+- hand-eye results: ROS ``easy_handeye`` YAML, ROS 2 ``easy_handeye2`` ``.calib`` and MoveIt
+  Calibration's saved camera pose launch file (ADR 0073).
 
 What it emits: one ``Calibration`` per calibrated subject, its numbers under their declared names in
-source order; for Kalibr's ``T_cam_imu`` and ``T_cn_cnm1`` a ``FrameTransform`` in one
-``FrameGraph`` for the file; findings for a transform whose frames or numbers the file does not
-give, a matrix that does not hold its declared size, a camera without an extrinsic, a frame graph
-with a loop, a repeat or a gap. Nothing is converted: units, quaternion order, matrix layout and
-direction are as the file declares them, or ``Unknown``.
+source order; for Kalibr's ``T_cam_imu`` and ``T_cn_cnm1`` and a hand-eye result's transform a
+``FrameTransform`` in one ``FrameGraph`` for the file; an OpenCV calibration time as ``performed``
+on a ``TimestampDomain`` of its own; findings for a transform whose frames or numbers the file does
+not give, a matrix that does not hold its declared size, a camera without an extrinsic, a frame
+graph with a loop, a repeat or a gap. Nothing is converted: units, quaternion order, matrix layout
+and direction are as the file declares them, or ``Unknown``.
 
 TF from bags and MCAP is not read here: the stream adapters do not decode ``/tf_static`` payloads.
 Binding a calibration to hardware and runs (MVL-38) and aligning its frames with a URDF's (MVL-37)
@@ -78,7 +82,7 @@ from neptune.identity.findings import ingest_finding
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.machine import Calibration
 from neptune.model.provenance import ByteRange, EvidenceRef, Span
-from neptune.model.reference import FrameGraph, FrameTransform
+from neptune.model.reference import FrameGraph, FrameTransform, TimestampDomain
 
 PYTHON: Final = f"{sys.version_info.major}.{sys.version_info.minor}"
 OPENCV_HEADER: Final = "%YAML:"
@@ -88,14 +92,27 @@ _XML_START: Final = re.compile(rb"(?:\xef\xbb\xbf)?\s*<")
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id=ADAPTER_ID,
-    version="0.1.1",
+    version="0.2.0",
     abi=ABI_VERSION,
-    summary="Camera, IMU and sensor-extrinsic calibration files: ROS, Kalibr and OpenCV.",
+    summary=(
+        "Camera, IMU, sensor-extrinsic and hand-eye calibration files: ROS, Kalibr, OpenCV,"
+        " easy_handeye and MoveIt Calibration."
+    ),
     formats=(
         FormatSpec(
             "ROS camera_info calibration, Kalibr and OpenCV YAML",
             media_types=("application/yaml",),
             extensions=(".yaml", ".yml"),
+        ),
+        FormatSpec(
+            "easy_handeye and easy_handeye2 hand-eye results",
+            media_types=("application/yaml",),
+            extensions=(".calib", ".yaml", ".yml"),
+        ),
+        FormatSpec(
+            "MoveIt Calibration camera pose launch file",
+            media_types=("application/xml",),
+            extensions=(".launch", ".xml"),
         ),
         FormatSpec(
             "ROS CameraInfo as JSON", media_types=("application/json",), extensions=(".json",)
@@ -104,7 +121,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "OpenCV FileStorage XML", media_types=("application/xml",), extensions=(".xml",)
         ),
     ),
-    record_kinds=(Calibration.kind, FrameGraph.kind, FrameTransform.kind),
+    record_kinds=(Calibration.kind, FrameGraph.kind, FrameTransform.kind, TimestampDomain.kind),
     config=(
         ConfigOption(
             "max_array_values",
@@ -190,8 +207,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             code("extrinsic_not_read"),
-            "an extrinsic matrix is not four rows of four finite numbers; no transform is"
-            " emitted and its rows stay parameters (unrepresentable, warning)",
+            "an extrinsic matrix is not four rows of four finite numbers, or a hand-eye"
+            " transform is not three and four finite numbers in a named order; no transform is"
+            " emitted and its values stay parameters (unrepresentable, warning)",
         ),
         Documented(
             code("frame_graph_disconnected"),
@@ -209,8 +227,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             code("frame_unresolved"),
             "an extrinsic names a frame the file does not (T_cn_cnm1 without the camera before"
-            " it), or names no frame (OpenCV R, T, CameraExtrinsicMat); no transform is emitted,"
-            " the numbers stay parameters (missing, warning or info)",
+            " it), or names no frame (OpenCV R, T, CameraExtrinsicMat), or a hand-eye result's"
+            " mode or frame names are not read; no transform is emitted, the numbers stay"
+            " parameters (missing, warning or info)",
         ),
         Documented(
             code("invalid_encoding"),
@@ -240,6 +259,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " read (limit, error)",
         ),
         Documented(
+            code("quaternion_not_unit"),
+            "a hand-eye rotation's quaternion is more than 1e-4 from norm 1 (zero included); the"
+            " transform keeps it as declared (inconsistent, warning)",
+        ),
+        Documented(
             code("shape_mismatch"),
             "a matrix with rows, cols and data whose data holds other than rows x cols x"
             " channels numbers (inconsistent, warning)",
@@ -248,6 +272,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             code("syntax_error"),
             "the text is not YAML, JSON, TOML or XML from the cited place on; not read"
             " (corrupt, error)",
+        ),
+        Documented(
+            code("time_not_read"),
+            "an OpenCV calibration_time is neither an ISO 8601 date-time nor the C locale's"
+            " date and time, or no date of the calendar; performed is Unknown and the text stays"
+            " a parameter (unsupported, warning)",
         ),
         Documented(
             code("too_deep"),
@@ -287,15 +317,23 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " projection_matrix, image_width; ROS message: K, P, distortion_model; Kalibr: a"
             " camN with camera_model and intrinsics, or an imuN with a noise density; OpenCV:"
             " the %YAML:1.0 header, an opencv-matrix or an opencv_storage root, and a camera"
-            " matrix or distortion name); SIGNATURE for the head of a file over 64 KiB; never"
-            " from a name. This beats the config adapter's STRUCTURE claim on the same bytes",
+            " matrix or distortion name; easy_handeye: eye_on_hand, tracking_base_frame and a"
+            " robot frame, flat or under parameters, and a transformation mapping;"
+            " easy_handeye2: parameters with calibration_type, tracking_base_frame and a robot"
+            " frame, and a transform mapping; MoveIt: a launch root holding only a tf2_ros"
+            " static_transform_publisher node named camera_link_broadcaster with args);"
+            " SIGNATURE for the head of a file over 64 KiB; never from a name. This beats the"
+            " config adapter's STRUCTURE claim on the same bytes",
         ),
         Documented(
             "direction",
             "Kalibr T_a_b maps b's coordinates into a's (Kalibr's documented meaning): the entry"
             " is the parent, the frame the key names the child, direction child_to_parent,"
-            " Known citing the matrix. Extrinsics with unnamed frames, or whose direction no key"
-            " states, are never transforms",
+            " Known citing the matrix. A hand-eye result is the tf transform its tool publishes:"
+            " the robot frame its mode names (effector for eye-in-hand, base for eye-on-base,"
+            " MoveIt's frame_id) the parent, the camera's frame the child, child_to_parent."
+            " Extrinsics with unnamed frames, or whose direction no key states, are never"
+            " transforms",
         ),
         Documented(
             "frames",
@@ -312,13 +350,17 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "matrices",
             "a 4x4 extrinsic is a HomogeneousMatrix of sixteen floats, row-major by its nesting,"
             " translation unit Unknown (no file states one), validity static. Rotation is never"
-            " split out, normalised or converted",
+            " split out, normalised or converted. A hand-eye transform is a Pose: x, y, z and the"
+            " quaternion in the file's order (xyzw or wxyz, Known from the key names or"
+            " static_transform_publisher's argument order), algebra Unknown; translation unit"
+            " metres for MoveIt (static_transform_publisher's arguments are), else Unknown",
         ),
         Documented(
             "opencv",
             "the %YAML:1.0 header is not YAML: its % is read as # (same length, so spans stay"
             " exact). A matrix is its rows, cols, dt and data parameters. XML values are typed"
-            " as OpenCV reads them (an integer, a real, .nan and .inf, else text); a locator is"
+            " as OpenCV reads them (an integer, a real, .nan and .inf, text in double quotes"
+            " without them, else text); a locator is"
             " the element's byte range, a data array's numbers cited by its element",
         ),
         Documented(
@@ -331,8 +373,17 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "subjects",
             "ROS: camera_name (message form: header.frame_id) as written, Unknown if absent;"
-            " Kalibr: the camN or imuN key; OpenCV: Unknown. Machine, hardware revision and"
-            " times are Unknown: binding is MVL-38's",
+            " Kalibr: the camN or imuN key; OpenCV: camera_name, stated; hand-eye: the camera's"
+            " frame (tracking_base_frame, MoveIt's child_frame_id). Machine, hardware revision"
+            " and the validity window are Unknown: binding is MVL-38's",
+        ),
+        Documented(
+            "times",
+            "an OpenCV calibration_time (or calibration_Time) is performed, stated, on a"
+            " TimestampDomain of its own (field the key, role document, epoch unix): ISO 8601"
+            " or the C locale's %c, counted as ADR 0023 §2 counts civil time. With a zone it is"
+            " an instant (timescale posix), without one timescale Unknown; no zone is assumed and"
+            " the text stays a parameter",
         ),
         Documented(
             "yaml",
@@ -492,7 +543,7 @@ def _findings(
             subject=EvidenceRef(source.content_id, (where,)),
             transform=config.transform,
             message=f"document {index} is none of the calibration formats read"
-            " (ROS camera_info, Kalibr, OpenCV FileStorage)",
+            " (ROS camera_info, Kalibr, OpenCV FileStorage, easy_handeye, MoveIt Calibration)",
             details={"document": index},
         )
 
@@ -501,7 +552,7 @@ def _findings(
 
 
 class CalibrationAdapter:
-    """ROS, Kalibr and OpenCV calibration files; one chunk per file."""
+    """ROS, Kalibr, OpenCV and hand-eye calibration files; one chunk per file."""
 
     descriptor = DESCRIPTOR
 
@@ -533,8 +584,10 @@ class CalibrationAdapter:
 
     @staticmethod
     def _probe_xml(head: bytes, complete: bool) -> ProbeResult:
-        if b"<opencv_storage" not in head:
-            return ProbeResult(0.0, (ProbeReason(code("not_calibration"), "not opencv_storage"),))
+        opencv = b"<opencv_storage" in head
+        if not opencv and not (complete and b"<launch" in head):
+            reason = "neither opencv_storage nor a whole launch file"
+            return ProbeResult(0.0, (ProbeReason(code("not_calibration"), reason),))
         if not complete:
             text = head.decode("utf-8", "replace")
             if HINT.search(text) is None:
@@ -544,7 +597,7 @@ class CalibrationAdapter:
             root = read_xml(head, XmlLimits(MAX_DEPTH, 200_000, 100_000, MIB, 64 * len(head)))
         except (XmlRefused, RecursionError):
             return ProbeResult(0.0, (ProbeReason(code("not_xml"), "not read as XML"),))
-        recognised = recognise(root, opencv=True, xml=True)
+        recognised = recognise(root, opencv=root.name == "opencv_storage", xml=True)
         if recognised is None:
             return ProbeResult(0.0, (ProbeReason(code("not_calibration"), "no calibration key"),))
         return _claim(recognised.format, complete)

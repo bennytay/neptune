@@ -50,6 +50,11 @@ class Item:
     repeated: bool = False
     count: int = 0
     order: int = 0  # its position among its parent's children
+    attributes: tuple[tuple[str, str], ...] = ()  # an XML element's, in source order
+
+    def attribute(self, name: str) -> str | None:
+        """An XML element's attribute as written, if it has it."""
+        return next((value for key, value in self.attributes if key == name), None)
 
     def child(self, name: str) -> "Item | None":
         """The first entry named ``name`` of a mapping."""
@@ -135,6 +140,16 @@ def xml_scalar(text: str) -> ConfigScalar:
     return ConfigScalar(ScalarType.STRING, text)
 
 
+def _xml_value(text: str) -> tuple[str, tuple[ConfigScalar, ...]]:
+    """An element's text as OpenCV reads it: a string it wrote in double quotes (one holding a
+    space, ``"Thu Oct  1 14:02:37 2026"``) is the text between them, never a number."""
+    token = text.strip()
+    if len(token) >= 2 and token[0] == token[-1] == '"':
+        inner = token[1:-1]
+        return inner, (ConfigScalar(ScalarType.STRING, inner),)
+    return token, (xml_scalar(text),)
+
+
 class XmlRefused(Exception):
     """The XML is not read, and why: the reason names a finding."""
 
@@ -211,6 +226,7 @@ def read_xml(data: bytes, limits: XmlLimits) -> Item:
         offset = parser.CurrentByteIndex
         item = Item(name, Kind.SCALAR, ByteRange(offset, 0))
         item.order = stack[-1].elements if stack else 0
+        item.attributes = tuple(attributes.items())
         if attributes.get("type_id") == OPENCV_MATRIX:
             item.tag = OPENCV_MATRIX
         if stack:
@@ -242,8 +258,7 @@ def read_xml(data: bytes, limits: XmlLimits) -> Item:
         elif len(text) > limits.max_scalar:
             item.kind, item.why = Kind.UNREAD, "a scalar over max_scalar_length"
         else:
-            item.text = text.strip()
-            item.readings = (xml_scalar(text),)
+            item.text, item.readings = _xml_value(text)
         if parent is not None:
             parent.item.children.append(item)
 

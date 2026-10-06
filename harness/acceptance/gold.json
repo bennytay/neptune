@@ -1,7 +1,7 @@
 {
   "gold_format": 1,
   "corpus": "acceptance",
-  "corpus_version": "2.1.0",
+  "corpus_version": "3.0.0",
   "consumers": ["context-c4-benchmark", "deploy-d3-evidence-packs", "demo-v1"],
   "scoring": "Platform ADR 0007 section 6: a claim is supported when the answer gives, for at least one of its evidence items, a citation that harness.acceptance.resolve.supports accepts: one of the item's resolved record ids (for a message item only a row: the stream record with the row's seq; the stream alone never counts), or the item's path and an equal locator (row, page, pointer, topic and log_time, parameter, code), which is how a package without compiler base records (Deploy D3) scores against the base package of the same corpus version. An answer fails a question when it cites a must_not_cite item as support or asserts a trap's wrong reading.",
   "questions": [
@@ -145,9 +145,9 @@
     "requal.RQ-2026-006": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/requalification/requalification_tests.csv", "key": "RQ-2026-006"}, "says": "The 2026-08-18 finger change was requalified (TCP accuracy check, 50-cycle pick and place)."},
     "requal.none-for-WO-26-0911": {"select": {"kind": "no_table_row", "path": "sites/PLANT-2/cell3/requalification/requalification_tests.csv", "key": "WO-26-0911"}, "says": "No requalification names WO-26-0911."},
     "cal.0818.error": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/calibration/handeye_calibration_log.csv", "key": "CAL-ARM3A-0818"}, "says": "Calibration log: CAL-ARM3A-0818 reprojection error 0.44 px against 0.8 px (SOP-CELL-021 rev B)."},
-    "cal.0818.z": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml", "pointer": "/transformation/z", "equals": "0.0745"}, "says": "CAL-ARM3A-0818 (easy_handeye, eye on hand, tool0 to wrist_camera): camera z offset 0.0745 m."},
+    "cal.0818.z": {"select": {"kind": "calibration", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml", "translation": "z", "equals": 0.0745}, "says": "CAL-ARM3A-0818 (easy_handeye, eye on hand, tool0 to wrist_camera): camera z offset 0.0745 m."},
     "cal.0911.error": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/calibration/handeye_calibration_log.csv", "key": "CAL-ARM3A-0911"}, "says": "Calibration log: CAL-ARM3A-0911 reprojection error 1.86 px against 2.0 px (SOP-CELL-021 rev C), after the bracket refit, substitute board."},
-    "cal.0911.z": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml", "pointer": "/transformation/z", "equals": "0.0702"}, "says": "CAL-ARM3A-0911 (easy_handeye, eye on hand, tool0 to wrist_camera): camera z offset 0.0702 m."},
+    "cal.0911.z": {"select": {"kind": "calibration", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml", "translation": "z", "equals": 0.0702}, "says": "CAL-ARM3A-0911 (easy_handeye, eye on hand, tool0 to wrist_camera): camera z offset 0.0702 m."},
     "vision.active-calibration": {"select": {"kind": "calibration", "path": "sites/PLANT-2/cell3/vision/wrist_camera_handeye.yml", "parameter": "reprojection_error", "equals": 1.86}, "says": "The vision PC's loaded hand-eye calibration (OpenCV export): CAL-ARM3A-0911, 1.86 px, substitute board."},
     "pin.0909.calibration": {"select": {"kind": "pin", "path": "neptune.yaml", "run": "sites/PLANT-2/cell3/bags/pallet_2026-09-09/pallet_2026-09-09_0.mcap", "snapshot": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml"}, "says": "The run sheet pins the last good run (2026-09-09) to hand-eye calibration CAL-ARM3A-0818, from before WO-26-0911 (stated, root ADR 0072)."},
     "pin.0914.calibration": {"select": {"kind": "pin", "path": "neptune.yaml", "run": "sites/PLANT-2/cell3/bags/pallet_2026-09-14/pallet_2026-09-14_0.mcap", "snapshot": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml"}, "says": "The run sheet pins the INC-C3-0011 run (2026-09-14) to hand-eye calibration CAL-ARM3A-0911, after the bracket refit."},

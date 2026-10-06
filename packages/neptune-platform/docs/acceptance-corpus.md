@@ -24,7 +24,7 @@ uv run --all-packages python -m harness.acceptance check                # build 
 make harness                                                            # the harness ingests it by default
 ```
 
-A gate quotes the version and tree id from the report's corpus line: `acceptance 2.1.0 (tree sha256:…)`.
+A gate quotes the version and tree id from the report's corpus line: `acceptance 3.0.0 (tree sha256:…)`.
 
 ## What is in it
 
@@ -140,6 +140,10 @@ assertion (`INC-C3-0011.assertions.json`) is an identifier the mapped package de
 3. `uv run --all-packages python -m harness.acceptance lock`, then `make check PKG=neptune-platform`: the
    ingest test resolves every evidence item and checks the expected findings.
 4. Say in the PR what changed for consumers (an answer, an evidence id, a new question).
+
+3.0.0: hand-eye CAL files are calibrations (compiler MVL-207, ADR 0073); `cal.*.z` cite the calibration extrinsic
+translation (the `calibration` selector's `translation` form, `cal.0818.z` = 0.0745, `cal.0911.z` = 0.0702) instead of a
+`config_value`. Cited evidence moved, so this is a MAJOR; the corpus files are unchanged.
 
 2.1.0 (MVL-191) added the syslog export's `MsgID` column and renamed the assertion's scope to Deploy's generic
 namespaces (`cmms.downtime`, `syslog`) and its ticket to `cmms.work_order`. It added evidence `zone.downtime` and

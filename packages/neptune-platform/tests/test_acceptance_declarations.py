@@ -138,12 +138,17 @@ def test_the_run_sheet_binds_each_pinned_run_stated_and_leaves_the_gaps_unpinned
     assert not UNPINNED & set(bound)
     # The stale managed export is never pinned (gold trap T2).
     assert all("cell_config.yaml" not in path for pins in bound.values() for path in pins)
-    unresolved = {
-        f.details["run"]
-        for f in package.records
-        if f.kind == "ingest_finding"
-        and f.code == "neptune.bindings.snapshot_unresolved"
-        and f.details["snapshot_kind"] == "configuration_snapshot"
+    # A pin resolves for the kind it names: a hand-eye CAL file is a calibration (compiler MVL-207),
+    # so a run pinned to one has no configuration snapshot, and that kind's finding is true of it.
+    pinned_kinds = {
+        (b.run, b.snapshot_kind.value)
+        for b in package.records
+        if isinstance(b, SnapshotBinding)
+        and paths[b.provenance.evidence.source] == ["neptune.yaml"]
     }
-    pinned_runs = {run for run, name in names.items() if name in PINS}
-    assert not unresolved & pinned_runs
+    unresolved = {
+        (f.details["run"], f.details["snapshot_kind"])
+        for f in package.records
+        if f.kind == "ingest_finding" and f.code == "neptune.bindings.snapshot_unresolved"
+    }
+    assert not unresolved & pinned_kinds

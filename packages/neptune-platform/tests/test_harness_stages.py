@@ -203,10 +203,11 @@ def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Pa
     ctx = _compiled(tmp_path / "work", registry)
     assert LEDGER.real is not None
     outcome = LEDGER.real(ctx)  # resolve() would make it a stub: a lock a major behind
-    # The manipulator package needs package-schema 2 (compiler ADR 0037); the quadruped's
-    # robot.urdf gives robot-description records, which need package-schema 8 (compiler ADR 0039).
+    # The quadruped's robot.urdf gives robot-description records, which need package-schema 8
+    # (compiler ADR 0039). The manipulator's handeye.yaml is an easy_handeye result the calibration
+    # adapter reads (compiler ADR 0073), so that package needs only package-schema 1; before 0.2.0
+    # the config adapter read it, which needed package-schema 2 (compiler ADR 0037).
     assert outcome.problems == (
-        "manipulator: the package needs package-schema 2, neptune-ledger locks 1.0.0",
         "quadruped: the package needs package-schema 8, neptune-ledger locks 1.0.0",
     )
 
