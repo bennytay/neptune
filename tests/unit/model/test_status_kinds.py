@@ -1,4 +1,4 @@
-"""The status and safety-state kinds of schema version 9 (ADR 0071): shape, rules, JSON, schema."""
+"""The status and safety-state kinds of schema version 10 (ADR 0071): shape, rules, JSON, schema."""
 
 from dataclasses import replace
 from typing import Any, Final
@@ -162,9 +162,10 @@ def test_a_newer_or_older_record_is_refused_by_its_version(record: Any, read: An
         read({**record.to_json(), "schema_version": STATUS_SINCE - 1})
 
 
-def test_a_package_with_status_records_is_a_version_9_package() -> None:
-    assert STATUS_SINCE == SCHEMA_VERSION == 9
-    assert set(kinds_at(9)) - set(kinds_at(8)) == {"safety_state", "status_report"}
+def test_a_package_with_status_records_is_a_version_10_package() -> None:
+    assert STATUS_SINCE == 10
+    added = set(kinds_at(STATUS_SINCE)) - set(kinds_at(STATUS_SINCE - 1))
+    assert added == {"safety_state", "status_report"}
     assert package_version(["run", "stream"]) == 1
     assert package_version(["stream", "status_report"]) == STATUS_SINCE
 

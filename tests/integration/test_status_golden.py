@@ -13,6 +13,7 @@ from typing import Final
 
 import pytest
 
+from neptune.model.status import STATUS_SINCE
 from neptune.store.package import read_files
 
 pytestmark = pytest.mark.integration
@@ -78,4 +79,4 @@ def test_every_package_reads_back_and_names_its_reader() -> None:
         (transform,) = package.receipt.transforms
         assert transform.adapter_id == readers[stem]
         assert transform.adapter_version == versions[readers[stem]]
-        assert package.manifest.version == 9
+        assert package.manifest.version == STATUS_SINCE
