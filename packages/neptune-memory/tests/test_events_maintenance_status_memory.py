@@ -68,6 +68,7 @@ def test_a_work_order_is_a_maintenance_event_with_one_event_per_action() -> None
     assert main["stated_cause"] == {"Finger pads worn; wrist camera bracket loose"}
     assert main["involves"] == {"cmms.asset:ARM-3A", "serial:FS-0291", "serial:FS-0340"}
     assert main["at_site"] == {"cmms.site:CELL-3"}
+    assert main["has_name"] == {"WO-26-0911"}  # its declared number, verbatim (ADR 0026)
     assert "declared_kind" not in main  # the record states no kind of its own
     actions = [facts(result, node(WORK_ORDER, "actions", i)) for i in range(4)]
     assert [a["has_description"] for a in actions] == [
@@ -77,6 +78,7 @@ def test_a_work_order_is_a_maintenance_event_with_one_event_per_action() -> None
         {"Hand-eye recalibration deferred: ChArUco board out for repair"},
     ]
     assert all(a["involves"] == {"cmms.asset:ARM-3A"} for a in actions)
+    assert all("has_name" not in a for a in actions)
     claims = [c for c in result.claims if c.subject.node_id.startswith(node(WORK_ORDER).node_id)]
     assert {c.assertion_kind.value for c in claims} == {"stated"}  # type: ignore[union-attr]
     # Each action is cited at its own span of the "Work Performed" cell.

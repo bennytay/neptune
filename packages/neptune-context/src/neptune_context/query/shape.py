@@ -33,6 +33,7 @@ from neptune_context.query.model import (
     Budget,
     CivilTime,
     ClockBridge,
+    CompareRuns,
     Direction,
     DomainClock,
     During,
@@ -217,6 +218,9 @@ class _Shape:
                 at = f"/explain/{index}"
                 if isinstance(item, Why):
                     self.str_(item.claim_id, f"{at}/claim_id")
+                elif isinstance(item, CompareRuns):
+                    self.subject(item.before, f"{at}/before")
+                    self.subject(item.after, f"{at}/after")
                 else:  # a Diff; anything else has no canonical JSON and is refused before this
                     self.subject(item.subject, f"{at}/subject")
                     self.point(item.before, f"{at}/before")

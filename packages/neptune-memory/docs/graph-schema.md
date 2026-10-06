@@ -326,7 +326,7 @@ def test_graph_schema_contract(check):
     `record:<rec id>` (a timeline entry `record:<rec id>/timeline/<i>`). Each event comes from an
     `incident_record`, an `intervention`, a `maintenance_event` (each action it lists is its own event,
     `record:<rec id>/actions/<i>`), a `status_report` (ADR 0025), or a row of a table the event consolidator's
-    config declares. Every
+    config declares. A lifecycle event's one declared number is its `has_name` (ADR 0026). Every
     claim about an event holds over its time as declared (an instant is `[t, t + 1 tick)`), and again on each
     clock a stated `clock_mapping` reaches directly, citing that mapping. `event_kind` is set only through a
     declared vendor mapping. `co_occurs_within` links two events from different sources, one claim each way, and

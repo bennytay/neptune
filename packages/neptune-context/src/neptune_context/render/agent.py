@@ -1092,7 +1092,9 @@ _NEXT: Final = {
 
 
 def _entity(entity: Entity) -> str:
-    return f"{entity.kind} {quote(entity.declared_id)}"
+    names = [n for n in (entity.label, *entity.aliases) if n is not None]
+    named = f" named {', '.join(quote(n) for n in names)}" if names else ""
+    return f"{entity.kind} {quote(entity.declared_id)}{named}"
 
 
 def _mention(mention: Mention) -> str:

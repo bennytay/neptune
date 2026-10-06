@@ -1,0 +1,30 @@
+{
+  "as_of": 4,
+  "budget": {
+    "items": 10
+  },
+  "clock_bridges": [],
+  "explain": [
+    {
+      "after": 2,
+      "before": 1,
+      "kind": "diff",
+      "subject": {
+        "declared_id": "asset-tag:AMR-9",
+        "kind": "machine",
+        "same_as_depth": 0
+      }
+    }
+  ],
+  "frame_bridges": [],
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [],
+  "subjects": [
+    {
+      "declared_id": "asset-tag:AMR-9",
+      "kind": "machine",
+      "same_as_depth": 0
+    }
+  ]
+}
