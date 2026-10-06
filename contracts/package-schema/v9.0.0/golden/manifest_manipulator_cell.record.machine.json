@@ -1,0 +1,66 @@
+{
+  "id": "rec:sha256:05ed32acdbee844ade4d0ed5b468f7433aae18efa979bdaf164a84d90ddfa1eb",
+  "identifiers": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "json_pointer",
+              "pointer": "/machines/0/id"
+            }
+          ],
+          "source": "sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"
+        },
+        "transform": "rec:sha256:23927b89c269692d44bf9db26bf5c432a34c9d9b28e3c9d1988284808a9b49b1"
+      },
+      "value": {
+        "namespace": "manifest",
+        "value": "ur5e-cell-3"
+      }
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "json_pointer",
+              "pointer": "/machines/0/aliases/serial"
+            }
+          ],
+          "source": "sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"
+        },
+        "transform": "rec:sha256:23927b89c269692d44bf9db26bf5c432a34c9d9b28e3c9d1988284808a9b49b1"
+      },
+      "value": {
+        "namespace": "serial",
+        "value": "20235400123"
+      }
+    }
+  ],
+  "kind": "machine",
+  "manufacturer": {
+    "knowledge": "not_covered"
+  },
+  "model": {
+    "knowledge": "not_covered"
+  },
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "json_pointer",
+          "pointer": "/machines/0"
+        }
+      ],
+      "source": "sha256:d5e2fadf957ede8012d1e334b8ef0b19801b9dcd6f9da6ae559761f5dc9fff1c"
+    },
+    "transform": "rec:sha256:23927b89c269692d44bf9db26bf5c432a34c9d9b28e3c9d1988284808a9b49b1"
+  },
+  "schema_version": 1
+}

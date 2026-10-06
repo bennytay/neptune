@@ -277,7 +277,7 @@ def test_the_fleet_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> 
         "authorisation_envelope": 4,
         "change_record": 6,
         "incident_record": 2,
-        "maintenance_event": 12,
+        "maintenance_event": 13,  # the INSP work order too (ADR 0016 §5)
         "requalification_record": 2,
     }
     machines = {
@@ -303,7 +303,7 @@ def test_the_cell_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> N
         "change_record": 2,
         "commissioning_baseline": 1,
         "incident_record": 1,
-        "maintenance_event": 5,  # four work orders and the tool-change SOP
+        "maintenance_event": 6,  # five work orders (one INSP) and the tool-change SOP
         "requalification_record": 3,
         "risk_assessment": 1,
     }

@@ -1,0 +1,77 @@
+{
+  "cells": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 6,
+              "offset": 319
+            }
+          ],
+          "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+        },
+        "transform": "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d"
+      },
+      "value": "ver_sw"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 8,
+              "offset": 310
+            }
+          ],
+          "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+        },
+        "transform": "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d"
+      },
+      "value": "char[40]"
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 40,
+              "offset": 325
+            }
+          ],
+          "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+        },
+        "transform": "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d"
+      },
+      "value": "2a7d3f1ce8b5f0a9d61c2e7b4f8a3d5c6e9b1f07"
+    }
+  ],
+  "id": "rec:sha256:67e5d3d39e05addf87ebac55acf331793677d02b173cd7d7c36adbf89f0dfa91",
+  "kind": "structured_record",
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 59,
+          "offset": 306
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    },
+    "transform": "rec:sha256:ab61c0ceda33ef8e8279c9c440d34386c2ff8c6499630b05d21d1a87567ee21d"
+  },
+  "row": 2,
+  "schema_version": 1,
+  "table": "rec:sha256:472c2c3a5f68c6c76ae47aa480427819802aaf21d725034169ce8dfa68e6f98a"
+}

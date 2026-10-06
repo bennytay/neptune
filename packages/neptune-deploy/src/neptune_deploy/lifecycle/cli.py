@@ -7,13 +7,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from neptune.store.package import PackageError
+from neptune_deploy import eventlogs
 from neptune_deploy.lifecycle import (
     PRESETS,
+    TEMPLATE_PRESETS,
     MappingError,
     TemplateRegistry,
     load_mapping,
     map_package,
-    preset,
+    presets,
+    template_preset,
 )
 from neptune_deploy.packs import cli as pack_cli
 
@@ -51,8 +54,8 @@ def _parser() -> argparse.ArgumentParser:
         "--preset",
         action="append",
         default=[],
-        choices=PRESETS,
-        help="a shipped mapping file by name (repeatable)",
+        choices=sorted({*PRESETS, *eventlogs.PRESETS}),
+        help="a shipped mapping file by name, lifecycle or event log (repeatable)",
     )
     mapper.add_argument(
         "-t",
@@ -61,6 +64,25 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="a document template file, or a directory of them (repeatable)",
+    )
+    mapper.add_argument(
+        "-T",
+        "--template-preset",
+        action="append",
+        default=[],
+        choices=TEMPLATE_PRESETS,
+        help="a shipped document template by name (repeatable)",
+    )
+    mapper.add_argument(
+        "--source-zone",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("PRESET", "SOURCE", "ZONE"),
+        help=(
+            "the civil zone (an IANA name, or 'unstated') a site declares for one source a preset"
+            " maps, by the source's path in the package (repeatable; ADR 0017)"
+        ),
     )
     mapper.add_argument("-o", "--out", type=Path, required=True, help="where to write the package")
     pack_cli.add_parser(commands)
@@ -72,12 +94,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "pack":
         return pack_cli.run(args)
     try:
-        mappings = [load_mapping(path) for path in args.mapping]
-        mappings += [preset(name) for name in args.preset]
-        templates = TemplateRegistry.from_paths(args.template).templates()
-        if not mappings and not templates:
-            raise MappingError("name at least one --mapping, --preset or --template")
-        package = map_package(args.package, mappings, args.out, templates)
+        zones: dict[tuple[str, str], str] = {}
+        for name, source, zone in args.source_zone:
+            if zones.setdefault((name, source), zone) != zone:
+                raise MappingError(f"--source-zone gives {name} {source} two zones")
+        named, logs = presets(args.preset, zones)
+        mappings = [load_mapping(path) for path in args.mapping] + named
+        registry = TemplateRegistry.from_paths(args.template)
+        for name in dict.fromkeys(args.template_preset):
+            shipped = template_preset(name)
+            known = registry.get(shipped.id, shipped.version)
+            if known is None or known.sha256 != shipped.sha256:
+                registry.add(shipped)  # a different file under the same id and version is refused
+        templates = registry.templates()
+        if not mappings and not templates and not logs:
+            raise MappingError(
+                "name at least one --mapping, --preset, --template or --template-preset"
+            )
+        package = map_package(args.package, mappings, args.out, templates, event_logs=logs)
     except (MappingError, PackageError, OSError) as exc:
         sys.stderr.write(f"neptune-deploy map: {exc}\n")
         return 2 if isinstance(exc, MappingError) else 1

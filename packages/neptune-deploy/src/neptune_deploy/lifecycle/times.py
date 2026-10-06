@@ -13,8 +13,9 @@ between day-first and month-first: the mapping file says which. Reading:
 - with an offset, the text names an instant: POSIX ticks from 1970-01-01T00:00:00Z;
 - without one, ticks count from 1970-01-01T00:00:00 of the text's own civil clock, never moved to
   UTC (the zone the mapping declares is recorded, not applied);
-- a date alone counts days (resolution 86,400 s); a date-time counts seconds, or the fraction
-  ``%f`` states.
+- the resolution is the precision the text states (Deploy ADR 0016 §9): a date alone counts days
+  (86,400 s), a time to the minute counts minutes (60 s), a time to the second counts seconds, and
+  ``%f`` counts the fraction it states. ``14:32`` is never read as ``14:32:00`` to the second.
 """
 
 import re
@@ -37,6 +38,7 @@ _DIRECTIVES: Final = {
 _NEEDS: Final = {"M": "H", "H": "M", "S": "M", "f": "S", "z": "H"}
 _EPOCH: Final = date(1970, 1, 1).toordinal()
 DAY: Final = Fraction(86400)
+MINUTE: Final = Fraction(60)
 MAX_TEXT: Final = 64
 
 
@@ -112,15 +114,19 @@ def _reading(parts: dict[str, str | None]) -> Reading | None:
         clock = time(int(parts["H"]), int(parts["M"] or 0), int(parts["S"] or 0))
     except ValueError:
         return None
-    seconds = days * 86400 + clock.hour * 3600 + clock.minute * 60 + clock.second
-    digits = parts["f"] or ""
-    scale = 10 ** len(digits)
-    ticks = seconds * scale + (int(digits) if digits else 0)
     offset = parts["z"]
+    shift = 0  # the stated offset, in minutes
     if offset is not None and offset != "Z":
         sign = -1 if offset[0] == "-" else 1
         hours, minutes = int(offset[1:3]), int(offset[-2:])
         if hours > 23 or minutes > 59:
             return None
-        ticks -= sign * (hours * 3600 + minutes * 60) * scale
-    return Reading(ticks, Fraction(1, scale), instant=offset is not None)
+        shift = sign * (hours * 60 + minutes)
+    instant = offset is not None
+    minutes_of = days * 1440 + clock.hour * 60 + clock.minute - shift
+    if parts["S"] is None:
+        return Reading(minutes_of, MINUTE, instant)
+    digits = parts["f"] or ""
+    scale = 10 ** len(digits)
+    ticks = (minutes_of * 60 + clock.second) * scale + (int(digits) if digits else 0)
+    return Reading(ticks, Fraction(1, scale), instant)

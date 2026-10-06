@@ -1,0 +1,32 @@
+{
+  "byte_order_mark": false,
+  "comments": [],
+  "digest": "sha256:c1c7579325bb549a71eb0ebbfc641e012e275d6f023399fad261aa7e9410620a",
+  "encoding": "utf-8",
+  "format": "yaml",
+  "format_version": {
+    "knowledge": "unknown"
+  },
+  "id": "rec:sha256:b1f8cfecf941230413667990f222303576dec6adbbdbb33d0385dbdc0227745a",
+  "kind": "configuration_snapshot",
+  "line_endings": "lf",
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "index": 0,
+          "kind": "config:document"
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": ""
+        }
+      ],
+      "source": "sha256:a9a0efc707fbca842362a234520211aa837daf147496a617bc487411e0f65518"
+    },
+    "transform": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+  },
+  "schema_version": 2,
+  "values": 21
+}
