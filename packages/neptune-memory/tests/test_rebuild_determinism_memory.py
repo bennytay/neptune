@@ -62,6 +62,7 @@ CONSOLIDATORS: Final = (
     "memory.calibration",
     "memory.configuration",
     "memory.coverage",
+    "memory.declared",
     "memory.episodes",
     "memory.events",
     "memory.identity",
@@ -117,10 +118,19 @@ def test_every_registered_consolidator_emits_over_the_archetype_ledger() -> None
         "memory.events",
         "memory.identity",
         "memory.runs",
+        "memory.declared",
         "memory.episodes",
         "memory.time",
     ]
-    assert all(r.claims for r in run.consolidations)
+    # The stand-in Ledger answers no thread queries, so no snapshot names a configuration node
+    # (ADR 0024) and no run is declared by name: the declared consolidator says so and claims
+    # nothing. Every other consolidator emits.
+    declared = next(
+        r for r in run.consolidations if r.transform.consolidator_id == "memory.declared"
+    )
+    assert not declared.claims
+    assert [f.code for f in declared.findings] == ["declared.unthreaded"]
+    assert all(r.claims for r in run.consolidations if r is not declared)
     assert not [
         f.code
         for r in run.consolidations
@@ -547,14 +557,16 @@ def test_a_consolidator_that_crashes_withdraws_nothing_and_its_readers_do_not_ru
     run = consolidate(ledger(2), crashing, 2)
     by_id = {r.transform.consolidator_id: r for r in run.consolidations}
     assert [f.code for f in by_id["memory.runs"].findings] == ["consolidate.failed"]
-    assert [f.code for f in by_id["memory.episodes"].findings] == ["consolidate.dependency_failed"]
+    readers = ("memory.declared", "memory.episodes")  # both read the run consolidator's claims
+    for reader in readers:
+        assert [f.code for f in by_id[reader].findings] == ["consolidate.dependency_failed"]
     entries = {e.transform["consolidator_id"]: e for e in run.snapshot.consolidators}
-    assert not entries["memory.runs"].complete and not entries["memory.episodes"].complete
+    assert not any(entries[c].complete for c in ("memory.runs", *readers))
     assert entries["memory.identity"].complete
     second = extend(first, run)
     assert {b.consolidator_id for b in second.builds if b.recorded_at == 2} == set(
         CONSOLIDATORS
-    ) - {"memory.runs", "memory.episodes"}
+    ) - {"memory.runs", *readers}
     held = {
         c.id
         for c in as_of(first.resolution, ledger_tx(1)).claims
