@@ -28,5 +28,6 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0019](0019-events-in-identity-and-machine-scoped-configuration-changes.md) | Events in identity, and configuration changes scoped to a machine | Accepted |
 | [0020](0020-runs-read-the-compilers-run-declaration.md) | The run consolidator reads the compiler's run_declaration | Accepted |
 | [0021](0021-a-machine-records-declared-ids-are-same-as.md) | A machine record's declared ids are same_as | Accepted |
-| [0022](0022-pinned-configuration-snapshots-name-their-anchored-configuration.md) | Pinned configuration snapshots name their anchored configuration | Accepted (transitional, until the Ledger threads `configuration_snapshot`) |
+| [0022](0022-pinned-configuration-snapshots-name-their-anchored-configuration.md) | Pinned configuration snapshots name their anchored configuration | Superseded by 0024 (the Ledger threads snapshots, Ledger ADR 0017) |
 | [0023](0023-event-table-rows-declare-ids-in-their-at-id-column.md) | Event table rows declare their ids in their @id column | Accepted |
+| [0024](0024-snapshot-configurations-come-from-the-ledgers-threads.md) | Snapshot configurations come from the Ledger's threads | Accepted |

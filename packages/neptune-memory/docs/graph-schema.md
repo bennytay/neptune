@@ -275,7 +275,7 @@ def test_graph_schema_contract(check):
 12. **Configuration is never guessed.** `memory.configuration` ([ADR 0010](adr/0010-configuration-lineage-consolidator.md))
     places configurations on machines only from lifecycle records, on each record's own clock, and on runs only from
     the compiler's snapshot bindings. A bound snapshot's configuration is the anchored configuration thread its
-    evidence keys, a pinned `configuration_snapshot` included ([ADR 0022](adr/0022-pinned-configuration-snapshots-name-their-anchored-configuration.md)).
+    evidence keys, a pinned `configuration_snapshot` included (Ledger ADR 0017; [ADR 0024](adr/0024-snapshot-configurations-come-from-the-ledgers-threads.md)).
     Where the evidence states none, the claim is `configuration_unknown`, never the
     nearest configuration in time; where records disagree, every reading is a `configuration_candidate`.
     Configuration nodes are shared by every machine that names them, so a change is the machine's own: two

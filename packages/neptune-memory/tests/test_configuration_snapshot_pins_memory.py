@@ -1,7 +1,7 @@
-"""A run's pinned configuration snapshot is its configuration (ADR 0022, root ADR 0072).
+"""A run's pinned configuration snapshot is its configuration (ADR 0022, ADR 0024, root ADR 0072).
 
-The Ledger threads no ``configuration_snapshot`` (Ledger ADR 0003 §2), so before ADR 0022 every
-run-sheet pin to a parameter document was ``configuration_unknown``. The packages are the
+The Ledger threads each ``configuration_snapshot`` on its own evidence (Ledger ADR 0017), so a
+run-sheet pin to a parameter document names that thread's configuration node. The packages are the
 compiler's manifest goldens (``tests/golden/manifest/``): three embodiments ingested under a
 ``neptune.yaml`` with run-sheet pins, so every ``snapshot_binding`` here is the compiler's own.
 Calibration and hardware pins use the compiler's record classes. Nothing is hand-written JSON.
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 
 from memory_calibration_records import calibration
-from memory_catalog_threads import anchored, answers, catalog, package_id, subject, thread_id
+from memory_catalog_threads import anchored, catalog, package_id, thread_id
 from memory_configuration_records import binding, hardware, run, run_thread
 from memory_identity_records import civil_domain
 from neptune.model.ids import ExternalObjectRef, LogicalId
@@ -25,7 +25,7 @@ from neptune.model.time import Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
 from neptune_memory.consolidate.configuration import ConfigurationLineageConsolidator
 from neptune_memory.consolidate.runs import run_node
-from neptune_memory.ledger import StubLedger, ThreadsOf
+from neptune_memory.ledger import StubLedger
 from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -114,17 +114,22 @@ def test_runs_pinning_one_document_share_its_configuration() -> None:
 
 
 def test_the_node_is_the_one_a_ledger_threading_snapshots_would_answer() -> None:
-    """If the Ledger's table gains a ``configuration_snapshot`` row, the catalog answers the
-    snapshot's anchored thread, and every claim is byte-for-byte the same: no lineage break."""
+    """The Ledger threads each snapshot (Ledger ADR 0017): the run's configuration is the node of
+    the thread the catalog answers, ``thread:<thread id>``, the id ADR 0022 computed (ADR 0024)."""
     records = package("manipulator_cell")
-    pid = package_id("manipulator_cell")
-    held = answers({pid: records})
-    for snapshot in kind(records, "configuration_snapshot"):
-        rid = str(snapshot["id"])
-        member = subject(anchored("configuration", snapshot), pid)
-        held[rid] = ThreadsOf(rid, "found", (member,), ())
-    threaded = StubLedger({pid: (1, records)}, "1.7.0", held)
-    assert consolidate(threaded).claims == consolidate(catalog({pid: records})).claims
+    ledger = catalog({package_id("manipulator_cell"): records})
+    result = consolidate(ledger)
+    for claim in of(result, "configuration_active_during"):
+        (snapshot_id,) = [r for r in claim.provenance.records if r in _snapshots(records)]
+        answer = ledger.threads_of(snapshot_id)
+        assert answer is not None
+        (member,) = [m for m in answer.memberships if m.key.kind == "configuration"]
+        assert claim.object == NodeRef(NodeType.CONFIGURATION, f"thread:{member.thread_id}")
+        assert claim.object == configuration_of(by_id(records)[snapshot_id])
+
+
+def _snapshots(records: Sequence[Record]) -> set[object]:
+    return {r["id"] for r in kind(records, "configuration_snapshot")}
 
 
 # --- Every other pin kind, unchanged -------------------------------------------------------------
@@ -196,9 +201,8 @@ def test_a_pinned_snapshot_the_catalog_answers_unknown_record_stays_unknown() ->
     ledger = catalog({package_id("manipulator_cell"): records}, without=[str(snapshot["id"])])
     result = consolidate(ledger)
     _unknown_citing(result, pin)
-    (finding,) = [f for f in result.findings if f.code == "configuration.uncatalogued_record"]
+    (finding,) = [f for f in result.findings if f.code == "configuration.unthreaded_id"]
     assert set(finding.records) == {pin["id"], snapshot["id"]}
-    assert "configuration.unthreaded_id" not in codes(result)
 
 
 def test_a_pin_naming_a_record_of_another_kind_stays_unknown() -> None:
