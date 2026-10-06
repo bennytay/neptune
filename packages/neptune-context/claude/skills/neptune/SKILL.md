@@ -30,11 +30,20 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      "include_inferred": true,
      "query": {
        "budget": {"items": 50, "tokens": 20000},
-       "subjects": [{"kind": "machine", "declared_id": "asset-tag:ARM-3A", "same_as_depth": 1}],
+       "subjects": [
+         {"kind": "machine", "declared_id": "servicenow.ci:ARM-3A"},
+         {"kind": "machine", "declared_id": "cmms.asset:ARM-3A"},
+         {"kind": "machine", "declared_id": "manifest:ARM-3A"}
+       ],
        "graph": {"hops": 2, "direction": "both", "predicates": "any"}
      }
    }
    ```
+
+   One machine can be declared under several source systems' names (above: ServiceNow, the CMMS,
+   the run manifests) with no stated link between them. Name each one you want answered; never
+   assume two names are the same machine. A claim that is not in the answer is not in Memory: if
+   no claim links an incident to the machine, say so, and query the incident's own node.
 
    Use `include_inferred: false` when the user wants evidence only, or when an inference could
    drive a safety decision.
@@ -48,7 +57,7 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 - Each fact is one sentence ending with citations: `[I6]` is the item, `[E6][E7]` its sources.
   The `Items:` footer maps `I6` to the item id (and a claim's id); the `Evidence:` footer maps
   `E6` to the exact source. **Every fact you repeat must keep its keys**, for example
-  "ARM-3A ran configuration cfg-c3-1.5 [I6][E6]". Never state anything the answer does not hold.
+  "ServiceNow records ARM-3A's configuration as `TCP z=145.5 mm` [I6][E6]". Never state anything the answer does not hold.
 - `neptune_why` answers an indented outline, root claim first: `Corroborated by`, `Conflicts with
   (resolver finding ...)` and `Alternative reading` lines, each citing its claim and sources. Say
   "Memory holds this, and these sources agree or conflict", never a cause: Neptune states
@@ -70,14 +79,16 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 
 ## Running the server
 
-The server answers over a Memory graph document (JSON). Point `NEPTUNE_MEMORY_GRAPH` at one and
-add the server to Claude Code from the repository root:
+The server answers over a Memory graph document: JSON, or gzipped JSON when the name ends `.gz`
+(one gzip member; the size cap applies to the decompressed bytes). For the Demo v1 two-site corpus
+serve Memory's pipeline-built snapshot, `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`,
+from the repository root:
 
 ```
-claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "$NEPTUNE_MEMORY_GRAPH"
+claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "${NEPTUNE_MEMORY_GRAPH:-packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz}"
 ```
 
-or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json`. For the Demo v1
-two-site corpus, write the snapshot first:
-`uv run --all-packages python packages/neptune-context/scripts/export_demo_graph.py "$NEPTUNE_MEMORY_GRAPH"`.
+or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json`. Set `NEPTUNE_MEMORY_GRAPH`
+to serve another graph document instead. `scripts/export_demo_graph.py` checks that the server can
+read the snapshot and, given a target, copies it there.
 Add `--planner anthropic` (the `anthropic` extra and an API key) to let `neptune_plan` call a model.

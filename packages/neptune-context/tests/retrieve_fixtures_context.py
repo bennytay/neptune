@@ -400,51 +400,34 @@ class FakeCatalog:
 
 # --- The Demo v1 corpus snapshot -------------------------------------------------------------
 
-DEMO_SNAPSHOT: Final = (
-    ROOT
-    / "packages"
-    / "neptune-deploy"
-    / "tests"
-    / "fixtures"
-    / "packs"
-    / "acceptance_corpus.graph.json"
+# Memory's pipeline-built graph of the acceptance corpus, frozen here by
+# ``scripts/freeze_demo_graph.py`` (a byte copy checked against the pinned codec). Goldens read
+# this copy, never Memory's live file: Memory regenerates that one as the corpus grows.
+DEMO_SNAPSHOT: Final = Path(__file__).resolve().parent / "golden" / "demo-graph-2.0.0.json.gz"
+MEMORY_SNAPSHOT: Final = (
+    ROOT / "packages" / "neptune-memory" / "tests" / "fixtures" / "acceptance_corpus.graph.json.gz"
 )
 
 
 def demo_document() -> GraphDocument:
-    """NORMALISING A NON-CONFORMANT DEPLOY SNAPSHOT.
+    """The frozen Demo v1 snapshot (``DEMO_SNAPSHOT``), read by the server's own reader and
+    so by Memory's strict codec: a graph-schema 2.0.0 document, used as written."""
+    from neptune_context.engine import read_graph_document
 
-    Deploy's frozen Memory graph of the acceptance corpus (Platform ADR 0007; Deploy ADR 0014),
-    with each claim id recomputed under Memory's claim-id scheme and the generation recomputed
-    from its resolver configuration, then read by Memory's strict codec.
+    return read_graph_document(DEMO_SNAPSHOT)
 
-    The snapshot is hand-written in graph-schema's shape (Memory cannot build it from the corpus
-    yet): its stored ids follow another scheme and some provenance record lists are unsorted, so
-    the ids are recomputed and the record lists sorted; every other part of every claim is used as
-    written. Its calibration-drift claims (``delta`` values) are inside the 2.0.0 pin.
-    """
-    from neptune_memory.schema.claim import CLAIM_ID_SCHEME
-    from neptune_memory.schema.codec import graph_from_json
 
-    from neptune.identity.canonical_json import dumps
-
-    data = json.loads(DEMO_SNAPSHOT.read_bytes())
-    # Normalising a non-conformant Deploy snapshot: the file is not a valid Memory graph
-    # document (the coordinator raised it with Deploy and Platform). Each fix-up below exists only
-    # so Memory's strict codec accepts it; drop them when the snapshot conforms.
-    # Its two ``drift`` claims hold a ``delta`` value and its calibration predicates
-    # (``calibrated_with``, ``calibrated_by``) are graph-schema 2.0.0 vocabulary, inside Context's
-    # pin since ADR 0012: they are read and carried as written.
-    keys = ("assertion_kind", "confidence", "object", "predicate", "provenance", "subject", "valid")
-    renamed: dict[str, str] = {}
-    for item in data["claims"]:
-        provenance = item["provenance"]
-        provenance["records"] = sorted(set(provenance["records"]))  # Memory: unique and sorted
-        payload: Any = {"claim": {k: item[k] for k in keys}, "scheme": CLAIM_ID_SCHEME}
-        renamed[item["id"]] = "claim:" + content_id(dumps(payload))
-    for item in data["claims"]:
-        item["id"] = renamed[item["id"]]
-        item["supersedes"] = sorted(renamed[i] for i in item["supersedes"])
-    data["claims"].sort(key=lambda c: (c["recorded_at"], c["id"]))
-    data["generation"] = config_hash(data["resolver_config"])
-    return graph_from_json(data)
+# What the snapshot calls the arm ``ARM-3A`` and its incident. Memory states no identity link
+# between the three names (one per source system) and no link from the incident to the arm, and
+# a content-addressed node is not a declared name, so a planner cannot resolve the incident:
+# queries about it name its node.
+DEMO_ARM: Final = ("machine", "servicenow.ci:ARM-3A")
+DEMO_ARM_NAMES: Final = (
+    DEMO_ARM,
+    ("machine", "cmms.asset:ARM-3A"),
+    ("machine", "manifest:ARM-3A"),
+)
+DEMO_INCIDENT: Final = (
+    "event",
+    "record:rec:sha256:9564b327cb9e51cee67926cba43467d4eefc51f6ee75092f8e7f34b6085847f2",
+)

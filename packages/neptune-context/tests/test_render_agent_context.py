@@ -155,7 +155,7 @@ def demo_answer() -> ContextPacket:
     query = Query(
         include_inferred=True,
         budget=Budget(items=60, tokens=24_000),
-        subjects=frozenset({Subject("machine", "asset-tag:ARM-3A", same_as_depth=1)}),
+        subjects=frozenset(Subject(*n) for n in (*F.DEMO_ARM_NAMES, F.DEMO_INCIDENT)),
         graph=GraphClause(None, 2, Direction.BOTH),
     )
     return Client(LocalEngine(ReferenceReader(F.demo_document()))).query(query)
@@ -163,8 +163,11 @@ def demo_answer() -> ContextPacket:
 
 def test_the_demo_answer_cites_every_fact() -> None:
     text = check(demo_answer())
-    assert 'has_configuration configuration "cfg:cfg-c3-1.5"' in text
-    assert "INFERRED (model " in text
+    assert 'has_configuration configuration "servicenow.u_after:TCP z=145.5 mm"' in text
+    assert 'has_description text "Operator reached into the pallet gate' in text
+    # The arm's neighbourhood holds no inferred claim (Memory's clock fits sit on clock nodes);
+    # how an inferred item reads is the persona goldens' and the hostile document's to prove.
+    assert "INFERRED" not in text.split("Facts:", 1)[1]
 
 
 @cache
