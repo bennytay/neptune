@@ -1,8 +1,9 @@
-"""Thread membership of one package's records (Ledger ADR 0003 §2, ADR 0010 §2).
+"""Thread membership of one package's records (Ledger ADR 0003 §2, ADR 0010 §2, ADR 0017).
 
 A pure function of the package's verified record lines and this Ledger version: which threads
 each record opens or joins, in which role, and which threads an ``Ambiguous`` field names. The
-field table of ADR 0003 §2 is the only source of membership; nothing is matched by name, content
+field table of ADR 0003 §2, with ADR 0017's ``configuration_snapshot`` row, is the only source of
+membership; nothing is matched by name, content
 or similarity, and no two keys are ever joined. ``part_of`` follows a tier-2 reference only to a
 record of the same package, because tier-2 ids are lineage-scoped.
 """
@@ -23,11 +24,13 @@ from neptune_ledger.threads.alignment import (
     mapping_rows,
 )
 
-# The record kinds ADR 0003 §2's table reads; every other kind is in no thread.
+# The record kinds ADR 0003 §2's table reads, with ADR 0017's ``configuration_snapshot`` row;
+# every other kind is in no thread (ADR 0017 §3 decides each).
 THREAD_RECORD_KINDS: Final = frozenset(
     {
         "asset",
         "calibration",
+        "configuration_snapshot",
         "document_block",
         "document_record",
         "hardware_component",
@@ -40,6 +43,11 @@ THREAD_RECORD_KINDS: Final = frozenset(
         "stream",
         "video",
     }
+)
+# Kinds that open the anchored configuration thread their own record-level evidence keys
+# (ADR 0003 §2; ``configuration_snapshot`` from ADR 0017 §1).
+CONFIGURATION_KINDS: Final = frozenset(
+    {"calibration", "configuration_snapshot", "hardware_configuration", "software_configuration"}
 )
 # Kinds whose thread a later record joins ``part_of`` by tier-2 id (ADR 0003 §2): the referencing
 # field, the referenced kind, and the thread kind of the referenced record.
@@ -274,12 +282,12 @@ def _declared(kind: str, record: Any) -> Iterator[tuple[str, str, str, Any]]:
 
 
 def _anchored(kind: str, record: Any) -> Iterator[str]:
-    """The anchored thread kinds a record opens as its ``subject`` (ADR 0003 §2)."""
+    """The anchored thread kinds a record opens as its ``subject`` (ADR 0003 §2, ADR 0017 §1)."""
     if kind == "run" and _grounded_value(record.get("logical_id"), record) is None:
         yield "run"
     elif kind == "stream":
         yield "stream"
-    elif kind in ("hardware_configuration", "software_configuration", "calibration"):
+    elif kind in CONFIGURATION_KINDS:
         yield "configuration"
     elif kind == "document_record":
         yield "document"

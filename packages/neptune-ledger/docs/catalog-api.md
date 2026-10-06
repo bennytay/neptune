@@ -2,7 +2,9 @@
 
 The contract that Memory, Context, Deploy and Learn build against. This page is the reference for
 each call. The decisions behind it are in [ADR 0002](adr/0002-catalog-data-model.md) (tables,
-registration), [ADR 0003](adr/0003-entity-threads-and-the-lineage-current-view.md) (threads),
+registration), [ADR 0003](adr/0003-entity-threads-and-the-lineage-current-view.md) (threads;
+[ADR 0017](adr/0017-configuration-snapshots-open-their-anchored-configuration-thread.md) adds
+`configuration_snapshot` to the `configuration` row and decides every other unthreaded kind),
 [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md) (names, errors, versioning) and
 the L1 gate's amendments, [ADR 0005](adr/0005-l1-gate-catalog-data-model-amendments.md) (record
 bodies, clock checks, collation, scale) and
