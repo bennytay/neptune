@@ -284,6 +284,49 @@
                 ],
                 "description": "An id; a number or boolean here is read as text, exactly as written."
               },
+              "snapshots": {
+                "description": "The configuration, software, hardware or calibration files the run ran with: each a root-relative path or a content id.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "required": [
+                        "path"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "content"
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "content": {
+                      "description": "The file's content id, at any path.",
+                      "pattern": "^sha256:[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "path": {
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
+                          "type": "string"
+                        },
+                        {
+                          "type": [
+                            "number",
+                            "boolean"
+                          ]
+                        }
+                      ],
+                      "description": "Root-relative path of one file."
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "software": {
                 "items": {
                   "anyOf": [

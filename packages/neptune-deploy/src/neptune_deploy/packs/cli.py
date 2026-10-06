@@ -28,6 +28,15 @@ def add_parser(commands: "argparse._SubParsersAction[Any]") -> None:
     parser.add_argument(
         "--snapshot", type=Path, required=True, help="the Memory graph document the spec names"
     )
+    parser.add_argument(
+        "--snapshot-schema-version",
+        metavar="X.Y.Z",
+        help=(
+            "the graph-schema version Memory built the snapshot under (the document names only"
+            " the major). A newer minor of the pinned major has its unknown keys reported as"
+            " snapshot_key_unread, not refused (ADR 0015); omitted, any unknown key is refused"
+        ),
+    )
     parser.add_argument("-o", "--out", type=Path, required=True, help="where to write the pack")
 
 
@@ -51,7 +60,9 @@ def _check(path: Path, data: bytes) -> bool:
 def run(args: argparse.Namespace) -> int:
     try:
         spec = load_spec(_read(args.spec, MAX_SPEC_BYTES))
-        snapshot = load_snapshot(_read(args.snapshot, MAX_SNAPSHOT_BYTES))
+        snapshot = load_snapshot(
+            _read(args.snapshot, MAX_SNAPSHOT_BYTES), schema_version=args.snapshot_schema_version
+        )
         pack = compile_pack(spec, snapshot)
         documents = {
             "claims.json": render_claims(pack),

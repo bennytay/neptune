@@ -4,11 +4,17 @@ Safety by construction: only ``http`` and ``https`` URLs without credentials, qu
 bearer token is sent only over ``https`` or to a loopback host; redirects are never followed (a
 redirect would carry the token somewhere the caller did not name); responses are size-bounded and
 read strictly. A token is never part of ``repr``, an error message or a log line.
+
+``timeout`` is one deadline for the whole answer (ADR 0004 §4): connecting, sending, the status
+line and headers and the body all draw on the same remaining time, because every socket wait is
+given only what is left. A server that drips its headers one byte at a time is cut off like one
+that drips its body (MVL-147, from the MVL-110 review).
 """
 
 from __future__ import annotations
 
 import http.client
+import io
 import time
 import urllib.error
 import urllib.request
@@ -73,6 +79,105 @@ def _read(stream: Any, limit: int, deadline: float) -> bytes:
     return b"".join(chunks)
 
 
+class _Deadline:
+    """One point in time every socket wait of a request must finish by."""
+
+    def __init__(self, seconds: float) -> None:
+        self.at = time.monotonic() + seconds
+
+    def remaining(self) -> float:
+        left = self.at - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("the engine did not answer in time")
+        return left
+
+
+class _DeadlineReader(io.RawIOBase):
+    """The socket's receive side, each wait bounded by what is left of the deadline."""
+
+    def __init__(self, owner: _DeadlineSocket) -> None:
+        self._owner = owner
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        sock = self._owner.sock
+        sock.settimeout(self._owner.deadline.remaining())
+        return int(sock.recv_into(buffer))
+
+    def close(self) -> None:
+        if not self.closed:
+            super().close()
+            self._owner.release()
+
+
+class _DeadlineSocket:
+    """A connected socket whose reads and writes share one deadline. ``http.client`` reads the
+    status line, headers and body through ``makefile``; ``close`` is deferred until every file
+    made from it is closed, as ``socket.socket`` does for its own files."""
+
+    def __init__(self, sock: Any, deadline: _Deadline) -> None:
+        self.sock = sock
+        self.deadline = deadline
+        self._files = 0
+        self._closing = False
+
+    def makefile(self, mode: str = "rb", *args: Any, **kwargs: Any) -> io.BufferedReader:
+        if mode != "rb":
+            raise ValueError(f"only binary reads are supported, not {mode!r}")
+        self._files += 1
+        return io.BufferedReader(_DeadlineReader(self))
+
+    def sendall(self, data: Any, *args: Any) -> None:
+        self.sock.settimeout(self.deadline.remaining())
+        self.sock.sendall(data, *args)
+
+    def release(self) -> None:
+        self._files -= 1
+        if self._closing and self._files <= 0:
+            self.sock.close()
+
+    def close(self) -> None:
+        self._closing = True
+        if self._files <= 0:
+            self.sock.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.sock, name)
+
+
+def _bounded(base: type[http.client.HTTPConnection], deadline: _Deadline) -> Any:
+    class Bounded(base):  # type: ignore[valid-type,misc]
+        def connect(self) -> None:
+            self.timeout = deadline.remaining()  # the TCP connect (and TLS handshake) wait
+            super().connect()
+            self.sock: Any = _DeadlineSocket(self.sock, deadline)
+
+    return Bounded
+
+
+class _HttpHandler(urllib.request.HTTPHandler):
+    def __init__(self, deadline: _Deadline) -> None:
+        super().__init__()
+        self._deadline = deadline
+
+    def http_open(self, req: Any) -> Any:
+        return self.do_open(_bounded(http.client.HTTPConnection, self._deadline), req)
+
+
+class _HttpsHandler(urllib.request.HTTPSHandler):
+    def __init__(self, deadline: _Deadline) -> None:
+        super().__init__()
+        self._deadline = deadline
+
+    def https_open(self, req: Any) -> Any:
+        context = getattr(self, "_context", None)
+        return self.do_open(
+            _bounded(http.client.HTTPSConnection, self._deadline), req, context=context
+        )
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args: Any, **kwargs: Any) -> None:
         return None
@@ -113,9 +218,17 @@ class HttpEngine:
         self._base = _check_url(url, token is not None)
         self._token = token
         self._timeout = timeout
+
+    @staticmethod
+    def _opener(deadline: _Deadline) -> urllib.request.OpenerDirector:
         # No proxies from the environment: the caller named this engine, and a proxy would see a
-        # plaintext token sent to a loopback host.
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+        # plaintext token sent to a loopback host. Connections draw on the request's deadline.
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _NoRedirect,
+            _HttpHandler(deadline),
+            _HttpsHandler(deadline),
+        )
 
     def __repr__(self) -> str:
         return f"HttpEngine({self._base!r}, token={'set' if self._token else None})"
@@ -132,9 +245,10 @@ class HttpEngine:
         request = urllib.request.Request(
             self._base + path, data=body, headers=headers, method="POST"
         )
-        deadline = time.monotonic() + self._timeout
+        bound = _Deadline(self._timeout)
+        deadline = bound.at
         try:
-            with self._opener.open(request, timeout=self._timeout) as response:
+            with self._opener(bound).open(request, timeout=self._timeout) as response:
                 data = _read(response, wire.MAX_RESPONSE_BYTES, deadline)
         except urllib.error.HTTPError as error:
             with error:

@@ -29,8 +29,8 @@ flowchart LR
   MODEL -->|record kinds| MAP
   STORE -->|exported diagnostics tables| DIAG
   DIAG -->|new package of stated event rows| STORE
-  CON -->|graph-schema 1.2.0 snapshot| PACKS
-  PACKS -->|catalog-api 1.6.0 resolve requests| CON
+  CON -->|graph-schema 1.6.0 snapshot| PACKS
+  PACKS -->|catalog-api 1.7.0 resolve requests| CON
   PACKS --> CONSOLE
 
   subgraph KEY[" "]

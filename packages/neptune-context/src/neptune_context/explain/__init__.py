@@ -1,4 +1,26 @@
-"""Explain: why an item is in a packet (channel, score parts, supporting claims and evidence).
+"""Explain (ADR 0010): why memory holds a claim, and what changed about a subject.
 
-Skeleton only (MVL-107). Explanations are derived from the retrieval trace, never recomputed.
+- ``explainer``: ``Explainer``, which answers a query's ``Why`` and ``Diff`` clauses for the
+  local engine: claim and evidence hits fused like any channel's, plus one trail per clause.
+- ``why`` / ``diff``: the two computations over Memory's snapshot (``run`` holds their shared
+  reads and admission rules).
+- ``history``: ``ClaimHistory``, claim versions by id, and ``IndexedReader``, Memory's
+  reference reader with that index.
+- ``markdown``: ``render_markdown``, the human rendering with console links (``links``).
+
+Trails name claims Memory holds and relations it states; nothing here infers a cause.
 """
+
+from neptune_context.explain.explainer import Explained, Explainer
+from neptune_context.explain.history import ClaimHistory, IndexedReader
+from neptune_context.explain.markdown import render_markdown
+from neptune_context.explain.run import Caps
+
+__all__ = [
+    "Caps",
+    "ClaimHistory",
+    "Explained",
+    "Explainer",
+    "IndexedReader",
+    "render_markdown",
+]

@@ -24,7 +24,18 @@ def test_graph_schema_v1_is_published_and_active() -> None:
     # 1.1.0: has_name, stream and document (ADR 0008); 1.2.0: configuration lineage (ADR 0010);
     # 1.3.0: run thread predicates (ADR 0009); 1.4.0: clocks and their mappings (ADR 0011);
     # 1.5.0: episode predicates (ADR 0012); 1.6.0: events (ADR 0013).
-    for published in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0"):
+    # 1.7.0: calibration history and the delta (ADR 0014); 1.8.0: coverage and health (ADR 0015).
+    for published in (
+        "1.0.0",
+        "1.1.0",
+        "1.2.0",
+        "1.3.0",
+        "1.4.0",
+        "1.5.0",
+        "1.6.0",
+        "1.7.0",
+        "1.8.0",
+    ):
         version = json.loads(
             (REGISTRY / f"v{published}" / "version.json").read_text(encoding="utf-8")
         )

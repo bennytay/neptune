@@ -23,10 +23,10 @@ TESTS = Path(__file__).resolve().parent
 # Golden digests of the fixture packs. A change here changes what every pack of these inputs
 # says: explain it in the PR, and raise COMPILER_VERSION when a pack's content changes.
 GOLDEN = {
-    "configuration.json": "sha256:31b62af1828e986eb4d6ac577d487dbd8580b798333f57893dcd4c649a7b9461",
-    "configuration.pdf": "sha256:159f72ea3d0bcef965342fd5ba9f258ab5df8f9336b6eac7b88db9388e0def3a",
-    "events.json": "sha256:32a6e162df8954b56831385f8cbc8eb5cda6f4a84a3c75cdf6e7fb3da78f1fec",
-    "events.pdf": "sha256:1cd6d05222a5f5b3f2037892642c155729da5f4923fa97bd1403f6b543e574d7",
+    "configuration.json": "sha256:d252081bf3975109698c1523676c4189fc8a26cb2b093a7fa7be2e8cf28b677d",
+    "configuration.pdf": "sha256:5651a6fdb7ff177eb2dc999fcbfd5018f34ed3d699e81f8eb71e1287bd0204cf",
+    "events.json": "sha256:2bbf41a1234bc34665d8ae5c79f3f2e432d70f2cb3ee547bbb5a7891e83b6015",
+    "events.pdf": "sha256:75fb3e70a47dbd095b958852ae2adb5082b17d266e911bdf69faf7956e7dbbf6",
 }
 
 

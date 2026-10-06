@@ -55,7 +55,7 @@ header).
 | [0044](0044-explain-dry-runs-inspect-and-return-a-bounded-typed-explanation.md) | Explain: the dry run inspects and returns a bounded, typed explanation | Accepted |
 | [0045](0045-rosbag2-adapter-metadata-sqlite3-reader-and-mcap-delegation.md) | rosbag2: one adapter for `metadata.yaml` and sqlite3 storage, MCAP left to the MCAP adapter, a SQLite reader over bytes | Accepted; amended by 0068 |
 | [0046](0046-ros1-bag-adapter-connections-as-streams-planning-from-the-index.md) | The ROS 1 bag adapter: connections as streams, planning from the index, the same Run and Stream as MCAP | Accepted; amended by 0068 |
-| [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted |
+| [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted; amended by 0072 |
 | [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
 | [0049](0049-stream-introspection-declared-layouts-and-inferred-semantics.md) | Stream introspection: declared layouts and inferred semantics as derived tables | Accepted |
 | [0050](0050-alignment-record-contract-identity-links-clock-mappings-frame-and-run-bindings.md) | The alignment record contract: identity links, clock mappings, frame and run bindings | Accepted; amended by 0060 |
@@ -71,10 +71,11 @@ header).
 | [0061](0061-declared-civil-time-zones-and-list-states.md) | Declared civil time zones, and lists that can be blank | Accepted |
 | [0062](0062-assertion-records-human-assertions-as-stated-evidence.md) | Assertion records: human assertions, acceptances and retractions as stated evidence | Accepted |
 | [0063](0063-task-and-world-context-records-from-declared-structure.md) | Task and world context records from declared structure: a pass over parsed records | Accepted |
-| [0064](0064-snapshot-binding-stated-joins-nearest-session-candidates-and-explicit-gaps.md) | Snapshot binding: stated joins, nearest session candidates, explicit gaps | Accepted |
+| [0064](0064-snapshot-binding-stated-joins-nearest-session-candidates-and-explicit-gaps.md) | Snapshot binding: stated joins, nearest session candidates, explicit gaps | Accepted; amended by 0072 |
 | [0065](0065-streaming-package-write-bounded-spill-and-byte-identical-output.md) | Streaming package write: bounded spill, byte-identical output | Accepted |
 | [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |
 | [0067](0067-connector-sources-uri-dispatch-carried-revisions-and-a-job-spool.md) | Connector Sources: URI dispatch, revisions carried by token, and a job spool | Accepted |
 | [0068](0068-payload-decoding-and-frame-alignment-run-trees-links-and-comparable-references.md) | Payload decoding and frame alignment: declared definitions into columns, run trees, links and comparable references | Accepted |
 | [0069](0069-salvage-by-chunk-declared-extents-and-loss-accounting.md) | Salvage by chunk: a lost chunk, declared extents, and an exact account of what was lost | Accepted |
 | [0070](0070-bounded-crash-safe-package-io-atomic-writes-and-a-streaming-reader.md) | Bounded, crash-safe package I/O: atomic writes and a streaming reader | Accepted |
+| [0072](0072-manifest-declarations-as-stated-records-run-declarations-entities-and-snapshot-pins.md) | Manifest declarations as stated records: run declarations, entities and snapshot pins | Accepted |

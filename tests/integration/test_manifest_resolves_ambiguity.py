@@ -111,7 +111,13 @@ def test_a_generated_and_edited_manifest_resolves_every_ambiguity(tmp_path: Path
     assert first["findings"]["by_code"]["neptune.manifest.adapter_pinned"] == 1
 
     package = read_package(tmp_path / "first")
-    transforms = {r.adapter_id: r for r in package.records if isinstance(r, TransformRecord)}
+    # The manifest transform reads the manifest alone; its run declarations' transform (same id,
+    # with the adapters it read upstream, ADR 0072 §6) is another record.
+    transforms = {
+        r.adapter_id: r
+        for r in package.records
+        if isinstance(r, TransformRecord) and not (r.adapter_id == MANIFEST_ID and r.upstream)
+    }
     stated = transforms[MANIFEST_ID]
     assert stated.config["location"] == {"kind": "local", "path": "neptune.yaml"}
     sources = {s.location.key: s.content_id for s in package.receipt.sources}

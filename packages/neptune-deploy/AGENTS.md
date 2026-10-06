@@ -46,7 +46,7 @@ compliance engine, a safety case generator, a CMMS or a dashboard.
    `neptune.identity` and `neptune.adapters.contract`; no network, filesystem or subprocess. Each is
    registered under the `neptune.adapters` entry point and passes `neptune.adapters.conformance`.
 5. **Record kinds come from the compiler model.** A missing field is a compiler PR, never a Deploy type.
-   Deploy pins package schema 8 (`PACKAGE_SCHEMA_VERSION`, `docs/contracts.md`, `contracts/lock.toml`).
+   Deploy pins package schema 9 (`PACKAGE_SCHEMA_VERSION`, `docs/contracts.md`, `contracts/lock.toml`).
 
 ### Repo map (`src/neptune_deploy/`; subpackages appear as their issues land)
 

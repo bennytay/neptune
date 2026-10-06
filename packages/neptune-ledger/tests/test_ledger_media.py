@@ -9,6 +9,7 @@ source is a finding, never an exception.
 """
 
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -419,6 +420,31 @@ def test_a_snapshot_pins_what_a_hydration_returns(lake: Lake) -> None:
     assert lake.codes(frame1, "frame", snapshot=1) == ["unknown_artefact"]
     assert lake.codes(frame1, "frame", snapshot=3) == ["as_of_out_of_range"]
     assert lake.artefact(frame1, "frame", snapshot=2).snapshot == 2
+
+
+def test_writers_racing_to_create_the_table_all_land(tmp_path: Path) -> None:
+    # Writers that all find no table all create it; one create can replace another, and the
+    # replaced writer's artefact must still be stored, not reported stored and then missing.
+    def row(i: int) -> dict[str, Any]:
+        made = "sha256:" + hashlib.sha256(str(i).encode()).hexdigest()
+        return {
+            "artefact_id": made, "source": "sha256:" + "0" * 64, "locator": "[]",
+            "variant": "frame", "transform_id": "t", "transform": "{}",
+            "media_type": "image/png", "size": 1, "sha256": made, "metadata": "{}",
+        }  # fmt: skip
+
+    for table in range(6):
+        store = MediaStore(tmp_path / f"race-{table}", "acme")
+        start = threading.Barrier(8)
+
+        def put(i: int, store: MediaStore = store, start: threading.Barrier = start) -> str:
+            start.wait()
+            store.put(row(i), bytes([i]))
+            return str(row(i)["artefact_id"])
+
+        with ThreadPoolExecutor(8) as pool:
+            stored = list(pool.map(put, range(8)))
+        assert all(store.get(made) is not None for made in stored), f"table {table}"
 
 
 def test_concurrent_hydrations_all_land(lake: Lake) -> None:
