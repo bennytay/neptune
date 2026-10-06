@@ -1,6 +1,6 @@
 # 0022 — Pinned configuration snapshots name their anchored configuration
 
-- Status: Accepted (transitional, until the Ledger threads `configuration_snapshot`)
+- Status: Superseded by 0024 (the Ledger threads snapshots, Ledger ADR 0017)
 - Date: 2026-10-06
 - Issue: MVL-191
 
