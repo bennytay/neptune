@@ -11,6 +11,7 @@ from neptune.model.source import LocalPath
 
 SCHEMA_FILE = Path(__file__).parents[3] / "docs" / "schema" / "manifest.schema.json"
 
+DIGEST = "ab" * 32
 FULL = b"""\
 neptune: 1
 machines:
@@ -32,6 +33,9 @@ runs:
     site: lab-a
     task: pick-place
     software: [driver]
+    snapshots:
+      - {path: arm/config/controller.yaml}
+      - {content: "sha256:%s"}
   - {name: trot, paths: [quadruped/], machine: anymal-c-03}
 sources:
   - {path: arm/joint_notes.txt, adapter: markdown}
@@ -42,7 +46,7 @@ adapters:
   tabular: {options: {csv_delimiter: ","}}
 grouping:
   gap_seconds: 30
-"""
+""" % DIGEST.encode()
 
 
 def test_a_full_manifest_reads() -> None:
@@ -68,6 +72,32 @@ def test_a_full_manifest_reads() -> None:
         ("ros_namespace", "ur_left"),
         ("serial", "20235400123"),
     )
+
+
+def test_snapshot_pins_and_alias_pointers_read() -> None:
+    manifest = parse_manifest(FULL)
+    pick = manifest.runs[0]
+    assert [pin.to_json() for pin in pick.snapshots] == [
+        {"path": "arm/config/controller.yaml"},
+        {"content": f"sha256:{DIGEST}"},
+    ]
+    assert [pin.pointer for pin in pick.snapshots] == [
+        "/runs/0/snapshots/0",
+        "/runs/0/snapshots/1",
+    ]
+    assert manifest.runs[1].snapshots == ()
+    assert pick.to_json()["snapshots"] == [pin.to_json() for pin in pick.snapshots]
+    machine = manifest.section("machines")[0]
+    assert machine.alias_pointers == (
+        "/machines/0/aliases/ros_namespace/0",
+        "/machines/0/aliases/ros_namespace/1",
+        "/machines/0/aliases/serial",
+    )
+    # An alias written twice cites where it is first written.
+    twice = parse_manifest(b"neptune: 1\nmachines:\n  - {id: a, aliases: {x: [b, c, b]}}\n")
+    entity = twice.section("machines")[0]
+    assert entity.aliases == (("x", "b"), ("x", "c"))
+    assert entity.alias_pointers == ("/machines/0/aliases/x/0", "/machines/0/aliases/x/1")
 
 
 def test_a_directory_path_covers_what_is_below_it() -> None:
@@ -128,6 +158,28 @@ def test_json_and_yaml_give_the_same_declarations() -> None:
         ("neptune: 1\ngrouping: {gap_seconds: 1.5}\n", "whole number"),
         ("neptune: 1\nmachines: {id: a}\n", "expected a list"),
         ("neptune: 1\nsites:\n  - {id: s, name: ''}\n", "non-empty"),
+        ("neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: [{path: ../c.yaml}]}\n", "root"),
+        (
+            "neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: [{path: /c.yaml}]}\n",
+            "absolute",
+        ),
+        ("neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: [{}]}\n", "exactly one"),
+        (
+            "neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: [{path: c, content: d}]}\n",
+            "exactly one",
+        ),
+        ("neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: [{url: c}]}\n", "unknown keys"),
+        (
+            "neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: [{content: 'sha256:AB'}]}\n",
+            "not a content id",
+        ),
+        (
+            "neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: [{path: c}, {path: c/}]}\n",
+            "pinned twice",
+        ),
+        ("neptune: 1\nruns:\n  - {name: a, paths: [x], snapshots: {path: c}}\n", "a list"),
+        ("neptune: 1\nmachines:\n  - {id: a, aliases: {'-x': b}}\n", "not a namespace id"),
+        ("neptune: 1\nmachines:\n  - {id: a, aliases: {'a b': b}}\n", "not a namespace id"),
     ],
 )
 def test_refused_declarations(text: str, says: str) -> None:
@@ -168,3 +220,11 @@ def test_the_editor_schema_agrees_with_the_reader() -> None:
     assert yaml.section("software")[0].to_json() == {"id": "7", "version": "1.10"}
     assert not validator.is_valid({"neptune": 1, "robots": []})
     assert not validator.is_valid({"neptune": 2})
+
+
+def test_a_version_1_alias_namespace_that_is_no_record_namespace_still_reads() -> None:
+    # Version 1 accepted any id as a namespace; ADR 0072 §5 keeps that: the records pass says
+    # which aliases cannot become identifiers, rather than the manifest being refused.
+    text = b"neptune: 1\nmachines:\n  - {id: a, aliases: {Serial: b, 'px4:uuid': c}}\n"
+    (machine,) = parse_manifest(text).section("machines")
+    assert machine.aliases == (("Serial", "b"), ("px4:uuid", "c"))
