@@ -4,16 +4,18 @@ The claims compared are those whose subject or object is the subject's node, or 
 declared ``same_as`` (up to the subject's ``same_as_depth``; candidates are never followed).
 
 - **Two transactions** (what Memory knew): the claims current at ``before`` against those current
-  at ``after``. A claim current at ``before`` and not at ``after`` is ``superseded`` when a version
-  current at ``after`` with another object lists it (through Memory's ``supersedes`` chain),
-  ``closed`` when the versions that replaced it keep its object over a narrower interval (Memory's
-  split closures) or when nothing replaced it (a retired lineage). A claim current at ``after``
-  and at no point a replacement is ``opened``.
-- **Two instants on one clock** (what held, as known at the packet's snapshot): the claims valid
-  at ``before`` against those valid at ``after``. A claim valid only at ``before`` is ``closed``,
-  or ``superseded`` when a claim with the same subject and predicate took over at the very tick
-  it ended; one valid only at ``after`` is ``opened``. Claims on other clocks are named, never
-  compared; instants on two clocks are not compared at all (no conversion is assumed).
+  at ``after``. A claim current at ``before`` and not at ``after`` is ``closed`` when the versions
+  that replaced it (through Memory's ``supersedes`` chain, or a new lineage's restatement with
+  the same start) keep its object over a strictly narrower interval, or when nothing replaced it
+  (a retired lineage); it is ``superseded`` when any replacing version differs otherwise. A claim
+  current at ``after`` that replaced nothing is ``opened``.
+- **Two instants on one clock** (what held, as known at the packet's snapshot): the facts
+  (subject, predicate, object) valid at ``before`` against those valid at ``after``; a fact that
+  holds at both is no change, whichever claims carry it. A claim whose fact held only at
+  ``before`` is ``closed``, or ``superseded`` when a claim with the same subject and predicate
+  (and so another object) took over at the very tick it ended; one whose fact holds only at
+  ``after`` is ``opened``. Claims on other clocks are named, never compared; instants on two
+  clocks are not compared at all (no conversion is assumed).
 
 Claims current at the packet's snapshot are carried as claim items; others (old versions) are
 named by id, and ``why`` with ``as_of`` before the change shows them.
@@ -32,6 +34,7 @@ from neptune_context.answer import domain_id
 from neptune_context.explain.run import object_key, weight
 from neptune_context.packets.model import GapCode
 from neptune_context.packets.trails import (
+    MAX_DIFF_NODES,
     Change,
     DiffChange,
     DiffPoint,
@@ -52,6 +55,19 @@ def _node_key(node: NodeRef) -> tuple[str, str]:
     return (str(node.node_type), node.node_id)
 
 
+def _within(inner: Claim, outer: Claim) -> bool:
+    """``inner``'s valid interval is a strict part of ``outer``'s, on the same clock."""
+    if inner.valid.domain_id != outer.valid.domain_id:
+        return False
+    a_end, b_end = inner.valid_to, outer.valid_to
+    starts_inside = inner.valid_from.ticks >= outer.valid_from.ticks
+    ends_inside = isinstance(b_end, Open) or (
+        not isinstance(a_end, Open) and a_end.ticks <= b_end.ticks
+    )
+    same = inner.valid_from == outer.valid_from and a_end == b_end
+    return starts_inside and ends_inside and not same
+
+
 def _held(claim: Claim, ticks: int) -> bool:
     end = claim.valid_to
     return claim.valid_from.ticks <= ticks and (isinstance(end, Open) or ticks < end.ticks)
@@ -67,10 +83,12 @@ class _Diff:
         self.nodes: tuple[NodeRef, ...] = ()
 
     def identities(self, subject: NodeRef) -> tuple[NodeRef, ...]:
-        """``subject`` and the nodes it is declared ``same_as`` within the subject's depth; the
-        ``same_as`` claims followed are carried, as the graph channel carries them."""
+        """``subject`` and the nodes it is declared ``same_as`` within the subject's depth, at
+        most ``MAX_DIFF_NODES`` (a gap names the rest); the ``same_as`` claims followed are
+        carried, as the graph channel carries them."""
         run, depth = self.run, self.clause.subject.same_as_depth
         seen, frontier = {subject}, [subject]
+        beyond: set[str] = set()
         for _ in range(depth):
             reached: list[NodeRef] = []
             for here in sorted(frontier, key=_node_key):
@@ -80,11 +98,23 @@ class _Diff:
                     if run.unplaceable(claim) is not None:
                         continue
                     other = claim.object if claim.subject == here else claim.subject
-                    if isinstance(other, NodeRef) and other not in seen:
-                        seen.add(other)
-                        reached.append(other)
-                        run.carry(claim, weight(claim))
+                    if not isinstance(other, NodeRef) or other in seen:
+                        continue
+                    if len(seen) >= MAX_DIFF_NODES:
+                        beyond.add(other.node_id)
+                        continue
+                    seen.add(other)
+                    reached.append(other)
+                    run.carry(claim, weight(claim))
             frontier = reached
+        if beyond:
+            run.gap(
+                GapCode.NOT_COVERED,
+                f"{self.at}/subject",
+                beyond,
+                f"a diff compares at most {MAX_DIFF_NODES} identities of its subject; these"
+                " declared identities were not compared",
+            )
         return tuple(sorted(seen, key=_node_key))
 
     def about(self, nodes: tuple[NodeRef, ...], tx: int) -> dict[ClaimId, Claim]:
@@ -154,13 +184,14 @@ class _Diff:
             if old.id in held_after:
                 continue
             later = self.successors(old, held_after, after) or self.restated(old, fresh)
+            # Memory supersedes within one subject and predicate; anything else opens on its own.
+            later = {i for i in later if held_after[i].predicate == old.predicate}
             replacements |= later
-            other = any(
-                held_after[i].predicate != old.predicate
-                or object_key(held_after[i]) != object_key(old)
+            narrowed = all(
+                object_key(held_after[i]) == object_key(old) and _within(held_after[i], old)
                 for i in later
             )
-            kind = Change.SUPERSEDED if other else Change.CLOSED
+            kind = Change.CLOSED if narrowed else Change.SUPERSEDED
             changes.append(DiffChange(old.predicate, kind, (old.id,), tuple(sorted(later))))
         for new in sorted(held_after.values(), key=lambda c: c.id):
             if new.id not in held_before and new.id not in replacements:
@@ -181,8 +212,17 @@ class _Diff:
                 " not compared",
             )
         on = [c for i, c in sorted(claims.items()) if i not in elsewhere]
-        closed = [c for c in on if _held(c, t1) and not _held(c, t2)]
-        opened = [c for c in on if _held(c, t2) and not _held(c, t1)]
+
+        def fact(claim: Claim) -> tuple[NodeRef, str, bytes]:
+            return (claim.subject, claim.predicate, object_key(claim))
+
+        at_before = [c for c in on if _held(c, t1)]
+        at_after = [c for c in on if _held(c, t2)]
+        facts_before = {fact(c) for c in at_before}
+        facts_after = {fact(c) for c in at_after}
+        # A fact that holds at both instants did not change there, whichever claims carry it.
+        closed = [c for c in at_before if fact(c) not in facts_after]
+        opened = [c for c in at_after if fact(c) not in facts_before]
         changes: list[DiffChange] = []
         took_over: set[ClaimId] = set()
         for old in closed:

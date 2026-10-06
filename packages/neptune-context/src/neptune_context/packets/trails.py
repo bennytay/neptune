@@ -272,15 +272,17 @@ class Change(StrEnum):
     """What happened to a claim between the two points."""
 
     OPENED = "opened"  # holds at after, did not at before
-    CLOSED = "closed"  # held at before; at after it holds over a narrower interval, or not at all
-    SUPERSEDED = "superseded"  # held at before; at after a claim with another object took its place
+    CLOSED = "closed"  # held at before; at after over a strictly narrower interval, or not at all
+    SUPERSEDED = "superseded"  # held at before; at after other versions took its place
 
 
 @dataclass(frozen=True)
 class DiffChange:
     """One change to one claim (or, opened, one new claim): ``before`` held at the earlier point,
-    ``after`` holds at the later one. ``closed`` names the narrowed versions in ``after`` when
-    Memory cut the claim's valid interval, and nothing when it stopped holding it."""
+    ``after`` holds at the later one. ``closed`` names the narrowed versions (same object, a
+    strictly narrower interval) in ``after``, or nothing when the claim stopped holding at all.
+    ``superseded`` names the versions that took its place: another object, or (in transaction
+    time) the same object over an interval that is not narrower."""
 
     predicate: str
     change: Change

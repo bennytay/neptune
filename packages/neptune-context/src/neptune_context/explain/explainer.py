@@ -86,6 +86,7 @@ class Explainer:
         run = Run(self._memory, self._catalog, self._history, request, self._caps)
         trails: list[Trail] = []
         for index, clause in enumerate(request.query.explain):
+            mark = run.mark()
             try:
                 trail = (
                     explain_why(run, index, clause.claim_id)
@@ -93,6 +94,7 @@ class Explainer:
                     else explain_diff(run, index, clause)
                 )
             except Exception as exc:  # partial success: one failing clause is a gap
+                run.rollback(mark)
                 run.gap(
                     GapCode.NOT_COVERED,
                     f"/explain/{index}",

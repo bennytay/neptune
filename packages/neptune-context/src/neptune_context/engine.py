@@ -29,6 +29,7 @@ from neptune.model.knowledge import Known
 from neptune_context.answer import domain_id
 from neptune_context.explain.explainer import Explainer
 from neptune_context.explain.history import IndexedReader
+from neptune_context.packets.findings import PacketError
 from neptune_context.packets.model import (
     BudgetUse,
     Channel,
@@ -148,10 +149,21 @@ class LocalEngine:
         request = Retrieval(query, snapshot)
         answers = [_retrieve(channel, request) for channel in self._channels]
         trails: tuple[Trail, ...] = ()
+        explained_claims: frozenset[str] = frozenset()
         if query.explain:
-            explained = self._explainer.explain(request)
-            answers = _with(answers, explained.answers)
-            trails = explained.trails
+            try:
+                explained = self._explainer.explain(request)
+            except Exception as exc:  # partial success: the explainer failing is a gap
+                answers = _with(answers, (_explain_failed(query, exc),))
+            else:
+                answers = _with(answers, explained.answers)
+                trails = explained.trails
+                explained_claims = frozenset(
+                    h.claim.id
+                    for a in explained.answers
+                    for h in a.hits
+                    if isinstance(h, ClaimItem)
+                )
         limits = Limits(
             query.budget.items, query.budget.tokens, query.budget.bytes, query.budget.latency_ms
         )
@@ -167,7 +179,20 @@ class LocalEngine:
                 query.during.start,
                 query.during.end,
             )
-        return ContextPacket(
+        cut_from_trails = {t.at: sorted(set(t.claims) & explained_claims - claims) for t in trails}
+        extra_gaps = tuple(
+            Gap(
+                GapCode.NOT_COVERED,
+                at,
+                Channel.GRAPH,
+                tuple(ids),
+                "the budget cut these claims the trail names; ask with a larger budget to"
+                " carry them",
+            )
+            for at, ids in cut_from_trails.items()
+            if ids
+        )
+        header = dict(
             query_id=query_id(query),
             as_of=snapshot.as_of,
             head=snapshot.head,
@@ -189,9 +214,16 @@ class LocalEngine:
                     key=lambda f: (f.recorded_at, f.claim, str(f.code), f.others),
                 )
             ),
-            gaps=_gaps(query, answers),
-            trails=trails,
         )
+        gaps = _gaps(query, answers, extra_gaps)
+        try:
+            return ContextPacket(**header, gaps=gaps, trails=trails)  # type: ignore[arg-type]
+        except PacketError as exc:
+            if not trails:
+                raise
+            # A trail that disagrees with the items is a defect here, never a failed query.
+            failed = _explain_failed(query, exc).gaps
+            return ContextPacket(**header, gaps=_gaps(query, answers, failed))  # type: ignore[arg-type]
 
     def hydrate(self, evidence: EvidenceRef, *, as_of: int | None) -> Resolution:
         if self._catalog is None:
@@ -269,9 +301,24 @@ def read_graph(path: Path) -> IndexedReader:
         raise ValueError(f"{path.name} is not a Memory graph document: {exc}") from exc
 
 
-def _gaps(query: Query, answers: Sequence[ChannelAnswer]) -> tuple[Gap, ...]:
-    """Every channel's gaps, plus the query members no channel serves yet."""
+def _explain_failed(query: Query, exc: Exception) -> ChannelAnswer:
+    """A ``not_covered`` gap at every explain clause: the explainer could not answer."""
+    detail = f"the explain clauses could not be answered: {type(exc).__name__}: {exc}"
+    return ChannelAnswer(
+        Channel.GRAPH,
+        gaps=tuple(
+            Gap(GapCode.NOT_COVERED, f"/explain/{i}", Channel.GRAPH, (), detail[:2000])
+            for i, _ in enumerate(query.explain)
+        ),
+    )
+
+
+def _gaps(
+    query: Query, answers: Sequence[ChannelAnswer], extra: Sequence[Gap] = ()
+) -> tuple[Gap, ...]:
+    """Every channel's gaps and ``extra``, plus the query members no channel serves yet."""
     gaps = {g.sort_key(): g for a in answers for g in a.gaps}
+    gaps.update((g.sort_key(), g) for g in extra)
     served = {a.channel for a in answers}
     if query.text is not None and not served & {Channel.LEXICAL, Channel.VECTOR}:
         gap = Gap(

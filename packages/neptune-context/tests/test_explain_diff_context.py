@@ -202,3 +202,10 @@ def test_a_diff_is_byte_identical_across_fresh_engines() -> None:
     again = Client(LocalEngine(IndexedReader(X.document()), X.Catalog())).query(query)
     assert canonical_bytes(again) == canonical_bytes(first)
     assert render_markdown(again) == render_markdown(first)
+
+
+def test_a_fact_that_holds_at_both_instants_is_no_change_whichever_claims_carry_it() -> None:
+    usv = Subject("machine", "asset-tag:USV-3")
+    # One of the three berth claims ends on 1 June; the other two keep the fact.
+    packet = ask(diff(usv, Instant(UTC_NS, X.MAR_1), Instant(UTC_NS, X.JUN_1 + 1)))
+    assert trail(packet).changes == ()

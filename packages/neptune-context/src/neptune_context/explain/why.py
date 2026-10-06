@@ -29,6 +29,7 @@ from neptune_context import pinned
 from neptune_context.explain.run import object_key, weight
 from neptune_context.packets.model import GapCode
 from neptune_context.packets.trails import Relation, WhyStep, WhyTrail
+from neptune_context.retrieve.graph import DECAY
 
 if TYPE_CHECKING:
     from neptune_memory.schema.claim import Claim, ClaimId
@@ -37,7 +38,6 @@ if TYPE_CHECKING:
     from neptune_context.explain.run import Run
 
 CANDIDATE: Final = "_candidate"
-DECAY: Final = 0.5  # each level below the root halves a claim's score
 _ORDER: Final = {Relation.CORROBORATES: 0, Relation.CONFLICTS: 1, Relation.ALTERNATIVE: 2}
 
 
@@ -110,7 +110,8 @@ class _Tree:
     ) -> None:
         run, caps = self.run, self.run.caps
         if len(self.steps) >= caps.steps:
-            self.unfollowed.add(claim.id)
+            if claim.id not in self.shown:
+                self.unfollowed.add(claim.id)
             return
         repeat = claim.id in self.shown
         self.steps.append(
@@ -154,12 +155,15 @@ class _Tree:
             self.unfollowed.update(o.id for _, o, _ in children if o.id not in self.shown)
             return
         if len(children) > caps.fan_out:
-            self.unfollowed.update(o.id for _, o, _ in children[caps.fan_out :])
+            self.unfollowed.update(
+                o.id for _, o, _ in children[caps.fan_out :] if o.id not in self.shown
+            )
             children = children[: caps.fan_out]
         for rel, other, why in children:
             self.visit(other, claim, rel, depth + 1, why)
 
     def finish(self) -> None:
+        self.unfollowed -= self.shown  # a claim cut on one branch and shown on another is shown
         run, at = self.run, self.at
         if self.withheld:
             run.gap(

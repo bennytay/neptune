@@ -10,7 +10,8 @@ or bridged. A claim that fails is never dropped silently: it is withheld (infere
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final
+from functools import cached_property
+from typing import TYPE_CHECKING
 
 from neptune_memory.schema.claim import is_inferred
 from neptune_memory.schema.interval import Open, ledger_tx
@@ -20,7 +21,9 @@ from neptune.model.knowledge import Known
 from neptune_context import pinned
 from neptune_context.answer import allowed_clocks
 from neptune_context.packets.model import Channel, Gap, GapCode, Superseded
+from neptune_context.packets.trails import MAX_DIFF_CLAIMS, MAX_WHY_DEPTH, MAX_WHY_STEPS
 from neptune_context.pins import GRAPH_SCHEMA_VERSION
+from neptune_context.retrieve.graph import weight
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -35,8 +38,6 @@ if TYPE_CHECKING:
     from neptune_context.explain.history import ClaimHistory
     from neptune_context.retrieve.channel import Retrieval
 
-UNKNOWN_CONFIDENCE_WEIGHT: Final = 0.5  # as the graph channel weighs an inferred claim it cannot
-
 
 @dataclass(frozen=True)
 class Caps:
@@ -47,6 +48,18 @@ class Caps:
     steps: int = 128  # why: claims one tree names
     diff_claims: int = 512  # diff: claims one diff names
 
+    def __post_init__(self) -> None:
+        bounds = {
+            "depth": (0, MAX_WHY_DEPTH),
+            "fan_out": (1, MAX_WHY_STEPS),
+            "steps": (1, MAX_WHY_STEPS),
+            "diff_claims": (1, MAX_DIFF_CLAIMS),
+        }
+        for name, (low, high) in bounds.items():
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f"Caps.{name} is an integer in [{low}, {high}]: {value!r}")
+
     def to_json(self) -> dict[str, int]:
         return {
             "depth": self.depth,
@@ -56,18 +69,20 @@ class Caps:
         }
 
 
-def weight(claim: Claim) -> float:
-    """1 for a deterministic claim, its confidence for an inferred one (the graph channel's)."""
-    if not is_inferred(claim.assertion_kind):
-        return 1.0
-    if isinstance(claim.confidence, Known):
-        return float(claim.confidence.value)
-    return UNKNOWN_CONFIDENCE_WEIGHT
+__all__ = ["Caps", "Run", "object_key", "weight"]
 
 
 def object_key(claim: Claim) -> bytes:
     """Objects compare as canonical JSON, as Memory's resolver compares them."""
     return dumps(claim.object.to_json())
+
+
+@dataclass(frozen=True)
+class _Mark:
+    carried: dict[ClaimId, tuple[float, Claim]]
+    cited: dict[ClaimId, tuple[float, Claim]]
+    findings: dict[str, ResolutionFinding]
+    gaps: int
 
 
 @dataclass
@@ -94,6 +109,20 @@ class Run:
     @property
     def include_inferred(self) -> bool:
         return self.request.query.include_inferred
+
+    @cached_property
+    def clocks(self) -> frozenset[str] | None:
+        """The clocks a carried claim may be on (``None``: any), computed once per query."""
+        return allowed_clocks(self.request.query)
+
+    def mark(self) -> _Mark:
+        """A point to roll back to when a clause fails partway (see ``rollback``)."""
+        return _Mark(dict(self.carried), dict(self.cited), dict(self.findings), len(self.gaps))
+
+    def rollback(self, mark: _Mark) -> None:
+        """Drop what a failed clause added: its claims, citations, findings and gaps."""
+        self.carried, self.cited, self.findings = mark.carried, mark.cited, mark.findings
+        del self.gaps[mark.gaps :]
 
     def gap(self, code: GapCode, at: str, refs: Iterable[str], detail: str) -> None:
         self.gaps.append(Gap(code, at, Channel.GRAPH, tuple(sorted(set(refs))), detail[:2000]))
@@ -143,7 +172,7 @@ class Run:
                 f"{reason} is newer than Context's pinned graph-schema {GRAPH_SCHEMA_VERSION}:"
                 " the claim is named, not carried"
             )
-        allowed = allowed_clocks(self.request.query)
+        allowed = self.clocks
         if allowed is not None and str(claim.valid.domain_id) not in allowed:
             return (
                 f"on clock {claim.valid.domain_id}, which the query neither asked for nor bridged:"
@@ -197,6 +226,11 @@ class Run:
                         high = middle
                 at = high
                 by = sorted(c.id for c in current(high) if claim.id in c.supersedes)
+                if not by:  # as the graph channel looks: every edge of the subject then
+                    view = self.memory.node(claim.subject, ledger_tx(high), include_inferred=True)
+                    if isinstance(view, Known):
+                        edges = (*view.value.claims, *view.value.incoming)
+                        by = sorted({c.id for c in edges if claim.id in c.supersedes})
         if at is None:
             return None
         if not by:

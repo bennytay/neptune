@@ -268,3 +268,43 @@ def test_why_is_byte_identical_across_fresh_engines(subject: str) -> None:
     )
     assert canonical_bytes(again) == canonical_bytes(first)
     assert render_markdown(again) == render_markdown(first)
+
+
+def test_a_clause_that_fails_partway_leaves_nothing_behind() -> None:
+    class Late(IndexedReader):
+        def superseded_by(self, claim_id: str):  # type: ignore[no-untyped-def]
+            raise RuntimeError("history offline")
+
+    march = X.find(X.WCAM, "has_calibration", X.CAL_A, current=False)
+    packet = Client(LocalEngine(Late(X.document()))).why(march.id, include_inferred=False)
+    assert packet.items == () and packet.trails == ()
+    (gap,) = gaps_at(packet)
+    assert "history offline" in gap.detail
+
+
+def test_the_whole_explainer_failing_is_a_gap_per_clause() -> None:
+    broken = engine()
+
+    def explode(request: object) -> object:
+        raise RuntimeError("explainer down")
+
+    broken._explainer.explain = explode  # type: ignore[method-assign,assignment]
+    april = X.find(X.WCAM, "has_calibration", X.CAL_B)
+    packet = Client(broken).why(april.id, include_inferred=False)
+    (gap,) = gaps_at(packet)
+    assert "explainer down" in gap.detail and packet.trails == ()
+
+
+def test_claims_the_budget_cuts_from_a_trail_are_named_in_a_gap() -> None:
+    berth = sorted(c.id for c in X.document().resolution.claims if c.subject == X.USV)
+    packet = why(berth[0], items=2)
+    missing = set(berth) - packet.claim_ids
+    assert missing and packet.budget.dropped
+    (cut,) = [g for g in gaps_at(packet) if "budget cut" in g.detail]
+    assert set(cut.refs) == missing
+
+
+def test_caps_stay_inside_the_trail_contract() -> None:
+    for bad in ({"depth": 9}, {"fan_out": 0}, {"steps": 257}, {"diff_claims": 0}, {"depth": True}):
+        with pytest.raises(ValueError, match="Caps"):
+            Caps(**bad)

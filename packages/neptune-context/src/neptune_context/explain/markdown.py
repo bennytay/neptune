@@ -144,7 +144,8 @@ class _Writer:
 
     def claim(self, claim_id: str, *, as_of: int | None = None) -> str:
         """A claim in one line: its content when carried, else its id and a ``why`` link."""
-        at = self.packet.as_of if as_of is None else as_of
+        carried = claim_id in self.claims
+        at = self.packet.as_of if as_of is None or carried else as_of
         link = f"[{ident(claim_id)}]({claim_link(claim_id, at)})"
         item = self.claims.get(claim_id)
         if item is None:
@@ -244,19 +245,21 @@ class _Writer:
         for change in trail.changes:
             by_predicate.setdefault(change.predicate, []).append(change)
         old = trail.before.tx if isinstance(trail.before, TxPoint) else None
+        new = trail.after.tx if isinstance(trail.after, TxPoint) else None
         for predicate, changes in by_predicate.items():
             self.add(f"### {text(predicate)}", "")
             for kind in _CHANGE_ORDER:
                 for change in (c for c in changes if c.change is kind):
-                    self.change(change, old, world=old is None)
+                    self.change(change, old, new, world=old is None)
             self.add("")
         while self.lines and self.lines[-1] == "":
             self.lines.pop()
 
-    def change(self, change: DiffChange, old: int | None, *, world: bool) -> None:
+    def change(self, change: DiffChange, old: int | None, new: int | None, *, world: bool) -> None:
+        """One change; a claim no longer carried links to ``why`` where it was held."""
         if change.change is Change.OPENED:
             for claim_id in change.after:
-                self.add(f"- **opened**: {self.claim(claim_id)}")
+                self.add(f"- **opened**: {self.claim(claim_id, as_of=new)}")
             return
         (before,) = change.before
         self.add(f"- **{change.change}**: {self.claim(before, as_of=old)}")
@@ -272,7 +275,7 @@ class _Writer:
                 item is not None and is_closure(item.claim)
             )
             word = "narrowed to" if narrowed else "replaced by"
-            self.add(f"  - {word} {self.claim(claim_id)}")
+            self.add(f"  - {word} {self.claim(claim_id, as_of=new)}")
 
     def rest(self) -> None:
         named = {i for t in self.packet.trails for i in t.claims}
