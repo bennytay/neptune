@@ -510,7 +510,7 @@ def config_of(mapping: LifecycleMapping, base_package: ContentId) -> JsonObject:
     """The transform config of one mapping applied to one package (ADR 0002 §7), with the zones a
     caller declared per source (ADR 0017 §2) when there are any."""
     document: JsonValue = mapping.document
-    out: JsonObject = {
+    out: dict[str, JsonValue] = {
         "base_package": base_package,
         "mapping": document,
         "mapping_sha256": mapping.sha256,
