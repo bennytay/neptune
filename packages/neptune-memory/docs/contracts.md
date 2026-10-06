@@ -29,8 +29,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
-  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
-    (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
+  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **1.9.0**
+    document (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
     `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
     1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
        Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
@@ -47,23 +48,27 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
        registered kinds ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §5).
        Wall-clock ticks stay on their own domain: two logs are compared only through a stated clock mapping.
 
-    Copy the file byte for byte; do not edit it.
+    **Deploy** copies the `.gz` byte for byte into its fixtures (decompress with any gzip reader, e.g.
+    `gzip -dc`, if it needs the JSON) and never edits either. **Context** reads the `.gz`: decompress it
+    and decode with `neptune_memory.schema.codec.graph_from_json`, or check it first with `memory verify`.
   - Regenerate it from the repository root with
     `uv run --all-packages --all-groups python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
-    makes it stale.
+    makes it stale. It compares both the decompressed document and the `.gz` bytes.
   - A regeneration is byte-identical on any host, in CI and locally. Record ids depend only on what the
     repository pins: the corpus, adapter versions, the libraries in `uv.lock` and the Python minor version in
-    `.python-version`. `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names
+    `.python-version`. The `.gz` bytes also depend on the `zlib` that deflates them (the uv-installed Python's).
+    `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names
     what moved. Cite corpus evidence by source path and locator, not by record id: a version bump renames record
     ids.
-  - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
+  - Check a copy without importing `neptune_memory`: `memory verify FILE`, gzipped or not (told by its bytes).
+    It exits 0 with a summary line. It
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
   - What it holds today:
     - 12 runs from both sites, with `evidenced_by` and `has_member`.
-    - 67 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
+    - 97 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
       2026-09-14.
     - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
       `stated_severity`, `has_description` and `evidenced_by`.

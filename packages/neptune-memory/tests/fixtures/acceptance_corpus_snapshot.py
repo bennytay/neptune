@@ -1,7 +1,9 @@
 """Memory's graph of the acceptance corpus (Platform ADR 0007, MVL-181), made by the real pipeline.
 
-``acceptance_corpus.graph.json`` (next to this file) is what ``memory rebuild --with-estimates``
-writes for the acceptance corpus. Nothing in it is hand-written:
+``acceptance_corpus.graph.json.gz`` (next to this file) is what ``memory rebuild --with-estimates``
+writes for the acceptance corpus, gzipped deterministically (``neptune_memory.store.gzipped``:
+fixed header, level 9) so the fixture stays under the repository's 512 KB limit. Nothing in it is
+hand-written:
 
 1. ``harness.acceptance`` generates the corpus (versioned and locked by Platform).
 2. The harness's own ``compiler`` and ``deploy`` stages run over it (``harness.run.run_stage`` with
@@ -37,7 +39,8 @@ network, and no transform records a host-bound library version (compiler #139 dr
 the same code gives the same bytes on any host. What the bytes still depend on is pinned by the
 repository: the corpus version, adapter versions, the libraries ``uv.lock`` pins and the Python
 minor version ``.python-version`` pins, all of which transform records name.
-``acceptance_corpus.environment.json`` records them, so a failing regeneration says which moved.
+``acceptance_corpus.environment.json`` records them, and the ``zlib`` that deflated the file, so a
+failing regeneration says which moved.
 ``tests/test_acceptance_snapshot_memory.py`` regenerates and compares, byte for byte.
 
 From the repository root, with ``G=packages/neptune-memory/tests/fixtures/<this file>``::
@@ -57,6 +60,7 @@ import io
 import json
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -64,6 +68,7 @@ from neptune.identity import canonical_json
 from neptune.store.package import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport, ThreadsOf, threads_of_from_json
+from neptune_memory.store.gzipped import LEVEL, deterministic_gzip
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -72,7 +77,7 @@ if TYPE_CHECKING:
 
 HERE: Final = Path(__file__).resolve().parent
 REPO: Final = HERE.parents[3]
-SNAPSHOT: Final = HERE / "acceptance_corpus.graph.json"
+SNAPSHOT: Final = HERE / "acceptance_corpus.graph.json.gz"
 ENVIRONMENT: Final = HERE / "acceptance_corpus.environment.json"
 CONFIG: Final = HERE / "acceptance_corpus.memory_config.json"
 TENANT: Final = "acceptance"
@@ -236,13 +241,17 @@ def environment(export: LedgerExport) -> bytes:
             if record.get("kind") == "transform_record":
                 key = f"{record['adapter_id']} {record['adapter_version']}"
                 transforms[key] = cast("JsonValue", record["libraries"])
-    document: JsonValue = {"corpus": corpus_label(), "transforms": transforms}
+    document: JsonValue = {
+        "corpus": corpus_label(),
+        "gzip": {"level": LEVEL, "zlib": zlib.ZLIB_RUNTIME_VERSION},
+        "transforms": transforms,
+    }
     return canonical_json.dumps(document) + b"\n"
 
 
 def build(work: Path, export: Path | None = None) -> tuple[bytes, bytes]:
-    """The snapshot's bytes (``memory rebuild`` over the corpus's Ledger export, in ``work``) and
-    its environment's."""
+    """The snapshot's gzip bytes (``memory rebuild`` over the corpus's Ledger export, in ``work``,
+    deterministically gzipped) and its environment's."""
     ledger = export if export is not None else work / "ledger.json"
     exported = ledger_export(work)
     ledger.write_bytes(canonical_json.dumps(cast("JsonValue", exported.to_json())) + b"\n")
@@ -252,7 +261,8 @@ def build(work: Path, export: Path | None = None) -> tuple[bytes, bytes]:
     status = main(argv, stdout=io.StringIO())
     if status != OK:
         raise RuntimeError(f"memory rebuild exited {status}")
-    return (graphs / TENANT / "graph.json").read_bytes(), environment(exported)
+    graph = (graphs / TENANT / "graph.json").read_bytes()
+    return deterministic_gzip(graph), environment(exported)
 
 
 def run(argv: list[str] | None = None) -> int:

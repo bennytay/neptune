@@ -24,7 +24,9 @@ Rule: thin wrappers over the library; no logic of their own, and no direct packa
 - ``verify GRAPH``: check a graph document file someone else holds (a consumer's fixture) with the
   codec: every claim and finding id against its content, canonical order, ``generation``, and the
   rest of what ``graph_from_json`` checks. One line per problem on stdout and exit 1; a one-line
-  summary and exit 0 when it decodes. Needs no ``--graphs`` or ``--tenant``.
+  summary and exit 0 when it decodes. Needs no ``--graphs`` or ``--tenant``. A gzip file (told by
+  its bytes, not its name: the acceptance snapshot ships as ``.json.gz``) is read decompressed, up
+  to ``MAX_GRAPH_BYTES``; a truncated, corrupt or oversized one is unreadable input.
 
 ``--ledger`` is a Ledger export (``neptune_memory.ledger.LedgerExport``), ``--graphs`` the root of
 the tenants' graph directories (``neptune_memory.store.graphs``). Exit status: 0 done, 1 refused
@@ -61,6 +63,7 @@ from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.reader import AsOfBeyondHeadError
 from neptune_memory.schema.supersede import LineageError, as_of
 from neptune_memory.store.graphs import GraphStoreError, TenantGraphs
+from neptune_memory.store.gzipped import gunzip, is_gzip
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -71,6 +74,8 @@ if TYPE_CHECKING:
 OK: Final = 0
 REFUSED: Final = 1
 USAGE: Final = 2
+# The largest graph document ``verify`` decompresses: past it a gzip file is refused, not inflated.
+MAX_GRAPH_BYTES: Final = 1 << 30
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -114,9 +119,13 @@ def _constant(token: str) -> object:
     raise ValueError(f"{token} is not JSON")
 
 
-def _strict_json(path: Path, what: str) -> object:
-    """Any strict JSON (no repeated keys, no NaN), canonical or not."""
-    text = path.read_bytes().decode("utf-8")
+def _strict_json(path: Path, what: str, *, gzipped: bool = False) -> object:
+    """Any strict JSON (no repeated keys, no NaN), canonical or not; with ``gzipped``, a gzip
+    file's content is read instead of its bytes."""
+    data = path.read_bytes()
+    if gzipped and is_gzip(data):
+        data = gunzip(data, MAX_GRAPH_BYTES)
+    text = data.decode("utf-8")
     try:
         return json.loads(text, object_pairs_hook=_unique, parse_constant=_constant)
     except RecursionError as exc:
@@ -134,7 +143,7 @@ class UndecodableError(ValueError):
 
 def _verify(path: Path, out: TextIO) -> int:
     """``memory verify``: one line per problem and ``REFUSED``, or a summary line and ``OK``."""
-    data = _strict_json(path, "graph document")
+    data = _strict_json(path, "graph document", gzipped=True)
     try:
         problems = graph_problems(data)  # type: ignore[arg-type]  # any JSON value; it checks
         document = None if problems else graph_from_json(data)  # type: ignore[arg-type]
