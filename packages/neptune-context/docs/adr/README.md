@@ -14,3 +14,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0005](0005-natural-language-query-planner.md) | The natural-language query planner: a model that emits a typed Query and shows it, never an answer | Accepted |
 | [0006](0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) | C1 gate: query-packet 1.0.0, answer checks, and the amendments the personas forced | Accepted |
 | [0007](0007-graph-channel-retrieval-interface-and-local-engine.md) | The graph channel, the retrieval channel interface, and the local engine | Accepted |
+| [0010](0010-why-and-diff-trails-and-the-human-renderer.md) | Why and diff trails: provenance trees, what-changed lists, and the human renderer | Accepted |
