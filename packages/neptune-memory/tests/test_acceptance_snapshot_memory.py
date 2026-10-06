@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Final
 import pytest
 
 from neptune.identity import canonical_json
-from neptune_memory.cli import registrations
+from neptune.identity.ids import config_hash
+from neptune_memory.cli import read_configs, registrations
 from neptune_memory.derived.clocks import CLOCKS_MODEL, ESTIMATES_CONSOLIDATOR_ID
 from neptune_memory.schema.codec import graph_from_json, graph_problems
 from neptune_memory.schema.reference import ReferenceReader
@@ -163,8 +164,12 @@ def test_the_snapshot_decodes_with_the_codec_and_reencodes_to_its_bytes() -> Non
 
 def test_the_snapshot_is_built_by_memory_rebuild_with_estimates_and_nothing_else() -> None:
     graph = document()
-    registered = sorted(r.consolidator_id for r in registrations(with_estimates=True))
-    assert sorted(b.consolidator_id for b in graph.builds) == registered
+    configs = read_configs(generator().CONFIG)
+    registered = {
+        r.consolidator_id: config_hash(r.config)
+        for r in registrations(with_estimates=True, configs=configs)
+    }
+    assert {b.consolidator_id: str(b.config_hash) for b in graph.builds} == registered
     assert {c.provenance.consolidator_id for c in graph.resolution.claims} <= set(registered)
     assert graph.resolution.claims, "the corpus consolidates to no claim at all"
 

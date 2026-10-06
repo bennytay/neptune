@@ -31,7 +31,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
     (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
-    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
     1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
        Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
        Both stages must run real and ok. Memory picks no preset.
@@ -41,7 +41,11 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     3. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
        `derived/clock_mapping` fits.
     4. The deterministic consolidators run, with `memory.time_estimates` alongside
-       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
+       ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)), under
+       `tests/fixtures/acceptance_corpus.memory_config.json`. That file declares Deploy's `syslog events`
+       table as an event table keyed by `MsgID` and maps `PSTOP`, `ESTOP` and the CMMS `Protective stop` to
+       registered kinds ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §5).
+       Wall-clock ticks stay on their own domain: two logs are compared only through a stated clock mapping.
 
     Copy the file byte for byte; do not edit it.
   - Regenerate it from the repository root with

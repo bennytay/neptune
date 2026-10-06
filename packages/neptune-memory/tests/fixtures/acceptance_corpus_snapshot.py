@@ -24,9 +24,13 @@ writes for the acceptance corpus. Nothing in it is hand-written:
    compiler package also contributes its ``derived/clock_mapping`` lines (the compiler's estimated
    clock fits, ``assertion_kind: inferred``, root ADR 0060), which the catalog does not expose
    yet (``threads_of`` answers ``unknown_record`` for them); no other ``derived/`` table is read.
-5. ``memory rebuild --snapshot 2 --with-estimates`` consolidates it with the deterministic
-   consolidators and ``memory.time_estimates`` (ADR 0017) and writes the graph document with the
-   codec; that file is copied byte for byte. Estimates become ``inferred`` claims only.
+5. ``memory rebuild --snapshot 2 --with-estimates --config CONFIG`` consolidates it with the
+   deterministic consolidators and ``memory.time_estimates`` (ADR 0017) and writes the graph
+   document with the codec; that file is copied byte for byte. Estimates become ``inferred``
+   claims only. ``CONFIG`` (``acceptance_corpus.memory_config.json``) is Memory's declaration
+   for this corpus (ADR 0013 §5): Deploy's ``syslog events`` table as an event table, keyed by its
+   RFC 5424 ``MsgID``, and the vendor kinds of what the corpus states (``PSTOP``,
+   ``ESTOP``, a CMMS ``Protective stop``). A code that names no registered kind stays unmapped.
 
 Deterministic: the corpus, the harness, the compiler, Deploy and Memory read no clock, randomness or
 network, and no transform records a host-bound library version (compiler #139 dropped expat), so
@@ -70,6 +74,7 @@ HERE: Final = Path(__file__).resolve().parent
 REPO: Final = HERE.parents[3]
 SNAPSHOT: Final = HERE / "acceptance_corpus.graph.json"
 ENVIRONMENT: Final = HERE / "acceptance_corpus.environment.json"
+CONFIG: Final = HERE / "acceptance_corpus.memory_config.json"
 TENANT: Final = "acceptance"
 COMPILED_AT: Final = 1  # the compiler's package: the first registration in a fresh catalog
 MAPPED_AT: Final = 2  # Deploy's lifecycle package, registered after it
@@ -243,7 +248,7 @@ def build(work: Path, export: Path | None = None) -> tuple[bytes, bytes]:
     ledger.write_bytes(canonical_json.dumps(cast("JsonValue", exported.to_json())) + b"\n")
     graphs = work / "graphs"
     argv = ["--graphs", str(graphs), "--tenant", TENANT, "rebuild", "--ledger", str(ledger)]
-    argv += ["--snapshot", str(HEAD), "--with-estimates"]
+    argv += ["--snapshot", str(HEAD), "--with-estimates", "--config", str(CONFIG)]
     status = main(argv, stdout=io.StringIO())
     if status != OK:
         raise RuntimeError(f"memory rebuild exited {status}")
