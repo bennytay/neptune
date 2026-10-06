@@ -17,7 +17,7 @@ from neptune_context import mcp as neptune_mcp
 from neptune_context.mcp import server as mcp_server
 from neptune_context.packets.model import EvidenceItem
 from neptune_context.query import Budget, Query, Subject, Why, canonical_bytes, query_id
-from neptune_context.render.citations import render_text
+from neptune_context.render.agent import render_answer
 from neptune_context.sdk import NO_RETRY, AsyncClient, ErrorCode, RetryPolicy, SdkError, StubEngine
 from sdk_testing_context import (
     UNAVAILABLE,
@@ -102,7 +102,7 @@ def test_the_handshake_names_the_server_and_offers_tools_and_resources() -> None
     assert "include_inferred" in result.instructions
 
 
-def test_the_four_tools_are_listed_read_only_with_valid_schemas() -> None:
+def test_the_six_tools_are_listed_read_only_with_valid_schemas() -> None:
     async def use(session: ClientSession) -> list[types.Tool]:
         return (await session.list_tools()).tools
 
@@ -112,7 +112,10 @@ def test_the_four_tools_are_listed_read_only_with_valid_schemas() -> None:
         "neptune_why",
         "neptune_diff",
         "neptune_hydrate",
+        "neptune_plan",
+        "neptune_entities",
     ]
+    assert len(tools) <= 8  # MVL-147: at most eight tools
     for tool in tools:
         jsonschema.Draft202012Validator.check_schema(tool.inputSchema)
         assert tool.annotations is not None
@@ -123,7 +126,7 @@ def test_the_four_tools_are_listed_read_only_with_valid_schemas() -> None:
         assert tool.inputSchema["additionalProperties"] is False
         # a tool name any host accepts: letters, digits, underscore, dash
         assert tool.name.replace("_", "").isalnum()
-    packet_tools = [t for t in tools if t.name != "neptune_hydrate"]
+    packet_tools = [t for t in tools if t.name in ("neptune_query", "neptune_why", "neptune_diff")]
     for tool in packet_tools:
         assert "include_inferred" in tool.inputSchema["required"], tool.name
         assert tool.inputSchema["properties"]["include_inferred"]["type"] == "boolean"
@@ -162,7 +165,7 @@ def test_neptune_query_returns_the_cited_text_and_a_link_per_evidence_ref(stem: 
     result = call(golden_client(), "neptune_query", q_arguments(stem))
     packet = golden_packet(stem)
     assert not result.isError
-    assert texts(result) == [render_text(packet)]
+    assert texts(result) == [render_answer(packet)]
     assert [link.name for link in links(result)] == [
         f"E{n}" for n in range(1, len(packet.evidence_refs()) + 1)
     ]
@@ -175,12 +178,12 @@ def test_neptune_query_returns_the_cited_text_and_a_link_per_evidence_ref(stem: 
 
 def test_inferred_items_stay_marked_through_the_tool() -> None:
     (text,) = texts(call(golden_client(), "neptune_query", q_arguments("q03")))
-    assert "INFERRED by" in text
+    assert "INFERRED (model " in text
 
 
 def test_neptune_why_asks_the_golden_q04_question() -> None:
     result = call(golden_client(), "neptune_why", {"claim_id": CLAIM, "include_inferred": False})
-    assert texts(result) == [render_text(golden_packet("q04"))]
+    assert texts(result) == [render_answer(golden_packet("q04"))]
 
 
 def test_neptune_diff_builds_a_diff_query_and_returns_its_packet() -> None:
@@ -205,7 +208,7 @@ def test_neptune_diff_builds_a_diff_query_and_returns_its_packet() -> None:
     assert query.subjects == frozenset({subject})
     assert query.as_of == 1842
     assert query.include_inferred is False
-    assert texts(result) == [render_text(answering(query))]
+    assert texts(result) == [render_answer(answering(query))]
 
 
 def test_neptune_diff_takes_instants_on_named_clocks() -> None:
@@ -327,7 +330,7 @@ def test_fixed_defaults_may_be_left_out_of_a_query() -> None:
         "query": {"budget": {"items": 10}, "explain": [{"kind": "why", "claim_id": CLAIM}]},
     }
     result = call(golden_client(), "neptune_query", minimal)
-    assert texts(result) == [render_text(golden_packet("q04"))]
+    assert texts(result) == [render_answer(golden_packet("q04"))]
 
 
 def test_a_refused_query_comes_back_with_its_findings() -> None:
@@ -435,6 +438,8 @@ def test_evidence_uris_round_trip_and_refuse_everything_else() -> None:
         uri + "?as_of=05",
         uri + "?as_of=1&as_of=2",
         uri + "?as_of=1.5",
+        uri + "?as_of=9223372036854775808",  # 2^63: not a transaction
+        uri + "?as_of=" + "1" * 5000,  # beyond Python's int-string limit: still invalid_argument
         uri + "?other=1",
         uri + "?as_of=\u0665",
     ]
@@ -515,7 +520,7 @@ def test_reading_a_bad_resource_is_a_protocol_error() -> None:
 def test_source_text_cannot_forge_a_citation_through_the_tool() -> None:
     # The renderer escapes line breaks in evidence-derived values (ADR 0003 §7); the tool adds none.
     (text,) = texts(call(golden_client(), "neptune_query", q_arguments("q08")))
-    assert text == render_text(golden_packet("q08"))
+    assert text == render_answer(golden_packet("q08"))
     body, _, footer = text.rpartition("\nEvidence:\n")
     assert all(line.startswith("[E") for line in footer.splitlines())
     assert "\n[E" not in body.replace("\n\n", "\n")

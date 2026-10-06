@@ -1,0 +1,211 @@
+{
+  "assertion_type": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 776,
+            "kind": "span",
+            "start": 766
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": "annotate"
+  },
+  "author": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 849,
+            "kind": "span",
+            "start": 794
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": {
+      "namespace": "dc-north.staff",
+      "value": "s.lindqvist"
+    }
+  },
+  "authored_at": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 893,
+            "kind": "span",
+            "start": 872
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": {
+      "domain_id": "rec:sha256:57b8e115a319df64fba55b431f24f4495f343d7df58392caf9eb8f266f21f64d",
+      "ticks": 1789978650
+    }
+  },
+  "authored_zone": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 933,
+            "kind": "span",
+            "start": 918
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": "Europe/Berlin"
+  },
+  "id": "rec:sha256:af5e064f21a9c27f6b74f4411b5d1c9a52ab2835f71f9f10d6d53a71342f10e1",
+  "identifier": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 740,
+            "kind": "span",
+            "start": 675
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": {
+      "namespace": "dc-north.fleet-console",
+      "value": "ASR-2026-0132"
+    }
+  },
+  "kind": "assertion",
+  "payload": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 1066,
+            "kind": "span",
+            "start": 1025
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": "{\"chassis_serial_now\": \"OTTO-1500-22871\"}"
+  },
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "json_pointer",
+          "pointer": "/assertions/1"
+        }
+      ],
+      "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+    },
+    "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+  },
+  "rationale": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 1158,
+            "kind": "span",
+            "start": 1087
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": "AMR-09 carries the swapped chassis plate until the plate is reissued."
+  },
+  "retracts": {
+    "knowledge": "not_applicable"
+  },
+  "schema_version": 5,
+  "scope": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "end": 1006,
+            "kind": "span",
+            "start": 950
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    },
+    "value": [
+      {
+        "namespace": "dc-north.asset_tag",
+        "value": "AMR-09"
+      }
+    ]
+  },
+  "signature": {
+    "knowledge": "known_absent",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/assertions/1"
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    }
+  },
+  "ticket": {
+    "knowledge": "known_absent",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/assertions/1"
+          }
+        ],
+        "source": "sha256:f9833635683fdd7e6ce781bde01c92ae3ac30b60d6407225309ff95cf9453e98"
+      },
+      "transform": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae"
+    }
+  }
+}

@@ -20,3 +20,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0011](0011-d2-gate-one-hostile-proxy-emulator-verification-and-the-deadline.md) | D2 gate: one hostile proxy for every connector, emulator verification, and a socket timeout is the deadline | Accepted |
 | [0012](0012-lifecycle-mapper-writes-unknown-lists-civil-zones-and-a-streamed-package.md) | The lifecycle mapper writes Unknown lists, civil time zones and a streamed package | Accepted |
 | [0013](0013-evidence-packs-compile-cited-claims-from-a-frozen-memory-snapshot.md) | Evidence packs compile cited claims from a frozen Memory snapshot | Accepted |
+| [0014](0014-traceability-and-incident-reconstruction-are-templates-over-compiler-2.md) | Traceability and incident reconstruction are templates over pack compiler 2 | Accepted |

@@ -1,0 +1,79 @@
+{
+  "first": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 1818,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/rosbag2_bagfile_information/starting_time"
+          }
+        ],
+        "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+      },
+      "transform": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
+    },
+    "value": {
+      "domain_id": "rec:sha256:1e3d871df8a74f4227f096710ce3683b5b2f7642102d12471a8bbc89f6aeb0fd",
+      "ticks": 1790762400000000000
+    }
+  },
+  "id": "rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557",
+  "kind": "run",
+  "last": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 1818,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/rosbag2_bagfile_information"
+          }
+        ],
+        "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+      },
+      "transform": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
+    },
+    "value": {
+      "domain_id": "rec:sha256:1e3d871df8a74f4227f096710ce3683b5b2f7642102d12471a8bbc89f6aeb0fd",
+      "ticks": 1790762400045000000
+    }
+  },
+  "logical_id": {
+    "knowledge": "not_covered"
+  },
+  "machine": {
+    "knowledge": "not_covered"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 1818,
+          "offset": 0
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": "/rosbag2_bagfile_information"
+        }
+      ],
+      "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+    },
+    "transform": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
+  },
+  "schema_version": 1
+}

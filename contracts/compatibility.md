@@ -11,13 +11,13 @@ statement.
 
 | Contract | Owner package | Status | Latest stable | Latest draft | Consumers |
 |---|---|---|---|---|---|
-| `package-schema` | `neptune` | active | 7.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
+| `package-schema` | `neptune` | active | 8.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `assertion-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `catalog-api` | `neptune-ledger` | active | 1.7.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
 | `graph-schema` | `neptune-memory` | active | 1.9.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
-| `query-packet` | `neptune-context` | planned | — | — | `neptune-deploy`, `neptune-learn` |
+| `query-packet` | `neptune-context` | active | 1.1.0 | — | `neptune-deploy`, `neptune-learn` |
 | `dataset-manifest` | `neptune-learn` | planned | — | — | none in this repository |
 
 ## Consumer locks
@@ -30,8 +30,8 @@ is part of another rides on its version and has no column.
 
 | Consumer | `package-schema` | `catalog-api` | `graph-schema` | `query-packet` |
 |---|---|---|---|---|
-| `neptune-ledger` | 7.0.0 current |  |  |  |
+| `neptune-ledger` | 8.0.0 current |  |  |  |
 | `neptune-memory` |  | 1.1.0 behind |  |  |
-| `neptune-context` |  | 1.6.0 behind | 1.0.0 behind |  |
-| `neptune-deploy` | 7.0.0 current | 1.6.0 behind | 1.2.0 behind | no stable |
-| `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | no stable |
+| `neptune-context` |  | 1.7.0 current | 1.6.0 behind |  |
+| `neptune-deploy` | 8.0.0 current | 1.6.0 behind | 1.2.0 behind | 1.0.0 behind |
+| `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) |
