@@ -59,7 +59,9 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
    with the same text as the in-process server without a catalog (as the sample `.mcp.json` runs it).
 4. **Pinned answers, checked by structure** (`harness/acceptance/answers.json`, `answers_format: 1`,
    naming its corpus version and the graph `generation` it was pinned against). Per gold question: the
-   phrasing it is `asked_as` and the tool `calls` an agent makes (subjects by declared id only, never a
+   phrasing it is `asked_as` and the tool `calls` an agent makes, at the budget the Claude Code skill
+   prescribes (`SKILL.md`: 50 items, 20,000 tokens), never a budget tuned to reach a pin (subjects by
+   declared id only, never a
    content-addressed id; an argument `"$support:<gold claim>"` is the first claim id whose statement cites
    that gold claim in the question's earlier answers, as an agent copies one from an Items footer).
    - **Cited.** A statement's citations, in ADR 0007 §6 terms, are the records its claims are *about* (a
@@ -93,7 +95,7 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
      `test_harness_answers.py` (`EXPECTED_CLASSES`), so a move between classes edits two files and turns the
      test red until both agree.
    - A separate file, not a selector in `gold.json`: gold stays compiler-version-proof (ADR 0007); the pins
-     are graph-specific. Corpus 2.1.0: 7 of 40 gold claims `supported`, 21 `co_cited`, 12 gaps. "Why did
+     are graph-specific. Corpus 2.1.0: 6 of 40 gold claims `supported`, 18 `co_cited`, 16 gaps. "Why did
      the arm-cell incident happen" and "what changed since the last good run" are not answered yet: the
      runs' calibrations are opaque configuration threads, and WO-26-0911's work and CAL-ARM3A-0818/0911
      reach no statement.
@@ -131,7 +133,7 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
 - **Copy Memory's config into `harness/acceptance/`.** Lost: two copies of one declaration drift, and a
   Memory change would turn the harness red on `main` instead of in Memory's PR.
 - **Score answer text, or ask an LLM to grade it.** Lost: not deterministic; the citation keys are.
-- **Count every cited gold claim as answered (ADR 0007 §6 alone).** Lost: 21 of 28 cited gold claims are
+- **Count every cited gold claim as answered (ADR 0007 §6 alone).** Lost: most cited gold claims (21 of 28 when this was decided) are
   cited only by statements about something else; the demo would claim "why" and "what changed" while no
   statement says them.
 - **Count the records a claim was built from, and widen a cell to its row** (the first cut of this PR).

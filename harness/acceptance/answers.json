@@ -22,8 +22,8 @@
             "include_inferred": false,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -100,18 +100,16 @@
       "supported": {
         "Q1.C1": {
           "claims": [
-            "claim:sha256:03610d43bbc48f792d5ba3efec9dfd04ef8c4393025597240968cff095308801",
             "claim:sha256:2a6ac0412ffd773cae002b65d22f85c8ec72b85a3a4efc83475183e3c50c0b4f",
             "claim:sha256:2a6ca3dea23045157716740f654d54a18a94679167448a2a394231086363c2df",
             "claim:sha256:2b56d5abcf469239d65417d389816eb19d947c901cbad42298845b4b87241aab",
             "claim:sha256:3379f059fcf05ecfb2bd5b8113933b38be6e57e3c23eb1a6dfd51ce0e720a47b",
-            "claim:sha256:723f94ad6389530fa66905046d99bdda12c93ce899552e5d50682051d6ad60a7",
             "claim:sha256:96fc6af9a29ed1ca61b934c41c7cbf325ae35a437b36ecc6fbeb6ae98f3c9bbd",
             "claim:sha256:afbf7d78a4fe6a42b36b086af94807c548770767a55e053d43d7c8c39e2a947d",
             "claim:sha256:c56efe5b1566853bac109310df7b66473c45ca77f31a3f29c89e3443c256c7f7",
             "claim:sha256:e29b171184f5948171987e063bfd2ce7b724a16786d3c3df20db222bededceb3"
           ],
-          "reason": "The incident report's description states that the fingers struck fixture PF-3 at pick P1, collision detection stopped the arm and the operator pressed the E-stop at OP-2. The 41.7 Nm against 35.0 Nm reading is not in this answer (Q7's syslog statement carries it)."
+          "reason": "The incident report's description states that the fingers struck fixture PF-3 at pick P1, collision detection stopped the arm and the operator pressed the E-stop at OP-2. The 41.7 Nm against 35.0 Nm reading is not in this answer."
         }
       }
     },
@@ -123,8 +121,8 @@
             "include_inferred": true,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -172,18 +170,9 @@
         },
         "Q2.C3": {
           "claims": [
-            "claim:sha256:0b4cf10006c4d0e7cbdd98829c2e6ee611d78dbd003e8546c6498678e909ed5c",
-            "claim:sha256:7e8b94eb7e3ca46cc49a5828b4bd49c7d15879feef6b4e569ad44064a7d9fc40",
-            "claim:sha256:853763fca7fcd201382dfddc245b4524e936073316e72c13ef954c6e4a8ad2f6",
             "claim:sha256:ee7dd1ffd6b0f2e904febbb332abbe716f76143d91d48ad3ed1b2c20837a0d46"
           ],
-          "reason": "Each run's configuration is stated as a Ledger configuration thread bound by the run sheet's pin, and the two runs' threads differ, but the threads are opaque ids: no statement names CAL-ARM3A-0818 or CAL-ARM3A-0911 or their errors."
-        },
-        "Q2.C8": {
-          "claims": [
-            "claim:sha256:d5d4f083492d7398356090c19cbcb94575386bc9fd0627cf2bba73f931a352a9"
-          ],
-          "reason": "The vendor-copy run's has_member claim rests on the 2026-09-09 bag's record, but no statement says the two paths hold one file."
+          "reason": "Only the 2026-09-09 run's configuration (as its vendor-share copy) reaches the answer, as an opaque Ledger thread bound by the run sheet's pin; the incident run's configuration is cut at the skill's budget, and no statement names CAL-ARM3A-0818 or CAL-ARM3A-0911 or their errors."
         }
       },
       "gaps": {
@@ -198,6 +187,10 @@
         "Q2.C6": {
           "in_graph": false,
           "reason": "Memory holds the cell PC's estimated clock fits as inferred maps_to and clock_map claims, but they are about clock nodes, which no claim links to a run or a machine, so no query from a declared id reaches them; and they rest on the compiler's clock_mapping estimates only as records they were built from, never as their subject or object, so no claim of the graph cites clock.0909 or clock.0914."
+        },
+        "Q2.C8": {
+          "in_graph": true,
+          "reason": "Memory holds the vendor-copy run's has_member claim on the 2026-09-09 bag's record, but at the skill's budget (50 items, 20,000 tokens; packages/neptune-context/claude/skills/neptune/SKILL.md) the answer is cut before it; and that claim would not say that the two paths hold one file."
         }
       },
       "id": "Q2",
@@ -218,8 +211,8 @@
             "include_inferred": false,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -255,18 +248,13 @@
             "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
           ],
           "reason": "Only \"ARM-3A has firmware 5.6.0\" cites it: that claim comes from the CMMS work orders' Firmware After cells and cites every ARM-3A work-order row, WO-26-0911's included, but states none of their work. The finger set and TCP z of the incident run are not stated."
-        },
-        "Q3.C2": {
-          "claims": [
-            "claim:sha256:0b4cf10006c4d0e7cbdd98829c2e6ee611d78dbd003e8546c6498678e909ed5c",
-            "claim:sha256:405e7bdbf9bfea6927f6d9d8effc79f59114cfd91bc831eb35dff4e1806b217c",
-            "claim:sha256:41089d42462026ad3454e2d2b87cec20654d5e0d5290a41d290b0f9ff1d545d2",
-            "claim:sha256:853763fca7fcd201382dfddc245b4524e936073316e72c13ef954c6e4a8ad2f6"
-          ],
-          "reason": "The incident run's configuration is stated as Ledger configuration threads bound by the run sheet's pins of CAL-ARM3A-0911 and the vision export, but the threads are opaque ids: no statement names the calibration or its 1.86 px."
         }
       },
       "gaps": {
+        "Q3.C2": {
+          "in_graph": true,
+          "reason": "Memory holds the incident run's configuration_active_during claims (threads bound by the run sheet's pins of CAL-ARM3A-0911 and the vision export), but at the skill's budget (50 items, 20,000 tokens; packages/neptune-context/claude/skills/neptune/SKILL.md) the answer is cut before it; and those threads are opaque ids naming no calibration."
+        },
         "Q3.C3": {
           "in_graph": false,
           "reason": "The software, collision limit and residual action are configuration values of cell_config.yaml, which Memory does not consolidate (the stale export is never pinned to a run, ADR 0009 §4); the bag's start and collision rows are status_report records Memory does not read yet. No claim cites them."
@@ -284,10 +272,9 @@
       "supported": {
         "Q3.C6": {
           "claims": [
-            "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f",
-            "claim:sha256:840fd00331692fd60ce1614cc4dda3d878b10461acf7c9dd887a64b90a1cd2f2"
+            "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f"
           ],
-          "reason": "LEG-01 is stated to have firmware 3.2.0 from 2026-09-13 (WO-26-0913), and the patrol run's configuration is bound by the run sheet's pin. The asset register's stale 3.1.4 is not stated."
+          "reason": "LEG-01 is stated to have firmware 3.2.0 from 2026-09-13 (WO-26-0913). The asset register's stale 3.1.4 is not stated."
         }
       }
     },
@@ -299,8 +286,8 @@
             "include_inferred": true,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -379,8 +366,8 @@
             "include_inferred": true,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -447,8 +434,8 @@
             "include_inferred": false,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -515,8 +502,8 @@
             "include_inferred": false,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -543,7 +530,7 @@
         },
         {
           "arguments": {
-            "claim_id": "$support:Q7.C3",
+            "claim_id": "$support:Q7.C2",
             "include_inferred": false
           },
           "tool": "neptune_why"
@@ -552,59 +539,45 @@
       "co_cited": {
         "Q7.C4": {
           "claims": [
-            "claim:sha256:0218bc10bd9ed609a2078d9c21dfecc291b3b75e7ae3038629e4ee8667f75b0d",
-            "claim:sha256:07d727d0d9a99bfd4fc95845f6b96168f946164265ae8b8accae007e94b06ff7",
-            "claim:sha256:3296e8fbd55d146096d79656c3f40d1a9dcf7d6f04a6f4cb563f555fe95b1cf4",
-            "claim:sha256:456aac4b891b2a66e48aef87f4c35c1b9e69cbb9460b67953344748707824518",
             "claim:sha256:5fbcb468095fc34825c63cc96c6ef41cef3712014678251a20db7df2c8bea7f5",
             "claim:sha256:65297f1a00f7b7be21dddf9d1727c94d9f9244ec8d59aab3a60f02aa44be519a",
             "claim:sha256:79209eb49219d6b440977f7a367f4509deb14001e2e3307fec51289756f1a8e2",
-            "claim:sha256:874862c50f9ac572e8753d0e66c964f31be6447ee18797966b46d6f32a282844",
             "claim:sha256:8749690a8bde2dafb1593c4b3c843b2be429d65f66630b0f88a1ffeae055923d",
-            "claim:sha256:884baccb7df2526412dba009bd431f4e04dba24768d03e1e4cc7e661fb6b913f",
             "claim:sha256:8dfc7d44db5704c4bf6141b26fb087f5ee99c8509149ff33eef06973e718bfd5",
             "claim:sha256:d3b110edf2ff9e37aa098f45765bbb87b14d089f9ce8f8c5e0f71e610f86ff55",
             "claim:sha256:f55cae3665da11d8f43974c60c164acaecce98b644d10dc6aed82380e7f4a2a9"
           ],
-          "reason": "The answer carries both stops' times and the same-stop claim, but on two clocks Memory relates by no mapping: no statement compares them or says the CMMS time is 32 s late."
+          "reason": "The answer carries both stops at their ticks, on two clocks Memory relates by no mapping: no statement compares them or says the CMMS time is 32 s late."
         }
       },
-      "gaps": {},
+      "gaps": {
+        "Q7.C3": {
+          "in_graph": true,
+          "reason": "Memory holds the stated same_as claim joining DT-26-0914-01 and syslog 4182 (A. Novak's assertion), but at the skill's budget (50 items, 20,000 tokens; packages/neptune-context/claude/skills/neptune/SKILL.md) the answer is cut before it, and neptune_why on the CMMS stop's first claim does not reach it."
+        }
+      },
       "id": "Q7",
       "supported": {
         "Q7.C1": {
           "claims": [
-            "claim:sha256:0218bc10bd9ed609a2078d9c21dfecc291b3b75e7ae3038629e4ee8667f75b0d",
             "claim:sha256:26eba433dc9fe83f396f633231c5c06fbd03470f53a4cb95333c860d4eb848da",
-            "claim:sha256:3296e8fbd55d146096d79656c3f40d1a9dcf7d6f04a6f4cb563f555fe95b1cf4",
-            "claim:sha256:450ea37b6ede7bb69a8beb6165e503f8f4c2f12119fb6d4b47d0d7008f1d3039",
             "claim:sha256:65297f1a00f7b7be21dddf9d1727c94d9f9244ec8d59aab3a60f02aa44be519a",
             "claim:sha256:79209eb49219d6b440977f7a367f4509deb14001e2e3307fec51289756f1a8e2",
-            "claim:sha256:874862c50f9ac572e8753d0e66c964f31be6447ee18797966b46d6f32a282844",
             "claim:sha256:8d2b2813bc1332880b6470c5aea707de0d4d7b3c64015696d0ed6f54c01547f9",
             "claim:sha256:8fb8f3792e0dab042a7a7a89198787491cfa07db81d206aca6827269c53ba30f",
             "claim:sha256:a9101dbf998fa2cd280eb6d66cce0eaa6764d7ce7bb75d23237d88257c616013",
-            "claim:sha256:e5c74d7130aa93efe8b79129cf6ce2f7fb454ab582acfbd0b238a12871f12814",
             "claim:sha256:f55cae3665da11d8f43974c60c164acaecce98b644d10dc6aed82380e7f4a2a9"
           ],
-          "reason": "The syslog statements carry the PSTOP (collision on joint 5, 41.7 Nm > 35.0 Nm) and the ESTOP at OP-2, each at its tick on the syslog's declared America/New_York clock (14:32:38 and 14:32:41)."
+          "reason": "The E-stop is stated (\"ESTOP: OP-2.ES1 pressed\", emergency_stop) at its tick on the syslog's declared America/New_York clock (14:32:41). The protective stop's syslog event reaches the answer only by its machine and severity at 14:32:38; its kind and description are cut at the skill's budget."
         },
         "Q7.C2": {
           "claims": [
-            "claim:sha256:07d727d0d9a99bfd4fc95845f6b96168f946164265ae8b8accae007e94b06ff7",
-            "claim:sha256:456aac4b891b2a66e48aef87f4c35c1b9e69cbb9460b67953344748707824518",
             "claim:sha256:5fbcb468095fc34825c63cc96c6ef41cef3712014678251a20db7df2c8bea7f5",
             "claim:sha256:8749690a8bde2dafb1593c4b3c843b2be429d65f66630b0f88a1ffeae055923d",
             "claim:sha256:8dfc7d44db5704c4bf6141b26fb087f5ee99c8509149ff33eef06973e718bfd5",
             "claim:sha256:d3b110edf2ff9e37aa098f45765bbb87b14d089f9ce8f8c5e0f71e610f86ff55"
           ],
-          "reason": "The CMMS downtime record DT-26-0914-01 is stated as a protective stop of ARM-3A at its tick on the downtime log's declared clock (14:33:10)."
-        },
-        "Q7.C3": {
-          "claims": [
-            "claim:sha256:884baccb7df2526412dba009bd431f4e04dba24768d03e1e4cc7e661fb6b913f"
-          ],
-          "reason": "A stated same_as claim joins CMMS stop DT-26-0914-01 and syslog 4182, from A. Novak's assertion."
+          "reason": "The CMMS downtime record DT-26-0914-01 is stated as a \"Protective stop\" of ARM-3A at its tick on the downtime log's declared clock (14:33:10)."
         }
       }
     },
@@ -616,8 +589,8 @@
             "include_inferred": false,
             "query": {
               "budget": {
-                "items": 200,
-                "tokens": 200000
+                "items": 50,
+                "tokens": 20000
               },
               "graph": {
                 "direction": "both",
@@ -647,14 +620,7 @@
           "tool": "neptune_query"
         }
       ],
-      "co_cited": {
-        "Q8.C3": {
-          "claims": [
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
-          ],
-          "reason": "Only \"ARM-3A has firmware 5.6.0\" cites it: that claim comes from the CMMS work orders' Firmware After cells and cites every ARM-3A work-order row, WO-26-0911's included, but states none of their work. No statement relates WO-26-0911 to ENV-P2-01's requalification condition."
-        }
-      },
+      "co_cited": {},
       "gaps": {
         "Q8.C1": {
           "in_graph": false,
@@ -663,6 +629,10 @@
         "Q8.C2": {
           "in_graph": false,
           "reason": "Deploy maps ENV-P2-02 and ENV-P2-03 as authorisation_envelope records whose approved configuration is not covered, and Memory states an envelope only as a configuration approved at a site, so no claim cites them."
+        },
+        "Q8.C3": {
+          "in_graph": true,
+          "reason": "Only \"ARM-3A has firmware 5.6.0\" would cite WO-26-0911's row, and at the skill's budget (50 items, 20,000 tokens; packages/neptune-context/claude/skills/neptune/SKILL.md) the answer is cut before it; no claim relates WO-26-0911 to ENV-P2-01's requalification condition."
         }
       },
       "id": "Q8",

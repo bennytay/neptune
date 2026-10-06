@@ -122,7 +122,8 @@ two `uv` commands directly (the Makefile needs GNU make 3.82+; macOS ships 3.81)
 
 ### The pinned answers
 
-`harness/acceptance/answers.json` lists, per gold question, the MCP tool calls an agent makes (subjects by
+`harness/acceptance/answers.json` lists, per gold question, the MCP tool calls an agent makes, at the budget the
+Claude Code skill prescribes (50 items, 20,000 tokens; subjects by
 declared id; `"$support:Q7.C3"` is the first claim id an earlier answer cites for Q7.C3) and pins each gold claim
 in one class with a written reason: `supported` (the claim ids whose statements cite it, by Platform ADR 0007 §6's
 rule over each statement's evidence refs, a single cell only by its column, and the records its claims are

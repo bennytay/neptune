@@ -21,16 +21,17 @@ MCP tools. Every answer is cited, and CI checks the citations by claim id, never
 - **Real:** compiler ingest · Deploy's lifecycle and event-log mapping · the Ledger's catalog (embedded
   PostgreSQL) · Memory's consolidation (byte-identical to its committed snapshot) · Context's local engine
   and MCP server · Deploy's evidence-pack PDFs. CI runs all of it.
-- **Answered today (7 of 40 gold claims supported):** what happened in INC-C3-0011 (the fingers struck PF-3,
-  protective stop, E-stop at OP-2); when the arm stopped per syslog (14:32:38, 14:32:41) and per the CMMS
-  (14:33:10), and the operator's statement that both are one stop; that the cell PC's log shows the alarms
-  about a minute and a half late; that ARM-3A's controller firmware stayed 5.6.0 and LEG-01's went to 3.2.0.
+- **Answered today (6 of 40 gold claims supported)**, asked as the Claude Code skill asks (50 items, 20,000
+  tokens): what happened in INC-C3-0011 (the fingers struck PF-3, protective stop, E-stop at OP-2); the E-stop
+  in syslog at 14:32:41 and the CMMS's protective stop at 14:33:10; that the cell PC's log shows the alarms about
+  a minute and a half late; that ARM-3A's controller firmware stayed 5.6.0 and LEG-01's went to 3.2.0.
 - **Not answered yet:** *why* the incident happened and *what changed* since the last good run. The answers cite
-  the right rows for 21 more gold claims, but only through statements about something else (`co_cited`): the
+  the right rows for 18 more gold claims, but only through statements about something else (`co_cited`): the
   runs' calibrations are opaque configuration threads, and WO-26-0911's work, CAL-ARM3A-0818/0911 and their
-  errors reach no statement. 12 more are gaps: the bags' warnings and e-stops (the compiler emits them as
-  `status_report` records; Memory does not read those yet), SOP and survey text, the stale config export's
-  values, the envelope register, the cell PC's clock fits. Each is pinned with its reason in
+  errors reach no statement. 16 more are gaps: facts Memory holds that the skill's budget cuts (the operator's
+  same-stop statement, the incident run's configuration), the bags' warnings and e-stops (the compiler emits
+  them as `status_report` records; Memory does not read those yet), SOP and survey text, the stale config
+  export's values, the envelope register, the cell PC's clock fits. Each is pinned with its reason in
   `harness/acceptance/answers.json`. No spatial baseline (MVL-135), no LeRobot export, no hosted service;
   pre-alpha APIs.
 
@@ -56,7 +57,7 @@ export NEPTUNE_MEMORY_GRAPH=demo/graph.json
    with each gold claim's class and reason.
 2. Run `claude` in the same folder and approve the `neptune` server (`.mcp.json`; the skill is
    `.claude/skills/neptune`). Ask: **"What happened in the arm-cell incident INC-C3-0011?"** and
-   **"When did ARM-3A stop, and do the CMMS and the controller log agree?"** Each fact comes back as
+   **"When did ARM-3A stop?"** Each fact comes back as
    `[I…][E…]` citations; `neptune_why` on a claim shows its evidence. In this path no Ledger catalog is
    attached, so `neptune_hydrate` (opening an `[E…]` source) answers `unavailable`; `make demo` hydrates
    through the Ledger and checks it.

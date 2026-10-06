@@ -31,20 +31,51 @@ def _gold(qid: str) -> dict[str, Any]:
 # Each gold claim's class, by hand (ADR 0011 §4): a pin that moves between classes in
 # answers.json must move here too, so a reclassification is always a deliberate, reviewed edit.
 EXPECTED_CLASSES: Final = {
-    "supported": {"Q1.C1", "Q2.C7", "Q3.C6", "Q5.C2", "Q7.C1", "Q7.C2", "Q7.C3"},
+    "supported": {
+        "Q1.C1",
+        "Q2.C7",
+        "Q3.C6",
+        "Q5.C2",
+        "Q7.C1",
+        "Q7.C2",
+    },
     "co_cited": {
-        *("Q1.C3", "Q1.C4", "Q1.C6", "Q1.C7"),
-        *("Q2.C1", "Q2.C2", "Q2.C3", "Q2.C8"),
-        *("Q3.C1", "Q3.C2"),
-        *("Q4.C1", "Q4.C2", "Q4.C3", "Q4.C5", "Q4.C6"),
+        "Q1.C3",
+        "Q1.C4",
+        "Q1.C6",
+        "Q1.C7",
+        "Q2.C1",
+        "Q2.C2",
+        "Q2.C3",
+        "Q3.C1",
+        "Q4.C1",
+        "Q4.C2",
+        "Q4.C3",
+        "Q4.C5",
+        "Q4.C6",
         "Q5.C1",
-        *("Q6.C1", "Q6.C2", "Q6.C3"),
+        "Q6.C1",
+        "Q6.C2",
+        "Q6.C3",
         "Q7.C4",
-        "Q8.C3",
     },
     "gaps": {
-        *("Q1.C2", "Q1.C5", "Q2.C4", "Q2.C5", "Q2.C6", "Q3.C3", "Q3.C4", "Q3.C5"),
-        *("Q4.C4", "Q5.C3", "Q8.C1", "Q8.C2"),
+        "Q1.C2",
+        "Q1.C5",
+        "Q2.C4",
+        "Q2.C5",
+        "Q2.C6",
+        "Q2.C8",
+        "Q3.C2",
+        "Q3.C3",
+        "Q3.C4",
+        "Q3.C5",
+        "Q4.C4",
+        "Q5.C3",
+        "Q7.C3",
+        "Q8.C1",
+        "Q8.C2",
+        "Q8.C3",
     },
 }
 
@@ -88,7 +119,7 @@ def test_why_and_what_changed_are_not_claimed_as_answered() -> None:
     by_id = {q["id"]: q for q in ANSWERS["questions"]}
     assert by_id["Q1"]["asked_as"] == "why did the arm-cell incident happen"
     assert by_id["Q2"]["asked_as"] == "what changed since the last good run"
-    assert set(by_id["Q1"]["supported"]) == {"Q1.C1"}  # what happened, not why
+    assert set(by_id["Q1"]["supported"]) <= {"Q1.C1"}  # at most what happened, not why
     for claim in ("Q1.C3", "Q1.C4", "Q1.C7", "Q2.C1", "Q2.C2", "Q2.C3"):
         assert claim not in by_id[claim[:2]]["supported"], claim
 
@@ -100,6 +131,9 @@ def test_the_calls_use_the_mcp_tools_and_name_subjects_by_declared_id() -> None:
             text = json.dumps(call["arguments"])
             # content-addressed ids move with every compiler or Memory change: never in a call
             assert "sha256:" not in text, question["id"]
+            query = call["arguments"].get("query")
+            if query is not None:  # the Claude Code skill's budget, never one tuned to a pin
+                assert query["budget"] == {"items": 50, "tokens": 20000}, question["id"]
             for subject in call["arguments"].get("query", {}).get("subjects", []):
                 assert ":" in subject["declared_id"]
 

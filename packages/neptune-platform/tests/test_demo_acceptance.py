@@ -78,21 +78,16 @@ def test_the_gold_questions_are_answered_through_the_mcp_tools_as_pinned(demo_di
     assert len(context["stdio"]["tools"]) == 6
 
 
-def test_what_changed_since_the_last_good_run_cites_both_runs_pins_but_names_no_calibration(
-    demo_dir: Path,
-) -> None:
-    """Q2.C3 is co-cited, not supported (ADR 0011 §4): the answer cites a run-configuration claim
-    resting on the run sheet's pin for each of ARM-3A's runs of 2026-09-09 and 2026-09-14, but the
-    configurations are opaque Ledger threads, and no statement names CAL-ARM3A-0818 or -0911."""
+def test_what_changed_since_the_last_good_run_names_no_calibration(demo_dir: Path) -> None:
+    """Q2.C3 is co-cited, not supported (ADR 0011 §4): at the skill's budget the answer cites a
+    run-configuration claim resting on the run sheet's calibration pin, but the configuration is an
+    opaque Ledger thread, and no statement names CAL-ARM3A-0818 or -0911 or WO-26-0911."""
     graph = json.loads((demo_dir / "graph.json").read_bytes())
     claims = {c["id"]: c for c in graph["claims"]}
     pinned = json.loads(acceptance.ANSWERS.read_text(encoding="utf-8"))
     q2 = next(q for q in pinned["questions"] if q["id"] == "Q2")
     ids = q2["co_cited"]["Q2.C3"]["claims"]
-    cited = [claims[i] for i in ids]
-    assert {c["predicate"] for c in cited} == {"configuration_active_during"}
-    starts = {c["valid"]["start"]["ticks"] // 10**9 for c in cited}
-    assert len(starts) == 2  # two runs: 2026-09-09 and 2026-09-14
+    assert {claims[i]["predicate"] for i in ids} == {"configuration_active_during"}
     transcript = json.loads((demo_dir / "answers.json").read_text(encoding="utf-8"))
     text = "".join(c["text"] for c in transcript["questions"][1]["calls"])
     assert all(i in text for i in ids)
