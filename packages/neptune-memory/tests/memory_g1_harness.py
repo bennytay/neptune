@@ -8,7 +8,6 @@ instants; the dates in comments are UTC labels for the reader) or a robot's own 
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING, Final
@@ -25,7 +24,7 @@ from neptune_memory.schema.codec import GraphDocument
 from neptune_memory.schema.interval import CivilClock, ledger_tx
 from neptune_memory.schema.predicates import CORE_PREDICATES, PredicateRegistry
 from neptune_memory.schema.reference import ReferenceReader
-from neptune_memory.schema.supersede import resolve, resolver_config
+from neptune_memory.schema.supersede import Build, resolve, resolver_config
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -37,8 +36,6 @@ if TYPE_CHECKING:
     from neptune_memory.schema.nodes import NodeRef
 
 Record = dict[str, object]
-# A consolidator run (ADR 0007 §5.1): consolidator id, version, config hash, recorded_at.
-Build = dict[str, object]
 
 SECONDS: Final = CivilClock(Timescale.POSIX, Epoch.UNIX, Fraction(1))
 DAY: Final = 86_400
@@ -156,19 +153,9 @@ class Fixed:
 
 
 def build(consolidation: Consolidation, recorded_at: int) -> Build:
-    """One consolidator run as ADR 0007 §5.1 records it: its lineage and transaction."""
-    transform = consolidation.transform
-    return {
-        "consolidator_id": transform.consolidator_id,
-        "config_hash": transform.config_hash,
-        "recorded_at": recorded_at,
-        "version": transform.version,
-    }
-
-
-def accepts_builds() -> bool:
-    """Whether ``resolve`` takes ADR 0007 §5.5's ``builds`` yet (MVL-132)."""
-    return "builds" in inspect.signature(resolve).parameters
+    """One consolidator run as ADR 0007 §5.1 records it: its lineage, transaction and claims."""
+    assert consolidation.recorded_at == recorded_at
+    return consolidation.build
 
 
 def reader(
@@ -179,15 +166,9 @@ def reader(
     head: int | None = None,
     builds: Sequence[Build] = (),
 ) -> ReferenceReader:
-    """Resolve ``claims`` and wrap the history in the reference reader.
-
-    ``builds`` go to ``resolve`` as soon as it accepts them, so the strict ``xfail`` tests that pass
-    them flip on their own when MVL-132 lands withdrawal; until then they are ignored.
-    """
-    if builds and accepts_builds():
-        resolution = resolve(claims, registry, priorities, builds=builds)  # type: ignore[call-arg]
-    else:
-        resolution = resolve(claims, registry, priorities)
+    """Resolve ``claims`` with their ``builds`` (ADR 0007 §5) and wrap the history in the
+    reference reader."""
+    resolution = resolve(claims, registry, priorities, builds)
     top = max((c.recorded_at for c in claims), default=0)
     document = GraphDocument(
         resolution,

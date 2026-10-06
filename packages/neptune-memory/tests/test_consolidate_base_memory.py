@@ -260,7 +260,8 @@ def test_bad_draft_is_a_finding_not_a_claim(draft: ClaimDraft, code: str) -> Non
 @pytest.mark.parametrize(
     ("error", "message"),
     [
-        (KeyError("boom"), "KeyError: 'boom'"),
+        (KeyError("boom"), "KeyError"),
+        (RuntimeError(f"state {object()} in {frozenset({'a', 'b'})}"), "RuntimeError"),
         (RuntimeError("line\nbreak"), "RuntimeError"),
         (RuntimeError("lone \ud800 surrogate"), "RuntimeError"),
     ],

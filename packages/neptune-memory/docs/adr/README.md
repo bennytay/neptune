@@ -11,9 +11,9 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0002](0002-graph-tiers-and-the-bi-temporal-claim-model.md) | Graph tiers, node and edge schema, and the bi-temporal claim model | Accepted; §4 and the worked examples superseded by 0005 |
 | [0003](0003-identity-policy-consolidator-contract-and-lineage.md) | Identity policy, the consolidator contract, and consolidator lineage | Accepted; the §1.4 undo sentence and the §3 known gap superseded by 0007 |
 | [0004](0004-claim-graph-store.md) | Claim graph store: PostgreSQL 16 + pgvector over Neo4j 5 (Apache AGE optional, measured) | Accepted; final per 0007, which supersedes Decision 4 (budgets) and the recall consequence |
-| [0005](0005-split-closures-bi-temporal-findings-and-the-resolver-config.md) | Split closures, bi-temporal findings and the resolver's config | Accepted |
+| [0005](0005-split-closures-bi-temporal-findings-and-the-resolver-config.md) | Split closures, bi-temporal findings and the resolver's config | Accepted; §1.1 (later-arrival tie-break) and §1.4 (no resurrection) superseded by 0016 for histories resolved with builds |
 | [0006](0006-graph-schema-v1-contract-surface-and-memory-reader.md) | Graph-schema v1: contract surface, version policy and the MemoryReader | Accepted |
-| [0007](0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) | G1 gate: withdrawal, names, evidence status, and the final store decision | Accepted |
+| [0007](0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) | G1 gate: withdrawal, names, evidence status, and the final store decision | Accepted; §5.3 (package-scoped builds) superseded by 0016 |
 | [0008](0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) | The identity consolidator on compiler identity links and assertions | Accepted |
 | [0009](0009-run-threads-and-cross-package-continuation.md) | Run threads and cross-package continuation from RunAssembly records | Accepted |
 | [0010](0010-configuration-lineage-consolidator.md) | The configuration lineage consolidator | Accepted |
@@ -22,3 +22,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0013](0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) | Event index: evidence-linked event claims and co-occurrence that is never cause | Accepted |
 | [0014](0014-calibration-history-and-drift-consolidator.md) | The calibration history and drift consolidator | Accepted |
 | [0015](0015-coverage-and-health-consolidator.md) | The coverage and health consolidator | Accepted |
+| [0016](0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md) | Memory snapshots, the rebuild CLI and build withdrawal | Accepted |

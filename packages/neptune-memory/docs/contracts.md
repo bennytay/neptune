@@ -6,21 +6,27 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 1`, published as `contracts/graph-schema/v1.8.0/` (1.0.0 to 1.7.0 stay)
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 1`, published as `contracts/graph-schema/v1.9.0/` (1.0.0 to 1.8.0 stay)
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
   - `neptune_memory.schema`: `NodeRef`/`NodeType`/`Tier`, `Claim` and its objects and provenance (with `ModelRef`),
     `Interval`/`CivilClock`/`LedgerTx`, the predicate registry (`CORE_PREDICATES`, `VOCABULARY_VERSION = 10`), the
-    superseding resolver (`resolve`, `as_of`, `ResolutionFinding`, `resolver_config`), `codec` (strict JSON) and
-    `export.graph_schema`. Claim model: [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md);
-    superseding: [ADR 0005](adr/0005-split-closures-bi-temporal-findings-and-the-resolver-config.md).
+    superseding resolver (`resolve`, `as_of`, `ResolutionFinding`, `resolver_config`, and from 1.9.0 `Build` for
+    withdrawal), `codec` (strict JSON) and `export.graph_schema`. Claim model:
+    [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md); superseding:
+    [ADR 0005](adr/0005-split-closures-bi-temporal-findings-and-the-resolver-config.md); withdrawal:
+    [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
   - Read API: `schema.reader.MemoryReader`, reference `schema.reference.ReferenceReader`; identity traversal
     `schema.traverse.same_as_closure` ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md));
     clock conversion `schema.clocks.convert` over `clock_map` claims
     ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)).
   - Contract tests: `neptune_memory.contract.suite.CHECKS`, run by the owner in
     `tests/test_reader_contract_memory.py` and `tests/test_golden_graph_memory.py`.
+- Memory snapshots and the graph dump (not a registry contract): `memory consolidate` records a
+  `MemorySnapshot` per Ledger snapshot and `memory dump` writes claims as canonical JSON Lines; their shapes and
+  the determinism they promise are in [`guarantees.md`](guarantees.md) and
+  [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
 
 ## Consumes
 
