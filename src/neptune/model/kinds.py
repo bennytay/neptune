@@ -86,6 +86,12 @@ from neptune.model.reference import (
     timestamp_domain_from_json,
 )
 from neptune.model.run import Run, Stream, run_from_json, stream_from_json
+from neptune.model.status import (
+    SafetyState,
+    StatusReport,
+    safety_state_from_json,
+    status_report_from_json,
+)
 from neptune.model.source import (
     SourceAbsence,
     SourceArtifact,
@@ -143,6 +149,8 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (FrameTransform, frame_transform_from_json),
         (Run, run_from_json),
         (Stream, stream_from_json),
+        (StatusReport, status_report_from_json),
+        (SafetyState, safety_state_from_json),
         (Machine, machine_from_json),
         (HardwareConfiguration, hardware_configuration_from_json),
         (HardwareComponent, hardware_component_from_json),
