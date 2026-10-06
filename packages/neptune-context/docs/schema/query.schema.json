@@ -268,9 +268,6 @@
                   "at_site",
                   "at_site_candidate",
                   "authorised_configuration",
-                  "calibrated_by",
-                  "calibrated_with",
-                  "calibration_candidate",
                   "clock_map",
                   "co_occurs_within",
                   "configuration_active_during",
@@ -280,7 +277,6 @@
                   "continues_candidate",
                   "declared_kind",
                   "deployed_at",
-                  "drift",
                   "ends_at",
                   "ends_at_candidate",
                   "episode_of",
@@ -325,7 +321,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 57,
+              "maxItems": 53,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
