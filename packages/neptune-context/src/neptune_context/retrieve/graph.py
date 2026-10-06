@@ -23,7 +23,7 @@ from fractions import Fraction
 from typing import TYPE_CHECKING, Any, Final
 
 from neptune_memory.schema.claim import LedgerRecordRef, TypedLiteral, ValueType, is_inferred
-from neptune_memory.schema.interval import OPEN, Interval, ledger_tx
+from neptune_memory.schema.interval import OPEN, Interval, Open, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CLOCK_MAP, SAME_AS, SAME_AS_CANDIDATE
 
@@ -70,6 +70,7 @@ DECAY: Final = 0.5  # each further level halves a claim's score
 UNKNOWN_CONFIDENCE_WEIGHT: Final = 0.5  # an inferred claim whose confidence is Unknown
 SITE_CHECK_HOPS: Final = 2  # how far a subject may be from the scoped site or zones
 DEFAULT_MAX_NODES: Final = 4096  # nodes a walk may expand before it stops (and says so)
+DEFAULT_MAX_EDGES: Final = 1024  # claims followed from one node (by claim id), then a gap
 DEFAULT_MAX_ROWS: Final = 10_000  # rows one Ledger window may return
 LEDGER_KINDS: Final = ("image", "stream")  # record kinds the Ledger windows read
 
@@ -110,16 +111,33 @@ class _Window:
         return Interval(start, end)
 
 
-def _carry(window: _Window, clock_map: ClockMap, clock: str, *, forward: bool) -> _Window | None:
-    """``window`` carried exactly through a direct map: onto its target (``forward``) or back
-    onto its source. Widened by the map's residual bound when it states one; ``None`` when the
-    map states no affine parameters (a composed map, or an unknown anchor or rate)."""
-    affine = clock_map.affine()
-    if affine is None:
-        return None
-    rate, offset = affine
+def _slack(clock_map: ClockMap) -> Fraction:
+    """The map's residual bound in target ticks when it states one, else 0."""
     residual = clock_map.residual_bound
-    slack = Fraction(residual.value.ticks) if isinstance(residual, Known) else Fraction(0)
+    return Fraction(residual.value.ticks) if isinstance(residual, Known) else Fraction(0)
+
+
+def _clip(a: _Window, b: _Window) -> _Window | None:
+    """The overlap of two windows on one clock, or ``None`` when they do not meet."""
+    start = max(a.start, b.start)
+    ends = [e for e in (a.end, b.end) if e is not None]
+    end = min(ends) if ends else None
+    if end is not None and end <= start:
+        return None
+    return _Window(a.clock, start, end)
+
+
+def _carry(
+    window: _Window,
+    affine: tuple[Fraction, Fraction],
+    clock: str,
+    *,
+    forward: bool,
+    slack: Fraction = Fraction(0),
+) -> _Window:
+    """``window`` carried exactly through ``target = rate * source + offset``: onto the target
+    clock (``forward``) or back onto the source, widened by ``slack`` target ticks each side."""
+    rate, offset = affine
 
     def there(ticks: int, low: bool) -> int:
         if forward:
@@ -145,7 +163,8 @@ class _State:
     other_clock: set[str] = field(default_factory=set)
     findings: dict[str, ResolutionFinding] = field(default_factory=dict)
     gaps: list[Gap] = field(default_factory=list)
-    truncated: bool = False
+    truncated: set[str] = field(default_factory=set)  # pointers of walks cut by max_nodes
+    crowded: dict[str, int] = field(default_factory=dict)  # node id -> claims it holds, when cut
 
     def hit(self, claim: Claim, level: int) -> None:
         held = self.hits.get(claim.id)
@@ -166,10 +185,12 @@ class GraphChannel:
         *,
         max_nodes: int = DEFAULT_MAX_NODES,
         max_rows: int = DEFAULT_MAX_ROWS,
+        max_edges: int = DEFAULT_MAX_EDGES,
     ) -> None:
         self._memory = memory
         self._catalog = catalog
         self._max_nodes = max_nodes
+        self._max_edges = max_edges
         self._max_rows = max_rows
 
     @property
@@ -184,6 +205,7 @@ class GraphChannel:
             "decay": DECAY,
             "ledger": self._catalog is not None,
             "ledger_kinds": list(LEDGER_KINDS),
+            "max_edges": self._max_edges,
             "max_nodes": self._max_nodes,
             "max_rows": self._max_rows,
             "site_check_hops": SITE_CHECK_HOPS,
@@ -191,26 +213,19 @@ class GraphChannel:
         }
 
     def retrieve(self, request: Retrieval) -> ChannelAnswer:
-        return _Retrieve(
-            self._memory, self._catalog, self._max_nodes, self._max_rows, request
-        ).run()
+        return _Retrieve(self, request).run()
 
 
 class _Retrieve:
     """One retrieval: seeds, bridges, the walk, the Ledger windows and the answer."""
 
-    def __init__(
-        self,
-        memory: MemoryReader,
-        catalog: CatalogApi | None,
-        max_nodes: int,
-        max_rows: int,
-        request: Retrieval,
-    ) -> None:
-        self.memory = memory
-        self.catalog = catalog
-        self.max_nodes = max_nodes
-        self.max_rows = max_rows
+    def __init__(self, channel: GraphChannel, request: Retrieval) -> None:
+        self.memory: MemoryReader = channel._memory
+        self.catalog: CatalogApi | None = channel._catalog
+        self.max_nodes = channel._max_nodes
+        self.max_rows = channel._max_rows
+        self.max_edges = channel._max_edges
+        self.current: dict[tuple[NodeRef, str, int], frozenset[str]] = {}
         self.query: Query = request.query
         self.snapshot = request.snapshot
         self.as_of: LedgerTx = request.snapshot.memory_as_of
@@ -219,9 +234,10 @@ class _Retrieve:
         self.window = (
             None if during is None else _Window(domain_id(during.clock), during.start, during.end)
         )
-        self.placed: dict[str, _Window] = {}  # bridged clock -> the window carried onto it
-        self.mappings: dict[str, Claim] = {}  # bridged clock -> the clock_map claim carrying it
-        self.used: set[str] = set()  # bridged clocks a carried claim was placed on
+        # bridged clock -> the window carried onto it, one piece per clock_map claim that covers
+        # part of the window, each clipped to where that mapping holds
+        self.placed: dict[str, list[tuple[_Window, Claim]]] = {}
+        self.used: dict[str, Claim] = {}  # clock_map claims a carried claim was placed through
         self.views: dict[NodeRef, Any] = {}
         self.transforms: dict[str, Transform | None] = {}
 
@@ -247,19 +263,21 @@ class _Retrieve:
         if self.window is None:
             return True
         clock = str(claim.valid.domain_id)
-        window = self.window if clock == self.window.clock else self.placed.get(clock)
-        if window is None:
+        if clock == self.window.clock:
+            return claim.valid.overlaps(self.window.interval())
+        pieces = self.placed.get(clock)
+        if pieces is None:
             if record:
                 self.state.other_clock.add(claim.id)
             return False
-        return claim.valid.overlaps(window.interval())
+        return any(claim.valid.overlaps(w.interval()) for w, _ in pieces)
 
     def carry(self, claim: Claim, level: int) -> None:
-        """Make ``claim`` a hit, noting the bridged clock it was placed on, if any."""
+        """Make ``claim`` a hit, noting the mapping pieces it was placed through, if any."""
         self.state.hit(claim, level)
-        clock = str(claim.valid.domain_id)
-        if clock in self.placed:
-            self.used.add(clock)
+        for window, mapping in self.placed.get(str(claim.valid.domain_id), ()):
+            if claim.valid.overlaps(window.interval()):
+                self.used[mapping.id] = mapping
 
     # --- Seeds ---------------------------------------------------------------------------------
 
@@ -268,6 +286,7 @@ class _Retrieve:
         query, node_types = self.query, pinned.node_types()
         subjects = ordered(query.subjects, _subject_json)
         declared: dict[NodeRef, int] = {}
+        groups: dict[NodeRef, list[NodeRef]] = {}  # a declared node and its same_as identities
         asked = False  # whether any subject names one node: then only those may seed the walk
         kinds: set[NodeType] = set()
         kind_wide: list[str] = []
@@ -298,13 +317,14 @@ class _Retrieve:
                 )
                 continue
             declared[node] = 0
-            for other in self.same_as(node, subject.same_as_depth):
+            groups[node] = [node, *self.same_as(node, subject.same_as_depth)]
+            for other in groups[node]:
                 declared.setdefault(other, 0)
         anchors = self.site_anchors()
         if not asked:
             seeds = anchors  # the site and zones are the anchors (ADR 0002 §5)
         elif declared and anchors:
-            seeds = self.at_site(declared, anchors)
+            seeds = self.at_site(groups, anchors)
         else:
             # Subjects that name nodes were asked; none found is no seed, never the whole site.
             seeds = declared
@@ -367,24 +387,28 @@ class _Retrieve:
         return anchors
 
     def at_site(
-        self, declared: dict[NodeRef, int], anchors: dict[NodeRef, int]
+        self, groups: dict[NodeRef, list[NodeRef]], anchors: dict[NodeRef, int]
     ) -> dict[NodeRef, int]:
-        """The declared seeds the graph connects to the scoped site (or, given zones, to one of
-        them) within ``SITE_CHECK_HOPS`` admitted claims; the rest are a gap at ``/site``."""
+        """The declared subjects (each with its ``same_as`` identities, kept or dropped together)
+        the graph connects to the scoped site (or, given zones, to one of them) within
+        ``SITE_CHECK_HOPS`` admitted claims; the rest are a gap at ``/site``."""
         zones = {n for n in anchors if n.node_type is NodeType.ZONE}
         targets = zones or set(anchors)
         kept: dict[NodeRef, int] = {}
-        for node in sorted(declared, key=_node_key):
+        dropped: list[NodeRef] = []
+        for root in sorted(groups, key=_node_key):
             reached = self.walk(
-                {node: 0},
+                dict.fromkeys(groups[root], 0),
                 SITE_CHECK_HOPS,
                 lambda p: p != SAME_AS_CANDIDATE,
                 Direction.BOTH,
                 record=False,
+                at="/site",
             )
             if targets & reached:
-                kept[node] = 0
-        dropped = sorted(set(declared) - set(kept), key=_node_key)
+                kept.update(dict.fromkeys(groups[root], 0))
+            else:
+                dropped.append(root)
         if dropped:
             self.state.gap(
                 GapCode.NOT_COVERED,
@@ -415,37 +439,93 @@ class _Retrieve:
                     " clock; this bridge does not touch it",
                 )
                 continue
-            mapping = self.mapping(bridge.mapping_id, source, target)
-            if mapping is None:
-                self.state.gap(
-                    GapCode.UNKNOWN,
-                    at,
-                    [bridge.mapping_id],
-                    f"Memory holds no clock_map from mapping {bridge.mapping_id} joining"
-                    f" {source} to {target} at transaction {self.as_of}; claims on the other"
-                    " clock stay apart",
-                )
-                continue
-            claim, clock_map = mapping
             forward = window.clock == source
             other = target if forward else source
-            carried = _carry(window, clock_map, other, forward=forward)
-            if carried is None:
-                self.state.gap(
-                    GapCode.UNKNOWN,
-                    at,
-                    [bridge.mapping_id, claim.id],
-                    "the mapping states no anchor and rate (a composed or unknown map), so the"
-                    " window cannot be carried exactly",
-                )
-                continue
-            self.placed[other] = carried
-            self.mappings[other] = claim
+            self.bridge(at, bridge.mapping_id, window, source, target, other, forward=forward)
 
-    def mapping(self, mapping_id: str, source: str, target: str) -> tuple[Claim, ClockMap] | None:
-        """The ``clock_map`` claim on ``source`` onto ``target`` that cites ``mapping_id``."""
+    def bridge(
+        self,
+        at: str,
+        mapping_id: str,
+        window: _Window,
+        source: str,
+        target: str,
+        other: str,
+        *,
+        forward: bool,
+    ) -> None:
+        """Carry ``window`` onto ``other`` through every piece of ``mapping_id`` Memory holds.
+
+        Memory splits a mapping into time-bounded ``clock_map`` claims, each valid over part of the
+        source clock. A piece is used only where it holds: its validity (carried onto the window's
+        clock when the window is on the target) is clipped to the window, and only that part is
+        carried. Any part of the window no piece covers is an ``unknown`` gap at the bridge: a map
+        is never extended past the interval its evidence states.
+        """
+        pieces = self.mapping(mapping_id, source, target)
+        if not pieces:
+            self.state.gap(
+                GapCode.UNKNOWN,
+                at,
+                [mapping_id],
+                f"Memory holds no clock_map from mapping {mapping_id} joining {source} to"
+                f" {target} at transaction {self.as_of}; claims on the other clock stay apart",
+            )
+            return
+        covered: list[Interval] = []
+        placed: list[tuple[_Window, Claim]] = []
+        unusable: list[str] = []
+        for claim, clock_map in pieces:
+            affine = clock_map.affine()
+            valid = claim.valid
+            if affine is None or str(valid.domain_id) != source:
+                unusable.append(claim.id)  # composed or unknown map, or validity elsewhere
+                continue
+            holds = _Window(
+                source, valid.start.ticks, None if isinstance(valid.end, Open) else valid.end.ticks
+            )
+            # Where the piece holds, on the window's clock.
+            coverage = holds if forward else _carry(holds, affine, target, forward=True)
+            part = _clip(window, coverage)
+            if part is None:
+                continue
+            covered.append(coverage.interval())
+            slack = _slack(clock_map)
+            if forward:
+                there: _Window | None = _carry(part, affine, other, forward=True, slack=slack)
+            else:
+                back = _carry(part, affine, other, forward=False, slack=slack)
+                there = _clip(back, holds)
+            if there is not None:
+                placed.append((there, claim))
+        if placed:
+            self.placed[other] = placed
+        uncovered = window.interval().minus(covered)
+        if uncovered:
+            spans = ", ".join(
+                f"[{p.start.ticks}, {'open' if isinstance(p.end, Open) else p.end.ticks})"
+                for p in uncovered[:4]
+            )
+            more = f" and {len(uncovered) - 4} more" if len(uncovered) > 4 else ""
+            reason = (
+                "; some pieces state no anchor and rate (a composed or unknown map)"
+                if unusable
+                else ""
+            )
+            self.state.gap(
+                GapCode.UNKNOWN,
+                at,
+                [mapping_id, *unusable],
+                f"no piece of mapping {mapping_id} holds over ticks {spans}{more} of the window"
+                f" on {window.clock}{reason}: claims there on {other} stay apart",
+            )
+
+    def mapping(self, mapping_id: str, source: str, target: str) -> list[tuple[Claim, ClockMap]]:
+        """Every ``clock_map`` claim (piece) on ``source`` onto ``target`` citing ``mapping_id``,
+        by claim id."""
         clock = NodeRef(NodeType.CLOCK, source)
         result = self.memory.claims(clock, CLOCK_MAP, self.as_of, include_inferred=True)
+        found: list[tuple[Claim, ClockMap]] = []
         for claim in result.claims:  # sorted by id
             obj = claim.object
             if not isinstance(obj, TypedLiteral) or obj.datatype is not ValueType.CLOCK_MAP:
@@ -460,8 +540,8 @@ class _Retrieve:
             if is_inferred(claim.assertion_kind) and not self.query.include_inferred:
                 self.state.withheld.add(claim.id)
                 continue
-            return claim, clock_map
-        return None
+            found.append((claim, clock_map))
+        return found
 
     # --- The walk ------------------------------------------------------------------------------
 
@@ -474,6 +554,7 @@ class _Retrieve:
         *,
         record: bool,
         kinds: frozenset[NodeType] = frozenset(),
+        at: str = "",
     ) -> set[NodeRef]:
         """Breadth first from ``seeds``; with ``record``, admitted claims become hits at the level
         they were reached. Returns every node reached (seeds included)."""
@@ -484,7 +565,7 @@ class _Retrieve:
             nxt: set[NodeRef] = set()
             for here in frontier:
                 if expanded >= self.max_nodes:
-                    self.state.truncated = True  # a site check cut short says so too
+                    self.state.truncated.add(at)  # where the walk that was cut is asked for
                     return reached
                 expanded += 1
                 view = self.view(here)
@@ -493,7 +574,11 @@ class _Retrieve:
                 if record:
                     for finding in view.value.findings:
                         self.state.findings.setdefault(finding.id, finding)
-                for claim in sorted((*view.value.claims, *view.value.incoming), key=lambda c: c.id):
+                edges = sorted((*view.value.claims, *view.value.incoming), key=lambda c: c.id)
+                if len(edges) > self.max_edges:
+                    self.state.crowded[here.node_id] = len(edges)
+                    edges = edges[: self.max_edges]
+                for claim in edges:
                     outgoing = claim.subject == here
                     if direction is Direction.OUT and not outgoing:
                         continue
@@ -530,14 +615,23 @@ class _Retrieve:
             claim.subject, claim.predicate, ledger_tx(tx), include_inferred=True
         ).claims
 
+    def holds(self, claim: Claim, tx: int) -> bool:
+        """Whether ``claim`` is current at ``tx``; one read per subject, predicate and
+        transaction, shared by every claim of that group (a busy hub costs one read, not one
+        per claim)."""
+        key = (claim.subject, claim.predicate, tx)
+        if key not in self.current:
+            self.current[key] = frozenset(c.id for c in self.present(claim, tx))
+        return claim.id in self.current[key]
+
     def superseded(self, claim: Claim) -> Superseded | None:
         """When, in ``(memory_as_of, head]``, Memory stopped holding ``claim``, and what by."""
         low, high = int(self.as_of), min(int(self.memory.head), int(self.snapshot.head))
-        if low >= high or any(c.id == claim.id for c in self.present(claim, high)):
-            return None
-        while high - low > 1:  # current at ``low``, gone at ``high``
+        if low >= high or self.holds(claim, high):
+            return None  # the usual case: one shared read at head for the whole group
+        while high - low > 1:  # current at ``low``, gone at ``high``: only superseded claims
             middle = (low + high) // 2
-            if any(c.id == claim.id for c in self.present(claim, middle)):
+            if self.holds(claim, middle):
                 low = middle
             else:
                 high = middle
@@ -767,9 +861,17 @@ class _Retrieve:
             (lambda p: p != SAME_AS_CANDIDATE) if names is None else (lambda p: p in names)
         )
         if seeds:
-            self.walk(seeds, hops, allowed, direction, record=True, kinds=kinds)
-        for clock in sorted(self.used):  # a placement shows the mapping it went through
-            self.state.hit(self.mappings[clock], 1)
+            self.walk(
+                seeds,
+                hops,
+                allowed,
+                direction,
+                record=True,
+                kinds=kinds,
+                at="/graph" if clause is not None else "",
+            )
+        for mapping_id in sorted(self.used):  # a placement shows the mapping it went through
+            self.state.hit(self.used[mapping_id], 1)
         state = self.state
         claims = sorted(state.hits.values(), key=lambda pair: pair[1].id)
         scored: list[tuple[float, Item]] = [
@@ -820,12 +922,21 @@ class _Retrieve:
                 f"{reason} is newer than Context's pinned graph-schema {GRAPH_SCHEMA_VERSION};"
                 " the packet cannot describe it",
             )
-        if state.truncated:
+        for at in sorted(state.truncated):
+            what = "the site check" if at == "/site" else "the walk"
+            state.gap(
+                GapCode.NOT_COVERED,
+                at,
+                [],
+                f"{what} stopped after expanding {self.max_nodes} nodes",
+            )
+        if state.crowded:
             state.gap(
                 GapCode.NOT_COVERED,
                 "/graph" if self.query.graph is not None else "",
-                [],
-                f"the walk stopped after expanding {self.max_nodes} nodes",
+                state.crowded,
+                f"these nodes hold more than {self.max_edges} claims; only the first"
+                f" {self.max_edges} by claim id were followed",
             )
 
 

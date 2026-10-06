@@ -15,15 +15,21 @@ A run is a sequence of entries, each ``>II`` (key length, payload length), the k
 JSON (a list of strings and integers) and the payload as given. Nothing in a run depends on the
 clock, the process or chance, so the same entries spill to the same bytes; runs are named by the
 sorter and a counter, and removed by ``close``.
+
+A ``SpillSpace`` is the sorters of one task (a package write, a package read, a validation rule's
+join, ADR 0070): one budget, one private directory under the caller's scratch, removed together.
 """
 
 import heapq
 import json
+import shutil
 import struct
+import tempfile
 from collections.abc import Iterator
 from operator import itemgetter
 from pathlib import Path
-from typing import BinaryIO, Final, TypeAlias
+from types import TracebackType
+from typing import BinaryIO, Final, Self, TypeAlias
 
 from neptune.identity import canonical_json
 
@@ -163,6 +169,47 @@ class Sorter:
         self._budget.held -= self.held
         self.held = 0
         self._buffer = []
+
+
+class SpillSpace:
+    """The sorters of one task, sharing one ``SpillBudget`` and one private scratch directory.
+
+    ``spill`` is a directory of the caller's (a workspace's scratch space, never the system temp
+    directory); a private directory is made in it and removed by ``close``, with every run. Without
+    one nothing spills and every sorter holds its entries in memory. Use it as a context manager.
+    """
+
+    def __init__(self, spill: Path | None, budget: int = SPILL_BUDGET) -> None:
+        self.budget = SpillBudget(budget)
+        self.directory = (
+            None if spill is None else Path(tempfile.mkdtemp(prefix="spill-", dir=spill))
+        )
+        self._sorters: list[Sorter] = []
+
+    def sorter(self, name: str) -> "Sorter":
+        """A new sorter of this space; ``name`` names its runs, so it must be unique here."""
+        made = Sorter(name, self.directory, self.budget)
+        self._sorters.append(made)
+        return made
+
+    def close(self) -> None:
+        """Remove every run and the private directory."""
+        for sorter in self._sorters:
+            sorter.close()
+        if self.directory is not None:
+            shutil.rmtree(self.directory, ignore_errors=True)
+            self.directory = None
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 def _write(run: BinaryIO, entries: "Iterator[Entry] | list[Entry]") -> None:

@@ -23,8 +23,6 @@ file, and the manifest lists files by path.
 
 import hashlib
 import json
-import shutil
-import tempfile
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
@@ -70,9 +68,10 @@ from neptune.store.package import (
     _series_settings,
     blob_path,
     check_record_lineage,
-    copy_file,
     derived_path,
+    lay_down,
     package_id,
+    replacing,
     series_path,
     table_path,
 )
@@ -86,7 +85,7 @@ from neptune.store.receipt import (
     render_lines,
 )
 from neptune.store.series import SeriesError, check_series
-from neptune.store.spill import SPILL_BUDGET, Key, Sorter, SpillBudget
+from neptune.store.spill import SPILL_BUDGET, Key, Sorter, SpillSpace
 
 if TYPE_CHECKING:
     from neptune.model.provenance import TransformRecord
@@ -108,13 +107,15 @@ _FLUSH: Final = 1024 * 1024
 
 class _Sink:
     """One file of the package as it is written: sized and hashed as it goes, kept as bytes in
-    memory or written to ``path``, through a buffer of about a megabyte."""
+    memory or written to ``path``, through a buffer of about a megabyte. With ``keep=False`` and
+    no path it is only sized and hashed: what the reader compares with the manifest."""
 
-    def __init__(self, path: Path | None) -> None:
+    def __init__(self, path: Path | None, *, keep: bool = True) -> None:
         self._hash = hashlib.sha256()
         self._size = 0
         self._buffer = bytearray()
         self._parts: list[bytes] = []
+        self._keep = keep  # without a path: hold the bytes, or only hash them (the reader's check)
         self._path = path
         self._file: BinaryIO | None = None
         if path is not None:
@@ -133,7 +134,7 @@ class _Sink:
         self._size += len(block)
         if self._file is not None:
             self._file.write(block)
-        else:
+        elif self._keep:
             self._parts.append(block)
 
     def close(self) -> tuple[Content, tuple[int, ContentId]]:
@@ -285,6 +286,11 @@ class _Receipt:
             )
             self.findings.add(finding_order(finding), canonical_json.dumps(finding.to_json()))
 
+    def close(self) -> None:
+        """Remove the runs of the sections that went through sorters."""
+        for sorter in (self.runs, self.streams, self.entities, self.findings, self.ambiguous):
+            sorter.close()
+
     def sections(
         self, artifacts: Mapping[ContentId, int], counts: Mapping[str, int], version: int
     ) -> dict[str, Any]:
@@ -340,6 +346,86 @@ def _content_json(sections: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def table_order(kinds: Iterable[str]) -> list[str]:
+    """The order a package's tables are read in: ``_FIRST``, then every other kind by name."""
+    present = set(kinds)
+    return [kind for kind in _FIRST if kind in present] + sorted(present - set(_FIRST))
+
+
+class _Gathered:
+    """What a package's tables give as they are read in ``table_order``, one record at a time:
+    each record checked as the package reader checks it (lineage, series), and what the receipt
+    and the manifest need. The writer and the reader (``neptune.store.reader``) share it, so what
+    one writes is what the other accepts."""
+
+    def __init__(
+        self,
+        sorter: Callable[[str], Sorter],
+        series: Mapping[RecordId, Content],
+        settings: JsonObject | None,
+        version: int,
+    ) -> None:
+        self.receipt = _Receipt(sorter)
+        self.version = version
+        self.counts: dict[str, int] = {}
+        self.transforms: dict[str, TransformRecord] = {}
+        self.artifacts: dict[ContentId, int] = {}
+        self.streams: set[RecordId] = set()
+        self._series = series
+        self._settings = settings
+
+    def add(self, record: Any, data: JsonValue) -> None:
+        """One record, read back from its line; ``data`` is its JSON."""
+        kind = record.kind
+        if kind == "transform_record":
+            self.transforms[record.id] = _lineage(check_transform_record, record)
+        else:
+            check_record_lineage(record, self.transforms)
+        if kind == "source_artifact":
+            self.artifacts[record.content_id] = record.size
+        elif kind == "stream":
+            self.streams.add(record.id)
+            if self._settings is not None and record.id in self._series:
+                _check_series(record, self._series[record.id], self._settings)
+        self.receipt.add(record, data)
+        self.version = max(self.version, record_version(record))
+
+    def done(self, kind: str, count: int) -> None:
+        """A table read whole: ``count`` records. Transforms are checked against each other."""
+        self.counts[kind] = count
+        if kind == "transform_record":
+            for transform in self.transforms.values():
+                check_record_lineage(transform, self.transforms)
+
+    def receipt_files(
+        self, sink: Callable[[str], _Sink]
+    ) -> tuple[RecordId, dict[str, tuple[Content, tuple[int, ContentId]]]]:
+        """The receipt's id, and ``receipt.json`` and ``receipt.md`` written through ``sink`` as
+        streams. ``counts`` must name every kind of the package's version by now."""
+        sections = self.receipt.sections(self.artifacts, self.counts, self.version)
+        core = _content_json(sections)
+        hashed = hashlib.sha256()
+        for piece in _encode({"inputs": core, "kind": RECEIPT_KIND, "scheme": RECORD_ID_SCHEME}):
+            hashed.update(piece)
+        receipt_id = RecordId("rec:sha256:" + hashed.hexdigest())
+        document = _encode(envelope(RECEIPT_KIND, {**core, "id": receipt_id}, self.version))
+        text = (line.encode("utf-8") for line in render_lines(_ReceiptView(receipt_id, sections)))
+        return receipt_id, {
+            RECEIPT: _write_all(sink(RECEIPT), document),
+            RECEIPT_TEXT: _write_all(sink(RECEIPT_TEXT), text),
+        }
+
+
+def _write_all(sink: _Sink, pieces: Iterable[bytes]) -> tuple[Content, tuple[int, ContentId]]:
+    try:
+        for piece in pieces:
+            sink.write(piece)
+    except BaseException:
+        sink.abandon()
+        raise
+    return sink.close()
+
+
 class PackageWriter:
     """Build a package from records given one at a time, in bounded memory (ADR 0065).
 
@@ -350,11 +436,7 @@ class PackageWriter:
     """
 
     def __init__(self, spill: Path | None = None, *, budget: int = SPILL_BUDGET) -> None:
-        self._directory = (
-            None if spill is None else Path(tempfile.mkdtemp(prefix="spill-", dir=spill))
-        )
-        self._budget = SpillBudget(budget)
-        self._sorters: list[Sorter] = []
+        self._space = SpillSpace(spill, budget)
         self._tables: dict[str, Sorter] = {}
         self._finished = False
 
@@ -371,16 +453,7 @@ class PackageWriter:
 
     def close(self) -> None:
         """Remove every spilled run and the writer's scratch directory."""
-        for sorter in self._sorters:
-            sorter.close()
-        if self._directory is not None:
-            shutil.rmtree(self._directory, ignore_errors=True)
-            self._directory = None
-
-    def _sorter(self, name: str) -> Sorter:
-        sorter = Sorter(name, self._directory, self._budget)
-        self._sorters.append(sorter)
-        return sorter
+        self._space.close()
 
     def add(self, record: Any, *, last_wins: bool = False) -> None:
         """Add one record. A record added with ``last_wins`` is replaced by a later record of the
@@ -392,7 +465,7 @@ class PackageWriter:
             raise PackageError(f"not a record of a known kind: {record!r}")
         table = self._tables.get(kind)
         if table is None:
-            table = self._tables[kind] = self._sorter(f"table-{kind}")
+            table = self._tables[kind] = self._space.sorter(f"table-{kind}")
         flag = _REPEATABLE if last_wins else _SINGLE
         table.add((record_key(record),), flag + _document(record) + b"\n")
 
@@ -424,61 +497,41 @@ class PackageWriter:
         # versions, raised to any record's own later version (ADR 0037 §1, ADR 0061 §6). Lines
         # carry their own versions, so the tables are written before it is known; it decides only
         # which empty tables the package has, and the receipt's and manifest's version.
-        version = package_version(self._tables)
-        order: list[str] = [kind for kind in _FIRST if kind in self._tables]
-        order += sorted(kind for kind in self._tables if kind not in _FIRST)
-        receipt = _Receipt(self._sorter)
+        gathered = _Gathered(self._space.sorter, series, settings, package_version(self._tables))
         files: dict[str, Content] = {}
         digests: dict[str, tuple[int, ContentId]] = {}
-        counts: dict[str, int] = {}
-        transforms: dict[str, TransformRecord] = {}
-        artifacts: dict[ContentId, int] = {}
-        streams: set[RecordId] = set()
 
         def sink(path: str) -> _Sink:
             return _Sink(None if out is None else out / path)
 
-        for kind in order:
+        for kind in table_order(self._tables):
             path = table_path(kind)
             table = sink(path)
             count = 0
             try:
                 for record, data, encoded in self._records(kind, path):
-                    if kind == "transform_record":
-                        transforms[record.id] = _lineage(check_transform_record, record)
-                    else:
-                        check_record_lineage(record, transforms)
-                    if kind == "source_artifact":
-                        artifacts[record.content_id] = record.size
-                    elif kind == "stream":
-                        streams.add(record.id)
-                        if settings is not None and record.id in series:
-                            _check_series(record, series[record.id], settings)
-                    receipt.add(record, data)
-                    version = max(version, record_version(record))
+                    gathered.add(record, data)
                     table.write(encoded)
                     count += 1
             except BaseException:
                 table.abandon()
                 raise
             files[path], digests[path] = table.close()
-            counts[kind] = count
-            if kind in self._tables:  # read once: its runs are not needed again
-                self._tables[kind].close()
-            if kind == "transform_record":
-                for transform in transforms.values():
-                    check_record_lineage(transform, transforms)
+            self._tables[kind].close()  # read once: its runs are not needed again
+            gathered.done(kind, count)
+        version = gathered.version
         kinds = kinds_at(version)
-        for kind in sorted(set(kinds) - set(counts)):  # a kind of this version with no records
+        for kind in sorted(set(kinds) - set(gathered.counts)):  # a kind of this version, no records
             path = table_path(kind)
             files[path], digests[path] = sink(path).close()
-            counts[kind] = 0
+            gathered.done(kind, 0)
 
         for stream, file in sorted(series.items()):
-            if stream not in streams:
+            if stream not in gathered.streams:
                 raise PackageError(f"series for {stream}, which is not a stream of this package")
             files[series_path(stream)] = file
             digests[series_path(stream)] = _digest(file)
+        artifacts = gathered.artifacts
         for artifact, file in sorted(blobs.items()):
             if artifact not in artifacts:
                 raise PackageError(f"blob {artifact} is not a source artifact of this package")
@@ -487,39 +540,21 @@ class PackageWriter:
                 raise PackageError(f"blob bytes do not hash to {artifact}")
             files[blob_path(artifact)] = file
             digests[blob_path(artifact)] = digest
+        transforms = set(gathered.transforms)
         for name, lines in sorted((derived or {}).items()):
             path = derived_path(name)
             if not _DERIVED.fullmatch(path):
                 raise PackageError(f"not a derived table kind: {name!r}")
-            files[path], digests[path] = self._derived(name, lines, set(transforms), sink(path))
+            files[path], digests[path] = self._derived(name, lines, transforms, sink(path))
 
-        sections = receipt.sections(artifacts, counts, version)
-        core = _content_json(sections)
-        hashed = hashlib.sha256()
-        payload = {"inputs": core, "kind": RECEIPT_KIND, "scheme": RECORD_ID_SCHEME}
-        for piece in _encode(payload):
-            hashed.update(piece)
-        receipt_id = RecordId("rec:sha256:" + hashed.hexdigest())
-        document = sink(RECEIPT)
-        try:
-            for piece in _encode(envelope(RECEIPT_KIND, {**core, "id": receipt_id}, version)):
-                document.write(piece)
-        except BaseException:
-            document.abandon()
-            raise
-        files[RECEIPT], digests[RECEIPT] = document.close()
-        text = sink(RECEIPT_TEXT)
-        try:
-            for rendered in render_lines(_ReceiptView(receipt_id, sections)):
-                text.write(rendered.encode("utf-8"))
-        except BaseException:
-            text.abandon()
-            raise
-        files[RECEIPT_TEXT], digests[RECEIPT_TEXT] = text.close()
+        receipt_id, written = gathered.receipt_files(sink)
+        gathered.receipt.close()  # its sections are written: their runs are not needed again
+        for path, (content, digest) in written.items():
+            files[path], digests[path] = content, digest
 
         manifest = PackageManifest(
             receipt=receipt_id,
-            tables=tuple((kind, counts[kind]) for kind in sorted(kinds)),
+            tables=tuple((kind, gathered.counts[kind]) for kind in sorted(kinds)),
             sources=tuple(
                 SourceHandle(
                     content,
@@ -560,9 +595,10 @@ class PackageWriter:
     def _derived(
         self, kind: str, lines: Iterable[JsonObject], transforms: set[str], sink: _Sink
     ) -> tuple[Content, tuple[int, ContentId]]:
-        """A derived table, sorted by id, each line checked as the reader checks it."""
+        """A derived table, sorted by id, each line checked as the reader checks it. Its runs are
+        removed as soon as it is written, not when the writer closes."""
         path = derived_path(kind)
-        sorter = self._sorter(f"derived-{kind}")
+        sorter = self._space.sorter(f"derived-{kind}")
         previous: Key | None = None
         try:
             for line in lines:
@@ -576,6 +612,8 @@ class PackageWriter:
         except BaseException:
             sink.abandon()
             raise
+        finally:
+            sorter.close()
         return sink.close()
 
 
@@ -619,25 +657,14 @@ def write_package_stream(
     lazy and are read once. ``root`` must not exist or be empty. Sorted runs spill under
     ``scratch``, a directory of the caller's (a workspace's scratch space, never the system temp
     directory), and are removed whether or not the write succeeds. Series and blobs are copied in
-    as streams, as ``write_package`` copies them.
+    as streams, as ``write_package`` copies them. Like ``write_package``, the package is written
+    beside ``root`` and renamed into place (ADR 0070): ``root`` holds all of it or none of it.
     """
-    if root.exists() and (not root.is_dir() or any(root.iterdir())):
-        raise PackageError(f"{root} is not an empty directory")
-    root.mkdir(parents=True, exist_ok=True)
-    try:
+    with replacing(root) as partial:
         with PackageWriter(scratch, budget=budget) as writer:
             writer.extend(records)
-            contents = writer.finish(root, series=series, blobs=blobs, store=store, derived=derived)
-        for relative, data in sorted(contents.items()):
-            target = root / relative
-            if isinstance(data, bytes):
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(data)
-            elif data != target:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                copy_file(data, target)
-    except BaseException:
-        for entry in list(root.iterdir()):  # it was empty: leave it so, not half a package
-            shutil.rmtree(entry) if entry.is_dir() and not entry.is_symlink() else entry.unlink()
-        raise
+            contents = writer.finish(
+                partial, series=series, blobs=blobs, store=store, derived=derived
+            )
+        lay_down(partial, contents)
     return package_id(contents)

@@ -483,9 +483,9 @@ def test_only_copied_files_are_read_back(
     opened: list[Path] = []
     read = read_package
 
-    def recording(root: Path) -> Any:
+    def recording(root: Path, **kwargs: Any) -> Any:
         opened.append(root)
-        return read(root)
+        return read(root, **kwargs)
 
     monkeypatch.setattr("neptune.store.assemble.read_package", recording)
     export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))

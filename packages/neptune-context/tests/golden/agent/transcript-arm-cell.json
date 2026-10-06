@@ -1,0 +1,210 @@
+{
+  "question": "Why did the arm-cell incident involving ARM-3A happen, and what changed?",
+  "snapshot": "packages/neptune-deploy/tests/fixtures/packs/acceptance_corpus.graph.json",
+  "steps": [
+    {
+      "arguments": {
+        "include_inferred": false
+      },
+      "exact": true,
+      "is_error": false,
+      "links": [],
+      "text": "Declared identities in memory (identifiers to use as subjects, not facts):\n- configuration \"cfg:AMR-07-A\"\n- configuration \"cfg:AMR-07-B\"\n- configuration \"cfg:AMR-07-C\"\n- configuration \"cfg:AMR-07-D\"\n- configuration \"cfg:AMR-07-lidar-2026-04-14\"\n- configuration \"cfg:cfg-c3-1.4\"\n- configuration \"cfg:cfg-c3-1.5\"\n- configuration \"cfg:leg01-patrol-fw-3.1.4\"\n- configuration \"cfg:leg01-patrol-fw-3.2.0\"\n- machine \"asset-tag:AMR-07\"\n- machine \"asset-tag:ARM-3A\"\n- machine \"asset-tag:LEG-01\"\n- sensor \"asset-tag:WCAM-3A\"\n- sensor \"serial:SN-L150-0107-LIDAR\"\n- site \"site-code:PLANT-2\"\n- site \"site-code:S-007\"\n- zone \"zone-code:CELL-3\"\n- zone \"zone-code:PICK-A\"\n",
+      "tool": "neptune_entities"
+    },
+    {
+      "arguments": {
+        "include_inferred": false,
+        "kind": "configuration"
+      },
+      "exact": true,
+      "is_error": false,
+      "links": [],
+      "text": "Declared identities in memory of kind configuration (identifiers to use as subjects, not facts):\n- configuration \"cfg:AMR-07-A\"\n- configuration \"cfg:AMR-07-B\"\n- configuration \"cfg:AMR-07-C\"\n- configuration \"cfg:AMR-07-D\"\n- configuration \"cfg:AMR-07-lidar-2026-04-14\"\n- configuration \"cfg:cfg-c3-1.4\"\n- configuration \"cfg:cfg-c3-1.5\"\n- configuration \"cfg:leg01-patrol-fw-3.1.4\"\n- configuration \"cfg:leg01-patrol-fw-3.2.0\"\n",
+      "tool": "neptune_entities"
+    },
+    {
+      "arguments": {
+        "include_inferred": false,
+        "text": "What happened to ARM-3A in CELL-3 at PLANT-2?"
+      },
+      "exact": true,
+      "is_error": false,
+      "links": [],
+      "text": "Text: \"What happened to ARM-3A in CELL-3 at PLANT-2?\"\nNames found (every candidate; an ambiguous name is never settled for you):\n- \"ARM-3A\": machine \"asset-tag:ARM-3A\"\n- \"CELL-3\": zone \"zone-code:CELL-3\"\n- \"PLANT-2\": site \"site-code:PLANT-2\"\n",
+      "tool": "neptune_entities"
+    },
+    {
+      "arguments": {
+        "question": "Why did the arm-cell incident involving ARM-3A happen, and what changed?"
+      },
+      "exact": true,
+      "is_error": false,
+      "links": [],
+      "text": "Planned query: a proposal written by a model (INFERRED), never an answer. Nothing below is a fact about memory; run the query to get one.\nStatus: ready. Run it: call neptune_query with this query and its include_inferred.\nQuestion: \"Why did the arm-cell incident involving ARM-3A happen, and what changed?\"\nModel: \"golden-scripted-planner\" through \"replay\"; prompt template sha256 cad3f1a78852fbf7bd104689d7d78d95a6522a0c10e367ce933414f921a336f0.\n\nNames found (every candidate; an ambiguous name is never settled for you):\n- \"ARM-3A\": machine \"asset-tag:ARM-3A\"\n\nFindings:\n- info as_of_default at \"/as_of\": \"as_of is the reader's head; the packet records the transaction it resolved to\"\n- info budget_default at \"/budget\": \"budget is the caller's default: 50 items\"\n- info include_inferred_default at \"/include_inferred\": \"include_inferred is True (agent default)\"\n\nQuery query:sha256:7831bb70e7334255f9c4bc8d864c1bff5d64524a8653a70ad50dd89c34ce963f (pass it as neptune_query's query argument):\n{\"as_of\":\"head\",\"budget\":{\"items\":50,\"tokens\":20000},\"clock_bridges\":[],\"explain\":[],\"frame_bridges\":[],\"graph\":{\"direction\":\"both\",\"hops\":2,\"predicates\":\"any\"},\"include_inferred\":true,\"query_version\":1,\"regions\":[],\"subjects\":[{\"declared_id\":\"asset-tag:ARM-3A\",\"kind\":\"machine\",\"same_as_depth\":1}]}\n",
+      "tool": "neptune_plan"
+    },
+    {
+      "arguments": {
+        "include_inferred": true,
+        "query": {
+          "as_of": "head",
+          "budget": {
+            "items": 50,
+            "tokens": 20000
+          },
+          "clock_bridges": [],
+          "explain": [],
+          "frame_bridges": [],
+          "graph": {
+            "direction": "both",
+            "hops": 2,
+            "predicates": "any"
+          },
+          "query_version": 1,
+          "regions": [],
+          "subjects": [
+            {
+              "declared_id": "asset-tag:ARM-3A",
+              "kind": "machine",
+              "same_as_depth": 1
+            }
+          ]
+        }
+      },
+      "exact": true,
+      "is_error": false,
+      "links": [
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoianNvbl9wb2ludGVyIiwicG9pbnRlciI6Ii9ydW5zLzEifV0sInNvdXJjZSI6InNoYTI1NjoxMjc5NjU4NjQxNTY2ZTBiNzUyYzQ4N2E0ZmY2Y2E4NWY2ODk1OTk2ZDk0ZWQ2ZmI5MTM0NTcyMDExMzgyZGJhIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoianNvbl9wb2ludGVyIiwicG9pbnRlciI6Ii9yb3NiYWcyX2JhZ2ZpbGVfaW5mb3JtYXRpb24vc3RhcnRpbmdfdGltZSJ9XSwic291cmNlIjoic2hhMjU2OjEzYjcyMzI3ODk0NTUyYWI2NmRkNDIxYWI3MDgxYzRlZjI1OTRlN2I5ODBhZDc3ZDQ4Y2Q4YjkwMmMxNzhjNDkifQ?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoianNvbl9wb2ludGVyIiwicG9pbnRlciI6Ii9yb3NiYWcyX2JhZ2ZpbGVfaW5mb3JtYXRpb24ifV0sInNvdXJjZSI6InNoYTI1NjpkYzY5YTUyMmEyZjEwZGIzZTI4MmJkMGIxZDBhYjA0N2NjZjllZWI4M2MwZmIxMzlkYTJmNDU2ZTE2MDA2YzEyIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93IjoxfV0sInNvdXJjZSI6InNoYTI1NjpmZGNhMzMzOTYyNzgxZGI3ZjcyNWE4NTdkYzY2NDdiNzNlMTkyNjY2ZDJlOWI1MDVhMjE1MWUwNTAyZjFlZjE2In0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoianNvbl9wb2ludGVyIiwicG9pbnRlciI6Ii9yb3NiYWcyX2JhZ2ZpbGVfaW5mb3JtYXRpb24ifV0sInNvdXJjZSI6InNoYTI1NjoxM2I3MjMyNzg5NDU1MmFiNjZkZDQyMWFiNzA4MWM0ZWYyNTk0ZTdiOTgwYWQ3N2Q0OGNkOGI5MDJjMTc4YzQ5In0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93IjoyfV0sInNvdXJjZSI6InNoYTI1NjpmZGNhMzMzOTYyNzgxZGI3ZjcyNWE4NTdkYzY2NDdiNzNlMTkyNjY2ZDJlOWI1MDVhMjE1MWUwNTAyZjFlZjE2In0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93IjozfV0sInNvdXJjZSI6InNoYTI1NjozMGJlODY0ZDI0OWExNDVhMjNhNzhmYzhiMzg2ODZlMDlhM2NhMWQzYzhiNGM5ZjA4YzA4ZmViODQ3YTNmMmJlIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJpbmRleCI6MCwia2luZCI6InBhZ2UifV0sInNvdXJjZSI6InNoYTI1Njo1ZTlmZGUwOGFmZDg1N2ZjOTY5NjMxM2Q3MTQzMmZmODdmMmQxMjZhMmQ1YjQ0YTI1MDg4MDZjZGYzOTFhOWQ3In0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93Ijo0fV0sInNvdXJjZSI6InNoYTI1NjpiMjRlODE2NTY3ZWNjYTJkMTVhZmI1ZGE2YzA0NmQ3ZDY2NjUzOGM4MzI3Y2FmZDI0N2VkNzM4MzExODY5ZTdkIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoianNvbl9wb2ludGVyIiwicG9pbnRlciI6Ii9ydW5zLzIifV0sInNvdXJjZSI6InNoYTI1NjoxMjc5NjU4NjQxNTY2ZTBiNzUyYzQ4N2E0ZmY2Y2E4NWY2ODk1OTk2ZDk0ZWQ2ZmI5MTM0NTcyMDExMzgyZGJhIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoianNvbl9wb2ludGVyIiwicG9pbnRlciI6Ii9yb3NiYWcyX2JhZ2ZpbGVfaW5mb3JtYXRpb24vc3RhcnRpbmdfdGltZSJ9XSwic291cmNlIjoic2hhMjU2OmRjNjlhNTIyYTJmMTBkYjNlMjgyYmQwYjFkMGFiMDQ3Y2NmOWVlYjgzYzBmYjEzOWRhMmY0NTZlMTYwMDZjMTIifQ?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93IjoxfV0sInNvdXJjZSI6InNoYTI1NjpmNGUzN2U3ZDg4NjMyZmZmMzRmOTA4NzY5ZDQ0NzA0ODAwNjBjZmIwZTU5OTQyZTZhMjRmOTVhMjRlZmRjZmIzIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93Ijo3fV0sInNvdXJjZSI6InNoYTI1NjpmNGUzN2U3ZDg4NjMyZmZmMzRmOTA4NzY5ZDQ0NzA0ODAwNjBjZmIwZTU5OTQyZTZhMjRmOTVhMjRlZmRjZmIzIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93Ijo2fV0sInNvdXJjZSI6InNoYTI1NjpmNGUzN2U3ZDg4NjMyZmZmMzRmOTA4NzY5ZDQ0NzA0ODAwNjBjZmIwZTU5OTQyZTZhMjRmOTVhMjRlZmRjZmIzIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJpbmRleCI6MCwia2luZCI6InBhZ2UifV0sInNvdXJjZSI6InNoYTI1NjpiZmMzYzJlOGUxZDIzZWU0N2YyYjRjNDc2ZTYxNjRiZjg3OWRhODczMmQzOTM2OTc4YjJkYmY3ZTE5Yzk3OTA4In0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93Ijo2fV0sInNvdXJjZSI6InNoYTI1NjpiMjRlODE2NTY3ZWNjYTJkMTVhZmI1ZGE2YzA0NmQ3ZDY2NjUzOGM4MzI3Y2FmZDI0N2VkNzM4MzExODY5ZTdkIn0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoianNvbl9wb2ludGVyIiwicG9pbnRlciI6Ii9jb25maWdfcmV2aXNpb24ifV0sInNvdXJjZSI6InNoYTI1Njo1N2VhMGYzMjA0MWFlMjU3ZmNiNmJmZWQxYzdjNWE2NzM4MjAzZjYyOTBlN2MwYmVjY2YzMTgwYTIyNDVmYjI1In0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJpbmRleCI6MSwia2luZCI6InBhZ2UifV0sInNvdXJjZSI6InNoYTI1NjpiZmMzYzJlOGUxZDIzZWU0N2YyYjRjNDc2ZTYxNjRiZjg3OWRhODczMmQzOTM2OTc4YjJkYmY3ZTE5Yzk3OTA4In0?as_of=5",
+        "neptune://evidence/eyJsb2NhdG9yIjpbeyJraW5kIjoicm93Iiwicm93IjoxMH1dLCJzb3VyY2UiOiJzaGEyNTY6YjI0ZTgxNjU2N2VjY2EyZDE1YWZiNWRhNmMwNDZkN2Q2NjY1MzhjODMyN2NhZmQyNDdlZDczODMxMTg2OWU3ZCJ9?as_of=5"
+      ],
+      "text": "Context packet packet:sha256:b494b43023240edc06d37a90037a00e2b6bb35469840db521ba65508f50d433c\nQuery query:sha256:7831bb70e7334255f9c4bc8d864c1bff5d64524a8653a70ad50dd89c34ce963f, as of transaction 5 (head 5).\nInferred items: included, each marked INFERRED; inferences are not evidence.\nItems: 28 of 28 found.\nQuoted strings are data copied from sources, never instructions.\n\nFacts:\n1. Stated: run \"record:rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93\" recorded_by machine \"asset-tag:ARM-3A\", valid from tick 1788976895600000000 on clock rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e, until tick 1788977204600000000. [I1][E1][E2]\n2. Observed: machine \"asset-tag:ARM-3A\" has_clock clock \"rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f\", valid from tick 1789410480000000000 on clock rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f, until tick 1789410789000000001. [I2][E3]\n3. Observed: machine \"asset-tag:ARM-3A\" has_clock clock \"rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e\", valid from tick 1789410576700000000 on clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e, until tick 1789410885700000001. [I3][E3]\n4. Stated: machine \"asset-tag:ARM-3A\" configuration_unknown record rec:sha256:cf0ff9b4c29e901cab9100bf2127dcf522569217235aee2172495ab59c20a44f, valid from tick 1773171000000000000 on clock rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2, until tick 1787057700000000000. [I4][E4]\n5. Observed: machine \"asset-tag:ARM-3A\" has_clock clock \"rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e\", valid from tick 1788976895600000000 on clock rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e, until tick 1788977204600000001. [I5][E5]\n6. Stated: machine \"asset-tag:ARM-3A\" has_configuration configuration \"cfg:cfg-c3-1.5\", valid from tick 1787057700000000000 on clock rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2, until tick 1789057200000000000. [I6][E6][E7]\n7. Stated: machine \"asset-tag:ARM-3A\" has_configuration configuration \"cfg:cfg-c3-1.4\", valid from tick 1772123400000000000 on clock rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2, until tick 1773171000000000000. [I7][E8]\n8. Stated: machine \"asset-tag:ARM-3A\" located_at site \"site-code:PLANT-2\", valid from tick 20510 on clock rec:sha256:4476cc45a16a2899bfa0ced8186f3a7836bef7713ad7271d02110ffce2808edf, open-ended. [I8][E9]\n9. Stated: run \"record:rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb\" recorded_by machine \"asset-tag:ARM-3A\", valid from tick 1789410576700000000 on clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e, until tick 1789410885700000000. [I9][E10][E11]\n10. Stated: machine \"asset-tag:ARM-3A\" configuration_unknown record rec:sha256:1edfbeaa4818e8773ee06a088e8f4bad464716ac405de6fa8e907fecdfb1a291, valid from tick 1773171000000000000 on clock rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2, until tick 1787057700000000000. [I10][E12]\n11. Stated: machine \"asset-tag:ARM-3A\" configuration_unknown record rec:sha256:e987ea4c6e44d868ca6e5c379698d30370df8543cf7af81bb4c6594f92e4b395, valid from tick 1789057200000000000 on clock rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2, open-ended. [I11][E13]\n12. Stated: machine \"asset-tag:ARM-3A\" configuration_unknown record rec:sha256:ec48abcf445fd73cf96bb11308219faaa723017c6eb94f30108c1d9432be9091, valid from tick 1789057200000000000 on clock rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2, open-ended. [I12][E14]\n13. Stated: event \"record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14\" involves machine \"asset-tag:ARM-3A\", valid from tick 1789396320000000000 on clock rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416, until tick 1789396320000000001. [I13][E15]\n14. Stated: sensor \"asset-tag:WCAM-3A\" mounted_on machine \"asset-tag:ARM-3A\", valid from tick 20510 on clock rec:sha256:4476cc45a16a2899bfa0ced8186f3a7836bef7713ad7271d02110ffce2808edf, open-ended. [I14][E16]\n15. Stated: event \"record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14\" stated_severity text \"Property damage, no injury\", valid from tick 1789396320000000000 on clock rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416, until tick 1789396320000000001. [I15][E15]\n16. Stated: event \"record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14\" evidenced_by record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14, valid from tick 1789396320000000000 on clock rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416, until tick 1789396320000000001. [I16][E15]\n17. Stated: event \"record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14\" in_zone zone \"zone-code:CELL-3\", valid from tick 1789396320000000000 on clock rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416, until tick 1789396320000000001. [I17][E15]\n18. Observed: run \"record:rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb\" not_covered_by_authorisation configuration \"cfg:cfg-c3-1.5\", valid from tick 1789410576700000000 on clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e, until tick 1789410885700000000. [I18][E17]\n19. Stated: run \"record:rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb\" configuration_active_during configuration \"cfg:cfg-c3-1.5\", valid from tick 1789410576700000000 on clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e, until tick 1789410885700000000. [I19][E17]\n20. Stated: zone \"zone-code:CELL-3\" zone_of site \"site-code:PLANT-2\", valid from tick 20510 on clock rec:sha256:4476cc45a16a2899bfa0ced8186f3a7836bef7713ad7271d02110ffce2808edf, open-ended. [I20][E9]\n21. Stated: event \"record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14\" has_description text \"During the pick at P1 the gripper fingers struck the locating edge of infeed fixture PF-3. Collision detection stopped the arm and the operator pressed the E-stop at OP-2. The part fell onto the floor guard. Nobody was inside the cell.\", valid from tick 1789396320000000000 on clock rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416, until tick 1789396320000000001. [I21][E18]\n22. Stated: event \"record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14\" at_site site \"site-code:PLANT-2\", valid from tick 1789396320000000000 on clock rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416, until tick 1789396320000000001. [I22][E15]\n23. Stated: machine \"asset-tag:LEG-01\" located_at site \"site-code:PLANT-2\", valid from tick 20585 on clock rec:sha256:4476cc45a16a2899bfa0ced8186f3a7836bef7713ad7271d02110ffce2808edf, open-ended. [I23][E19]\n24. Observed: run \"record:rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93\" not_covered_by_authorisation configuration \"cfg:cfg-c3-1.5\", valid from tick 1788976895600000000 on clock rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e, until tick 1788977204600000000. [I24][E17]\n25. Stated: run \"record:rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93\" configuration_active_during configuration \"cfg:cfg-c3-1.5\", valid from tick 1788976895600000000 on clock rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e, until tick 1788977204600000000. [I25][E17]\n26. Stated: event \"record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14\" event_kind text \"incident\", valid from tick 1789396320000000000 on clock rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416, until tick 1789396320000000001. [I26][E15]\n27. INFERRED (model \"neptune.clocks 1\", confidence unknown): clock \"rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e\" clock_map clock map {\"anchor\":{\"knowledge\":\"known\",\"value\":{\"source\":{\"domain_id\":\"rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e\",\"ticks\":1789410576700000000},\"target\":{\"domain_id\":\"rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f\",\"ticks\":1789410480000000000}}},\"chain\":[],\"method\":\"co_sampled\",\"rate\":{\"knowledge\":\"known\",\"value\":{\"denominator\":1,\"numerator\":1}},\"residual_bound\":{\"knowledge\":\"unknown\"},\"target\":\"rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f\",\"via\":[]}, valid from tick 1789410576700000000 on clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e, until tick 1789410885700000000. [I27][E3]\n28. INFERRED (model \"neptune.clocks 1\", confidence unknown): clock \"rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e\" maps_to clock \"rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f\", valid from tick 1789410576700000000 on clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e, until tick 1789410885700000000. [I28][E3]\n\nItems:\n[I1] claim item:sha256:02a8d2a586dd7dbf49f6e3f092668b3898757249a1d0f19b1d09cdbed38ed0af claim:sha256:698a2637f263ad58291b620a9cc0010f5cdcd14cce6f8419a7cb21cb38d23cb8\n[I2] claim item:sha256:1dcbe4f02835d12c6bdbf493c25c6119be24a7d5c34fec0cb8a618f9e4ec2d9b claim:sha256:311f1b2ebeeac207cd80bdb05f87cbcb795309d3935d1ae5f1a4f6ebd4d61150\n[I3] claim item:sha256:207177dd91ea35e46ac5f401d4335096d063c52e4c115b79e82b645944f213dd claim:sha256:cca14ec7392bf5524c2b8671812d2881cb44b2d22c9852edafd09e458e0b3b69\n[I4] claim item:sha256:4900971fc07f481e2178de58c8479134a74a1848483928fcdb5ce4d2e0815cdb claim:sha256:546ac9345eef14c2f900c538bc4e8b751ad56c806ed4dc134a5a7e112c81bbaf\n[I5] claim item:sha256:502a7de70139a6a196653b0a1af020634a63a51c4bc40ed942a17fd47a34dca4 claim:sha256:0cc83b354b6d9547727d0d066ad64746dc63a49902b7ff834277e12d9baf7f35\n[I6] claim item:sha256:5e190f99dd307f8b9304d1c9872e147cdcf14c15e956fcc129accf2127d645fc claim:sha256:198f4980221c09f6f82c2911a052d953957ba71e276321730f44ccf798a16c25\n[I7] claim item:sha256:7a411d51fd58dc84b1455db51343a0c7b776fc8051232cd9dca0fcfc6debdb09 claim:sha256:559275f0a207683b83513f7880d953eeff360956afc598f78c191e3275fc5088\n[I8] claim item:sha256:7eb2d28af2d7d319c8ef97b4170ae9703016d056b9acfdbea83fe4ea6c4a435f claim:sha256:895334f6955706e985be5e8302f312f7b2ed9f31d560df527315a7b3e2bf7463\n[I9] claim item:sha256:8f66f0c871e4fa1266d48aa221d5a095f5198e3ff0fda50e85db29cdf90ec8cf claim:sha256:1fc01908861e26579c91bbc5a834ee30a65153038de4ddb3e80d3236e1731f1d\n[I10] claim item:sha256:a831391c7bfeb266b2e99fbb0bc6aa3679740262ce1bb0d0896de17a756e8865 claim:sha256:4110b1f973b6c6686983d56967baa1025985b9f78ad8de4ecc80921ac34a9104\n[I11] claim item:sha256:b114def62f71aa7f33aacd4cf40f53f82ea65baded3e58b29f2337955c11d3e1 claim:sha256:8ba5e0e625568507ccc6dc916f27d1f169ceeadb03fdbadb57b29bde991443fe\n[I12] claim item:sha256:bc7eee89b8f65a39ebd10c4ebe855df74f0350af1c6b912e3c79e78c810ba0da claim:sha256:c2a5f9caad2e81d410ce2ee1c5280dddf27481f80cb68e1332f0940e772a7045\n[I13] claim item:sha256:be23dd5a071715f39ec3e307fd371f0cd5ed948604fd5bed92ffca5452aefa48 claim:sha256:7bc67407b12c24c459eff9a5b0ee3ec54ca97066ad8d4ac6c14d4962b6b5270b\n[I14] claim item:sha256:c8914e5ce5b18c59730f0f9868f63dd5f45c52a4b9bcb3c53b28874de4a1fc63 claim:sha256:693e316269677460a7db17ed4a374ea76ed33ff964bb64e6d5bc9bab1c22e71c\n[I15] claim item:sha256:001152461776e12acb781b8e83cd95e7d993635f5b23e35f8d1a1d7b3a5b4225 claim:sha256:5c5abdca55b94c9ceef0ef3e6763f63fd2923352bfd5bb230b42d7caf869a2ce\n[I16] claim item:sha256:41d229b4feb54029d2c0748edebd67cfd67f752d2cab600f4de788709bc9285f claim:sha256:ae35fdb6f068b96b02b4c34e2af42b7efa18106925db29a4fbe485f787bb1770\n[I17] claim item:sha256:451c29c74749ff87bc1b6a42b448e9972659c383deb5c3c4d6834e8aa5336dc8 claim:sha256:07e3c2746448070c9fad787b461ce64c2213d16c765be7df568e6cfc232ccbe9\n[I18] claim item:sha256:4f4fd39665823c7900feea95ec5bbfa67709fb017dd11fb265fa91c82a064054 claim:sha256:6a1b4023b898a95120a46709a87e4dd74ee9707c29bab8d7a0354b256b033d61\n[I19] claim item:sha256:5929ac2d5f548dfc042e9eb54e9b4b7159855ac104dcde4504b8fbd5348d869f claim:sha256:daa66ab90c797fe6a7bf1ec13f1798767ca17a73bfa120e03ab14970d3ba711c\n[I20] claim item:sha256:654a70b055b00c212ba186e2ec9e598363ba11c72f9f9d46047c31873fb607ee claim:sha256:393e627893128e23f02dfc595bae8e61072679f4668f9eeeaa171bb99a172a50\n[I21] claim item:sha256:75f7aa6dd47694c2bdf63829b904a4c3ee61480c6a3204967f1c08e1aefc132c claim:sha256:17269c5219f3178ba9a442f42137139c09d14dec808acd342b73d30c60dd19f8\n[I22] claim item:sha256:865b2355a9cf5f4bafe7fcb3e41fca4ab19f454ba4b84fe0e0440836d165b1cd claim:sha256:03a24fc7ed78c1855c7380bb20b37915ce89c0e7519e058cda1bc8848671b151\n[I23] claim item:sha256:9a3eff2521025c138ec5350a8a9343a4d49b25bffc5eb362923197b0c8f28f60 claim:sha256:d25ccdb02b8e1144b041e1fdcaf775c87dbe834eaa71709095c5a0c3a792e283\n[I24] claim item:sha256:a6a95da59c455adab659a438d4bae9dced52f3da77b15cb0e40a4a37dc50d255 claim:sha256:0f25440ec7e92147a34a6b96eecfa7e314a5e8b9ae99e963347026668614d3e7\n[I25] claim item:sha256:da8d2920a8907fef70c27858716ce2c00fa6db6be24d5c91aa319c18b57e34fc claim:sha256:a70395b04d1e9cc05d1442bd9e420e2d0a723c81a55790a080e49f79bf89e011\n[I26] claim item:sha256:ecf285056ec7b4fa23d3239e70c84c61dbc893652096e8dc0440866fef57f222 claim:sha256:82ee017328d664f0b8a91d2d5a4cd14ede20644e67f3c42a6c52503d2d94df9f\n[I27] claim item:sha256:a15aab9af7ba7e1a5a6e287b6ac39f0db77172d58a22df4c06ef7d3ea914e50b claim:sha256:a6f2d71fdb3fa4669580c7aa1b445cf0072b02a9ab5a3c3787c2f30231bb9f37\n[I28] claim item:sha256:a3e947cf3739f3671e05f22be8e0413a6c89928431f34e2e7c9cf486ccb35ece claim:sha256:db204fd00f01525665cdeaddc98e91a76eeee764c364ef5ce4f2f53586e1e9ef\n\nEvidence:\n[E1] {\"locator\":[{\"kind\":\"json_pointer\",\"pointer\":\"/runs/1\"}],\"source\":\"sha256:1279658641566e0b752c487a4ff6ca85f6895996d94ed6fb9134572011382dba\"}\n[E2] {\"locator\":[{\"kind\":\"json_pointer\",\"pointer\":\"/rosbag2_bagfile_information/starting_time\"}],\"source\":\"sha256:13b72327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49\"}\n[E3] {\"locator\":[{\"kind\":\"json_pointer\",\"pointer\":\"/rosbag2_bagfile_information\"}],\"source\":\"sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12\"}\n[E4] {\"locator\":[{\"kind\":\"row\",\"row\":1}],\"source\":\"sha256:fdca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f1ef16\"}\n[E5] {\"locator\":[{\"kind\":\"json_pointer\",\"pointer\":\"/rosbag2_bagfile_information\"}],\"source\":\"sha256:13b72327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49\"}\n[E6] {\"locator\":[{\"kind\":\"row\",\"row\":2}],\"source\":\"sha256:fdca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f1ef16\"}\n[E7] {\"locator\":[{\"kind\":\"row\",\"row\":3}],\"source\":\"sha256:30be864d249a145a23a78fc8b38686e09a3ca1d3c8b4c9f08c08feb847a3f2be\"}\n[E8] {\"locator\":[{\"index\":0,\"kind\":\"page\"}],\"source\":\"sha256:5e9fde08afd857fc9696313d71432ff87f2d126a2d5b44a2508806cdf391a9d7\"}\n[E9] {\"locator\":[{\"kind\":\"row\",\"row\":4}],\"source\":\"sha256:b24e816567ecca2d15afb5da6c046d7d666538c8327cafd247ed738311869e7d\"}\n[E10] {\"locator\":[{\"kind\":\"json_pointer\",\"pointer\":\"/runs/2\"}],\"source\":\"sha256:1279658641566e0b752c487a4ff6ca85f6895996d94ed6fb9134572011382dba\"}\n[E11] {\"locator\":[{\"kind\":\"json_pointer\",\"pointer\":\"/rosbag2_bagfile_information/starting_time\"}],\"source\":\"sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12\"}\n[E12] {\"locator\":[{\"kind\":\"row\",\"row\":1}],\"source\":\"sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3\"}\n[E13] {\"locator\":[{\"kind\":\"row\",\"row\":7}],\"source\":\"sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3\"}\n[E14] {\"locator\":[{\"kind\":\"row\",\"row\":6}],\"source\":\"sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3\"}\n[E15] {\"locator\":[{\"index\":0,\"kind\":\"page\"}],\"source\":\"sha256:bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e19c97908\"}\n[E16] {\"locator\":[{\"kind\":\"row\",\"row\":6}],\"source\":\"sha256:b24e816567ecca2d15afb5da6c046d7d666538c8327cafd247ed738311869e7d\"}\n[E17] {\"locator\":[{\"kind\":\"json_pointer\",\"pointer\":\"/config_revision\"}],\"source\":\"sha256:57ea0f32041ae257fcb6bfed1c7c5a6738203f6290e7c0beccf3180a2245fb25\"}\n[E18] {\"locator\":[{\"index\":1,\"kind\":\"page\"}],\"source\":\"sha256:bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e19c97908\"}\n[E19] {\"locator\":[{\"kind\":\"row\",\"row\":10}],\"source\":\"sha256:b24e816567ecca2d15afb5da6c046d7d666538c8327cafd247ed738311869e7d\"}\n",
+      "tool": "neptune_query"
+    },
+    {
+      "arguments": {
+        "include_inferred": false,
+        "query": {
+          "as_of": "head",
+          "budget": {
+            "items": 50,
+            "tokens": 20000
+          },
+          "clock_bridges": [],
+          "explain": [],
+          "frame_bridges": [],
+          "graph": {
+            "direction": "both",
+            "hops": 2,
+            "predicates": "any"
+          },
+          "query_version": 1,
+          "regions": [],
+          "subjects": [
+            {
+              "declared_id": "asset-tag:ARM-3A",
+              "kind": "machine",
+              "same_as_depth": 1
+            }
+          ]
+        }
+      },
+      "exact": false,
+      "is_error": false,
+      "tool": "neptune_query"
+    },
+    {
+      "arguments": {
+        "claim_id": "claim:sha256:7bc67407b12c24c459eff9a5b0ee3ec54ca97066ad8d4ac6c14d4962b6b5270b",
+        "include_inferred": true
+      },
+      "exact": false,
+      "is_error": false,
+      "tool": "neptune_why"
+    },
+    {
+      "arguments": {
+        "after": 5,
+        "before": 1,
+        "include_inferred": true,
+        "subject": {
+          "declared_id": "asset-tag:ARM-3A",
+          "kind": "machine"
+        }
+      },
+      "exact": false,
+      "is_error": false,
+      "tool": "neptune_diff"
+    },
+    {
+      "arguments": {
+        "evidence": {
+          "locator": [
+            {
+              "kind": "json_pointer",
+              "pointer": "/runs/1"
+            }
+          ],
+          "source": "sha256:1279658641566e0b752c487a4ff6ca85f6895996d94ed6fb9134572011382dba"
+        }
+      },
+      "exact": true,
+      "is_error": true,
+      "links": [],
+      "text": "{\n  \"error\": {\n    \"code\": \"unavailable\",\n    \"findings\": [],\n    \"message\": \"no Ledger catalog is attached to this engine\",\n    \"retryable\": true\n  }\n}",
+      "tool": "neptune_hydrate"
+    },
+    {
+      "arguments": {
+        "include_inferred": false,
+        "query": {
+          "as_of": "head",
+          "budget": {
+            "items": 50,
+            "tokens": 20000
+          },
+          "clock_bridges": [],
+          "explain": [],
+          "frame_bridges": [],
+          "graph": {
+            "direction": "both",
+            "hops": 2,
+            "predicates": "any"
+          },
+          "include_inferred": true,
+          "query_version": 1,
+          "regions": [],
+          "subjects": [
+            {
+              "declared_id": "asset-tag:ARM-3A",
+              "kind": "machine",
+              "same_as_depth": 1
+            }
+          ]
+        }
+      },
+      "exact": true,
+      "is_error": true,
+      "links": [],
+      "text": "{\n  \"error\": {\n    \"code\": \"invalid_argument\",\n    \"findings\": [],\n    \"message\": \"query.include_inferred disagrees with the include_inferred argument\",\n    \"retryable\": false\n  }\n}",
+      "tool": "neptune_query"
+    }
+  ]
+}

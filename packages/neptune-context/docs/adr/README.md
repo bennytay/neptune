@@ -15,3 +15,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0006](0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) | C1 gate: query-packet 1.0.0, answer checks, and the amendments the personas forced | Accepted |
 | [0007](0007-graph-channel-retrieval-interface-and-local-engine.md) | The graph channel, the retrieval channel interface, and the local engine | Accepted |
 | [0008](0008-lexical-channel-bm25-over-text-bearing-records-and-claims.md) | The lexical channel: in-process BM25 over text-bearing records and claims | Accepted |
+| [0009](0009-agent-renderer-and-mcp-tool-surface.md) | The agent renderer and the MCP tool surface: cited sentences, six read-only tools, a skill | Accepted |
