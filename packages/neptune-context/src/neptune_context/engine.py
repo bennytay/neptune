@@ -17,6 +17,7 @@ too, because it may be called directly.
 from __future__ import annotations
 
 import json
+import stat
 from typing import TYPE_CHECKING, Final
 
 from neptune_memory.schema.codec import graph_from_json
@@ -69,7 +70,7 @@ if TYPE_CHECKING:
 
 ENGINE_ID: Final = "neptune-context.local"
 ENGINE_VERSION: Final = "1"
-MAX_GRAPH_BYTES: Final = 1024 * 1024 * 1024  # a graph document read whole into memory
+MAX_GRAPH_BYTES: Final = 256 * 1024 * 1024  # a graph document is read whole into memory
 
 
 class LocalEngine:
@@ -287,7 +288,10 @@ def read_graph(path: Path) -> IndexedReader:
     """A Memory graph document at ``path``, read strictly (bounded size, no duplicate keys, no NaN)
     and decoded by Memory's codec (ids, order, generation all checked) into Memory's reference
     reader, indexed by claim id for ``why`` (``IndexedReader``). Raises ``ValueError`` or
-    ``OSError``; nothing else."""
+    ``OSError``; nothing else. Only a regular file is read: a FIFO or a device could block or
+    never end."""
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise ValueError(f"{path.name} is not a regular file")
     with path.open("rb") as handle:
         data = handle.read(MAX_GRAPH_BYTES + 1)
     if len(data) > MAX_GRAPH_BYTES:

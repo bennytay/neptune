@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="self_include">
+  <xacro:include filename="self_include.urdf.xacro"/>
+  <xacro:include filename="../../../../etc/passwd"/>
+  <link name="base_link"/>
+</robot>
