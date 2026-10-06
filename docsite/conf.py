@@ -9,8 +9,12 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from docutils import nodes
+from sphinx import addnodes
+
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
+    from sphinx.environment import BuildEnvironment
 
 project = "Neptune"
 author = "Benjamin Tay"
@@ -29,10 +33,11 @@ myst_enable_extensions = ["colon_fence"]
 autodoc_member_order = "bysource"
 autodoc_typehints = "signature"
 autodoc_preserve_defaults = True
-# Nitpicky mode is on (`-n`): every document cross-reference must resolve. Python annotations name
-# types from other packages and the standard library that the site does not document, so Python
-# references are exempt, and so is a short type name that two documented modules both define.
-nitpick_ignore_regex = [(r"py:.*", r".*")]
+# Nitpicky mode is on (`-n`): every cross-reference must resolve, Python roles in pages and
+# docstrings included. Only what autodoc itself writes is exempt: the annotations in a signature and
+# the "Bases:" line of `:show-inheritance:` name types from other packages and the standard library
+# that the site does not document (`_autodoc_annotation`). So is a short type name that two
+# documented modules both define (`ref.python`).
 suppress_warnings = ["ref.python"]
 
 html_theme = "furo"
@@ -61,6 +66,32 @@ def _docstring(
     lines[:] = [_LITERAL.sub(_end_literal, line) for line in lines]
 
 
+def _autodoc_generated(node: nodes.Node) -> bool:
+    """Whether ``node`` sits in a signature or in the "Bases:" line autodoc writes."""
+    parent = node.parent
+    while parent is not None:
+        if isinstance(parent, addnodes.desc_signature):
+            return True
+        if (
+            isinstance(parent, nodes.paragraph)
+            and isinstance(parent.parent, addnodes.desc_content)
+            and parent.astext().startswith("Bases: ")
+        ):
+            return True
+        parent = parent.parent
+    return False
+
+
+def _autodoc_annotation(
+    app: Sphinx, env: BuildEnvironment, node: addnodes.pending_xref, contnode: nodes.TextElement
+) -> nodes.Node | None:
+    """An unresolved Python reference autodoc generated renders as plain text; any other fails."""
+    if node.get("refdomain") == "py" and _autodoc_generated(node):
+        return contnode
+    return None
+
+
 def setup(app: Sphinx) -> dict[str, Any]:
     app.connect("autodoc-process-docstring", _docstring)
+    app.connect("missing-reference", _autodoc_annotation)
     return {"parallel_read_safe": True}

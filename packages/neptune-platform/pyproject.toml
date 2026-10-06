@@ -32,10 +32,11 @@ files = ["src", "tests"]
 mypy_path = "src:../.."
 
 # The docs site (docsite/, platform ADR 0012) calls Sphinx, whose sources use Python 3.12 syntax
-# that mypy cannot parse while it targets 3.11; its names are treated as Any.
+# that mypy cannot parse while it targets 3.11, and docutils ships no types; their names are Any.
 [[tool.mypy.overrides]]
-module = ["sphinx", "sphinx.*"]
+module = ["sphinx", "sphinx.*", "docutils", "docutils.*"]
 follow_imports = "skip"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

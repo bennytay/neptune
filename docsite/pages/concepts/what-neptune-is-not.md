@@ -18,8 +18,7 @@ axes, explicit missingness and identities that are linked, never merged. An inde
 vector) is a way in, not the store of truth: every hit resolves to a claim or a record with its evidence.
 
 **Not a dashboard.** Neptune is not an analytics or fleet-operations screen. It produces packages,
-claims, context packets and evidence packs for agents, engineers and the tools they already use; the
-one front end Deploy plans is a thin, read-only view over evidence packs.
+claims, context packets and evidence packs for agents, engineers and the tools they already use.
 
 **Not a trainer.** Neptune does not train or fine-tune models, learn policies, generate evaluations or run
 simulations. It gives those systems evidence they can trust and trace, with inference labelled as
@@ -27,7 +26,7 @@ inference.
 
 It is also not a safety-case generator, a compliance engine or a maintenance system. Deploy reads
 work orders, incidents and authorisation envelopes as **stated** evidence and cites them; it never
-ranks a severity or decides that a robot is safe.
+ranks a severity and never builds a safety case.
 
 And it is not built for one kind of robot. Nothing in the data model assumes a flight controller, a
 single vehicle or one morphology: arms, mobile bases, legged robots, humanoids, aerial, marine and road

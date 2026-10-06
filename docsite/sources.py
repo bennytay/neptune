@@ -19,13 +19,19 @@ REPOSITORY_REF: Final = "main"
 
 @dataclass(frozen=True)
 class Section:
-    """A layer's documents: ``layers/<slug>`` lists them."""
+    """A layer's documents: ``layers/<slug>`` lists them.
+
+    ``key`` are (title, repository path) pairs the page links first, for the decisions a reader
+    needs before the rest (a query language, a packet format), which would otherwise sit in the
+    ADR list only.
+    """
 
     slug: str
     title: str
     summary: str
     root: str
     lead: tuple[str, ...] = ()
+    key: tuple[tuple[str, str], ...] = ()
 
 
 SECTIONS: Final = (
@@ -71,6 +77,17 @@ SECTIONS: Final = (
         "a context packet with provenance on every item, through an SDK and an MCP server.",
         "packages/neptune-context/docs",
         ("sdk.md", "contracts.md"),
+        (
+            ("The query language", "packages/neptune-context/docs/adr/0002-query-language.md"),
+            (
+                "The context packet format",
+                "packages/neptune-context/docs/adr/0003-the-context-packet.md",
+            ),
+            (
+                "The SDK and the MCP server",
+                "packages/neptune-context/docs/adr/0004-sdk-and-mcp-server.md",
+            ),
+        ),
     ),
     Section(
         "deploy",
@@ -80,6 +97,13 @@ SECTIONS: Final = (
         "snapshot.",
         "packages/neptune-deploy/docs",
         ("samples/README.md", "contracts.md"),
+        (
+            (
+                "Evidence packs",
+                "packages/neptune-deploy/docs/adr/"
+                "0013-evidence-packs-compile-cited-claims-from-a-frozen-memory-snapshot.md",
+            ),
+        ),
     ),
     Section(
         "platform",

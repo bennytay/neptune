@@ -33,7 +33,7 @@ founder reads first. Forces:
 2. **Layout: `docsite/`, owned by Platform.** A root directory like `harness/`: `MEMBER_DIRS` in the
    Makefile and `.github/scripts/ci_plan.py` route it to `neptune-platform`, whose job lints it and whose
    tests (`tests/test_docsite_*.py`) cover it. `docsite/sources.py` declares the sections and API modules,
-   `docsite/pages/` holds the hand-written pages (home, concepts, quickstart), `docsite/conf.py` is the
+   `docsite/pages/` holds the hand-written pages (home, concepts, quickstart, deployment targets), `docsite/conf.py` is the
    Sphinx configuration.
 3. **The site mirrors the repository's paths.** `python -m docsite` assembles a source tree in
    `build/docs/src` (gitignored) where `docs/architecture.md` is the page `docs/architecture` and
@@ -43,7 +43,9 @@ founder reads first. Forces:
    A link to any other repository path is rewritten, in the assembled copy only, to its GitHub URL on
    `main`; an image is copied in; a link to a path that does not exist, or that leaves the repository, is a
    problem that fails the build. Sources are read, never written.
-4. **Generated pages.** One page per layer (`layers/<slug>`), one per published contract version
+4. **Generated pages.** One page per layer (`layers/<slug>`, which links the decisions a reader needs
+   first, such as Context's query language and packet format and Deploy's evidence packs, before its
+   document list), one per published contract version
    (`contracts/<id>/<version>/schema`: every definition, nested schema resources included, as a labelled
    section with its type, its properties and whether each is required, every other keyword verbatim,
    `$ref`s as cross-references, and the schema file attached for download), and one per API surface
@@ -51,14 +53,17 @@ founder reads first. Forces:
    define). The quickstart page embeds the README's first level-2 section whose heading contains
    "quickstart" (case-insensitive), links rewritten; until the README has one it points at the README.
 5. **Strict.** Sphinx runs with `-W --keep-going -n -E` from an empty output directory: every warning
-   fails, every document cross-reference and heading anchor must resolve, and no cached page hides a
-   warning. Two narrow exemptions, both about Python annotations in the API reference rather than links:
-   unresolved `py:` references (types from undocumented modules and the standard library) and `ref.python`
-   (a short type name two documented modules both define). One docstring shim: a ``literal``s glued to a
+   fails, every cross-reference (Python roles in pages and docstrings included) and heading anchor must
+   resolve, and no cached page hides a warning. Two narrow exemptions, both for references autodoc itself
+   writes rather than links anyone typed: an unresolved Python reference inside a signature or in
+   `:show-inheritance:`'s "Bases:" line (types from undocumented modules and the standard library) renders
+   as plain text (a `missing-reference` handler in `docsite/conf.py`), and `ref.python` (a short type name
+   two documented modules both define) is suppressed. A misspelled `{py:class}` in a page fails. One docstring shim: a ``literal``s glued to a
    following word gets reStructuredText's escaped space, so Markdown-ish prose parses without editing
    another package's source.
 6. **Offline and deterministic.** No clock (no `last updated`, a copyright without a year), no network, and
-   after Sphinx a scan fails the build if any page, stylesheet or script would load a remote resource.
+   after Sphinx a scan fails the build if any page (tags, `<style>` elements, `style` attributes),
+   stylesheet or script would load a remote resource.
    Two builds under different `PYTHONHASHSEED` and `TZ`, and parallel or serial, are byte-identical.
 7. **The build is part of `check`.** `make docs` builds into `build/docs/html`. A whole-workspace `make check`
    runs it after lint, type and test; `make check PKG=<name>` does not, mirroring CI, where `ci.yml`'s
@@ -92,4 +97,4 @@ founder reads first. Forces:
 - If the README's quickstart heading changes so it no longer contains "quickstart", the page falls back
   to pointing at the README; `tests/test_docsite_assemble.py` pins both behaviours.
 - Sphinx's sources use Python 3.12 syntax, so the platform's mypy does not follow into `sphinx`
-  (`follow_imports = "skip"`) while it targets 3.11.
+  (`follow_imports = "skip"`) while it targets 3.11; docutils ships no types and is treated the same.

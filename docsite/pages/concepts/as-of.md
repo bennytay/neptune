@@ -30,7 +30,11 @@ fingers were changed and the camera bracket refitted before that run.
 
 That is what makes an incident review reproducible. A context packet records the transaction it was
 answered at, so anyone can replay the answer later and get the same claims, even after newer evidence
-arrives. An `as_of` beyond the latest transaction is refused rather than guessed.
+arrives, on the same Memory **generation**. The generation is the hash of Memory's resolver
+configuration (priorities, vocabulary and vocabulary version); adding a consolidator, changing a
+priority or extending the vocabulary starts a new generation, and answers are never compared across
+generations. An `as_of` beyond the latest
+transaction is refused rather than guessed.
 
 ## Clocks are named, never coerced
 
@@ -44,6 +48,7 @@ on your clock only through a named clock mapping, and through an estimated one i
 ## Where to go next
 
 - [Memory's reading guarantees](../packages/neptune-memory/docs/graph-schema.md#guarantees) (as-of is a
-  true snapshot; one answer per `as_of`; clocks are never coerced)
+  true snapshot; one answer per `as_of`; clocks are never coerced) and
+  [why they hold within one generation](../packages/neptune-memory/docs/graph-schema.md#caveat-a-resolver-configuration-is-a-store-generation)
 - [Context's query language: `as_of` and `during`](../packages/neptune-context/docs/adr/0002-query-language.md)
 - [Time in the canonical model](../docs/canonical-data-model.md#time-adr-0005-adr-0012-modeltimepy)

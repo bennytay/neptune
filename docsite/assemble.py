@@ -87,6 +87,10 @@ def _toctree(entries: Iterable[str], *options: str) -> list[str]:
 def section_page(root: Path, section: Section) -> str:
     guides, decisions, reviews = section_documents(root, section)
     lines = [f"# {section.title}", "", section.summary, ""]
+    if section.key:
+        lines += ["Start with:", ""]
+        lines += [f"- [{title}](../{path})" for title, path in section.key]
+        lines.append("")
     lines += _toctree((_docname(p) for p in guides), ":maxdepth: 1")
     indexes = [p for p in decisions if PurePosixPath(p).stem == "README"]
     if decisions:

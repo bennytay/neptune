@@ -21,6 +21,9 @@ REPO: Final = Path(__file__).resolve().parents[3]
         ("a.css", "@font-face { src: url('https://x/f.woff2') }"),
         ("a.css", '@import "https://x/y.css";'),
         ("a.js", 'fetch("https://telemetry.example/p")'),
+        ("a.html", '<style>@import url("https://fonts.example/css");</style>'),
+        ("a.html", "<STYLE type='text/css'>\nb { background: url(//x/y.png) }\n</style>"),
+        ("a.html", '<div style="background: url(&quot;https://x/y.png&quot;)"></div>'),
     ],
 )
 def test_a_remote_load_is_a_problem(tmp_path: Path, name: str, text: str) -> None:
@@ -37,6 +40,10 @@ def test_links_and_local_resources_are_not_remote_loads(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (tmp_path / "a.css").write_text("x { background: url('img/a.png') }", encoding="utf-8")
+    # page text that merely mentions a remote url() is not a load
+    (tmp_path / "b.html").write_text(
+        "<pre>@import url(https://x/y.css)</pre><style>b { color: red }</style>", encoding="utf-8"
+    )
     assert build.remote_loads(tmp_path) == []
 
 
@@ -44,6 +51,7 @@ def test_the_configuration_reads_no_network_and_keeps_strictness() -> None:
     assert conf.extensions == ["myst_parser", "sphinx.ext.autodoc"]  # no intersphinx, no analytics
     assert conf.html_theme == "furo"
     assert conf.suppress_warnings == ["ref.python"]
+    assert not hasattr(conf, "nitpick_ignore_regex")  # only autodoc's own references are exempt
     assert conf.html_last_updated_fmt is None
     assert not re.search(r"\d{4}", conf.copyright)
 
@@ -90,3 +98,43 @@ def test_the_build_output_is_ignored_by_git() -> None:
         ["git", "-C", str(REPO), "check-ignore", "-q", "build/docs/html/index.html"], check=False
     )
     assert result.returncode == 0
+
+
+PROBE_DIR: Final = Path(__file__).resolve().parent / "fixtures" / "docsite"
+AUTOMODULE: Final = (
+    "```{eval-rst}\n.. automodule:: docsite_probe_module\n"
+    "   :members:\n   :show-inheritance:\n```\n"
+)
+
+
+def _probe_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, page: str) -> tuple[int, str]:
+    """A one-page site under the real configuration: the probe module's API, then ``page``."""
+    monkeypatch.syspath_prepend(str(PROBE_DIR))
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "index.md").write_text(f"# Probe\n\n{AUTOMODULE}\n{page}\n", encoding="utf-8")
+    return build.sphinx(source, tmp_path / "html", tmp_path / "doctrees")
+
+
+def test_autodocs_own_references_to_undocumented_types_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, output = _probe_build(tmp_path, monkeypatch, "Plain text.")
+    assert code == 0, output
+    page = (tmp_path / "html" / "index.html").read_text(encoding="utf-8")
+    assert "Fraction" in page and "OrderedDict" in page
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        "See {py:class}`neptune.sdk.DoesNotExist`.",
+        "```{eval-rst}\nSee :py:func:`docsite_probe_module.missing`.\n```",
+    ],
+)
+def test_a_python_role_to_a_missing_target_fails_the_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, page: str
+) -> None:
+    code, output = _probe_build(tmp_path, monkeypatch, page)
+    assert code != 0
+    assert "reference target not found" in output

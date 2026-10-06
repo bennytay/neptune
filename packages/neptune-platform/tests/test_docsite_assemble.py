@@ -50,6 +50,8 @@ def repo(tmp_path: Path) -> Path:
             "contracts/y/contract.toml": 'title = "Y"\nstatus = "planned"\npart_of = "x"\n',
         },
     )
+    # the decisions layer pages link first (outside the sections' fake documents)
+    _write(root, {path: "# Key\n" for section in SECTIONS for _, path in section.key})
     return root
 
 
@@ -89,6 +91,17 @@ def test_the_compiler_section_leads_with_its_order_and_puts_decisions_apart(
     assert "/docs/adr/README\n" in decisions[0]
     assert ":hidden:\n\n/docs/adr/0001-first\n" in decisions[0]
     assert "/docs/reviews/m1\n" in decisions[1]
+
+
+def test_a_layer_page_links_its_key_decisions_first(repo: Path, pages: Path) -> None:
+    page = assemble.assemble(repo, pages).files["layers/context.md"].decode()
+    start = page.index("Start with:")
+    assert start < page.index("```{toctree}")
+    assert (
+        "- [The query language](../packages/neptune-context/docs/adr/0002-query-language.md)"
+        in page
+    )
+    assert "- [The context packet format](../" in page
 
 
 def test_contracts_are_rendered_newest_first_and_pending_ones_listed(
@@ -167,5 +180,5 @@ def test_the_real_repository_assembles_without_problems() -> None:
         assert f"layers/{section.slug}.md" in tree.files
         for lead in section.lead:
             assert f"{section.root}/{lead}" in tree.files, "a lead document was renamed"
-    for path in ("index.md", "quickstart.md", "concepts/claims.md", "concepts/as-of.md"):
+    for path in ("index.md", "quickstart.md", "deployment-targets.md", "concepts/as-of.md"):
         assert path in tree.files

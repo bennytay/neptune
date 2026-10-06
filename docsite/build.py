@@ -8,6 +8,7 @@ from an empty ``out`` with a fresh environment, so a warning cannot hide in a ca
 
 from __future__ import annotations
 
+import html
 import io
 import re
 import shutil
@@ -26,6 +27,28 @@ _REMOTE_TAG = re.compile(
     re.IGNORECASE,
 )
 _REMOTE_CSS = re.compile(r"(?:url\(\s*[\"']?|@import\s+[\"']?)(?:https?:)?//", re.IGNORECASE)
+# CSS inside a page: <style> elements and style attributes (not text that merely mentions url()).
+_INLINE_CSS = re.compile(
+    r"<style\b[^>]*>(.*?)</style\s*>|\sstyle\s*=\s*(?:\"([^\"]*)\"|'([^']*)')",
+    re.IGNORECASE | re.DOTALL,
+)
+_REMOTE_JS = re.compile(r"(?:fetch|importScripts)\(\s*[\"'](?:https?:)?//")
+
+
+def _remote(suffix: str, text: str) -> str | None:
+    """The first remote load in a file's text, if any."""
+    if suffix == ".css":
+        match = _REMOTE_CSS.search(text)
+    elif suffix == ".js":
+        match = _REMOTE_JS.search(text)
+    else:
+        match = _REMOTE_TAG.search(text)
+        if match is None:
+            for inline in _INLINE_CSS.finditer(text):
+                css = html.unescape("".join(group or "" for group in inline.groups()))
+                if found := _REMOTE_CSS.search(css):
+                    return found.group(0)
+    return match.group(0) if match else None
 
 
 def remote_loads(html_dir: Path) -> list[str]:
@@ -35,12 +58,9 @@ def remote_loads(html_dir: Path) -> list[str]:
         if path.suffix not in {".html", ".css", ".js"} or not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        pattern = _REMOTE_TAG if path.suffix == ".html" else _REMOTE_CSS
-        if path.suffix == ".js":
-            pattern = re.compile(r"(?:fetch|importScripts)\(\s*[\"'](?:https?:)?//")
-        if match := pattern.search(text):
+        if found := _remote(path.suffix, text):
             where = path.relative_to(html_dir).as_posix()
-            problems.append(f"{where}: loads a remote resource: {match.group(0)[:120]!r}")
+            problems.append(f"{where}: loads a remote resource: {found[:120]!r}")
     return problems
 
 

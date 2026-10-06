@@ -36,6 +36,7 @@ concepts/evidence-and-inference
 concepts/as-of
 concepts/what-neptune-is-not
 quickstart
+deployment-targets
 ```
 
 ```{toctree}

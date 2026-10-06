@@ -19,8 +19,8 @@ Every value Neptune produces says how it is known. There are three answers, and 
 - **An inference must point at what it is about.** An inferred claim names its model and cites the
   evidence it read; evidence never points at an inference.
 - **Uncertainty stays honest.** Evidence carries no confidence score: where a source is unclear the value
-  is *ambiguous* (with every reading), *unknown* or *not covered*. Only an inferred claim carries a
-  probability.
+  is *ambiguous* (with every reading), *unknown* or *not covered*. Only an inferred claim may carry
+  a probability.
 
 ## How the code enforces it
 
