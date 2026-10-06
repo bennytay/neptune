@@ -1,0 +1,14 @@
+{
+  "deploy_format": 1,
+  "corpus": "acceptance",
+  "corpus_version": "2.0.0",
+  "description": "What the harness's deploy stage maps over the acceptance corpus's compiled package (Platform ADR 0008): Deploy's shipped presets by name, and document templates by repository path (a file or a directory). Adding one is an edit here, never to harness/stages.py. Each declaration must map at least one record, and each kind under at_least must reach its count, or the stage is red.",
+  "presets": ["cmms_generic", "jira_json", "register_zone", "servicenow_csv"],
+  "templates": [],
+  "at_least": {
+    "authorisation_envelope": 5,
+    "change_record": 5,
+    "incident_record": 1,
+    "maintenance_event": 15
+  }
+}

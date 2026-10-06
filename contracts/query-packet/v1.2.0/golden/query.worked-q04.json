@@ -1,0 +1,30 @@
+{
+  "as_of": 1842,
+  "budget": {
+    "items": 100
+  },
+  "clock_bridges": [],
+  "explain": [
+    {
+      "after": 1842,
+      "before": 1500,
+      "kind": "diff",
+      "subject": {
+        "declared_id": "asset_tag:agv-114",
+        "kind": "machine",
+        "same_as_depth": 0
+      }
+    }
+  ],
+  "frame_bridges": [],
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [],
+  "subjects": [
+    {
+      "declared_id": "asset_tag:agv-114",
+      "kind": "machine",
+      "same_as_depth": 0
+    }
+  ]
+}

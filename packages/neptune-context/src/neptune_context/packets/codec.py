@@ -27,6 +27,7 @@ from neptune_memory.schema.codec import (
     node_from_json,
 )
 from neptune_memory.schema.interval import LedgerTx
+from neptune_memory.schema.supersede import parse_finding_id
 
 from neptune.identity.canonical_json import dumps
 from neptune.model.frames import FrameRef, frame_ref_from_json
@@ -72,7 +73,24 @@ from neptune_context.packets.model import (
     Superseded,
     Transform,
 )
-from neptune_context.pinned import claim_beyond_pin, finding_beyond_pin, node_beyond_pin
+from neptune_context.packets.trails import (
+    Change,
+    DiffChange,
+    DiffPoint,
+    DiffTrail,
+    Relation,
+    Trail,
+    TxPoint,
+    WhyStep,
+    WhyTrail,
+    WorldPoint,
+)
+from neptune_context.pinned import (
+    claim_beyond_pin,
+    finding_beyond_pin,
+    node_beyond_pin,
+    predicates,
+)
 from neptune_context.pins import GRAPH_SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -467,6 +485,94 @@ def _gap(value: JsonValue, at: str) -> Gap:
     )
 
 
+def _evidence_refs(value: JsonValue, at: str) -> tuple[Any, ...]:
+    return _each(value, at, lambda v, a: _upstream(a, lambda: evidence_ref_from_json(v)))
+
+
+def _why_step(value: JsonValue, at: str) -> WhyStep:
+    obj = _exact(
+        value,
+        at,
+        {"assertion_kind", "claim", "depth", "evidence", "relation", "repeat"},
+        frozenset({"finding", "parent"}),
+    )
+    (claim,) = _claim_ids([obj["claim"]], f"{at}/claim")
+    parent = _claim_ids([obj["parent"]], f"{at}/parent")[0] if "parent" in obj else None
+    finding = (
+        _upstream(f"{at}/finding", lambda: parse_finding_id(_str(obj["finding"], f"{at}/finding")))
+        if "finding" in obj
+        else None
+    )
+    return _upstream(
+        at,
+        lambda: WhyStep(
+            claim,
+            parent,
+            _enum(obj["relation"], f"{at}/relation", Relation),
+            _int(obj["depth"], f"{at}/depth"),
+            _assertion_kind(obj["assertion_kind"], f"{at}/assertion_kind"),
+            _evidence_refs(obj["evidence"], f"{at}/evidence"),
+            finding,
+            _bool(obj["repeat"], f"{at}/repeat"),
+        ),
+    )
+
+
+def _point(value: JsonValue, at: str) -> DiffPoint:
+    if isinstance(value, Mapping) and "tx" in value:
+        obj = _exact(value, at, {"tx"})
+        return _upstream(at, lambda: TxPoint(LedgerTx(_int(obj["tx"], f"{at}/tx"))))
+    obj = _exact(value, at, {"clock", "ticks"})
+    return _upstream(
+        at,
+        lambda: WorldPoint(
+            _str(obj["clock"], f"{at}/clock"),  # type: ignore[arg-type]
+            _int(obj["ticks"], f"{at}/ticks"),
+        ),
+    )
+
+
+def _change(value: JsonValue, at: str) -> DiffChange:
+    obj = _exact(value, at, {"after", "before", "change", "predicate"})
+    predicate = _str(obj["predicate"], f"{at}/predicate")
+    if predicate not in predicates():
+        raise _Bad(
+            Code.SHAPE,
+            f"{at}/predicate",
+            f"predicate {predicate!r} is not in the pinned graph-schema {GRAPH_SCHEMA_VERSION}",
+        )
+    return _upstream(
+        at,
+        lambda: DiffChange(
+            predicate,
+            _enum(obj["change"], f"{at}/change", Change),
+            _claim_ids(obj["before"], f"{at}/before"),
+            _claim_ids(obj["after"], f"{at}/after"),
+        ),
+    )
+
+
+def _trail(value: JsonValue, at: str) -> Trail:
+    kind = value.get("kind") if isinstance(value, Mapping) else None
+    if kind == WhyTrail.kind:
+        obj = _exact(value, at, {"at", "claim", "kind", "steps"})
+        (claim,) = _claim_ids([obj["claim"]], f"{at}/claim")
+        steps = _each(obj["steps"], f"{at}/steps", _why_step)
+        return _upstream(at, lambda: WhyTrail(_str(obj["at"], f"{at}/at"), claim, steps))
+    if kind == DiffTrail.kind:
+        obj = _exact(value, at, {"after", "at", "before", "changes", "kind", "nodes", "subject"})
+        subject = _upstream(f"{at}/subject", lambda: _node(obj["subject"]))
+        nodes = _each(obj["nodes"], f"{at}/nodes", lambda v, a: _upstream(a, lambda: _node(v)))
+        before = _point(obj["before"], f"{at}/before")
+        after = _point(obj["after"], f"{at}/after")
+        changes = _each(obj["changes"], f"{at}/changes", _change)
+        return _upstream(
+            at,
+            lambda: DiffTrail(_str(obj["at"], f"{at}/at"), subject, nodes, before, after, changes),
+        )
+    raise _Bad(Code.SHAPE, f"{at}/kind", f"a trail's kind is 'why' or 'diff', got {kind!r}")
+
+
 def _header(value: JsonValue, at: str) -> dict[str, Any]:
     obj = _exact(
         value,
@@ -538,6 +644,7 @@ def _packet(value: JsonValue) -> ContextPacket:
         value,
         "",
         {"findings", "gaps", "header", "id", "items", "kind", "packet_version", "superseded_since"},
+        frozenset({"trails"}),
     )
     if obj["kind"] != PACKET_KIND:
         raise _Bad(Code.SHAPE, "/kind", f"kind must be {PACKET_KIND!r}")
@@ -546,10 +653,18 @@ def _packet(value: JsonValue) -> ContextPacket:
     superseded = _each(obj["superseded_since"], "/superseded_since", _superseded)
     findings = _each(obj["findings"], "/findings", lambda v, a: _upstream(a, lambda: _finding(v)))
     gaps = _each(obj["gaps"], "/gaps", _gap)
+    if "trails" in obj and not _list(obj["trails"], "/trails"):
+        raise _Bad(Code.SHAPE, "/trails", "trails is written only when there is one (ADR 0010)")
+    trails = _each(obj["trails"], "/trails", _trail) if "trails" in obj else ()
     packet = _upstream(
         "",
         lambda: ContextPacket(
-            **header, items=items, superseded_since=superseded, findings=findings, gaps=gaps
+            **header,
+            items=items,
+            superseded_since=superseded,
+            findings=findings,
+            gaps=gaps,
+            trails=trails,
         ),
     )
     stated, actual = _str(obj["id"], "/id"), _upstream("", lambda: packet.id)
