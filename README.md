@@ -21,16 +21,20 @@ MCP tools. Every answer is cited, and CI checks the citations by claim id, never
 - **Real:** compiler ingest · Deploy's lifecycle and event-log mapping · the Ledger's catalog (embedded
   PostgreSQL) · Memory's consolidation (byte-identical to its committed snapshot) · Context's local engine
   and MCP server · Deploy's evidence-pack PDFs. CI runs all of it.
-- **Answered today (3 of 40 gold claims supported)**, asked as the Claude Code skill asks (50 items, 20,000
-  tokens): that ARM-3A's controller firmware stayed 5.6.0 and LEG-01's went to 3.2.0, and that the cell PC's log
-  shows the incident's alarms about a minute and a half late.
-- **Not answered yet:** *why* the incident happened and *what changed* since the last good run, and most of
-  *what happened*. Memory (graph-schema 2.2.0) now holds much of it: the incident and its stated cause, the
-  stops, WO-26-0911's actions, the runs' configurations. But at the skill's budget the answers reach 13 more
-  gold claims only through statements about something else (`co_cited`, e.g. "WO-26-0911's action involves
-  ARM-3A" without its description), and 24 are gaps: facts Memory holds that the budget cuts, the bags'
-  statuses (events that cite the bag by byte range, not by row), SOP and survey text, the stale config
-  export's values, the envelope register. Each is pinned with its reason in `harness/acceptance/answers.json`.
+- **Answered today (12 of 40 gold claims supported)**, asked exactly as the Claude Code skill asks
+  (`neptune_entities`, a one-hop read of the incident, `neptune_compare_runs` of the last good run and the
+  incident run). *What happened:* the fingers struck PF-3, collision detection stopped the arm, the E-stop at
+  OP-2. *What changed since the last good run:* WO-26-0911 replaced the finger set (FS-0340) and set TCP z
+  145.5 -> 151.5 mm, removed and refitted the wrist camera bracket and deferred the hand-eye recalibration;
+  WO-26-0912 re-ran it with a substitute board; the calibration went from CAL-ARM3A-0818 to CAL-ARM3A-0911
+  (reprojection error 1.86 px, camera z 0.0745 -> 0.0702). Also: no wrist camera images exist, the cell PC's
+  log runs about a minute and a half late, LEG-01 went to firmware 3.2.0, and INC-0007's stated cause (the
+  rack face 40 mm out).
+- **Not answered yet:** 10 gold claims are cited only through statements about something else (`co_cited`),
+  among them "the calibration caused it": Neptune states differences, never causes. 18 are gaps: the stop
+  times per syslog and CMMS and their 32 s conflict (cut at the skill's budget), the bags' statuses (events
+  that cite the bag by byte range, not by row), SOP and survey text, the stale config export's values, the
+  envelope register. Each is pinned with its reason in `harness/acceptance/answers.json`.
   No spatial baseline (MVL-135), no LeRobot export, no hosted service; pre-alpha APIs.
 
 ## 15-minute quickstart
@@ -54,7 +58,7 @@ export NEPTUNE_MEMORY_GRAPH=demo/graph.json
    cites the claims it rests on; `demo/answers.md` shows the gold questions answered through the MCP tools,
    with each gold claim's class and reason.
 2. Run `claude` in the same folder and approve the `neptune` server (`.mcp.json`; the skill is
-   `.claude/skills/neptune`). Ask: **"What happened in the arm-cell incident INC-C3-0011?"** and
+   `.claude/skills/neptune`). Ask: **"Why did the arm-cell incident INC-C3-0011 happen?"** and
    **"What changed on ARM-3A since its last good run?"** Each fact comes back as
    `[I…][E…]` citations; `neptune_why` on a claim shows its evidence. In this path no Ledger catalog is
    attached, so `neptune_hydrate` (opening an `[E…]` source) answers `unavailable`; `make demo` hydrates

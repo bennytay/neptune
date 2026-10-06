@@ -50,27 +50,35 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
    stops it at the end (`Context.close`, also on error). `needs_services` is false for every stage: CI
    still needs no Docker. The memory stage's `entry` is `neptune_memory.cli`, the context stage's
    `neptune_context.mcp`.
-3. **Context, real, through the MCP tools** (`harness/agent.py`). The engine is `LocalEngine` over the
-   graph with the ledger's catalog attached; the server is `neptune_context.mcp.build_server`, called
-   through an in-memory MCP session: the tools, arguments and text Claude Code gets. The smoke query is the
-   first gold question's first query (the graph's first declared identity for a corpus without answers),
-   and the report keeps the packet's id and counts. One stdio round trip proves the Claude Code path:
-   `python -m neptune_context.mcp --memory <graph>` is spawned, lists its six tools and answers that query
-   with the same text as the in-process server without a catalog (as the sample `.mcp.json` runs it).
+3. **Context, real, through the MCP tools** (`harness/agent.py`). The gold questions are asked of the
+   server `.mcp.json` runs (`neptune_context.mcp.build_server` over `LocalEngine` and the graph, no Ledger
+   catalog), through an in-memory MCP session: the tools, arguments and text Claude Code gets. A catalog
+   adds a hydrated evidence item per cited source, which changes what a budget holds, so it is used only
+   to open each question's first cited source (`neptune_hydrate`). The smoke query is the first question's
+   first query as asked (the graph's first declared identity for a corpus without answers); the report
+   keeps the packet's id and counts. One stdio round trip proves the Claude Code path:
+   `python -m neptune_context.mcp --memory <graph>` is spawned, lists its tools and answers the first
+   question's last cited call (its run comparison) with the same text as the in-process server.
 4. **Pinned answers, checked by structure** (`harness/acceptance/answers.json`, `answers_format: 1`,
    naming its corpus version and the graph `generation` it was pinned against). Per gold question: the
-   phrasing it is `asked_as` and the tool `calls` an agent makes, at the budget the Claude Code skill
-   prescribes (`SKILL.md`: 50 items, 20,000 tokens), never a budget tuned to reach a pin (subjects by
-   declared id only, never a
-   content-addressed id; an argument `"$support:<gold claim>"` is the first claim id whose statement cites
-   that gold claim in the question's earlier answers, as an agent copies one from an Items footer).
+   phrasing it is `asked_as` and the tool `calls` an agent makes, exactly as the Claude Code skill
+   prescribes (`SKILL.md`): "what changed" lists the runs and calls `neptune_compare_runs` on the last good
+   run and the incident run; "why" finds the incident by its number, reads it one hop, then the same
+   comparison; other questions read their incident or walk two hops from the machines' declared ids, at
+   the skill's budget (50 items, 20,000 tokens), never a budget tuned to reach a pin. Calls never hold a
+   content-addressed id: `"$named:<kind>:<name>"` is the id an earlier `neptune_entities` answer of the
+   question lists for that name (`run "<id>" named "cell3-2026-09-09"`; the first, sorted, when copies of one
+   recording share a name), and `"$support:<gold claim>"` the first claim id an earlier answer cites for it.
    - **Cited.** A statement's citations, in ADR 0007 §6 terms, are the records its claims are *about* (a
      subject or object that is a record: a `record` object or a `record:<id>` node) and, per evidence ref
      it cites, the source's corpus path with its row, page or JSON pointer. The other records a claim was
      built from (`provenance.records`) are not citations: a claim built from a work order states one of
      its cells, not the work order. A single cell (`row_cell`) is cited as `{row, column}`, never widened
      to its row: it meets only a gold item that names that column (the `table_row` selector's optional
-     `column`, located `{row, column}`). A gold claim is *cited* when a statement's citations meet
+     `column`, located `{row, column}`). An evidence ref that locates exactly the bytes a compiler record
+     holds for one value (a configuration value's, cited as its JSON pointer; a calibration parameter's,
+     as its name) cites that value: Memory's declared values (graph-schema 2.2.0) cite a configuration's
+     bytes by span. A gold claim is *cited* when a statement's citations meet
      `harness.acceptance.resolve.supports` for one of its evidence items.
    - **Column items in gold.** `cmms.WO-26-0911.work` (`Work Performed`) and `cmms.WO-26-0911.firmware`
      (`Firmware After`) were added beside the whole-row `cmms.WO-26-0911`, and the gold claims that rest on
@@ -95,10 +103,10 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
      `test_harness_answers.py` (`EXPECTED_CLASSES`), so a move between classes edits two files and turns the
      test red until both agree.
    - A separate file, not a selector in `gold.json`: gold stays compiler-version-proof (ADR 0007); the pins
-     are graph-specific. Corpus 2.1.0 over graph-schema 2.2.0: 3 of 40 gold claims `supported`, 13 `co_cited`, 24 gaps. "Why did
-     the arm-cell incident happen" and "what changed since the last good run" are not answered yet: the
-     runs' calibrations are opaque configuration threads, and WO-26-0911's work and CAL-ARM3A-0818/0911
-     reach no statement.
+     are graph-specific. Corpus 2.1.0 over graph-schema 2.2.0, asked as SKILL.md prescribes: 12 of 40 gold
+     claims `supported`, 10 `co_cited`, 18 gaps. What happened and what changed since the last good run
+     (WO-26-0911's actions, CAL-ARM3A-0818 to -0911, 1.86 px, the z offsets) are supported; the cause is
+     `co_cited`, since Neptune states differences, never causes.
 5. **`make demo`** (`python -m harness.demo`): the harness over the acceptance corpus with every stage
    real (owner contract tests skipped; `make harness` runs them), then Deploy's published `pack` command
    over the graph just built: `incident-timeline@2` for INC-C3-0011 (Memory's event node for the incident

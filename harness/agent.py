@@ -1,10 +1,11 @@
 """The context stage, real (Platform ADR 0011): the gold questions asked through Context's agent
 tools over the graph the memory stage built, and checked by structure, never by text.
 
-The engine is ``neptune_context``'s ``LocalEngine`` over the graph document, with the ledger
-stage's catalog attached so evidence hydrates, and the server is the one ``python -m
-neptune_context.mcp`` runs (``build_server``), called through an in-memory MCP session: the same
-tools, arguments and text an agent such as Claude Code gets.
+The questions are asked of the server ``python -m neptune_context.mcp --memory`` runs
+(``build_server`` over ``neptune_context``'s ``LocalEngine`` and the graph, with no Ledger catalog,
+as the sample ``.mcp.json`` runs it), called through an in-memory MCP session: the same tools,
+arguments and text an agent such as Claude Code gets. The ledger stage's catalog is attached only to
+open each question's first cited source (``neptune_hydrate``).
 
 A case's answer declaration (``Case.answers``; the acceptance corpus's is
 ``harness/acceptance/answers.json``) lists, per gold question, the tool calls an agent makes and
@@ -37,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import timedelta
@@ -54,10 +56,15 @@ if TYPE_CHECKING:
 
 ANSWERS_FORMAT: Final = 1
 # The tools whose answers are cited text (the others answer lists, plans or one resolution).
-PACKET_TOOLS: Final = ("neptune_query", "neptune_why", "neptune_diff")
+PACKET_TOOLS: Final = ("neptune_query", "neptune_why", "neptune_diff", "neptune_compare_runs")
 # An argument written "$support:<gold claim id>" is the first claim id (sorted) that supports that
 # gold claim in the question's earlier answers: what an agent copies from an Items footer.
 SUPPORT_REF: Final = "$support:"
+# An argument written "$named:<kind>:<name>" is the id an earlier ``neptune_entities`` answer of
+# the question lists for that kind and name (``<kind> "<id>" named "<name>"``; the first id, sorted,
+# when one name has several, as SKILL.md allows for copies of one run): how the skill finds a run
+# or an incident by name. Calls never hard-code a content-addressed id.
+NAMED_REF: Final = "$named:"
 CALL_TIMEOUT_S: Final = 120
 SMOKE_SOURCE: Final = "context LocalEngine over the memory stage's graph, through neptune_query"
 
@@ -189,6 +196,27 @@ class Scorer:
                     self.paths[str(revision["content_id"])] = path
         self.resolved = resolved
         self.claims: dict[str, Json] = {str(c["id"]): c for c in graph.get("claims", [])}
+        # Evidence refs that locate exactly one value a compiler record holds: a configuration
+        # value (located by its JSON pointer) or a calibration parameter (by its name). A claim
+        # citing those bytes cites that value, as a cell cites its row and column.
+        self.values: dict[tuple[str, str], Json] = {}
+        for root in roots:
+            package = Package(root)
+            for record in package.kind("configuration_value"):
+                pointer = "".join(
+                    "/" + str(part).replace("~", "~0").replace("/", "~1")
+                    for part in record.get("path", [])
+                )
+                self._value(record.get("value"), {"pointer": pointer})
+            for record in package.kind("calibration"):
+                for item in record.get("parameters", []):
+                    self._value(item.get("value"), {"parameter": item.get("name")})
+
+    def _value(self, slot: Any, locator: Json) -> None:
+        evidence = slot.get("provenance", {}).get("evidence") if isinstance(slot, dict) else None
+        if isinstance(evidence, dict) and evidence.get("locator"):
+            key = (str(evidence.get("source")), json.dumps(evidence["locator"], sort_keys=True))
+            self.values.setdefault(key, locator)
 
     def ref_citations(self, ref: Json) -> list[Json]:
         """An evidence ref as path-and-locator citations: its row, page or JSON pointer, or the
@@ -211,6 +239,9 @@ class Scorer:
                 out.append({"locator": {"pointer": part["pointer"]}, "path": path})
         if not ref.get("locator"):
             out.append({"locator": {}, "path": path})
+        key = (str(ref.get("source")), json.dumps(ref.get("locator", []), sort_keys=True))
+        if key in self.values:
+            out.append({"locator": self.values[key], "path": path})
         return out
 
     def claim_citations(self, claim_id: str) -> list[Json]:
@@ -271,12 +302,24 @@ class Scorer:
 # --- Asking the gold questions ----------------------------------------------------------------
 
 
-def _resolve_refs(value: Any, supported: dict[str, list[str]]) -> Any:
-    """``value`` with every ``$support:<gold claim>`` string replaced by a claim id."""
+def _named(ref: str, earlier: Sequence[str]) -> str:
+    kind, _, name = ref.removeprefix(NAMED_REF).partition(":")
+    pattern = re.compile(rf'{re.escape(kind)} "([^"]+)" named "{re.escape(name)}"')
+    found = sorted({str(m) for text in earlier for m in pattern.findall(text)})
+    if not found:
+        raise LookupError(f"{ref}: no earlier neptune_entities answer names it")
+    return found[0]
+
+
+def _resolve_refs(value: Any, supported: dict[str, list[str]], earlier: Sequence[str] = ()) -> Any:
+    """``value`` with every ``$support:<gold claim>`` string replaced by a claim id, and every
+    ``$named:<kind>:<name>`` by the id an earlier answer lists for it."""
     if isinstance(value, dict):
-        return {k: _resolve_refs(v, supported) for k, v in value.items()}
+        return {k: _resolve_refs(v, supported, earlier) for k, v in value.items()}
     if isinstance(value, list):
-        return [_resolve_refs(v, supported) for v in value]
+        return [_resolve_refs(v, supported, earlier) for v in value]
+    if isinstance(value, str) and value.startswith(NAMED_REF):
+        return _named(value, earlier)
     if isinstance(value, str) and value.startswith(SUPPORT_REF):
         found = supported.get(value.removeprefix(SUPPORT_REF), [])
         if not found:
@@ -308,7 +351,10 @@ def ask(client: AsyncClient, question: Json, declared: Json, scorer: Scorer) -> 
 
     for number, call in enumerate(declared.get("calls", []), start=1):
         try:
-            arguments = _resolve_refs(copy.deepcopy(call.get("arguments", {})), asked.cited)
+            earlier = [c.text for c in asked.calls if c.tool == "neptune_entities"]
+            arguments = _resolve_refs(
+                copy.deepcopy(call.get("arguments", {})), asked.cited, earlier
+            )
         except LookupError as error:
             asked.problems.append(f"call {number} ({call.get('tool')}): {error}")
             continue
@@ -489,9 +535,16 @@ def answers_path(ctx: Context) -> Path:
 
 
 def run_answers(
-    ctx: Context, client: AsyncClient, document: Json, *, pin: bool = False
+    ctx: Context,
+    client: AsyncClient,
+    document: Json,
+    *,
+    pin: bool = False,
+    hydrator: AsyncClient | None = None,
 ) -> tuple[Json, list[str], Json | None]:
-    """Ask every declared gold question; (summary for the report, problems, the transcript).
+    """Ask every declared gold question through ``client``, and open each question's first
+    cited source through ``hydrator`` (default ``client``); (summary for the report, problems,
+    the transcript).
     With ``pin``, the declaration file is rewritten from the answers first."""
     from harness.acceptance import resolve as gold_resolve
 
@@ -529,7 +582,7 @@ def run_answers(
             declared = pinned(asked, declared, scorer)
             rewritten.append(declared)
         problems += check(asked, declared, scorer, question.get("must_not_cite", []))
-        hydrated = _hydrated(client, asked)
+        hydrated = _hydrated(hydrator or client, asked)
         if hydrated != "resolved":
             problems.append(f"{qid}: the first cited source did not hydrate ({hydrated})")
         summary[qid] = {
@@ -590,19 +643,6 @@ def context_real(ctx: Context) -> Outcome:
         return Outcome({}, ("the memory stage wrote no graph document",))
     document = read_graph_document(graph)
     raw = json.loads(graph.read_bytes())
-    declaration_path, gold_path = _declaration(ctx)
-    first_call: Json | None = None
-    question: str | None = None
-    if declaration_path is not None and gold_path is not None:
-        declared = json.loads(declaration_path.read_text(encoding="utf-8")).get("questions", [])
-        gold = json.loads(gold_path.read_text(encoding="utf-8"))
-        first = next((q for q in declared if q.get("calls")), None)
-        if first is not None:
-            first_call = next((c for c in first["calls"] if c.get("tool") == "neptune_query"), None)
-            question = next(
-                (q["question"] for q in gold.get("questions", []) if q["id"] == first["id"]),
-                None,
-            )
     problems: list[str] = []
     output: Json = {}
     if ctx.ledger_uri is None:
@@ -610,9 +650,26 @@ def context_real(ctx: Context) -> Outcome:
     with PostgresCatalog(
         ctx.ledger_uri, LEDGER_TENANT, package_roots=package_roots(ctx)
     ) as catalog:
+        # The questions are asked as Claude Code asks them, of the server `.mcp.json` runs (no
+        # catalog: a catalog adds a hydrated evidence item per source, which changes what a
+        # budget holds); the first cited source of each is then opened through the catalog.
         client = local_client(document, catalog)
+        summary, found, transcript = run_answers(
+            ctx, local_client(document), raw, pin=ctx.pin_answers, hydrator=client
+        )
+        # The smoke query and the stdio probe are the first question's own calls, as asked
+        # (their names resolved): its first query, and its last cited answer.
+        asked = (transcript or {}).get("questions", [])[:1]
+        calls = [
+            {"arguments": c["arguments"], "tool": c["tool"]}
+            for q in asked
+            for c in q["calls"]
+            if not c["is_error"]
+        ]
+        first_call = next((c for c in calls if c["tool"] == "neptune_query"), None)
+        packet_calls = [c for c in calls if c["tool"] in PACKET_TOOLS]
+        question = asked[0]["question"] if asked else None
         output["smoke"] = _smoke(client, first_call, question)
-        summary, found, transcript = run_answers(ctx, client, raw, pin=ctx.pin_answers)
     problems += found
     if summary:
         output["answers"] = summary
@@ -624,7 +681,11 @@ def context_real(ctx: Context) -> Outcome:
         )
     if output["smoke"].get("packet") is None:
         problems.append("the smoke query returned no packet")
-    probe = first_call or {"tool": "neptune_entities", "arguments": {"include_inferred": False}}
+    probe: Json = (
+        packet_calls[-1]
+        if packet_calls
+        else {"arguments": {"include_inferred": False}, "tool": "neptune_entities"}
+    )
     tools, over_stdio = stdio_round_trip(graph, probe)
     (in_process,) = call_tools(local_client(document), [probe])
     output["stdio"] = {

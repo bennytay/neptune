@@ -19,6 +19,7 @@ TOOLS: Final = (
     "neptune_hydrate",
     "neptune_plan",
     "neptune_entities",
+    "neptune_compare_runs",
 )
 
 
@@ -32,47 +33,47 @@ def _gold(qid: str) -> dict[str, Any]:
 # answers.json must move here too, so a reclassification is always a deliberate, reviewed edit.
 EXPECTED_CLASSES: Final = {
     "supported": {
-        "Q2.C7",
-        "Q3.C6",
-        "Q5.C2",
-    },
-    "co_cited": {
+        "Q1.C1",
         "Q1.C3",
         "Q1.C4",
         "Q2.C1",
         "Q2.C2",
+        "Q2.C3",
         "Q3.C1",
+        "Q3.C2",
+        "Q3.C6",
+        "Q4.C2",
+        "Q5.C2",
+        "Q6.C1",
+    },
+    "co_cited": {
+        "Q1.C7",
+        "Q2.C7",
         "Q4.C1",
+        "Q4.C3",
         "Q4.C5",
         "Q4.C6",
         "Q5.C1",
         "Q6.C2",
         "Q6.C3",
         "Q7.C1",
-        "Q7.C4",
     },
     "gaps": {
-        "Q1.C1",
         "Q1.C2",
         "Q1.C5",
         "Q1.C6",
-        "Q1.C7",
-        "Q2.C3",
         "Q2.C4",
         "Q2.C5",
         "Q2.C6",
         "Q2.C8",
-        "Q3.C2",
         "Q3.C3",
         "Q3.C4",
         "Q3.C5",
-        "Q4.C2",
-        "Q4.C3",
         "Q4.C4",
         "Q5.C3",
-        "Q6.C1",
         "Q7.C2",
         "Q7.C3",
+        "Q7.C4",
         "Q8.C1",
         "Q8.C2",
         "Q8.C3",
@@ -113,15 +114,35 @@ def test_pins_are_claim_ids_and_every_pin_says_why() -> None:
             assert len(gap["reason"]) > 40, claim
 
 
-def test_why_and_what_changed_are_not_claimed_as_answered() -> None:
-    """Demo v1's two headline questions: until the calibrations and WO-26-0911's work reach a
-    statement, their cause and change claims are co-cited at best (MVL-191 review)."""
+RUNS: Final = {"arguments": {"include_inferred": False, "kind": "run"}, "tool": "neptune_entities"}
+COMPARE: Final = {
+    "arguments": {
+        "after": {"declared_id": "$named:run:cell3-2026-09-14", "kind": "run"},
+        "before": {"declared_id": "$named:run:cell3-2026-09-09", "kind": "run"},
+        "include_inferred": False,
+    },
+    "tool": "neptune_compare_runs",
+}
+
+
+def test_why_and_what_changed_are_asked_exactly_as_the_skill_prescribes() -> None:
+    """SKILL.md: "what changed" lists the runs and compares the last good run with the incident
+    run; "why" finds the incident by its number, reads it one hop, then the same comparison."""
     by_id = {q["id"]: q for q in ANSWERS["questions"]}
-    assert by_id["Q1"]["asked_as"] == "why did the arm-cell incident happen"
     assert by_id["Q2"]["asked_as"] == "what changed since the last good run"
-    assert set(by_id["Q1"]["supported"]) <= {"Q1.C1"}  # at most what happened, not why
-    for claim in ("Q1.C3", "Q1.C4", "Q1.C7", "Q2.C1", "Q2.C2", "Q2.C3"):
-        assert claim not in by_id[claim[:2]]["supported"], claim
+    assert by_id["Q2"]["calls"] == [RUNS, COMPARE]
+    assert by_id["Q1"]["asked_as"] == "why did the arm-cell incident happen"
+    found, read, runs, compare = by_id["Q1"]["calls"]
+    assert found["tool"] == "neptune_entities" and "INC-C3-0011" in found["arguments"]["text"]
+    assert read["arguments"]["query"]["subjects"] == [
+        {"declared_id": "$named:event:INC-C3-0011", "kind": "event"}
+    ]
+    assert read["arguments"]["query"]["graph"] == {
+        "direction": "both",
+        "hops": 1,
+        "predicates": "any",
+    }
+    assert (runs, compare) == (RUNS, COMPARE)
 
 
 def test_the_calls_use_the_mcp_tools_and_name_subjects_by_declared_id() -> None:
@@ -176,6 +197,14 @@ def scorer(tmp_path: Path) -> Scorer:
     (records / "source_revision.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in revisions), encoding="utf-8"
     )
+    span = {"locator": [{"end": 404, "kind": "span", "start": 398}], "source": "sha256:aa"}
+    value = {
+        "id": "rec:cv",
+        "kind": "configuration_value",
+        "path": ["transformation", "z"],
+        "value": {"knowledge": "known", "provenance": {"evidence": span}, "value": 0.0745},
+    }
+    (records / "configuration_value.jsonl").write_text(json.dumps(value) + "\n", encoding="utf-8")
     resolved = {
         "wo": {
             "citations": [
@@ -276,6 +305,17 @@ def test_an_evidence_ref_cites_its_sources_path_with_its_row_page_or_pointer(
     assert scorer.ref_citations(ref("sha256:zz", {"kind": "row", "row": 1})) == []
 
 
+def test_a_span_that_is_exactly_a_records_value_cites_that_value(scorer: Scorer) -> None:
+    """Memory's declared values cite a configuration's bytes by span: those bytes are the value a
+    configuration_value record holds, so the span cites its JSON pointer (ADR 0011 §4)."""
+    exact = {"locator": [{"end": 404, "kind": "span", "start": 398}], "source": "sha256:aa"}
+    assert scorer.ref_citations(exact) == [
+        {"locator": {"pointer": "/transformation/z"}, "path": "cmms/work_orders.csv"}
+    ]
+    wider = {"locator": [{"end": 405, "kind": "span", "start": 398}], "source": "sha256:aa"}
+    assert scorer.ref_citations(wider) == []
+
+
 def test_a_claim_cites_the_records_it_is_about_and_its_evidence(scorer: Scorer) -> None:
     """Its subject or object when that is a record, never the records it was built from."""
     assert scorer.claim_citations("claim:one") == [
@@ -303,6 +343,20 @@ def test_support_is_adr_0007s_rule_over_a_statements_citations(scorer: Scorer) -
     # claim:one was built from the work order's row and cites one cell of it: it meets the
     # Firmware After item, not the whole row; claim:cell's other cell meets neither
     assert scorer.in_graph(["wo.firmware"]) and not scorer.in_graph(["wo"])
+
+
+def test_a_named_reference_is_the_id_an_earlier_listing_gives_that_name() -> None:
+    listing = (
+        'Declared identities:\n- run "record:rec:b" named "cell3-2026-09-09"\n'
+        '- run "record:rec:a" named "cell3-2026-09-09"\n- event "record:rec:e" named "INC-1"\n'
+    )
+    call = {"before": {"declared_id": "$named:run:cell3-2026-09-09"}, "x": "$named:event:INC-1"}
+    assert agent._resolve_refs(call, {}, [listing]) == {
+        "before": {"declared_id": "record:rec:a"},  # two copies of one run: the first, sorted
+        "x": "record:rec:e",
+    }
+    with pytest.raises(LookupError, match="no earlier neptune_entities answer names it"):
+        agent._resolve_refs("$named:run:cell3-2026-09-14", {}, [listing])
 
 
 def test_a_support_reference_is_replaced_by_the_first_supporting_claim() -> None:

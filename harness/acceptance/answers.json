@@ -13,7 +13,7 @@
         {
           "arguments": {
             "include_inferred": false,
-            "text": "Why did the arm-cell incident INC-C3-0011 on ARM-3A in CELL-3 happen?"
+            "text": "why did INC-C3-0011 happen"
           },
           "tool": "neptune_entities"
         },
@@ -27,25 +27,13 @@
               },
               "graph": {
                 "direction": "both",
-                "hops": 2,
+                "hops": 1,
                 "predicates": "any"
               },
               "subjects": [
                 {
-                  "declared_id": "incident_report.machine:ARM-3A",
-                  "kind": "machine"
-                },
-                {
-                  "declared_id": "incident_report.zone:CELL-3",
-                  "kind": "zone"
-                },
-                {
-                  "declared_id": "cmms.asset:ARM-3A",
-                  "kind": "machine"
-                },
-                {
-                  "declared_id": "syslog.host:ARM-3A",
-                  "kind": "machine"
+                  "declared_id": "$named:event:INC-C3-0011",
+                  "kind": "event"
                 }
               ]
             }
@@ -54,37 +42,38 @@
         },
         {
           "arguments": {
-            "claim_id": "$support:Q1.C3",
+            "include_inferred": false,
+            "kind": "run"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "after": {
+              "declared_id": "$named:run:cell3-2026-09-14",
+              "kind": "run"
+            },
+            "before": {
+              "declared_id": "$named:run:cell3-2026-09-09",
+              "kind": "run"
+            },
             "include_inferred": false
           },
-          "tool": "neptune_why"
+          "tool": "neptune_compare_runs"
         }
       ],
       "co_cited": {
-        "Q1.C3": {
+        "Q1.C7": {
           "claims": [
-            "claim:sha256:2fb5524d5a98e7a8df244f2c2d8fbef05bc832353f8506b2f38a177190c742a7",
-            "claim:sha256:747859ae2218dfeb7b03ba3b5cf33a3b3f4af6c7701d6be08c309e7fd2762460",
-            "claim:sha256:ae579312f8ff023cf1e6a26c4bbc1bdabda57ac503242fb1e341bcbceb95a276",
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3",
-            "claim:sha256:d58c388f1560587bfd93b16816e691d3b3d0e083cc458699db7953c5cf98ef68"
+            "claim:sha256:04777de76121bbd996433ca6044d880955f357d4e04c81487704e7685f837314",
+            "claim:sha256:2c69ff21e97ac0e4584a3d19f7973e99546b547d41043a9ca34439211114d321",
+            "claim:sha256:616297a5c54defedf7eda4fad380521bb19ed9d160845c1d0b9bb3f34bbacde1",
+            "claim:sha256:bd64b5d9312316eef0c67c16386fe32e4a9c838ce12105bc88de4b151e8043f9"
           ],
-          "reason": "WO-26-0911's work-order and action events reach the answer only as \"involves ARM-3A\" at the work order's time (their kinds and descriptions are cut at the skill's budget), and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: no statement says the bracket was refitted or the recalibration deferred."
-        },
-        "Q1.C4": {
-          "claims": [
-            "claim:sha256:0b518bb44ccd36bbf4648b3c7726a3ccb2e1ab3ae8b3a65a60a6ac4ca173e2a3",
-            "claim:sha256:250d58f648b34cfdf97fd19c83a34bfc51d263c0b3059bc01184b131bea1b718",
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
-          ],
-          "reason": "WO-26-0912's events reach the answer only as \"involves ARM-3A\", and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: no statement names CAL-ARM3A-0911, its substitute board or its 1.86 px."
+          "reason": "The report's stated cause (\"the fingers closed about 4 mm lower than taught\") and both runs' transformation z are stated: the evidence for this gold claim. Its inference, the calibration as the most probable cause, is not: Neptune states no causes."
         }
       },
       "gaps": {
-        "Q1.C1": {
-          "in_graph": true,
-          "reason": "Memory states the incident (its description: the fingers struck PF-3, collision detection stopped the arm, the E-stop at OP-2), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it."
-        },
         "Q1.C2": {
           "in_graph": false,
           "reason": "Memory now makes events of the bags' /diagnostics statuses (the compiler's status_report records, with their declared values such as residual_mm), but those claims are about the status_report record and cite the bag by byte range, not the /diagnostics row (topic and log time) the gold item names, so by the citation rule no claim cites it; cell_config.yaml's residual action is a configuration value Memory does not consolidate."
@@ -95,83 +84,91 @@
         },
         "Q1.C6": {
           "in_graph": true,
-          "reason": "Memory holds ServiceNow's 2026-08-18 change (TCP z=145.5 mm, CHG0030013), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it; no claim states that the 2026-09-10 work has no change record or requalification."
-        },
-        "Q1.C7": {
-          "in_graph": true,
-          "reason": "Memory holds the report's stated cause (\"the fingers closed about 4 mm lower than taught\"), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it (Q5's answer carries it); no claim states the calibration as the cause."
+          "reason": "Memory holds ServiceNow's 2026-08-18 change (TCP z=145.5 mm, CHG0030013), but the calls SKILL.md prescribes for this question (reading the incident, comparing the two runs) do not reach it; no claim states that the 2026-09-10 work has no change record or requalification."
         }
       },
       "id": "Q1",
-      "supported": {}
+      "supported": {
+        "Q1.C1": {
+          "claims": [
+            "claim:sha256:04777de76121bbd996433ca6044d880955f357d4e04c81487704e7685f837314",
+            "claim:sha256:05c38d19d95a91319fc61a59092abff4244fbb9b0292fd4e26e97f54c105f59a",
+            "claim:sha256:24007c87d981801f3f15ba3cb113f8e5e8101ad378ded7abdca1c6fb0a526504",
+            "claim:sha256:3cc61a56211c050d284e7bd0b19f576a697ae4c32049393ebd49c01af1d3751e",
+            "claim:sha256:4fb900edba702c243f6fb503b5331c2c9097631ff808f4d1f0af8d30bf907f9d",
+            "claim:sha256:58e02b607aa802b2e7925160d615905b24d61ff121c3b9947500d9b1baeadbab",
+            "claim:sha256:5e7dace2efdd3539c8f3bee4d2e22733d4db34152a98ea2c3ba6feb7f45e7844",
+            "claim:sha256:611a5da70fb183edab3ac467eac36ca8edcb8f6d9a25839ff40b45f99e1af4f1",
+            "claim:sha256:62c7813eea303f92df8e7ab573b7a3c36e3da658c76a5ae6c9b2bb634a6119f3",
+            "claim:sha256:7187ae46bc76ebce3397bb4ce53a5ee4a51aef0339c34400285f580c6b1b5ae5",
+            "claim:sha256:bd64b5d9312316eef0c67c16386fe32e4a9c838ce12105bc88de4b151e8043f9",
+            "claim:sha256:c636c8d15be4d5ee308d7eeb1a692f6d67cdc494f2f85103f30a2f46420eae13"
+          ],
+          "reason": "Reading the incident (one hop from INC-C3-0011) states the report's description: the fingers struck fixture PF-3 at pick P1, collision detection stopped the arm and the operator pressed the E-stop at OP-2. The 41.7 Nm against 35.0 Nm reading is not stated."
+        },
+        "Q1.C3": {
+          "claims": [
+            "claim:sha256:2a49e20b39f8aeae69c607507334f08772419ef89f785dc877dab92116a43531",
+            "claim:sha256:451755d364a0d4edc265768cb8dc94d0e7086389d7531d67566c1d8b72f75ce7",
+            "claim:sha256:6da76f2e6c2bf0b96052ee5e5f8d1eae6f873e5dcc9da5ad4f0467c55fffdd47",
+            "claim:sha256:89fca8fdb9826b49d4503fd2171b1d3a3ea885dd579034a10b3188f166551208",
+            "claim:sha256:ef693b954b6f1cd4666dea354202c2f8f53ffd1c2dfe5b8e0232eb5ac3719793",
+            "claim:sha256:fa00075474951459b25237d18064106097c8e7e1e739a35574968cde367a2f27"
+          ],
+          "reason": "neptune_compare_runs states WO-26-0911's actions, among them \"Remove and refit wrist camera bracket\" and \"Hand-eye recalibration deferred: ChArUco board out for repair\", at the work order's time (2026-09-10)."
+        },
+        "Q1.C4": {
+          "claims": [
+            "claim:sha256:2c69ff21e97ac0e4584a3d19f7973e99546b547d41043a9ca34439211114d321",
+            "claim:sha256:3d8f9fd06d364bda35668b58db849e771cc1779e56db296db5a4d9b20bedeba5",
+            "claim:sha256:616297a5c54defedf7eda4fad380521bb19ed9d160845c1d0b9bb3f34bbacde1",
+            "claim:sha256:a5f270e30c09ca162a6feb638d87c1d6c5cd3fd4928f3912245c6e5bffcd9fe6",
+            "claim:sha256:bfa83696a53597bdacb1c595f1fc85341043949eac7a948f6c5760a1934ee321",
+            "claim:sha256:d48f20093d87dfe190d355c27531ce8f34e51a8fdae807872825dff7bfdb1f84"
+          ],
+          "reason": "The comparison states WO-26-0912's action (\"Re-run hand-eye calibration with substitute 7x5 board per SOP-CELL-021 rev C\"), the incident run's calibration's reprojection error [1.86] and both runs' transformation z (0.0745, 0.0702); it also names CAL-ARM3A-0818 and -0911. CAL-ARM3A-0818's 0.44 px is not stated."
+        }
+      }
     },
     {
       "asked_as": "what changed since the last good run",
       "calls": [
         {
           "arguments": {
-            "include_inferred": true,
-            "query": {
-              "budget": {
-                "items": 50,
-                "tokens": 20000
-              },
-              "graph": {
-                "direction": "both",
-                "hops": 2,
-                "predicates": "any"
-              },
-              "subjects": [
-                {
-                  "declared_id": "manifest:ARM-3A",
-                  "kind": "machine"
-                },
-                {
-                  "declared_id": "cmms.asset:ARM-3A",
-                  "kind": "machine"
-                },
-                {
-                  "declared_id": "servicenow.ci:ARM-3A",
-                  "kind": "machine"
-                }
-              ]
-            }
+            "include_inferred": false,
+            "kind": "run"
           },
-          "tool": "neptune_query"
+          "tool": "neptune_entities"
         },
         {
           "arguments": {
-            "claim_id": "$support:Q2.C2",
+            "after": {
+              "declared_id": "$named:run:cell3-2026-09-14",
+              "kind": "run"
+            },
+            "before": {
+              "declared_id": "$named:run:cell3-2026-09-09",
+              "kind": "run"
+            },
             "include_inferred": false
           },
-          "tool": "neptune_why"
+          "tool": "neptune_compare_runs"
         }
       ],
       "co_cited": {
-        "Q2.C1": {
+        "Q2.C7": {
           "claims": [
-            "claim:sha256:2fb5524d5a98e7a8df244f2c2d8fbef05bc832353f8506b2f38a177190c742a7",
-            "claim:sha256:747859ae2218dfeb7b03ba3b5cf33a3b3f4af6c7701d6be08c309e7fd2762460",
-            "claim:sha256:ae579312f8ff023cf1e6a26c4bbc1bdabda57ac503242fb1e341bcbceb95a276",
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+            "claim:sha256:2a49e20b39f8aeae69c607507334f08772419ef89f785dc877dab92116a43531",
+            "claim:sha256:451755d364a0d4edc265768cb8dc94d0e7086389d7531d67566c1d8b72f75ce7",
+            "claim:sha256:6da76f2e6c2bf0b96052ee5e5f8d1eae6f873e5dcc9da5ad4f0467c55fffdd47",
+            "claim:sha256:89fca8fdb9826b49d4503fd2171b1d3a3ea885dd579034a10b3188f166551208",
+            "claim:sha256:ef693b954b6f1cd4666dea354202c2f8f53ffd1c2dfe5b8e0232eb5ac3719793",
+            "claim:sha256:fa00075474951459b25237d18064106097c8e7e1e739a35574968cde367a2f27"
           ],
-          "reason": "WO-26-0911's work-order and action events reach the answer only as \"involves ARM-3A\" at the work order's time (their kinds and descriptions are cut at the skill's budget), and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: no statement states the finger set or TCP change."
-        },
-        "Q2.C2": {
-          "claims": [
-            "claim:sha256:2fb5524d5a98e7a8df244f2c2d8fbef05bc832353f8506b2f38a177190c742a7",
-            "claim:sha256:747859ae2218dfeb7b03ba3b5cf33a3b3f4af6c7701d6be08c309e7fd2762460",
-            "claim:sha256:ae579312f8ff023cf1e6a26c4bbc1bdabda57ac503242fb1e341bcbceb95a276",
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
-          ],
-          "reason": "WO-26-0911's work-order and action events reach the answer only as \"involves ARM-3A\" at the work order's time (their kinds and descriptions are cut at the skill's budget), and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: no statement says the bracket was refitted."
+          "reason": "Only WO-26-0911's actions cite its row; the comparison carries no statement that the controller software (5.6.0) or the application (PALLET_C3 1.4.0) stayed the same."
         }
       },
       "gaps": {
-        "Q2.C3": {
-          "in_graph": true,
-          "reason": "Memory holds both runs' configuration claims bound by the run sheet's calibration pins, but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it."
-        },
         "Q2.C4": {
           "in_graph": false,
           "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
@@ -186,25 +183,67 @@
         },
         "Q2.C8": {
           "in_graph": true,
-          "reason": "Memory holds the vendor-copy run's has_member claim on the 2026-09-09 bag's record, but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it; and that claim would not say that the two paths hold one file."
+          "reason": "Memory holds the vendor-copy run's has_member claim on the 2026-09-09 bag's record, but the calls SKILL.md prescribes for this question (comparing the two runs) do not reach it; and that claim would not say that the two paths hold one file."
         }
       },
       "id": "Q2",
       "supported": {
-        "Q2.C7": {
+        "Q2.C1": {
           "claims": [
-            "claim:sha256:2fb5524d5a98e7a8df244f2c2d8fbef05bc832353f8506b2f38a177190c742a7",
-            "claim:sha256:747859ae2218dfeb7b03ba3b5cf33a3b3f4af6c7701d6be08c309e7fd2762460",
-            "claim:sha256:ae579312f8ff023cf1e6a26c4bbc1bdabda57ac503242fb1e341bcbceb95a276",
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+            "claim:sha256:2a49e20b39f8aeae69c607507334f08772419ef89f785dc877dab92116a43531",
+            "claim:sha256:451755d364a0d4edc265768cb8dc94d0e7086389d7531d67566c1d8b72f75ce7",
+            "claim:sha256:6da76f2e6c2bf0b96052ee5e5f8d1eae6f873e5dcc9da5ad4f0467c55fffdd47",
+            "claim:sha256:89fca8fdb9826b49d4503fd2171b1d3a3ea885dd579034a10b3188f166551208",
+            "claim:sha256:ef693b954b6f1cd4666dea354202c2f8f53ffd1c2dfe5b8e0232eb5ac3719793",
+            "claim:sha256:fa00075474951459b25237d18064106097c8e7e1e739a35574968cde367a2f27"
           ],
-          "reason": "ARM-3A's firmware 5.6.0 is stated from March 2026, open-ended, so it held through both runs: the controller software did not change. The application version (PALLET_C3 1.4.0) is not stated."
+          "reason": "The comparison states WO-26-0911's actions \"Replace finger set with long set FS-0340 (+6.0 mm)\" and \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\". The runs' start lines are not stated."
+        },
+        "Q2.C2": {
+          "claims": [
+            "claim:sha256:2a49e20b39f8aeae69c607507334f08772419ef89f785dc877dab92116a43531",
+            "claim:sha256:451755d364a0d4edc265768cb8dc94d0e7086389d7531d67566c1d8b72f75ce7",
+            "claim:sha256:6da76f2e6c2bf0b96052ee5e5f8d1eae6f873e5dcc9da5ad4f0467c55fffdd47",
+            "claim:sha256:89fca8fdb9826b49d4503fd2171b1d3a3ea885dd579034a10b3188f166551208",
+            "claim:sha256:ef693b954b6f1cd4666dea354202c2f8f53ffd1c2dfe5b8e0232eb5ac3719793",
+            "claim:sha256:fa00075474951459b25237d18064106097c8e7e1e739a35574968cde367a2f27"
+          ],
+          "reason": "The comparison states WO-26-0911's action \"Remove and refit wrist camera bracket\"."
+        },
+        "Q2.C3": {
+          "claims": [
+            "claim:sha256:0b4cf10006c4d0e7cbdd98829c2e6ee611d78dbd003e8546c6498678e909ed5c",
+            "claim:sha256:7e8b94eb7e3ca46cc49a5828b4bd49c7d15879feef6b4e569ad44064a7d9fc40",
+            "claim:sha256:bfa83696a53597bdacb1c595f1fc85341043949eac7a948f6c5760a1934ee321"
+          ],
+          "reason": "The comparison states that the two runs ran with different configurations bound by the run sheet's calibration pins, names them CAL-ARM3A-0818 and CAL-ARM3A-0911, and states the incident run's reprojection error [1.86]. CAL-ARM3A-0818's 0.44 px is not stated."
         }
       }
     },
     {
       "asked_as": "which configuration was active",
       "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "kind": "run"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "after": {
+              "declared_id": "$named:run:cell3-2026-09-14",
+              "kind": "run"
+            },
+            "before": {
+              "declared_id": "$named:run:cell3-2026-09-09",
+              "kind": "run"
+            },
+            "include_inferred": false
+          },
+          "tool": "neptune_compare_runs"
+        },
         {
           "arguments": {
             "include_inferred": false,
@@ -241,21 +280,8 @@
           "tool": "neptune_query"
         }
       ],
-      "co_cited": {
-        "Q3.C1": {
-          "claims": [
-            "claim:sha256:747859ae2218dfeb7b03ba3b5cf33a3b3f4af6c7701d6be08c309e7fd2762460",
-            "claim:sha256:ae579312f8ff023cf1e6a26c4bbc1bdabda57ac503242fb1e341bcbceb95a276",
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
-          ],
-          "reason": "WO-26-0911's work-order and action events reach the answer only as \"involves ARM-3A\" at the work order's time (their kinds and descriptions are cut at the skill's budget), and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: the incident run's finger set and TCP z are not stated."
-        }
-      },
+      "co_cited": {},
       "gaps": {
-        "Q3.C2": {
-          "in_graph": true,
-          "reason": "Memory holds the incident run's configuration claims bound by the run sheet's pins of CAL-ARM3A-0911 and the vision export, but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it."
-        },
         "Q3.C3": {
           "in_graph": false,
           "reason": "The software, collision limit and residual action are configuration values of cell_config.yaml, which Memory does not consolidate (the stale export is never pinned to a run, ADR 0009 §4); memory now makes events of the bags' /diagnostics statuses (the compiler's status_report records, with their declared values such as residual_mm), but those claims are about the status_report record and cite the bag by byte range, not the /diagnostics row (topic and log time) the gold item names, so by the citation rule no claim cites it (the start and collision rows)."
@@ -271,10 +297,34 @@
       },
       "id": "Q3",
       "supported": {
+        "Q3.C1": {
+          "claims": [
+            "claim:sha256:24704d79766ff09e638ac371164f2c0117785eac9d2454acde5d168087ac96eb",
+            "claim:sha256:2a49e20b39f8aeae69c607507334f08772419ef89f785dc877dab92116a43531",
+            "claim:sha256:305e77f3328dcf5cae577955ba5edf35fc989616a2cd763989484a39ce91c0a8",
+            "claim:sha256:451755d364a0d4edc265768cb8dc94d0e7086389d7531d67566c1d8b72f75ce7",
+            "claim:sha256:5a7e3e6f643171aee3cf84a2db5794680f9e1c9605725c0a52e199783d0842ef",
+            "claim:sha256:6da76f2e6c2bf0b96052ee5e5f8d1eae6f873e5dcc9da5ad4f0467c55fffdd47",
+            "claim:sha256:89fca8fdb9826b49d4503fd2171b1d3a3ea885dd579034a10b3188f166551208",
+            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3",
+            "claim:sha256:c2806127c2a713e9c208e43015b21643a569d2f4cc2a44f0a3d6a2465cf1a8e5",
+            "claim:sha256:ef693b954b6f1cd4666dea354202c2f8f53ffd1c2dfe5b8e0232eb5ac3719793",
+            "claim:sha256:fa00075474951459b25237d18064106097c8e7e1e739a35574968cde367a2f27"
+          ],
+          "reason": "The comparison states WO-26-0911's actions \"Replace finger set with long set FS-0340 (+6.0 mm)\" and \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\", in force for the incident run after the last good run."
+        },
+        "Q3.C2": {
+          "claims": [
+            "claim:sha256:0b4cf10006c4d0e7cbdd98829c2e6ee611d78dbd003e8546c6498678e909ed5c",
+            "claim:sha256:41089d42462026ad3454e2d2b87cec20654d5e0d5290a41d290b0f9ff1d545d2",
+            "claim:sha256:bfa83696a53597bdacb1c595f1fc85341043949eac7a948f6c5760a1934ee321"
+          ],
+          "reason": "The comparison states the incident run's configurations (bound by the run sheet's pins of CAL-ARM3A-0911 and the vision export), names CAL-ARM3A-0911 and states its reprojection error [1.86]."
+        },
         "Q3.C6": {
           "claims": [
             "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f",
-            "claim:sha256:6a48324c559870b36b86340c1cb349c3cb536a5a07492a9f3dcda4943ad88de9"
+            "claim:sha256:8984af8a17b2f99c5777deb70f6c2519a839590d5730a292bb0a4b6df220814a"
           ],
           "reason": "LEG-01 is stated to have firmware 3.2.0 from 2026-09-13 (WO-26-0913). The asset register's stale 3.1.4 is not stated."
         }
@@ -283,6 +333,36 @@
     {
       "asked_as": "what is unknown",
       "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "text": "what is unknown about INC-C3-0011"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 50,
+                "tokens": 20000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 1,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "$named:event:INC-C3-0011",
+                  "kind": "event"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        },
         {
           "arguments": {
             "include_inferred": true,
@@ -322,51 +402,88 @@
       "co_cited": {
         "Q4.C1": {
           "claims": [
+            "claim:sha256:2e149e37f3679900bd35a588a2b4c651374cd70434a7fdb2591e9cdd65647867",
             "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f",
-            "claim:sha256:849c905d3f2398bf6bd13b7d2cd451b4ac190d52eb9b04f6e742893a3cf64249",
-            "claim:sha256:d1db131f1229e2bb7082b4dc24b1765ee51fbf2bd8e9834acfbd8165317fdac5",
-            "claim:sha256:d39f7c6c84c1f207169803d07038c18df8760621deb04ebf22f5252538a92db3"
+            "claim:sha256:545d47c2cff3bbcafc362a3b7f66cf50156e14c6eae52d4b7f284c2ee0c83691"
           ],
-          "reason": "Only \"LEG-01 has firmware 3.2.0\" and WO-26-0916's events (as \"involves LEG-01\") cite WO-26-0916's row; no statement says the patrol bag is truncated or what the WP-6 capture recorded."
+          "reason": "Only \"LEG-01 has firmware 3.2.0\" and WO-26-0916's actions (as \"involves LEG-01\") cite WO-26-0916's row; no statement says the patrol bag is truncated or what the WP-6 capture recorded (the incident's stated cause mentions that LEG-01's recording ends before the collision, but cites the report, not the bag)."
+        },
+        "Q4.C3": {
+          "claims": [
+            "claim:sha256:04777de76121bbd996433ca6044d880955f357d4e04c81487704e7685f837314",
+            "claim:sha256:bd64b5d9312316eef0c67c16386fe32e4a9c838ce12105bc88de4b151e8043f9"
+          ],
+          "reason": "Only the incident's description and stated cause cite the report's clock note (\"about a minute and a half later\"); no statement says that the offset is inferred, its 96.7 s estimate or the survey's +94.1 s."
         },
         "Q4.C5": {
           "claims": [
-            "claim:sha256:747859ae2218dfeb7b03ba3b5cf33a3b3f4af6c7701d6be08c309e7fd2762460",
-            "claim:sha256:ae579312f8ff023cf1e6a26c4bbc1bdabda57ac503242fb1e341bcbceb95a276",
-            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3"
+            "claim:sha256:24704d79766ff09e638ac371164f2c0117785eac9d2454acde5d168087ac96eb",
+            "claim:sha256:305e77f3328dcf5cae577955ba5edf35fc989616a2cd763989484a39ce91c0a8",
+            "claim:sha256:5a7e3e6f643171aee3cf84a2db5794680f9e1c9605725c0a52e199783d0842ef",
+            "claim:sha256:c0e9b16fe36fde603c4d119a36ab072c2bf170913c22075eed70535341c5b5d3",
+            "claim:sha256:c2806127c2a713e9c208e43015b21643a569d2f4cc2a44f0a3d6a2465cf1a8e5"
           ],
-          "reason": "WO-26-0911's work-order and action events reach the answer only as \"involves ARM-3A\" at the work order's time (their kinds and descriptions are cut at the skill's budget), and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: no statement says the camera's pose after the refit was never measured."
+          "reason": "WO-26-0911's events reach this answer only as \"involves ARM-3A\", and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: no statement says the camera's pose after the refit was never measured."
         },
         "Q4.C6": {
           "claims": [
+            "claim:sha256:2e149e37f3679900bd35a588a2b4c651374cd70434a7fdb2591e9cdd65647867",
             "claim:sha256:4d0df7fbc9b4003cfd02ba72967962138cc7d913d6c763daaa525fad13dd368f",
-            "claim:sha256:849c905d3f2398bf6bd13b7d2cd451b4ac190d52eb9b04f6e742893a3cf64249",
-            "claim:sha256:d1db131f1229e2bb7082b4dc24b1765ee51fbf2bd8e9834acfbd8165317fdac5",
-            "claim:sha256:d39f7c6c84c1f207169803d07038c18df8760621deb04ebf22f5252538a92db3"
+            "claim:sha256:545d47c2cff3bbcafc362a3b7f66cf50156e14c6eae52d4b7f284c2ee0c83691"
           ],
-          "reason": "Only \"LEG-01 has firmware 3.2.0\" and WO-26-0916's events (as \"involves LEG-01\") cite its row; the SSD replacement and the cache-flush change are not stated."
+          "reason": "Only \"LEG-01 has firmware 3.2.0\" and WO-26-0916's actions (as \"involves LEG-01\") cite its row; the SSD replacement and the cache-flush change are not stated."
         }
       },
       "gaps": {
-        "Q4.C2": {
-          "in_graph": true,
-          "reason": "Memory holds the report's stated cause, which says wrist camera images are not recorded, but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it (Q5's answer carries it)."
-        },
-        "Q4.C3": {
-          "in_graph": true,
-          "reason": "Memory holds the report's clock note and the inferred clock fits, but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it; no claim states that the offset is inferred with an unbounded latency."
-        },
         "Q4.C4": {
           "in_graph": false,
           "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
         }
       },
       "id": "Q4",
-      "supported": {}
+      "supported": {
+        "Q4.C2": {
+          "claims": [
+            "claim:sha256:04777de76121bbd996433ca6044d880955f357d4e04c81487704e7685f837314",
+            "claim:sha256:bd64b5d9312316eef0c67c16386fe32e4a9c838ce12105bc88de4b151e8043f9"
+          ],
+          "reason": "Reading the incident states the report's stated cause, which says \"Wrist camera images are not recorded.\""
+        }
+      }
     },
     {
       "asked_as": "build the incident timeline",
       "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "text": "when did the collision and E-stop of INC-C3-0011 happen"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 50,
+                "tokens": 20000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 1,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "$named:event:INC-C3-0011",
+                  "kind": "event"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        },
         {
           "arguments": {
             "include_inferred": true,
@@ -402,18 +519,20 @@
       "co_cited": {
         "Q5.C1": {
           "claims": [
-            "claim:sha256:0791d41e508986ed56309f149177a076e211fc98dabb1b554f3d127a230e412b",
-            "claim:sha256:4a84c7f51fa9a3fb84777d31f50cada2d7c32aa29bb1baf0d3b0443d551631bb",
-            "claim:sha256:4c35243e9ece74126a5123b27fd367cf4d01c9e79dfd43af15b9c251fccb6774",
-            "claim:sha256:58b18c7bd870c02d431f0e12bb9e87632723e654c1c868f7ce5c56482b4daec0",
-            "claim:sha256:8899e5af245879e4993cf258e92bd0d4eeed716020e8510ace628be6af804496",
-            "claim:sha256:9403c3b4757277d2006eca510ea6d173fe0e7759056723718d974df3da1f1399",
-            "claim:sha256:9d652f7925cf2eb0c4333519e223847f73dca45c1490df54cbd3549da6923f5f",
-            "claim:sha256:f1dcbc15c2eb7214375f0077559d98aa2841b5c9a203643a8ec7d28cadbfc9a8",
-            "claim:sha256:f4311f0467a26273b1a6cb88cf60c58938aa792d4a4f4229cb592d6eda443beb",
-            "claim:sha256:f64aa988e52c8e857929ea95a51ab18efca807cc1335667a289f78312bdeb1d2"
+            "claim:sha256:04777de76121bbd996433ca6044d880955f357d4e04c81487704e7685f837314",
+            "claim:sha256:05c38d19d95a91319fc61a59092abff4244fbb9b0292fd4e26e97f54c105f59a",
+            "claim:sha256:24007c87d981801f3f15ba3cb113f8e5e8101ad378ded7abdca1c6fb0a526504",
+            "claim:sha256:3cc61a56211c050d284e7bd0b19f576a697ae4c32049393ebd49c01af1d3751e",
+            "claim:sha256:4fb900edba702c243f6fb503b5331c2c9097631ff808f4d1f0af8d30bf907f9d",
+            "claim:sha256:58e02b607aa802b2e7925160d615905b24d61ff121c3b9947500d9b1baeadbab",
+            "claim:sha256:5e7dace2efdd3539c8f3bee4d2e22733d4db34152a98ea2c3ba6feb7f45e7844",
+            "claim:sha256:611a5da70fb183edab3ac467eac36ca8edcb8f6d9a25839ff40b45f99e1af4f1",
+            "claim:sha256:62c7813eea303f92df8e7ab573b7a3c36e3da658c76a5ae6c9b2bb634a6119f3",
+            "claim:sha256:7187ae46bc76ebce3397bb4ce53a5ee4a51aef0339c34400285f580c6b1b5ae5",
+            "claim:sha256:bd64b5d9312316eef0c67c16386fe32e4a9c838ce12105bc88de4b151e8043f9",
+            "claim:sha256:c636c8d15be4d5ee308d7eeb1a692f6d67cdc494f2f85103f30a2f46420eae13"
           ],
-          "reason": "Statements about the incident (its assets, site, kind, description and stated cause) cite the report's timeline page, but the HMI's 14:32:38 and 14:32:41 entries are not in this answer."
+          "reason": "Statements about the incident (its assets, site, kind, name, description and stated cause) cite the report's timeline page, but the HMI's 14:32:38 and 14:32:41 entries are not in this answer."
         }
       },
       "gaps": {
@@ -426,8 +545,8 @@
       "supported": {
         "Q5.C2": {
           "claims": [
-            "claim:sha256:9403c3b4757277d2006eca510ea6d173fe0e7759056723718d974df3da1f1399",
-            "claim:sha256:f64aa988e52c8e857929ea95a51ab18efca807cc1335667a289f78312bdeb1d2"
+            "claim:sha256:04777de76121bbd996433ca6044d880955f357d4e04c81487704e7685f837314",
+            "claim:sha256:bd64b5d9312316eef0c67c16386fe32e4a9c838ce12105bc88de4b151e8043f9"
           ],
           "reason": "The incident report's description states that the cell PC's event log shows the alarms about a minute and a half later. The 96.7 s estimate and the missing time sync are not stated."
         }
@@ -436,6 +555,36 @@
     {
       "asked_as": "why did the AMR hit the rack",
       "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "text": "why did INC-0007 happen"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 50,
+                "tokens": 20000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 1,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "$named:event:INC-0007",
+                  "kind": "event"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        },
         {
           "arguments": {
             "include_inferred": false,
@@ -479,32 +628,38 @@
       "co_cited": {
         "Q6.C2": {
           "claims": [
-            "claim:sha256:2c9debb46bf9e9ef28f3bf8266a09949ef661c5a5690113dee00a5d3b48ccc9c",
+            "claim:sha256:1f180883927740f77d77b995c1836375d5d9fb5174690caaa3c9aad208234171",
+            "claim:sha256:21ba00ef8d894d9cc748e752b667d83e38bed2db0b0351963f076b496bb253a5",
+            "claim:sha256:2fd16f87e1607669be1abe6670301c6b7a799931a586cc4f0faca49cad04b0b4",
+            "claim:sha256:388025c7a5511793079857b95ffcc84c1f93d8051c1de15efaeaad74e9b2f687",
+            "claim:sha256:6a795b7b05e14e402b8f3f816091263fd48d5323d3ccb5dff4521735131b1a47",
             "claim:sha256:90ecd96d77e4ea40621bb6cdb2f893384a921af4310cfbfe37ece053d00b42f7",
-            "claim:sha256:a9bed2d47c9f2e37ae2cf509a88e03bd54c10f21901ebbd0d7b950e5631bbed8",
-            "claim:sha256:ba6e83eb6cf3741703d2c8eb9fa62400e51026c06199e956d2b06e21f0c9d263",
-            "claim:sha256:f000a6dbae33558b49678aca4c06ab9ff66d26ae4d36d17fa9de0cb6a975bb64"
+            "claim:sha256:a9bed2d47c9f2e37ae2cf509a88e03bd54c10f21901ebbd0d7b950e5631bbed8"
           ],
-          "reason": "Only \"AMR-07 has firmware 4.2.0\", the requalification's configuration_unknown and WO-26-0402's events (as \"involves AMR-07\") cite WO-26-0402 and RQ-S007-0007; none states the fork repair, the requalification or the return to service."
+          "reason": "Only INC-0007's work order (its stated cause \"Contact with rack upright\", its actions as \"involves AMR-07\"), \"AMR-07 has firmware 4.2.0\" and the requalification's configuration_unknown cite WO-26-0402 and RQ-S007-0007; none states the fork repair, the requalification or the return to service."
         },
         "Q6.C3": {
           "claims": [
-            "claim:sha256:004eae6e658e89bddbc64d0612757c31509f2bd347f12940a74ef823f522fb78",
-            "claim:sha256:648843ef6566f8e54770da5e8a63702d06b94d1e117ec5ba5d3cb760c1b0dc9e",
+            "claim:sha256:1abdb2f143f120945ebc4e92c66dcb76e7785ad89cae41d782d3ccfa36a72360",
             "claim:sha256:7ac2e1c1163338dc745409332595389643c5ba5c3a9b3670ee67f5cf0265af97",
-            "claim:sha256:fe8106e18f6b8b0c5897730d1ffc1b29e432e24984f14032262d62a8654bda46"
+            "claim:sha256:88f3ecd1a2d8cca6ab5ed863e2c5e4492f7ce5da6a2375d1f77f7f91c58b8126",
+            "claim:sha256:c99973aeaf986904c585356bfc1fffd1c342cb5ca37b3537873777f6e3daa9f9",
+            "claim:sha256:ce06290cb90eb6133b2297644269e9e1a28b873a5ebcf8b4a846048245872fd1"
           ],
-          "reason": "Only \"AMR-07 has firmware 4.3.1 from 2026-04-14\" and WO-26-0414's events (as \"involves AMR-07\") cite WO-26-0414; no statement says that AMR-07's navigation configuration at INC-0007 is not in the hand-over."
+          "reason": "Only \"AMR-07 has firmware 4.3.1 from 2026-04-14\" and WO-26-0414's events (its name, its actions as \"involves AMR-07\") cite WO-26-0414; no statement says that AMR-07's navigation configuration at INC-0007 is not in the hand-over."
         }
       },
-      "gaps": {
-        "Q6.C1": {
-          "in_graph": true,
-          "reason": "Memory holds claims citing INC-0007's report, but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it."
-        }
-      },
+      "gaps": {},
       "id": "Q6",
-      "supported": {}
+      "supported": {
+        "Q6.C1": {
+          "claims": [
+            "claim:sha256:860098f5262b8ff17072d638bcc4b0b30ebf1da2bb5f4928da36d2f028fcb2eb",
+            "claim:sha256:b1b62484f6cb07efa0bb6033897d631f29f560f5f5f507c8ced90cccf4affdd0"
+          ],
+          "reason": "Reading INC-0007 states the report's stated cause: \"The rack face was 40 mm further out than the site map. The pick position had not been refreshed\" after the rack was re-bolted."
+        }
+      }
     },
     {
       "asked_as": "do the CMMS and syslog times of the stop agree",
@@ -539,27 +694,14 @@
             }
           },
           "tool": "neptune_query"
-        },
-        {
-          "arguments": {
-            "claim_id": "$support:Q7.C1",
-            "include_inferred": false
-          },
-          "tool": "neptune_why"
         }
       ],
       "co_cited": {
         "Q7.C1": {
           "claims": [
-            "claim:sha256:f03cba8425e1719fed37b789894e502a89ec20a2b8f8d79a97f81c752c5a250a"
+            "claim:sha256:a3f6c1998c61ba40c17855f29743d3a07d6f52bb5bac977c5f16785ddeed37b1"
           ],
-          "reason": "Only the syslog PSTOP event's \"involves ARM-3A\" (at 14:32:38 on the syslog's declared clock) reaches the answer; its kind and description, and the PLC's E-stop, are cut at the skill's budget."
-        },
-        "Q7.C4": {
-          "claims": [
-            "claim:sha256:f03cba8425e1719fed37b789894e502a89ec20a2b8f8d79a97f81c752c5a250a"
-          ],
-          "reason": "Only the syslog PSTOP's \"involves ARM-3A\" cites it; the CMMS stop and the same-stop claim are cut at the skill's budget, and no statement compares the two times."
+          "reason": "Only the PLC E-stop's \"involves PLC-C3\" reaches the answer; the syslog stops' kinds and descriptions are cut at the skill's budget."
         }
       },
       "gaps": {
@@ -569,7 +711,11 @@
         },
         "Q7.C3": {
           "in_graph": true,
-          "reason": "Memory holds the stated same_as claim joining DT-26-0914-01 and syslog 4182 (A. Novak's assertion), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it, and neptune_why on the syslog stop's claim does not reach it."
+          "reason": "Memory holds the stated same_as claim joining DT-26-0914-01 and syslog 4182 (A. Novak's assertion), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it."
+        },
+        "Q7.C4": {
+          "in_graph": true,
+          "reason": "Memory holds both stops and the same-stop claim, but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it; no claim compares the two times or says the CMMS time is 32 s late."
         }
       },
       "id": "Q7",
@@ -626,7 +772,7 @@
         },
         "Q8.C3": {
           "in_graph": true,
-          "reason": "Only \"ARM-3A has firmware 5.6.0\" would cite WO-26-0911's row, and at the skill's budget (50 items, 20,000 tokens; packages/neptune-context/claude/skills/neptune/SKILL.md) the answer is cut before it; no claim relates WO-26-0911 to ENV-P2-01's requalification condition."
+          "reason": "Memory holds WO-26-0911's events (they cite its row), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it; no claim relates WO-26-0911 to ENV-P2-01's requalification condition."
         }
       },
       "id": "Q8",

@@ -75,18 +75,30 @@ def test_the_gold_questions_are_answered_through_the_mcp_tools_as_pinned(demo_di
         assert row["hydrated"] == "resolved"  # its first cited source resolves via the Ledger
         assert row["statements"] > 0 and row["cited_claims"] > 0
     assert context["stdio"]["same_as_in_process"] is True
-    assert len(context["stdio"]["tools"]) == 6
+    assert "neptune_compare_runs" in context["stdio"]["tools"]
+    assert context["stdio"]["call"] == "neptune_compare_runs"  # the first question's comparison
 
 
-def test_what_changed_since_the_last_good_run_is_not_answered_yet(demo_dir: Path) -> None:
-    """At the skill's budget the Q2 answer names no calibration and no work order: Q2.C3 (the
-    calibration change) is a gap Memory holds but the answer cuts (ADR 0011 §4)."""
+def test_what_changed_since_the_last_good_run_names_both_calibrations_and_the_work_order(
+    demo_dir: Path,
+) -> None:
+    """Q2 asked as SKILL.md prescribes (the runs, then neptune_compare_runs): the comparison
+    names CAL-ARM3A-0818 and -0911, the 1.86 px and WO-26-0911's actions, and Q2.C3 is pinned as
+    supported (ADR 0011 §4)."""
     pinned = json.loads(acceptance.ANSWERS.read_text(encoding="utf-8"))
     q2 = next(q for q in pinned["questions"] if q["id"] == "Q2")
-    assert q2["gaps"]["Q2.C3"]["in_graph"] is True
+    assert {"Q2.C1", "Q2.C2", "Q2.C3"} <= set(q2["supported"])
     transcript = json.loads((demo_dir / "answers.json").read_text(encoding="utf-8"))
-    text = "".join(c["text"] for c in transcript["questions"][1]["calls"])
-    assert "CAL-ARM3A" not in text and "WO-26-0911" not in text
+    compare = transcript["questions"][1]["calls"][-1]
+    assert compare["tool"] == "neptune_compare_runs" and not compare["is_error"]
+    for fact in (
+        "CAL-ARM3A-0818",
+        "CAL-ARM3A-0911",
+        "1.86",
+        "Remove and refit wrist camera bracket",
+    ):
+        assert fact in compare["text"], fact
+    assert "cut by" not in compare["text"]  # whole at the tool's default budget
 
 
 def test_the_pdfs_open_and_name_their_subject(demo_dir: Path) -> None:
