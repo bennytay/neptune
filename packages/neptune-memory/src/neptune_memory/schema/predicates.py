@@ -37,8 +37,9 @@ if TYPE_CHECKING:
 # predicates that hold for every node type widened to ``event`` (ADR 0013 §6). 9: the calibration
 # history predicates joined (ADR 0014 §6). 10: the coverage and health predicates joined (ADR 0015
 # §6). 11: ``succeeds`` is a statement about two configurations, never read from one machine's chain
-# (ADR 0019 §2). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 11
+# (ADR 0019 §2). 12: ``declared_value`` and ``stated_cause`` joined, and the ``maintenance`` event
+# kind (ADR 0025). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 12
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
@@ -74,6 +75,9 @@ EVENT_KIND: Final = "event_kind"
 DECLARED_KIND: Final = "declared_kind"
 STATED_SEVERITY: Final = "stated_severity"
 HAS_DESCRIPTION: Final = "has_description"
+STATED_CAUSE: Final = "stated_cause"
+# Declared names and values (ADR 0025): a value a record declares at a key path, as stated.
+DECLARED_VALUE: Final = "declared_value"
 INVOLVES: Final = "involves"
 IN_ZONE: Final = "in_zone"
 CO_OCCURS_WITHIN: Final = "co_occurs_within"
@@ -100,6 +104,7 @@ EVENT_KINDS: Final[Mapping[str, str]] = MappingProxyType(
         "fault": "a fault or error state a controller or diagnostic declares",
         "incident": "an incident a record reports",
         "intervention": "a human intervention: a remote assist or an on-site action",
+        "maintenance": "maintenance a work order or maintenance record states was performed",
         "mode_change": "a declared change of operating mode",
         "near_miss": "a near miss a record reports",
         "protective_stop": "a protective (safeguard) stop a safety function triggered",
@@ -616,6 +621,22 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.TEXT},
         _ONE,
         "what the record says happened, verbatim: a message, a description, a reason",
+    ),
+    _p(
+        STATED_CAUSE,
+        {_N.EVENT},
+        {_V.TEXT},
+        _ONE,
+        "the cause a record states for the event, verbatim: a root cause, a diagnosis; never"
+        " inferred",
+    ),
+    _p(
+        DECLARED_VALUE,
+        {_N.CONFIGURATION, _N.EVENT},
+        {_V.DECLARED_VALUE},
+        _MANY,
+        "a value the subject's record declares at a key path, as stated (unit as declared),"
+        " cited where the value appears; never converted or compared",
     ),
     _p(
         INVOLVES,

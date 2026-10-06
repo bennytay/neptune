@@ -36,6 +36,7 @@ from neptune_memory.consolidate.configuration import (
     ConfigurationLineageConsolidator,
 )
 from neptune_memory.consolidate.coverage import CoverageConsolidator
+from neptune_memory.consolidate.declared import DeclaredConsolidator
 from neptune_memory.consolidate.episodes import EpisodeConsolidator
 from neptune_memory.consolidate.event_records import resolve_config as event_config
 from neptune_memory.consolidate.events import EventConsolidator
@@ -111,6 +112,10 @@ def default_registrations() -> tuple[Registration, ...]:
         Registration(EpisodeConsolidator(), after=(RUNS_CONSOLIDATOR_ID,)),
         Registration(EventConsolidator(), event_config({})),
         Registration(CoverageConsolidator()),
+        # Names and values hold where configurations and runs are placed (ADR 0025).
+        Registration(
+            DeclaredConsolidator(), after=(CONFIGURATION_CONSOLIDATOR_ID, RUNS_CONSOLIDATOR_ID)
+        ),
     )
 
 

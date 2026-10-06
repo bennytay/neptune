@@ -97,6 +97,8 @@ class ValueType(StrEnum):
     CLOCK_MAP = "clock_map"  # a clock mapping's parameters or chain (``clock_map.ClockMap``)
     # The component-wise difference of two calibrations' declared numbers (``Delta``, ADR 0014).
     DELTA = "delta"
+    # One value a record declares at a key path, as stated (``DeclaredValue``, ADR 0025).
+    DECLARED_VALUE = "declared_value"
 
 
 class DeltaQuantity(StrEnum):
@@ -257,7 +259,91 @@ class Delta:
         return out
 
 
-LiteralValue: TypeAlias = str | int | bool | float | NonFinite | Timestamp | ClockMap | Delta
+class DeclaredType(StrEnum):
+    """What a ``DeclaredValue`` holds: one scalar as its record types it, or a list of numbers."""
+
+    TEXT = "text"
+    INTEGER = "integer"
+    REAL = "real"  # a finite float or a NonFinite the source wrote
+    BOOLEAN = "boolean"
+    REALS = "reals"  # numbers in source order (a calibration parameter's), at least one
+
+
+DeclaredScalar: TypeAlias = str | int | float | bool | NonFinite
+MAX_PATH_STEPS: Final = 64
+
+
+@dataclass(frozen=True)
+class DeclaredValue:
+    """One value a record declares at a key path, exactly as stated (ADR 0025).
+
+    - ``path``: the keys verbatim (text) and sequence positions (integers ``>= 0``), outermost
+      first: a configuration value's path, a calibration parameter's declared name, a status
+      value's key. At least one step.
+    - ``type`` and ``value``: the value as its record types it, never converted or normalised:
+      ``0.0745`` stays a real and ``"0.0745"`` text; a ``reals`` value is its numbers in source
+      order. The unit is the enclosing literal's, as declared (``Unknown`` where a number states
+      none, ``NotApplicable`` for text and booleans).
+    """
+
+    path: tuple[str | int, ...]
+    type: DeclaredType
+    value: DeclaredScalar | tuple[float | NonFinite, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, tuple) or not self.path:
+            raise ValueError("a declared value names a key path of at least one step")
+        if len(self.path) > MAX_PATH_STEPS:
+            raise ValueError(f"a key path has at most {MAX_PATH_STEPS} steps")
+        for step in self.path:
+            if isinstance(step, str):
+                check_verbatim("path step", step)
+            elif not _is_int(step) or step < 0:
+                raise TypeError(f"a path step is a key (text) or a position (int >= 0): {step!r}")
+        if not isinstance(self.type, DeclaredType):
+            raise TypeError(f"type must be a DeclaredType, got {self.type!r}")
+        value = self.value
+        if self.type is DeclaredType.REALS:
+            if not isinstance(value, tuple) or not value:
+                raise ValueError("a reals value is a non-empty tuple of numbers")
+            if len(value) > MAX_DELTA_VALUES:
+                raise ValueError(f"a reals value holds at most {MAX_DELTA_VALUES} numbers")
+            if not all(_is_real(v) for v in value):
+                raise TypeError(f"a reals value holds finite floats or NonFinite: {value!r}")
+            return
+        ok = {
+            DeclaredType.TEXT: lambda: isinstance(value, str) and not isinstance(value, NonFinite),
+            DeclaredType.INTEGER: lambda: _is_int(value),
+            DeclaredType.REAL: lambda: _is_real(value),
+            DeclaredType.BOOLEAN: lambda: isinstance(value, bool),
+        }[self.type]()
+        if not ok:
+            raise TypeError(f"{value!r} is not a declared {self.type} value")
+        if self.type is DeclaredType.TEXT:
+            assert isinstance(value, str)
+            check_verbatim("value", value)
+
+    @property
+    def numeric(self) -> bool:
+        """Whether the value is a number or numbers, so it may carry a declared unit."""
+        return self.type in (DeclaredType.INTEGER, DeclaredType.REAL, DeclaredType.REALS)
+
+    def to_json(self) -> JsonObject:
+        value = self.value
+        encoded: JsonValue
+        if isinstance(value, tuple):
+            encoded = [real_to_json(v) for v in value]
+        elif self.type is DeclaredType.REAL:
+            assert isinstance(value, float | NonFinite)
+            encoded = real_to_json(value)
+        else:
+            encoded = value
+        return {"path": list(self.path), "type": str(self.type), "value": encoded}
+
+
+LiteralValue: TypeAlias = (
+    str | int | bool | float | NonFinite | Timestamp | ClockMap | Delta | DeclaredValue
+)
 
 
 @dataclass(frozen=True)
@@ -288,6 +374,7 @@ class TypedLiteral:
             ValueType.INSTANT: lambda: isinstance(value, Timestamp),
             ValueType.CLOCK_MAP: lambda: isinstance(value, ClockMap),
             ValueType.DELTA: lambda: isinstance(value, Delta),
+            ValueType.DECLARED_VALUE: lambda: isinstance(value, DeclaredValue),
         }[datatype]()
         if not ok:
             raise TypeError(f"{value!r} is not a {datatype} value")
@@ -303,7 +390,7 @@ class TypedLiteral:
                     raise TypeError(f"a delta's unit must be a Unit: {self.unit!r}")
                 if not isinstance(self.unit.provenance, Inherited):
                     raise ValueError("a literal's unit inherits the claim's provenance (INHERITED)")
-        elif datatype is ValueType.QUANTITY:
+        elif datatype is ValueType.QUANTITY or (isinstance(value, DeclaredValue) and value.numeric):
             if not isinstance(self.unit, Known | Unknown | Ambiguous):
                 raise ValueError(f"a quantity's unit is Known, Unknown or Ambiguous: {self.unit!r}")
             readings = (
@@ -323,12 +410,14 @@ class TypedLiteral:
             if not all(isinstance(slot, Inherited) for slot in slots):
                 raise ValueError("a literal's unit inherits the claim's provenance (INHERITED)")
         elif not isinstance(self.unit, NotApplicable):
-            raise ValueError(f"only a quantity has a unit; a {datatype} has NotApplicable")
+            raise ValueError(
+                f"only a quantity or a declared number has a unit; a {datatype} has NotApplicable"
+            )
 
     def to_json(self) -> JsonObject:
         value = self.value
         encoded: JsonValue
-        if isinstance(value, Timestamp | ClockMap | Delta):
+        if isinstance(value, Timestamp | ClockMap | Delta | DeclaredValue):
             encoded = value.to_json()
         elif isinstance(value, float | NonFinite):
             encoded = real_to_json(value)

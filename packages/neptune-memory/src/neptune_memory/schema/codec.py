@@ -22,7 +22,7 @@ from neptune.model.ids import ConfigHash, parse_config_hash, parse_record_id
 from neptune.model.knowledge import AssertionKind, Knowledge
 from neptune.model.knowledge import from_json as knowledge_from_json
 from neptune.model.provenance import evidence_ref_from_json
-from neptune.model.scalars import real_from_json
+from neptune.model.scalars import NonFinite, real_from_json
 from neptune.model.time import timestamp_from_json
 from neptune.model.units import Unit, unit_from_json
 from neptune_memory.schema import GRAPH_SCHEMA_RELEASE, GRAPH_SCHEMA_VERSION
@@ -31,7 +31,10 @@ from neptune_memory.schema.claim import (
     ClaimAssertionKind,
     ClaimObject,
     ClaimProvenance,
+    DeclaredScalar,
     DeclaredTransform,
+    DeclaredType,
+    DeclaredValue,
     Delta,
     DeltaAdjustment,
     DeltaQuantity,
@@ -160,7 +163,44 @@ def _declared_transform(data: JsonValue) -> DeclaredTransform:
     )
 
 
+def declared_value_from_json(data: JsonValue) -> DeclaredValue:
+    """A ``DeclaredValue``: its key path, its declared type and its value in that type."""
+    obj = _exact(data, "declared value", {"path", "type", "value"})
+    path: list[str | int] = []
+    for step in _list(obj["path"], "path"):
+        if isinstance(step, str):
+            path.append(step)
+        else:
+            path.append(_int(step, "path step"))
+    kind = DeclaredType(_str(obj["type"], "type"))
+    raw = obj["value"]
+    value: DeclaredScalar | tuple[float | NonFinite, ...]
+    if kind is DeclaredType.REALS:
+        items = []
+        for item in _list(raw, "value"):
+            number = real_from_json(item)
+            if not isinstance(number, float | NonFinite):
+                raise ValueError(f"a reals value holds numbers, got {item!r}")
+            items.append(number)
+        value = tuple(items)
+    elif kind is DeclaredType.REAL:
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            raise ValueError("a declared real is written with a fraction or as a NonFinite")
+        value = real_from_json(raw)
+    elif kind is DeclaredType.INTEGER:
+        value = _int(raw, "value")
+    elif kind is DeclaredType.BOOLEAN:
+        if not isinstance(raw, bool):
+            raise ValueError("a declared boolean is true or false")
+        value = raw
+    else:
+        value = _str(raw, "value")
+    return DeclaredValue(tuple(path), kind, value)
+
+
 def _literal_value(datatype: ValueType, value: JsonValue) -> LiteralValue:
+    if datatype is ValueType.DECLARED_VALUE:
+        return declared_value_from_json(value)
     if datatype is ValueType.INSTANT:
         return timestamp_from_json(value)
     if datatype is ValueType.CLOCK_MAP:

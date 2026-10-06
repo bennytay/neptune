@@ -111,7 +111,11 @@ def _object(claim: Claim) -> str:
     if isinstance(obj, TypedLiteral):
         # The unit as the literal declares it (Memory's own encoding; a bare ``Unit`` is not JSON).
         encoded = obj.to_json()
-        unit = f" ({code(encoded['unit'])})" if str(obj.datatype) in {"quantity", "delta"} else ""
+        unit = (
+            f" ({code(encoded['unit'])})"
+            if str(obj.datatype) in {"quantity", "delta", "declared_value"}
+            else ""
+        )
         return code(encoded["value"]) + unit
     assert isinstance(obj, LedgerRecordRef)
     return f"record {ident(obj.record_id)}"
