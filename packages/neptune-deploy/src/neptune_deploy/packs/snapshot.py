@@ -39,7 +39,7 @@ from neptune_deploy.packs._read import (
 )
 from neptune_deploy.packs.errors import PackError
 
-GRAPH_SCHEMA_PIN: Final = "2.0.0"  # contracts/lock.toml; a test holds the two together
+GRAPH_SCHEMA_PIN: Final = "2.2.0"  # contracts/lock.toml; a test holds the two together
 # The 1.x minor whose shapes a 1.x document is read against strictly (ADR 0015, ADR 0018 §2).
 GRAPH_SCHEMA_1X_PIN: Final = "1.6.0"
 GRAPH_SCHEMA_MAJORS: Final = (1, 2)  # the majors this reader reads; any other is refused
@@ -53,11 +53,13 @@ _VERSION: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)
 SNAPSHOT_PREFIX: Final = "snapshot:"
 MAX_SNAPSHOT_BYTES: Final = 512 * 1024 * 1024
 ASSERTION_KINDS: Final = ("inferred", "observed", "stated")
-# graph-schema 1.0.0's datatypes, plus clock_map (1.4.0, Memory ADR 0011) and delta (1.7.0, Memory
-# ADR 0014): a graph Memory builds with clock mappings or calibration drift holds them.
+# graph-schema 1.0.0's datatypes, plus clock_map (1.4.0, Memory ADR 0011), delta (1.7.0, Memory
+# ADR 0014) and declared_value (2.2.0, Memory ADR 0025): a graph Memory builds with clock mappings,
+# calibration drift or declared configuration values holds them.
 LITERAL_TYPES: Final = (
     "boolean",
     "clock_map",
+    "declared_value",
     "delta",
     "instant",
     "integer",
@@ -551,6 +553,8 @@ def _object(value: JsonValue, pointer: str, subject: Node) -> JsonObject:
         elif datatype == "delta":
             _delta_unit(literal["unit"], child(pointer, "unit"))
             _delta(literal["value"], child(pointer, "value"))
+        elif datatype == "declared_value":
+            _declared_value(literal["value"], child(pointer, "value"))
     else:
         raise _R.fail("an object is a node, a record or a literal", child(pointer, "kind"))
     return value
@@ -634,6 +638,50 @@ def _clock_map(value: JsonValue, pointer: str, subject: Node) -> None:
     _state(clock["anchor"], child(pointer, "anchor"), anchor)
     _state(clock["rate"], child(pointer, "rate"), fraction)
     _state(clock["residual_bound"], child(pointer, "residual_bound"), bound)
+
+
+_DECLARED_TYPES: Final = ("boolean", "integer", "real", "reals", "text")
+
+
+def _declared_number(value: JsonValue, pointer: str) -> None:
+    """A finite JSON number with a fraction, or a ``NonFinite`` object (``{"non_finite": ...}``)."""
+    if isinstance(value, float):
+        return
+    number = _R.obj(value, pointer, ("non_finite",))
+    _R.choice(number["non_finite"], child(pointer, "non_finite"), ("-inf", "inf", "nan"))
+
+
+def _declared_value(value: JsonValue, pointer: str) -> None:
+    """A ``DeclaredValue`` (graph-schema 2.2.0): a key path (keys as text, positions as integers)
+    and a value in its declared type. Read as stated; nothing is converted."""
+    declared = _R.obj(value, pointer, ("path", "type", "value"))
+    at = child(pointer, "path")
+    steps = _R.array(declared["path"], at)
+    if not steps:
+        raise _R.fail("a declared value names a key path of at least one step", at)
+    for i, step in enumerate(steps):
+        if isinstance(step, str):
+            _R.string(step, child(at, i))
+        else:
+            _R.integer(step, child(at, i), 0)
+    kind = _R.choice(declared["type"], child(pointer, "type"), _DECLARED_TYPES)
+    here = child(pointer, "value")
+    item = declared["value"]
+    if kind == "text":
+        _R.string(item, here)
+    elif kind == "integer":
+        _R.integer(item, here)
+    elif kind == "boolean":
+        if not isinstance(item, bool):
+            raise _R.fail("expected a boolean", here)
+    elif kind == "real":
+        _declared_number(item, here)
+    else:
+        numbers = _R.array(item, here)
+        if not numbers:
+            raise _R.fail("a reals value holds at least one number", here)
+        for i, number in enumerate(numbers):
+            _declared_number(number, child(here, i))
 
 
 def _delta_unit(value: JsonValue, pointer: str) -> None:

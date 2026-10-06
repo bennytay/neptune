@@ -212,17 +212,18 @@ def test_a_build_lists_each_claim_once() -> None:
 
 
 def test_a_newer_2x_minor_reports_the_keys_it_adds() -> None:
-    """ADR 0015's rule, with the minor read from the document rather than declared."""
+    """ADR 0015's rule, with the minor read from the document rather than declared (a minor
+    beyond the 2.2.0 pin)."""
     document = _document()
-    document["graph_schema"] = "2.1.0"
+    document["graph_schema"] = "2.3.0"
     for claim in document["claims"]:
         claim["provenance"]["derivation"] = "secret"
     snap = read_snapshot(document)
     assert [u.key_path for u in snap.unread] == ["/claims/*/provenance/derivation"]
-    assert snap.declared_schema_version == "2.1.0" and snap.release == "2.1.0"
+    assert snap.declared_schema_version == "2.3.0" and snap.release == "2.3.0"
     pack = _pack("configuration-traceability", NODE["AMR05"], 2, snap)
     out = json.loads(render_json(pack))
-    assert out["snapshot"]["graph_schema"] == "2.1.0"
+    assert out["snapshot"]["graph_schema"] == "2.3.0"
     assert [f["code"] for f in out["findings"]] == ["snapshot_key_unread"]
     assert b"secret" not in render_json(pack) + render_pdf(pack) + render_claims(pack)
 

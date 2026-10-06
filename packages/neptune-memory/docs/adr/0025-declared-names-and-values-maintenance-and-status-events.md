@@ -64,8 +64,9 @@ facts reach the Ledger but stop at Memory:
      place of its own is a counted finding (`value_absent`, `value_unstated`, `value_ambiguous`,
      `value_unlocated`), never a fact.
 6. **graph-schema 2.2.0, a minor.** It adds the two predicates, the value type, `#/$defs/DeclaredValue` and the
-   `maintenance` kind (`VOCABULARY_VERSION = 12`). Nothing is narrowed, so every 2.x golden validates. Consumers'
-   locks stay at 2.0.0 (a minor lag warns); a consumer reads the new claims once it raises its pin.
+   `maintenance` kind (`VOCABULARY_VERSION = 12`). Nothing is narrowed, so every 2.x golden validates. Context
+   and Deploy raise their pins to 2.2.0 in the same change (as for 2.0.0): Deploy's reader refuses a literal
+   type it does not know, and Context reports a predicate beyond its pin as a gap (Context ADR 0014).
 
 ## Alternatives considered
 
@@ -87,8 +88,7 @@ facts reach the Ledger but stop at Memory:
   named configurations and runs, and the calibration values (claim counts in the PR).
 - A configuration no run is bound to and no machine span places (`cell_config.yaml` in the acceptance corpus)
   declares nothing in the graph until something places it; the finding says how many values wait.
-- Deploy's snapshot reader (pinned 2.0.0) refuses a `declared_value` literal, and Context reports `declared_value`
-  and `stated_cause` claims as beyond its pin. Both read them after raising their pins to 2.2.0, each in its own
-  PR with its own contract decisions.
+- Context and Deploy read the new claims at their 2.2.0 pins; Context's packet schema widens (query-packet
+  1.4.0). Rendering them in evidence-pack templates is a later Deploy template version.
 - Revisit when the compiler states a configuration's own validity or name, or when `safety_state` and related
   records (a downtime ticket) need claims.

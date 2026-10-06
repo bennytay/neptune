@@ -22,7 +22,7 @@ from neptune_deploy.packs.appendix import CATALOG_API_VERSION, resolution
 from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_1X_PIN
 from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_PIN as READER_PIN
 
-GRAPH_SCHEMA_PIN = "2.0.0"
+GRAPH_SCHEMA_PIN = "2.2.0"
 GRAPH_SCHEMA_1X = "1.6.0"  # the 1.x fixtures' shape, read as ADR 0015 reads 1.x
 DOCS = Path(__file__).resolve().parents[1] / "docs"
 

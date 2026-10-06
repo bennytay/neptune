@@ -1,6 +1,6 @@
 Context packet packet:sha256:256627045306adaa9f3d091607878c9a8c36f5c1cf8ce9d37ea942d00ef13a7c
 Query query:sha256:1f3a79359304b5a796c9d5290b9c764d78634c7ebf8c07f720cf93e941cb279c, as of transaction 5 (head 5).
-Graph read: graph-schema 1.x, older than Context's pin 2.0.0; predicates such as succeeds carry their 1.x meaning.
+Graph read: graph-schema 1.x, older than Context's pin 2.2.0; predicates such as succeeds carry their 1.x meaning.
 World time: ticks [0, open) on clock rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31.
 Inferred items: excluded.
 Items: 2 of 2 found.

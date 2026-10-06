@@ -304,6 +304,14 @@ def _claim_texts(claim: Claim) -> list[tuple[TextField, str]]:
     obj = claim.object
     if isinstance(obj, TypedLiteral) and obj.datatype is ValueType.TEXT and obj.value:
         out.append((TextField.CLAIM_TEXT, str(obj.value)))
+    elif isinstance(obj, TypedLiteral) and obj.datatype is ValueType.DECLARED_VALUE:
+        # A declared value is found by its key path and its value as written (Memory ADR 0025).
+        declared = obj.to_json()["value"]
+        assert isinstance(declared, dict)
+        path, stated = declared["path"], declared["value"]
+        steps = " ".join(str(step) for step in path) if isinstance(path, list) else ""
+        shown = " ".join(str(v) for v in stated) if isinstance(stated, list) else str(stated)
+        out.append((TextField.CLAIM_TEXT, f"{steps} {shown}".strip()))
     ids = [claim.subject.node_id]
     if isinstance(obj, NodeRef):
         ids.append(obj.node_id)

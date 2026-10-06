@@ -41,7 +41,9 @@ def test_the_frozen_snapshot_is_a_small_graph_schema_2_0_0_gzip_the_codec_reads(
     assert raw[:2] == b"\x1f\x8b" and F.DEMO_SNAPSHOT.name.endswith(".json.gz")
     assert len(raw) < 512 * 1024  # the repository's fixture limit
     document = read_graph_document(F.DEMO_SNAPSHOT)
-    assert document.to_json()["graph_schema"] == pins.GRAPH_SCHEMA_VERSION == "2.0.0"
+    # Frozen at 2.0.0; a 2.x document of an older minor reads as written under the 2.2.0 pin.
+    assert document.to_json()["graph_schema"] == "2.0.0"
+    assert pins.GRAPH_SCHEMA_VERSION.split(".")[0] == "2"
     assert int(document.head) == 2 and document.resolution.claims
 
 
