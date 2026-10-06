@@ -1,9 +1,9 @@
 """The acceptance-corpus snapshot (``tests/fixtures/acceptance_corpus.graph.json``) is what Memory's
 own pipeline makes of the MVL-181 corpus, and a graph document Memory's codec reads.
 
-A regeneration states the same facts on any host. It is byte-identical wherever the compiler's
-transforms record the same libraries as ``acceptance_corpus.environment.json`` (the generator's
-docstring says why they can differ). Deploy and Context consume the file (``docs/contracts.md``).
+A regeneration is byte-identical on any host. ``acceptance_corpus.environment.json`` names the
+libraries the compiler's transforms record, so a failure says which one moved. Deploy and Context
+consume the file (``docs/contracts.md``).
 """
 
 from __future__ import annotations
@@ -79,8 +79,9 @@ RECORD_ID: Final = re.compile(rb"rec:sha256:[0-9a-f]{64}")
 def facts(data: bytes) -> list[bytes]:
     """Each claim's content with every Ledger record id masked: subject and object types and values,
     predicate, validity ticks, assertion kind, consolidator and the evidence (source content ids and
-    locators). Record ids are what the host-bound libraries rename (a transform id, and every record
-    downstream of it, such as Deploy's lifecycle records); the byte check pins them in CI."""
+    locators). A failure here means the snapshot states other facts; a byte-check failure alone
+    means only lineage ids moved (an adapter or library version renames its transform and every
+    record downstream of it, Deploy's lifecycle records included)."""
     graph = graph_from_json(canonical_json.loads(data.rstrip(b"\n")))
     return sorted(
         RECORD_ID.sub(b"rec:*", canonical_json.dumps(claim.content_json()))
@@ -96,155 +97,61 @@ def test_a_regeneration_states_the_same_facts(regenerated: tuple[bytes, bytes]) 
     )
 
 
-# Libraries a transform records that come with the CPython build, not with uv.lock: a host may
-# differ in them alone and still run the code the snapshot was made with.
-# TODO: remove once the compiler moves library and runtime versions out of id-bearing content
-# (root non-negotiable 5); then every regeneration is byte-identical and nothing skips.
-HOST_BOUND: Final = frozenset({"expat", "python"})
-COMPARE: Final = "compare"
-SKIP: Final = "skip"
-FAIL: Final = "fail"
-
-
-def byte_check(here: JsonValue, recorded: JsonValue, *, ci: bool) -> tuple[str, str]:
-    """(``compare`` | ``skip`` | ``fail``, why) for a regeneration whose environment is ``here``
-    against the snapshot's ``recorded``. Skip only where the two differ in host-bound libraries
-    alone, and never in CI; any other difference (the corpus, an adapter or its version, a library
-    uv.lock pins) means the committed snapshot is stale."""
-    if here == recorded:
-        return COMPARE, "the same libraries"
+def differences(here: JsonValue, recorded: JsonValue) -> dict[str, object]:
+    """What differs between two environments, by corpus and by adapter: (here, snapshot)."""
     if not isinstance(here, dict) or not isinstance(recorded, dict):
-        return FAIL, "an environment is not a JSON object"
+        return {"environment": (here, recorded)}
+    out: dict[str, object] = {}
     if here.get("corpus") != recorded.get("corpus"):
-        return FAIL, f"the corpus changed: {here.get('corpus')} != {recorded.get('corpus')}"
+        out["corpus"] = (here.get("corpus"), recorded.get("corpus"))
     mine, theirs = here.get("transforms"), recorded.get("transforms")
     if not isinstance(mine, dict) or not isinstance(theirs, dict):
-        return FAIL, "an environment has no transforms object"
-    if mine.keys() != theirs.keys():
-        changed = sorted(mine.keys() ^ theirs.keys())
-        return FAIL, f"adapters or adapter versions changed: {changed}"
-    host: dict[str, object] = {}
-    for adapter in sorted(mine):
-        a, b = mine[adapter], theirs[adapter]
-        if not isinstance(a, dict) or not isinstance(b, dict):
-            return FAIL, f"{adapter}: libraries are not a JSON object"
-        for library in sorted(a.keys() | b.keys()):
-            if a.get(library) == b.get(library):
-                continue
-            if library not in HOST_BOUND:
-                return FAIL, f"{adapter}: {library} {b.get(library)} -> {a.get(library)}"
-            host[f"{adapter}: {library}"] = (a.get(library), b.get(library))
-    if ci:
-        return FAIL, f"CI must reproduce the snapshot byte for byte; host libraries differ: {host}"
-    return SKIP, f"host libraries differ from the snapshot's (here, snapshot): {host}"
+        return {**out, "transforms": (mine, theirs)}
+    for adapter in sorted(mine.keys() | theirs.keys()):
+        if mine.get(adapter) != theirs.get(adapter):
+            out[adapter] = (mine.get(adapter), theirs.get(adapter))
+    return out
 
 
 @pytest.mark.slow
-def test_a_regeneration_with_the_same_libraries_is_byte_identical(
-    regenerated: tuple[bytes, bytes],
-) -> None:
+def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes]) -> None:
+    """On any host, in CI and locally: the compiler no longer records host-bound library versions
+    in id-bearing content, so a difference here is a stale snapshot (the corpus, an adapter or its
+    version, a library ``uv.lock`` pins, or the Python minor ``.python-version`` pins)."""
     graph, environment = regenerated
     recorded = generator().ENVIRONMENT.read_bytes()
-    ci = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
-    verdict, why = byte_check(
-        canonical_json.loads(environment.rstrip(b"\n")),
-        canonical_json.loads(recorded.rstrip(b"\n")),
-        ci=ci,
-    )
-    if verdict == SKIP:
-        pytest.skip(why)
-    assert verdict == COMPARE, f"acceptance_corpus.environment.json is stale: {why}. {REGENERATE}"
+    if environment != recorded:
+        changed = differences(
+            canonical_json.loads(environment.rstrip(b"\n")),
+            canonical_json.loads(recorded.rstrip(b"\n")),
+        )
+        pytest.fail(f"the compiler's transforms changed (here, snapshot): {changed}. {REGENERATE}")
     assert graph == committed(), f"acceptance_corpus.graph.json is stale. {REGENERATE}"
 
 
-def environment(**transforms: dict[str, str]) -> JsonValue:
-    """An environment document; ``calibration_0_1_0`` is the key ``calibration 0.1.0``."""
-    keys = {k: "{} {}".format(*k.split("_", 1)).replace("_", ".") for k in transforms}
-    return {
+def test_differences_name_each_changed_adapter_and_the_corpus() -> None:
+    base: JsonValue = {
         "corpus": "acceptance 1.0.0",
-        "transforms": {keys[k]: dict(v) for k, v in transforms.items()},
+        "transforms": {
+            "calibration 0.1.1": {"pyyaml": "6.0.3"},
+            "tabular 0.2.0": {"pyarrow": "25"},
+        },
     }
-
-
-BASE: Final = environment(
-    calibration_0_1_0={"expat": "expat_2.8.5", "python": "3.12", "pyyaml": "6.0.3"},
-    tabular_0_2_0={"pyarrow": "25.0.1"},
-)
-
-
-@pytest.mark.parametrize(
-    ("here", "ci", "verdict"),
-    [
-        (BASE, False, COMPARE),
-        (BASE, True, COMPARE),
-        # expat or python alone: a host difference; skipped locally, a failure in CI
-        (
-            environment(
-                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.12", "pyyaml": "6.0.3"},
-                tabular_0_2_0={"pyarrow": "25.0.1"},
-            ),
-            False,
-            SKIP,
-        ),
-        (
-            environment(
-                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.13", "pyyaml": "6.0.3"},
-                tabular_0_2_0={"pyarrow": "25.0.1"},
-            ),
-            True,
-            FAIL,
-        ),
-        # a uv.lock bump, alone or beside a host difference
-        (
-            environment(
-                calibration_0_1_0={"expat": "expat_2.8.5", "python": "3.12", "pyyaml": "6.0.3"},
-                tabular_0_2_0={"pyarrow": "26.0.0"},
-            ),
-            False,
-            FAIL,
-        ),
-        (
-            environment(
-                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.12", "pyyaml": "6.0.4"},
-                tabular_0_2_0={"pyarrow": "25.0.1"},
-            ),
-            False,
-            FAIL,
-        ),
-        # a library added or dropped, an adapter version bumped or an adapter added
-        (
-            environment(
-                calibration_0_1_0={"expat": "expat_2.8.5", "python": "3.12"},
-                tabular_0_2_0={"pyarrow": "25.0.1"},
-            ),
-            False,
-            FAIL,
-        ),
-        (
-            environment(
-                calibration_0_2_0={"expat": "expat_2.8.5", "python": "3.12", "pyyaml": "6.0.3"},
-                tabular_0_2_0={"pyarrow": "25.0.1"},
-            ),
-            False,
-            FAIL,
-        ),
-        (
-            environment(
-                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.12", "pyyaml": "6.0.3"},
-                tabular_0_2_0={"pyarrow": "25.0.1"},
-                text_0_1_0={},
-            ),
-            False,
-            FAIL,
-        ),
-        ({"corpus": "acceptance 1.1.0", "transforms": {}}, False, FAIL),
-        ([], False, FAIL),
-    ],
-)
-def test_the_byte_check_skips_only_for_host_libraries_outside_ci(
-    here: JsonValue, ci: bool, verdict: str
-) -> None:
-    assert byte_check(here, BASE, ci=ci)[0] == verdict
+    bumped: JsonValue = {
+        "corpus": "acceptance 1.1.0",
+        "transforms": {
+            "calibration 0.1.2": {"pyyaml": "6.0.3"},
+            "tabular 0.2.0": {"pyarrow": "26"},
+        },
+    }
+    assert differences(base, base) == {}
+    assert differences(bumped, base) == {
+        "corpus": ("acceptance 1.1.0", "acceptance 1.0.0"),
+        "calibration 0.1.1": (None, {"pyyaml": "6.0.3"}),
+        "calibration 0.1.2": ({"pyyaml": "6.0.3"}, None),
+        "tabular 0.2.0": ({"pyarrow": "26"}, {"pyarrow": "25"}),
+    }
+    assert differences([], base) == {"environment": ([], base)}
 
 
 def test_the_snapshot_decodes_with_the_codec_and_reencodes_to_its_bytes() -> None:

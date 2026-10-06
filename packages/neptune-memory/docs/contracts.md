@@ -45,13 +45,11 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
     makes it stale.
-  - Record ids in it depend on the libraries the compiler's transforms record. The calibration adapter records
-    the expat bundled with CPython, so a different 3.12 patch release gives other finding record ids.
-    `acceptance_corpus.environment.json` lists those libraries. The committed files are made under the Python CI
-    installs, and CI requires a byte-identical regeneration. The byte check skips only on a local host whose
-    `expat` or `python` alone differ. It still checks the same facts with every record id masked. Any
-    other change fails: the corpus, an adapter or its version, or a library `uv.lock` pins. Cite corpus evidence
-    by source path and locator, not by record id.
+  - A regeneration is byte-identical on any host, in CI and locally. Record ids depend only on what the
+    repository pins: the corpus, adapter versions, the libraries in `uv.lock` and the Python minor version in
+    `.python-version`. `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names
+    what moved. Cite corpus evidence by source path and locator, not by record id: a version bump renames record
+    ids.
   - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
