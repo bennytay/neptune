@@ -253,3 +253,26 @@ def test_the_same_catalog_gives_the_same_claims_whatever_the_package_order() -> 
     again = consolidate(catalog(packages(records[:half], records[half:])))
     assert first.claims == second.claims == again.claims
     assert first.findings == second.findings == again.findings
+
+
+def test_lineage_siblings_of_one_anchored_run_stay_two_run_nodes() -> None:
+    """A parser upgrade gives the same bag a second Run record citing the same evidence; the
+    catalog puts both in one anchored thread, the runs consolidator keeps two nodes, and so does
+    this one, rather than calling the anchor ambiguous."""
+    records, named = _runs()
+    sibling = {**named["anchored"], "id": "rec:sha256:" + "a" * 64}
+    result = consolidate(catalog(packages(records, [sibling])))
+    unknown = {c.subject.node_id for c in of(result, "configuration_unknown")}
+    assert unknown == {f"record:{named['anchored']['id']}", f"record:{sibling['id']}"}
+    assert "configuration.ambiguous_anchor" not in codes(result)
+
+
+def test_an_envelope_that_places_nothing_still_leaves_anchored_coverage_undecided() -> None:
+    """The only envelope is one the Ledger does not hold: it names no node, yet it may be the
+    one that covers the run, so coverage is undecided rather than surely uncovered."""
+    records, named = _runs()
+    envelopes = [r for r in records if r.get("kind") == "authorisation_envelope"]
+    result = consolidate(catalog(packages(records), without=[str(e["id"]) for e in envelopes]))
+    assert of(result, "not_covered_by_authorisation") == []
+    undecided = [f for f in result.findings if f.code == "configuration.authorisation_undecided"]
+    assert [named["binding"]["id"] in f.records for f in undecided] == [True]

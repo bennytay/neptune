@@ -40,22 +40,28 @@ The acceptance corpus was registered in a real catalog to check them:
 2. The Ledger export (ADR 0016 §4) gains an optional `threads`. It holds one answer per record id at the
    export's head, sorted by record id, without `api_version`, `as_of` and `findings`. Those say when and
    by which version a question was answered, and the export's `head` and `catalog_api_version` already
-   state that. `LedgerExport.at(snapshot)` drops memberships from packages registered later. A record
-   that only later packages hold becomes `unknown_record`.
+   state that. The answers must cover every record id the packages hold: a missing one would read as
+   "not in the Ledger", so the export is refused instead. `LedgerExport.at(snapshot)` drops
+   memberships from packages registered later. A record that only later packages hold becomes
+   `unknown_record`.
 3. The acceptance snapshot's export is made by a real catalog. `PostgresCatalog` runs on a throwaway
    PostgreSQL 16 from the `pgserver` wheel, registers both packages at transactions 1 and 2, and is asked
    `threads_of` for every record id.
 
 ### 2. Which node a record names
 
-1. **Subject memberships open nodes.**
-   - A declared key `(kind, LogicalId)` is `node_ref(type, id)`, the node a stand-in thread declaring that
-     id keys. Node ids are the same function of the declared id from either source, so nothing is keyed
+1. **Memberships open nodes.**
+   - A declared key `(kind, LogicalId)`, in any role, is `node_ref(type, id)`. A `cites` membership
+     (`Calibration.machine`) says the thread exists. It is the node a stand-in thread declaring that id
+     keys. Node ids are the same function of the declared id from either source, so nothing is keyed
      twice.
-   - An anchored run is `record:<run record id>`, the runs consolidator's node (ADR 0009 §2).
+   - An anchored key names a node only for the record that is its `subject`, and only that record looks
+     it up.
+   - An anchored run is `record:<run record id>`, the runs consolidator's node (ADR 0009 §2). Lineage
+     siblings that cite one anchor stay two nodes, as there.
    - Any other anchored key is `thread:<thread id>`. The thread id is derived from the evidence anchor
      alone, so a parser upgrade that cites the same evidence keeps the node.
-   - `cites` and `part_of` memberships open no node.
+   - An anchored `cites` or `part_of` membership opens nothing.
    - Declared ids in the reserved namespaces `record` and `thread` name nothing, so they cannot forge one
      of these nodes.
 2. **Lifecycle records declare their own ids.** For a record of a lifecycle kind above, a `Known`
@@ -73,10 +79,11 @@ The acceptance corpus was registered in a real catalog to check them:
 1. A catalog thread states no start. A run that states no `first` therefore has no stand-in convention
    (ADR 0008 §2) to fall back on. It is `configuration.untimeable_window`, and nothing about its
    configuration is placed.
-2. Envelopes name declared configuration ids. A configuration known only as `thread:<id>` is never one
-   of them, by construction. So when any envelope exists, whether one covers such a configuration is
-   `configuration.authorisation_undecided`, never `not_covered_by_authorisation`. With no envelope in the
-   Ledger at all, "no envelope covers it" is still a fact and is claimed.
+2. Envelopes name declared configuration ids. A configuration known only by its anchor is never one of
+   them, by construction. So whenever the Ledger holds any envelope, whether one covers such a
+   configuration is `configuration.authorisation_undecided`, never `not_covered_by_authorisation`. That
+   includes an envelope that places nothing. With no envelope in the Ledger at all, "no envelope covers
+   it" is still a fact and is claimed.
 
 ### 4. What stays
 
@@ -87,6 +94,9 @@ The acceptance corpus was registered in a real catalog to check them:
   `assertion` record, so there is nothing for it to ground on yet. Feeding it catalog nodes is the step
   that would join `cmms.asset:ARM-3A` to the run's machine once a link or an operator assertion states
   it.
+- Calibration reads catalog nodes for its machine (a `cites` membership) and for its configuration
+  (anchored). Its `cites` evidence lookups and `calibrated_by` still match only through stand-ins. The
+  corpus has one calibration, and it names no machine (MVL-207, then #129).
 - Consolidator versions do not change. For a reader without thread answers the output is the same bytes
   as before. Thread answers are new input, not a new rule over old input.
 

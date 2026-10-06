@@ -78,7 +78,7 @@ from neptune_memory.consolidate.identity_records import (
     Malformed,
     clock,
 )
-from neptune_memory.consolidate.threads import catalog_threads
+from neptune_memory.consolidate.threads import CatalogThreads, catalog_threads
 from neptune_memory.schema.claim import (
     MAX_DELTA_VALUES,
     DeclaredTransform,
@@ -205,6 +205,7 @@ class _View:
     nodes: set[NodeRef] = field(default_factory=set)
     anchors: dict[tuple[NodeType, bytes], set[NodeRef]] = field(default_factory=dict)
     cites: dict[NodeRef, set[bytes]] = field(default_factory=dict)  # evidence its threads cite
+    catalog: CatalogThreads = field(default_factory=CatalogThreads)
     graph_frames: dict[RecordId, set[FrameRef]] = field(default_factory=dict)
     parents: dict[FrameRef, list[Transform]] = field(default_factory=dict)  # by declared child
     chains: dict[NodeRef, list[_Placed]] = field(default_factory=dict)
@@ -219,8 +220,12 @@ class _View:
         ref = node_ref(node_type, logical_id)
         return ref if ref in self.nodes else None
 
-    def anchored(self, node_type: NodeType, anchor: EvidenceRef) -> tuple[NodeRef, ...]:
-        found = self.anchors.get((node_type, _key(anchor)), ())
+    def anchored(
+        self, node_type: NodeType, anchor: EvidenceRef, record: RecordId
+    ) -> tuple[NodeRef, ...]:
+        """Stand-in threads citing ``anchor``, and anchored threads ``record`` opens (ADR 0018)."""
+        found = self.anchors.get((node_type, _key(anchor)), set())
+        found = found | self.catalog.subject_of(record, node_type)
         return tuple(sorted(found, key=lambda n: n.node_id))
 
 
@@ -283,12 +288,8 @@ def _read(ledger: LedgerReader, previous: Sequence[Claim]) -> _View:
             for cited in thread.evidence:
                 view.anchors.setdefault((node.node_type, _key(cited)), set()).add(node)
                 view.cites.setdefault(node, set()).add(_key(cited))
-    catalog = catalog_threads(ledger, seen.keys() - conflicted)  # ADR 0018 §1
-    view.nodes |= catalog.nodes
-    for (node_type, anchor), nodes in catalog.anchors.items():
-        view.anchors.setdefault((node_type, anchor), set()).update(nodes)
-        for node in nodes:
-            view.cites.setdefault(node, set()).add(anchor)
+    view.catalog = catalog_threads(ledger, seen.keys() - conflicted)  # ADR 0018 §1
+    view.nodes |= view.catalog.nodes
     _chains(view, previous)
     return view
 
@@ -860,7 +861,7 @@ def _entry(view: _View, calibration: CalibrationRecord) -> _Entry | None:
     placement = _placement(view, calibration, at)
     if placement is None:
         return None
-    configurations = view.anchored(NodeType.CONFIGURATION, calibration.anchor)
+    configurations = view.anchored(NodeType.CONFIGURATION, calibration.anchor, calibration.record)
     configuration = configurations[0] if len(configurations) == 1 else None
     if configuration is None:
         view.findings.append(
@@ -1416,7 +1417,7 @@ def _calibrated_by(view: _View) -> list[ClaimDraft]:
     requalification is bound to) is ``calibrated_by`` that record, from when it was performed."""
     calibrations: dict[NodeRef, list[RecordId]] = {}
     for calibration in view.calibrations:
-        nodes = view.anchored(NodeType.CONFIGURATION, calibration.anchor)
+        nodes = view.anchored(NodeType.CONFIGURATION, calibration.anchor, calibration.record)
         if len(nodes) == 1:
             calibrations.setdefault(nodes[0], []).append(calibration.record)
     drafts: list[ClaimDraft] = []

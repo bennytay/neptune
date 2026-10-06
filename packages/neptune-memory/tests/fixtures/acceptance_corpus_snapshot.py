@@ -55,12 +55,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
-import psycopg
-from neptune_ledger.api import CATALOG_API_VERSION, codec
-from neptune_ledger.catalog.migrate import apply_migrations
-from neptune_ledger.catalog.registry import PostgresCatalog
-from pgserver.postgres_server import get_server
-
 from neptune.identity import canonical_json
 from neptune.sdk import Neptune
 from neptune.sdk.result import read_package
@@ -147,7 +141,14 @@ def _wire(data: bytes) -> dict[str, Any]:
 
 def catalog_threads(work: Path, roots: tuple[Path, ...], record_ids: list[str]) -> list[ThreadsOf]:
     """Register ``roots`` in order in a fresh Ledger catalog and ask it ``threads_of`` for each
-    record id: the Ledger's own answers, read back through Memory's strict parser."""
+    record id: the Ledger's own answers, read back through Memory's strict parser. The Ledger
+    and its test server are imported here, so reading the committed snapshot needs neither."""
+    import psycopg
+    from neptune_ledger.api import CATALOG_API_VERSION, codec
+    from neptune_ledger.catalog.migrate import apply_migrations
+    from neptune_ledger.catalog.registry import PostgresCatalog
+    from pgserver.postgres_server import get_server
+
     server = get_server(work / "pgdata", cleanup_mode="stop")
     try:
         admin_uri = str(server.get_uri())
@@ -197,6 +198,8 @@ def ledger_export(work: Path) -> LedgerExport:
         {str(r["id"]) for p in packages for r in p.records if isinstance(r.get("id"), str)}
     )
     threads = catalog_threads(work, (result.destination, lifecycle), ids)
+    from neptune_ledger.api import CATALOG_API_VERSION
+
     return LedgerExport(
         HEAD,
         CATALOG_API_VERSION,

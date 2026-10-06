@@ -140,6 +140,10 @@ def _first(threads: list[dict[str, Any]]) -> dict[str, Any]:
             key={"namespace": "Not A Token", "value": "x"}
         ),
         lambda t: t[0]["unresolved"].append({"thread_id": t[0]["record_id"]}),
+        lambda t: _first(t)["memberships"][0]["key"].update(kind=[]),
+        lambda t: _first(t)["memberships"][0].update(roles=[{}]),
+        lambda t: t.pop(),  # a held record left unanswered would read as "not in the Ledger"
+        lambda t: t.clear(),
     ],
 )
 def test_a_malformed_thread_answer_is_refused(change: Any) -> None:
@@ -152,3 +156,22 @@ def test_a_threads_key_that_is_not_an_array_is_refused() -> None:
     data["threads"] = {}
     with pytest.raises(ValueError):
         ledger_export_from_json(data)
+
+
+def test_a_declared_key_names_its_node_in_any_role_an_anchored_one_only_as_subject() -> None:
+    from memory_catalog_threads import thread_id
+    from neptune_memory.consolidate.threads import catalog_threads
+    from neptune_memory.ledger import Membership, StubLedger
+    from neptune_memory.schema.nodes import NodeRef, NodeType
+
+    machine = declared("machine", LogicalId("fleet", "ARM-3A"))
+    cites = (
+        Membership(thread_id(machine), machine, FIRST, ("cites",)),
+        Membership(thread_id(SNAPSHOT_KEY), SNAPSHOT_KEY, FIRST, ("part_of",)),
+    )
+    rid = str(SNAPSHOT["id"])
+    found = catalog_threads(
+        StubLedger({}, "1.7.0", {rid: ThreadsOf(rid, "found", cites, ())}), [rid]
+    )
+    assert found.nodes == {NodeRef(NodeType.MACHINE, "fleet:ARM-3A")}
+    assert found.opened == {} and found.anchor_only == set() and found.holds(rid) is True

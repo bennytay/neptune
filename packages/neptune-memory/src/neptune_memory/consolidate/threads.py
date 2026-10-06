@@ -11,8 +11,9 @@ node:
   ``thread:<thread id>``, a key the Ledger derives from the anchor alone, so a parser upgrade
   citing the same evidence keeps the node (ADR 0010, alternatives).
 
-``cites`` and ``part_of`` memberships open no node here: a record that cites a thread names it
-through its own declared field, and part-of is one hop the Ledger already resolved.
+A declared key names its node in any role: a ``cites`` membership (``Calibration.machine``) says
+the thread exists. An anchored ``cites`` or ``part_of`` membership names nothing here: part-of is
+one hop the Ledger already resolved.
 
 Readers that answer no thread queries (stand-in Ledgers, exports made before catalog-api 1.7.0)
 contribute nothing, and the stand-in path decides alone.
@@ -58,7 +59,8 @@ def ref_key(ref: EvidenceRef) -> bytes:
 
 
 def membership_node(membership: Membership, record: str) -> NodeRef | None:
-    """The node ``record``'s subject membership names; ``None`` for one in a reserved namespace."""
+    """The node a membership of ``record`` names; ``None`` for a declared id in a reserved
+    namespace."""
     node_type = NodeType(membership.key.kind)
     declared = membership.key.declared
     if declared is not None:
@@ -74,19 +76,26 @@ def membership_node(membership: Membership, record: str) -> NodeRef | None:
 class CatalogThreads:
     """What the catalog says about the records a consolidator read.
 
-    ``nodes``: every node a declared subject membership names. ``anchors``: for an anchored one,
-    ``(node type, anchor key) -> nodes``, the lookup the stand-in's ``evidence`` fed. ``held``:
-    record id -> ``True`` if the Ledger holds it, ``False`` if not; absent when the reader
-    answers no thread queries (then nothing here decides anything).
+    ``nodes``: every node a declared key names, in any role: the thread exists, so its node
+    does. ``opened``: record id -> the nodes of the anchored threads it is the subject of (a run
+    is its own ``record:`` node, so lineage siblings citing one anchor stay apart, as the runs
+    consolidator keeps them). ``anchor_only``: those anchored nodes, which no declared id names.
+    ``held``: record id -> ``True`` if the Ledger holds it, ``False`` if not; absent when the
+    reader answers no thread queries (then nothing here decides anything).
     """
 
     nodes: set[NodeRef] = field(default_factory=set)
-    anchors: dict[tuple[NodeType, bytes], set[NodeRef]] = field(default_factory=dict)
+    opened: dict[str, set[NodeRef]] = field(default_factory=dict)
+    anchor_only: set[NodeRef] = field(default_factory=set)
     held: dict[str, bool] = field(default_factory=dict)
 
     def holds(self, record: str) -> bool | None:
         """``True`` / ``False``: the Ledger holds the record or not; ``None``: not answered."""
         return self.held.get(record)
+
+    def subject_of(self, record: str, node_type: NodeType) -> set[NodeRef]:
+        """The anchored nodes of ``node_type`` whose thread ``record`` opens."""
+        return {n for n in self.opened.get(record, ()) if n.node_type is node_type}
 
 
 def catalog_threads(ledger: LedgerReader, records: Iterable[str]) -> CatalogThreads:
@@ -98,14 +107,12 @@ def catalog_threads(ledger: LedgerReader, records: Iterable[str]) -> CatalogThre
             continue
         found.held[record] = answer.status == "found"
         for membership in answer.memberships:
-            if "subject" not in membership.roles:
-                continue
             node = membership_node(membership, record)
             if node is None:
                 continue
-            anchor = membership.key.anchor
-            if anchor is None:
+            if membership.key.anchor is None:
                 found.nodes.add(node)
-            else:
-                found.anchors.setdefault((node.node_type, ref_key(anchor)), set()).add(node)
+            elif "subject" in membership.roles:
+                found.opened.setdefault(record, set()).add(node)
+                found.anchor_only.add(node)
     return found

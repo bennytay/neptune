@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Final, Literal
 
-from neptune.identity import canonical_json
 from neptune.model.finding import Severity
 from neptune.model.knowledge import AssertionKind
 from neptune.model.time import Timestamp
@@ -62,9 +61,10 @@ from neptune_memory.consolidate.identity_records import (
 )
 from neptune_memory.consolidate.threads import (
     RESERVED_NAMESPACES,
-    THREAD_NAMESPACE,
+    UNTHREADED_KINDS,
     CatalogThreads,
     catalog_threads,
+    ref_key,
 )
 from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, CivilClock, Interval, Open
@@ -115,10 +115,6 @@ def _safe(reason: str) -> str:
     except UnicodeEncodeError:
         return "unrepresentable text"
     return reason if reason.isprintable() else "unprintable text"
-
-
-def _ref_key(ref: EvidenceRef) -> bytes:
-    return canonical_json.dumps(ref.to_json())
 
 
 def _span(start: Timestamp, end: Timestamp | Open) -> JsonValue:
@@ -200,11 +196,14 @@ class _View:
         )
         return None
 
-    def anchored(self, node_type: NodeType, anchor: EvidenceRef) -> tuple[NodeRef, ...]:
-        """The nodes whose threads cite ``anchor``: a record's thread when it declares no id."""
-        return tuple(
-            sorted(self.anchors.get((node_type, _ref_key(anchor)), ()), key=lambda n: n.node_id)
-        )
+    def anchored(
+        self, node_type: NodeType, anchor: EvidenceRef, record: RecordId
+    ) -> tuple[NodeRef, ...]:
+        """A record's thread when it declares no id: the stand-in threads citing ``anchor``, and
+        the anchored threads the catalog says ``record`` opens (ADR 0018 §2.1)."""
+        found = self.anchors.get((node_type, ref_key(anchor)), set())
+        found = found | self.catalog.subject_of(record, node_type)
+        return tuple(sorted(found, key=lambda n: n.node_id))
 
 
 def _read(ledger: LedgerReader) -> _View:
@@ -260,10 +259,12 @@ def _read(ledger: LedgerReader) -> _View:
         parsed = seen[rid]
         if isinstance(parsed, Event):
             view.events.append(parsed)
-            view.own.add(rid)
+            if parsed.kind in UNTHREADED_KINDS:
+                view.own.add(rid)
         elif isinstance(parsed, Envelope):
             view.envelopes.append(parsed)
-            view.own.add(rid)
+            if AUTHORISATION_ENVELOPE in UNTHREADED_KINDS:
+                view.own.add(rid)
         elif isinstance(parsed, RunRecord):
             view.runs.append(parsed)
         elif isinstance(parsed, Binding):
@@ -277,11 +278,9 @@ def _read(ledger: LedgerReader) -> _View:
         view.starts[node] = threads[0].valid_from
         for thread in threads:
             for cited in thread.evidence:
-                view.anchors.setdefault((node.node_type, _ref_key(cited)), set()).add(node)
+                view.anchors.setdefault((node.node_type, ref_key(cited)), set()).add(node)
     view.catalog = catalog_threads(ledger, seen.keys() - conflicted)
     view.nodes |= view.catalog.nodes
-    for anchor, nodes in view.catalog.anchors.items():
-        view.anchors.setdefault(anchor, set()).update(nodes)
     return view
 
 
@@ -714,9 +713,7 @@ def _coverage(
     end) exists, or an open run window is only partly covered, the coverage is undecided: a
     finding, never a claim (ADR 0010 §5).
     """
-    if configuration.node_id.startswith(f"{THREAD_NAMESPACE}:") and (
-        found.naming or found.maybe or found.unbound
-    ):
+    if configuration in view.catalog.anchor_only and view.envelopes:
         # Envelopes name declared configuration ids; a configuration the Ledger keys only by its
         # evidence anchor is never one of them by construction. Whether it is the configuration
         # an envelope names is an identity question no record settles (ADR 0018 §3).
@@ -792,7 +789,7 @@ def _run_node(view: _View, run: RunRecord) -> NodeRef | None:
     """A run's node: by its declared logical id, else by its anchored thread (Ledger ADR 0003)."""
     if run.logical_id is not None:
         return view.declared(NodeType.RUN, run.logical_id, run.record)
-    nodes = view.anchored(NodeType.RUN, run.anchor)
+    nodes = view.anchored(NodeType.RUN, run.anchor, run.record)
     if len(nodes) == 1:
         return nodes[0]
     view.findings.append(
@@ -1016,7 +1013,7 @@ def _bind(
             )
         )
     else:
-        configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor)
+        configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor, snapshot.record)
         if len(configurations) != 1:
             view.findings.append(
                 _finding(

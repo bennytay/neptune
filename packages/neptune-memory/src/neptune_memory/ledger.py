@@ -297,12 +297,8 @@ def _keys(value: object, what: str, keys: set[str]) -> Mapping[str, object]:
 
 
 def _text(value: object, what: str) -> str:
-    if (
-        not isinstance(value, str)
-        or not value.isprintable()
-        or not 0 < len(value) <= MAX_PACKAGE_ID
-    ):
-        raise ValueError(f"{what} must be printable text, 1 to {MAX_PACKAGE_ID} characters")
+    if not isinstance(value, str) or not value or not value.isprintable():
+        raise ValueError(f"{what} must be non-empty printable text")
     return value
 
 
@@ -314,7 +310,7 @@ def _thread_key(obj: Mapping[str, object], what: str) -> tuple[str, ThreadKey]:
     parse_content_id(thread_id)
     key = _keys(obj["key"], f"{what}: key", {"key", "kind"})
     kind = key["kind"]
-    if kind not in THREAD_KINDS:
+    if not isinstance(kind, str) or kind not in THREAD_KINDS:
         raise ValueError(f"{what}: key kind must be one of {sorted(THREAD_KINDS)}: {kind!r}")
     inner = key["key"]
     try:
@@ -350,6 +346,7 @@ def threads_of_from_json(data: object) -> ThreadsOf:
         if (
             not isinstance(roles, list)
             or not roles
+            or not all(isinstance(role, str) for role in roles)
             or len(set(roles)) != len(roles)
             or not set(roles) <= ROLES
         ):
@@ -433,4 +430,11 @@ def ledger_export_from_json(data: object) -> LedgerExport:
     if ids != sorted(set(ids)):
         raise ValueError("packages must be unique and ordered by package_id")
     threads = _threads(obj["threads"]) if "threads" in obj else None
+    if threads is not None:
+        held = {r["id"] for p in out for r in p.records if isinstance(r.get("id"), str)}
+        missing = held - {t.record_id for t in threads}
+        if missing:
+            raise ValueError(
+                f"threads must answer every record the packages hold; {len(missing)} have none"
+            )
     return LedgerExport(head, api, tuple(out), threads)
