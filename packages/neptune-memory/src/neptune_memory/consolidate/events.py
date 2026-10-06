@@ -105,6 +105,7 @@ if TYPE_CHECKING:
 OBSERVED: Final = AssertionKind.OBSERVED
 STATED: Final = AssertionKind.STATED
 RECORD_NAMESPACE: Final = "record"
+HAS_NAME: Final = "has_name"
 MAX_LISTED: Final = 16  # record ids an aggregated finding lists; its details give the count
 
 
@@ -410,6 +411,29 @@ def _parts(record: MaintenanceEvent) -> list[_Fact]:
     ]
 
 
+def _named_by(identifiers: Knowledge[tuple[Knowledge[LogicalId], ...]]) -> list[_Fact]:
+    """``has_name``: the one id value a lifecycle record declares for itself (a work order or
+    incident number), verbatim, as the name people use for the event; never the node's key
+    (ADR 0026). Several distinct values, or none stated, name nothing."""
+    if not isinstance(identifiers, Known):
+        return []
+    known = [
+        i for i in identifiers.value if isinstance(i, Known) and is_declared_value(i.value.value)
+    ]
+    values = {i.value.value for i in known}
+    if len(values) != 1:
+        return []
+    first = known[0]
+    return [
+        _Fact(
+            HAS_NAME,
+            _text(first.value.value),
+            _kind(first.provenance, STATED),
+            (*_cited(first.provenance), *_cited(identifiers.provenance)),
+        )
+    ]
+
+
 def _status_values(record: StatusReport) -> list[_Fact]:
     """``declared_value`` for each key/value a status states, in order: text, or an integer
     with no unit stated (``Unknown``). A list not stated states none."""
@@ -545,6 +569,7 @@ class _Builder:
                 *_stated_text(record.severity, STATED_SEVERITY),
                 *_stated_text(record.description, HAS_DESCRIPTION),
                 *_stated_text(record.root_cause, STATED_CAUSE),
+                *_named_by(record.identifiers),
                 *_listed(record.machines, NodeType.MACHINE),
                 *_listed(record.assets, NodeType.ASSET),
                 *_ids(record.site, AT_SITE, NodeType.SITE, STATED),
@@ -605,6 +630,7 @@ class _Builder:
             *self.lifecycle_kind(parse.INTERVENTION, record.mode, record.id),
             *_stated_text(record.mode, DECLARED_KIND),
             *_stated_text(record.reason, HAS_DESCRIPTION),
+            *_named_by(record.identifiers),
             *_listed(record.machines, NodeType.MACHINE),
             *_ids(record.site, AT_SITE, NodeType.SITE, STATED),
         ]
@@ -637,6 +663,7 @@ class _Builder:
             _Fact(EVIDENCED_BY, LedgerRecordRef(record.id), STATED),
             *self.lifecycle_kind(parse.MAINTENANCE, Unknown(), record.id),
             *_stated_text(record.diagnosis, STATED_CAUSE),
+            *_named_by(record.identifiers),
             *machines,
             *_parts(record),
             *_ids(record.site, AT_SITE, NodeType.SITE, STATED),
@@ -1518,7 +1545,8 @@ class EventConsolidator:
 
     consolidator_id: Final = EVENTS_CONSOLIDATOR_ID
     # 2: maintenance events and their actions, status reports, stated causes (ADR 0025).
-    version: Final = "2"
+    # 3: a lifecycle record's one declared id value names its event (has_name, ADR 0026).
+    version: Final = "3"
     model: Final[ModelRef | None] = None
 
     def consolidate(
