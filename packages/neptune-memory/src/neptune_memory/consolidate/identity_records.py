@@ -365,11 +365,13 @@ def assertion(record: Mapping[str, object]) -> Statement:
 class Declaring:
     """The ids an event's record declares itself by (its ``identifiers``): ``certain`` the
     ``Known`` items of a ``Known`` list; ``possible`` every candidate of an ``Ambiguous`` item, or
-    of every reading of an ``Ambiguous`` list. A list not stated declares nothing."""
+    of every reading of an ``Ambiguous`` list. A list not stated declares nothing. ``refused``
+    counts ids that are blank or padded (ADR 0006 §9): they name nothing, and the rest still do."""
 
     record: RecordId
     certain: tuple[LogicalId, ...]
     possible: tuple[LogicalId, ...]
+    refused: int = 0
 
 
 def _declaring(
@@ -377,6 +379,7 @@ def _declaring(
 ) -> Declaring:
     certain: list[LogicalId] = []
     possible: list[LogicalId] = []
+    refused = 0
     lists = (
         [(listed.value, True)]
         if isinstance(listed, Known)
@@ -388,9 +391,12 @@ def _declaring(
         for item in items:
             for value in _values(item):
                 into = certain if decided and isinstance(item, Known) else possible
-                if declared(value) not in into:
+                if not is_declared_value(value.value):
+                    refused += 1
+                elif value not in into:
                     into.append(value)
-    return Declaring(record_id, tuple(certain), tuple(p for p in possible if p not in certain))
+    possible = [p for p in possible if p not in certain]
+    return Declaring(record_id, tuple(certain), tuple(possible), refused)
 
 
 def incident_identifiers(record: Mapping[str, object]) -> Declaring:

@@ -419,13 +419,23 @@ def _events(view: _View, ledger: LedgerReader, previous: Sequence[Claim]) -> _Ev
                 try:
                     declaring = reader(record_json)
                 except parse.Malformed:
-                    continue  # memory.events reports it, and placed no event on it
+                    continue  # the compiler's reader refuses it: memory.events placed no event
                 if declaring.record in found.origins:
                     declared.setdefault(declaring.record, set()).add(declaring)
     for record, readings in sorted(declared.items()):
         if len(readings) > 1:
             continue  # one id, two contents: memory.events placed nothing on it either
         (declaring,) = readings
+        if declaring.refused:
+            view.findings.append(
+                _finding(
+                    "malformed_identifier",
+                    "an event's record declares ids that are blank or padded with whitespace;"
+                    " they name nothing, and its other ids still do",
+                    (record,),
+                    refused=declaring.refused,
+                )
+            )
         for ids, slot in ((declaring.certain, 0), (declaring.possible, 1)):
             for node in ids:
                 found.declaring.setdefault(_key(node), (set(), set()))[slot].add(record)

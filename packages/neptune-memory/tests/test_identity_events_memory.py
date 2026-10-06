@@ -474,3 +474,18 @@ def test_the_build_is_byte_identical_and_independent_of_package_order(second: bo
 
 def _evidence(record: Record) -> list[EvidenceRef]:
     return [evidence_ref_from_json(record["provenance"]["evidence"])]  # type: ignore[index]
+
+
+def test_a_padded_declared_id_names_nothing_and_the_records_other_ids_still_do() -> None:
+    padded = LogicalId("cmms.downtime", "  DT-0914-01")
+    packages, built = cell(downtime_ids=(padded, DOWNTIME))
+    packages["assertions"] = [
+        assertion("ASR-STOP", SAME, (DOWNTIME, built["pstop"]), authored_at=authored())
+    ]
+    _, identity = run(packages)
+    (claim,) = of(identity, SAME_AS)
+    assert {claim.subject, claim.object} == set(stop_nodes(built))
+    (finding,) = identity.findings
+    assert finding.code == "identity.malformed_identifier"
+    assert finding.records == (built["stop"],)
+    assert finding.details == {"refused": 1}
