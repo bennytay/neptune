@@ -191,13 +191,13 @@ def test_civil_times_keep_their_own_clock_and_record_the_declared_zone() -> None
     package = _mapped("warehouse_amr")
     (event,) = _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0311")
     stamp = event.performed.value
-    # 2026-03-02 09:40 on its own civil clock, never moved to UTC.
-    assert stamp.ticks == 20514 * 86400 + 9 * 3600 + 40 * 60
+    # 2026-03-02 09:40 on its own civil clock, never moved to UTC, in minutes (ADR 0016 §9).
+    assert stamp.ticks == 20514 * 1440 + 9 * 60 + 40
     (domain,) = [d for d in _of(package, "timestamp_domain") if d.id == stamp.domain_id]
     assert domain.field == "Completed"
     assert domain.scope == ()  # the declared zone is the mapping's, never the clock's scope
     assert isinstance(domain.timescale, Unknown)
-    assert domain.resolution == Known(Fraction(1))
+    assert domain.resolution == Known(Fraction(60))
 
 
 def test_stated_offsets_are_instants_on_a_posix_clock() -> None:
@@ -244,9 +244,11 @@ def test_malformed_rows_are_findings_never_dropped_or_merged() -> None:
     (late,) = _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0315")
     assert isinstance(late.performed, Unknown)
     assert codes["value_unreadable"][0].details["rows"] == [6]
-    # A work order type the mapping does not name, and a column it does not map.
+    # A ticket type the mapping does not name, and a column it does not map. The INSP work order
+    # (row 5) is a maintenance event since cmms_generic 2 (ADR 0016 §5).
     rows = sorted(r for f in codes["row_unmatched"] for r in f.details["rows"])
-    assert rows == [2, 5]  # the Jira task (array index 2) and the INSP work order (row 5)
+    assert rows == [2]  # the Jira task (array index 2)
+    assert _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0314")
     columns = sorted(c for f in codes["column_unmapped"] for c in f.details["columns"])
     assert columns == ["/fields/customfield_10040", "Downtime h"]
 

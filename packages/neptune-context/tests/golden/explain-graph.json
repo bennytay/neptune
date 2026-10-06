@@ -930,70 +930,6 @@
    "confidence": {
     "knowledge": "not_applicable"
    },
-   "id": "claim:sha256:0f58915eea7300da8e3fb4f46cb589520951c741957b9f72da1df3bb32d15947",
-   "object": {
-    "datatype": "quantity",
-    "kind": "literal",
-    "unit": {
-     "knowledge": "known",
-     "value": "mm"
-    },
-    "value": 4.3
-   },
-   "predicate": "drift",
-   "provenance": {
-    "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
-    "consolidator_id": "fixture.calibration",
-    "consolidator_version": "1",
-    "evidence": [
-     {
-      "locator": [
-       {
-        "kind": "json_pointer",
-        "pointer": "/translation"
-       }
-      ],
-      "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
-     },
-     {
-      "locator": [
-       {
-        "kind": "json_pointer",
-        "pointer": "/translation"
-       }
-      ],
-      "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
-     }
-    ],
-    "records": [
-     "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
-     "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
-    ]
-   },
-   "recorded_at": 2,
-   "subject": {
-    "kind": "node",
-    "node_id": "asset-tag:WCAM-7",
-    "node_type": "sensor"
-   },
-   "superseded_at": "open",
-   "supersedes": [],
-   "valid": {
-    "end": {
-     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-     "ticks": 1776124800000000000
-    },
-    "start": {
-     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-     "ticks": 1772323200000000000
-    }
-   }
-  },
-  {
-   "assertion_kind": "observed",
-   "confidence": {
-    "knowledge": "not_applicable"
-   },
    "id": "claim:sha256:36931f9e809214c11f23425e5fd320e997b09b27324b6df6b87d3c51aa1d3ce8",
    "object": {
     "kind": "node",
@@ -1196,118 +1132,11 @@
    }
   },
   {
-   "assertion_kind": "observed",
-   "confidence": {
-    "knowledge": "not_applicable"
-   },
-   "id": "claim:sha256:a0c4571e70d525d4a7e7610599a93f069ac3f275eebd9d0137c8d3d4275119c2",
-   "object": {
-    "kind": "node",
-    "node_id": "site-code:DEPOT-5",
-    "node_type": "site"
-   },
-   "predicate": "located_at",
-   "provenance": {
-    "config_hash": "sha256:853547ce298710008f74f09ef14dc13f0bcb2274147eb914ba00df3c59ba99f9",
-    "consolidator_id": "fixture.telemetry",
-    "consolidator_version": "1",
-    "evidence": [
-     {
-      "locator": [
-       {
-        "kind": "row",
-        "row": 3
-       }
-      ],
-      "source": "sha256:a2147dd0b6406bb4305114bbdd28e24ec9019dc530130bfd545a28c12bb6dc0e"
-     }
-    ],
-    "records": []
-   },
-   "recorded_at": 2,
-   "subject": {
-    "kind": "node",
-    "node_id": "vin:av-2",
-    "node_type": "machine"
-   },
-   "superseded_at": "open",
-   "supersedes": [],
-   "valid": {
-    "end": "open",
-    "start": {
-     "domain_id": "rec:sha256:0bfb474d272de1fe8dae60451cee98be39c654f793efff7527f85b1758d41582",
-     "ticks": 1000
-    }
-   }
-  },
-  {
    "assertion_kind": "stated",
    "confidence": {
     "knowledge": "not_applicable"
    },
-   "id": "claim:sha256:a120b136381ff91b19bacab9fabe00778a9e3d16d8f50efce637bb8ea247fada",
-   "object": {
-    "kind": "node",
-    "node_id": "cfg:wcam-7-cal-2026-03",
-    "node_type": "configuration"
-   },
-   "predicate": "has_calibration",
-   "provenance": {
-    "config_hash": "sha256:9ae923e6d8e32043593ff994b5ecf1f0c6549c320703ce40b0283fb2609a615a",
-    "consolidator_id": "memory.supersede",
-    "consolidator_version": "2",
-    "evidence": [
-     {
-      "locator": [
-       {
-        "kind": "json_pointer",
-        "pointer": "/extrinsics"
-       }
-      ],
-      "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
-     },
-     {
-      "locator": [
-       {
-        "kind": "json_pointer",
-        "pointer": "/extrinsics"
-       }
-      ],
-      "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
-     }
-    ],
-    "records": [
-     "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
-     "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
-    ]
-   },
-   "recorded_at": 2,
-   "subject": {
-    "kind": "node",
-    "node_id": "asset-tag:WCAM-7",
-    "node_type": "sensor"
-   },
-   "superseded_at": "open",
-   "supersedes": [
-    "claim:sha256:4d63c689862fa0239af3a82983859f3365cc2054196fc6f8a388430d2beccde4"
-   ],
-   "valid": {
-    "end": {
-     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-     "ticks": 1776124800000000000
-    },
-    "start": {
-     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-     "ticks": 1772323200000000000
-    }
-   }
-  },
-  {
-   "assertion_kind": "stated",
-   "confidence": {
-    "knowledge": "not_applicable"
-   },
-   "id": "claim:sha256:afdb48a78b80f876637d72cb80772072b9d9c19ace83d7e887a5b925e20a53d3",
+   "id": "claim:sha256:6998a0fd439d1226a2f0d10d2467af3a9adbbcf6296bb089055731a2abfff15e",
    "object": {
     "kind": "node",
     "node_id": "zone-code:DOCK-1",
@@ -1315,7 +1144,7 @@
    },
    "predicate": "located_at",
    "provenance": {
-    "config_hash": "sha256:a08c14ef81fab08a7160c7332169b1d282c3c9ab262c2c9316588fc9aeb08a48",
+    "config_hash": "sha256:34d9015566f7fe273581bd3fec965f23b1c755156681fa7092e32670c7c6a97f",
     "consolidator_id": "memory.supersede",
     "consolidator_version": "2",
     "evidence": [
@@ -1366,7 +1195,7 @@
    "confidence": {
     "knowledge": "not_applicable"
    },
-   "id": "claim:sha256:b1deaf1f7db69b5ee833e4adefcb2c9c857941af12cde46a627986696a29ba98",
+   "id": "claim:sha256:8f9dc4b9d22ef30cce28ee2c21923972a642832c2573dea070a9544624ed91a8",
    "object": {
     "kind": "node",
     "node_id": "zone-code:DOCK-1",
@@ -1374,7 +1203,7 @@
    },
    "predicate": "located_at",
    "provenance": {
-    "config_hash": "sha256:3585520820c554fa07b6bb494123be96345121acba03fc689930ea6f3402347c",
+    "config_hash": "sha256:232844ebdabeb029bb1d482d29879cd3497cfee01043749531b3b1ccd9e98e1e",
     "consolidator_id": "memory.supersede",
     "consolidator_version": "2",
     "evidence": [
@@ -1425,6 +1254,51 @@
    "confidence": {
     "knowledge": "not_applicable"
    },
+   "id": "claim:sha256:a0c4571e70d525d4a7e7610599a93f069ac3f275eebd9d0137c8d3d4275119c2",
+   "object": {
+    "kind": "node",
+    "node_id": "site-code:DEPOT-5",
+    "node_type": "site"
+   },
+   "predicate": "located_at",
+   "provenance": {
+    "config_hash": "sha256:853547ce298710008f74f09ef14dc13f0bcb2274147eb914ba00df3c59ba99f9",
+    "consolidator_id": "fixture.telemetry",
+    "consolidator_version": "1",
+    "evidence": [
+     {
+      "locator": [
+       {
+        "kind": "row",
+        "row": 3
+       }
+      ],
+      "source": "sha256:a2147dd0b6406bb4305114bbdd28e24ec9019dc530130bfd545a28c12bb6dc0e"
+     }
+    ],
+    "records": []
+   },
+   "recorded_at": 2,
+   "subject": {
+    "kind": "node",
+    "node_id": "vin:av-2",
+    "node_type": "machine"
+   },
+   "superseded_at": "open",
+   "supersedes": [],
+   "valid": {
+    "end": "open",
+    "start": {
+     "domain_id": "rec:sha256:0bfb474d272de1fe8dae60451cee98be39c654f793efff7527f85b1758d41582",
+     "ticks": 1000
+    }
+   }
+  },
+  {
+   "assertion_kind": "observed",
+   "confidence": {
+    "knowledge": "not_applicable"
+   },
    "id": "claim:sha256:d87888736ecfc158aa4491287a8f5f4d248a070bd8aa231a224ba0e17d57e53c",
    "object": {
     "kind": "node",
@@ -1461,6 +1335,143 @@
    ],
    "valid": {
     "end": "open",
+    "start": {
+     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+     "ticks": 1772323200000000000
+    }
+   }
+  },
+  {
+   "assertion_kind": "observed",
+   "confidence": {
+    "knowledge": "not_applicable"
+   },
+   "id": "claim:sha256:e11ffb96ef1dea4cff67f465407aeed308e33f44075830ae59a2e3864950a56e",
+   "object": {
+    "datatype": "delta",
+    "kind": "literal",
+    "unit": {
+     "knowledge": "known",
+     "value": "mm"
+    },
+    "value": {
+     "earlier": "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+     "later": "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796",
+     "name": "translation",
+     "quantity": "parameter",
+     "representation": "values",
+     "values": [
+      0.0,
+      -0.1,
+      4.3
+     ]
+    }
+   },
+   "predicate": "drift",
+   "provenance": {
+    "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
+    "consolidator_id": "fixture.calibration",
+    "consolidator_version": "1",
+    "evidence": [
+     {
+      "locator": [
+       {
+        "kind": "json_pointer",
+        "pointer": "/translation"
+       }
+      ],
+      "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+     },
+     {
+      "locator": [
+       {
+        "kind": "json_pointer",
+        "pointer": "/translation"
+       }
+      ],
+      "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+     }
+    ],
+    "records": [
+     "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+     "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+    ]
+   },
+   "recorded_at": 2,
+   "subject": {
+    "kind": "node",
+    "node_id": "asset-tag:WCAM-7",
+    "node_type": "sensor"
+   },
+   "superseded_at": "open",
+   "supersedes": [],
+   "valid": {
+    "end": {
+     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+     "ticks": 1776124800000000000
+    },
+    "start": {
+     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+     "ticks": 1772323200000000000
+    }
+   }
+  },
+  {
+   "assertion_kind": "stated",
+   "confidence": {
+    "knowledge": "not_applicable"
+   },
+   "id": "claim:sha256:e43ac6d32b1464cfa3edab842cb5737fc3ebe31bdb571c36a7ee846917c18289",
+   "object": {
+    "kind": "node",
+    "node_id": "cfg:wcam-7-cal-2026-03",
+    "node_type": "configuration"
+   },
+   "predicate": "has_calibration",
+   "provenance": {
+    "config_hash": "sha256:e7fc86604e6ff84dc40f7acae3f2abb84d54736cc692e2e203ca24be708967f4",
+    "consolidator_id": "memory.supersede",
+    "consolidator_version": "2",
+    "evidence": [
+     {
+      "locator": [
+       {
+        "kind": "json_pointer",
+        "pointer": "/extrinsics"
+       }
+      ],
+      "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+     },
+     {
+      "locator": [
+       {
+        "kind": "json_pointer",
+        "pointer": "/extrinsics"
+       }
+      ],
+      "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+     }
+    ],
+    "records": [
+     "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+     "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+    ]
+   },
+   "recorded_at": 2,
+   "subject": {
+    "kind": "node",
+    "node_id": "asset-tag:WCAM-7",
+    "node_type": "sensor"
+   },
+   "superseded_at": "open",
+   "supersedes": [
+    "claim:sha256:4d63c689862fa0239af3a82983859f3365cc2054196fc6f8a388430d2beccde4"
+   ],
+   "valid": {
+    "end": {
+     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+     "ticks": 1776124800000000000
+    },
     "start": {
      "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
      "ticks": 1772323200000000000
@@ -1519,65 +1530,6 @@
    "confidence": {
     "knowledge": "not_applicable"
    },
-   "id": "claim:sha256:0b61149294d63177f50f29690cc8adb3e2cb925f2adbde682db21e7ebd45c120",
-   "object": {
-    "kind": "node",
-    "node_id": "zone-code:AISLE-9",
-    "node_type": "zone"
-   },
-   "predicate": "located_at",
-   "provenance": {
-    "config_hash": "sha256:56b5af1034a9cf3a1374e488fb5e181ffea3df8ebdd9ab77c368af91e4be4a8e",
-    "consolidator_id": "memory.supersede",
-    "consolidator_version": "2",
-    "evidence": [
-     {
-      "locator": [
-       {
-        "kind": "row",
-        "row": 4
-       }
-      ],
-      "source": "sha256:e5b495d29a4293582ffdb1427d2f9879d47ce9472dff7ae25bc27c148f5464e5"
-     },
-     {
-      "locator": [
-       {
-        "kind": "row",
-        "row": 5
-       }
-      ],
-      "source": "sha256:e5b495d29a4293582ffdb1427d2f9879d47ce9472dff7ae25bc27c148f5464e5"
-     }
-    ],
-    "records": []
-   },
-   "recorded_at": 3,
-   "subject": {
-    "kind": "node",
-    "node_id": "asset-tag:HUM-1",
-    "node_type": "machine"
-   },
-   "superseded_at": "open",
-   "supersedes": [
-    "claim:sha256:fc801343da4e8bf1fc8b68dae8b9d58bfdfbe36fd0479b04a32723c28e9d0cfd"
-   ],
-   "valid": {
-    "end": {
-     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-     "ticks": 1772323200000000000
-    },
-    "start": {
-     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
-     "ticks": 1769904000000000000
-    }
-   }
-  },
-  {
-   "assertion_kind": "stated",
-   "confidence": {
-    "knowledge": "not_applicable"
-   },
    "id": "claim:sha256:31eea816e81c1745a378e2810f5af873da08351bd39b6deec1347f0a604b2dcc",
    "object": {
     "kind": "node",
@@ -1625,7 +1577,7 @@
    "confidence": {
     "knowledge": "not_applicable"
    },
-   "id": "claim:sha256:9c567708ca0510711660122e0f3f71bf2d647afda10aae95c26e5e9285140e51",
+   "id": "claim:sha256:60667545362b9b41331435cd39ed53801f516168d5d1cf6638ae33c88e10f51e",
    "object": {
     "kind": "node",
     "node_id": "zone-code:DOCK-1",
@@ -1633,7 +1585,7 @@
    },
    "predicate": "located_at",
    "provenance": {
-    "config_hash": "sha256:3321ad84097a4483cb3aad749fa179c0683f373b2df8eed272c78daf92727c9c",
+    "config_hash": "sha256:2cbaae13c8bccbc643a3c168cc015dc8a1a50c49f1d2ef13baffa6821bec3cd9",
     "consolidator_id": "memory.supersede",
     "consolidator_version": "2",
     "evidence": [
@@ -1776,6 +1728,65 @@
    "confidence": {
     "knowledge": "not_applicable"
    },
+   "id": "claim:sha256:cf3cb921318b86792b2086ab094f7e86de9b3bda164d2c0b33ccd237009152ca",
+   "object": {
+    "kind": "node",
+    "node_id": "zone-code:AISLE-9",
+    "node_type": "zone"
+   },
+   "predicate": "located_at",
+   "provenance": {
+    "config_hash": "sha256:919bb80e5e5f1611e5529eca8e4141e11212720dbf6912c722700187245454fd",
+    "consolidator_id": "memory.supersede",
+    "consolidator_version": "2",
+    "evidence": [
+     {
+      "locator": [
+       {
+        "kind": "row",
+        "row": 4
+       }
+      ],
+      "source": "sha256:e5b495d29a4293582ffdb1427d2f9879d47ce9472dff7ae25bc27c148f5464e5"
+     },
+     {
+      "locator": [
+       {
+        "kind": "row",
+        "row": 5
+       }
+      ],
+      "source": "sha256:e5b495d29a4293582ffdb1427d2f9879d47ce9472dff7ae25bc27c148f5464e5"
+     }
+    ],
+    "records": []
+   },
+   "recorded_at": 3,
+   "subject": {
+    "kind": "node",
+    "node_id": "asset-tag:HUM-1",
+    "node_type": "machine"
+   },
+   "superseded_at": "open",
+   "supersedes": [
+    "claim:sha256:fc801343da4e8bf1fc8b68dae8b9d58bfdfbe36fd0479b04a32723c28e9d0cfd"
+   ],
+   "valid": {
+    "end": {
+     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+     "ticks": 1772323200000000000
+    },
+    "start": {
+     "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+     "ticks": 1769904000000000000
+    }
+   }
+  },
+  {
+   "assertion_kind": "stated",
+   "confidence": {
+    "knowledge": "not_applicable"
+   },
    "id": "claim:sha256:f6746940655a3ae48745c07c840e7083c06c2eefdad361e4aee323ccd6e79e12",
    "object": {
     "kind": "node",
@@ -1878,12 +1889,12 @@
   {
    "claim": "claim:sha256:6988b49274637eaf1705002fecdb155a2c6af2559e07e7a6878997696366853e",
    "code": "overridden_on_arrival",
-   "id": "finding:sha256:8d93ef76e872f533b90032f9bc814f7c6af42c9d91f7c189530faf2660aaaa53",
+   "id": "finding:sha256:0687f444a78aeabb8d1a8d4271236b32cb132d9fd889a45955b6126512c48cf9",
    "others": [
     "claim:sha256:1164fd613239b8ed42bbf9ce38561f5d0899c0e500daac90e3a32bb6fbdecf0d"
    ],
    "provenance": {
-    "config_hash": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
+    "config_hash": "sha256:4fa4e0a00f170dd43a738763b3ba34a20defee91757d71e7c4b793b57a2eba01",
     "resolver_id": "memory.supersede",
     "resolver_version": "2"
    },
@@ -1893,12 +1904,12 @@
   {
    "claim": "claim:sha256:a0c4571e70d525d4a7e7610599a93f069ac3f275eebd9d0137c8d3d4275119c2",
    "code": "clock_mismatch",
-   "id": "finding:sha256:d3785b7e94a2944b190b6015806dc868a88b71b9d04efe5230c77b1ab0ce7c7d",
+   "id": "finding:sha256:7584fdd2e6419b9a40979c3b192f4a41d51a808c94c59c6bef3b35014de27290",
    "others": [
     "claim:sha256:42d0b79f0a426a54dd250725febee928a822a4e8bfbf5226d95f0144954c18fd"
    ],
    "provenance": {
-    "config_hash": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
+    "config_hash": "sha256:4fa4e0a00f170dd43a738763b3ba34a20defee91757d71e7c4b793b57a2eba01",
     "resolver_id": "memory.supersede",
     "resolver_version": "2"
    },
@@ -1906,8 +1917,9 @@
    "superseded_at": "open"
   }
  ],
- "generation": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
- "graph_schema_version": 1,
+ "generation": "sha256:4fa4e0a00f170dd43a738763b3ba34a20defee91757d71e7c4b793b57a2eba01",
+ "graph_schema": "2.0.0",
+ "graph_schema_version": 2,
  "head": 4,
  "kind": "memory.graph",
  "resolver_config": {
@@ -2818,7 +2830,7 @@
     },
     {
      "cardinality": "many",
-     "description": "took over from the object on a machine's chain; valid while the subject is in force",
+     "description": "a source states the subject replaces the object as configurations, wherever they appear; never read from one machine's chain, whose changes are its has_configuration spans",
      "domain": [
       "configuration"
      ],
@@ -2842,6 +2854,6 @@
     }
    ]
   },
-  "vocabulary_version": 10
+  "vocabulary_version": 11
  }
 }

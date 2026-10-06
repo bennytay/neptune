@@ -6,12 +6,24 @@ import re
 from fractions import Fraction
 
 import pytest
+from neptune_memory.schema.claim import (
+    DeclaredTransform,
+    Delta,
+    DeltaAdjustment,
+    DeltaQuantity,
+    TypedLiteral,
+    ValueType,
+)
 from neptune_memory.schema.codec import GraphDocument
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
 from neptune_memory.schema.supersede import Resolution, resolver_config
 
 import explain_fixtures_context as X
+from neptune.model.frames import FrameRef, TransformDirection
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotApplicable
+from neptune.model.units import Unit, unit_from_json
+from neptune_context import pinned
 from neptune_context.engine import LocalEngine
 from neptune_context.explain import IndexedReader, render_markdown
 from neptune_context.explain.links import claim_link, evidence_link
@@ -21,6 +33,7 @@ from neptune_context.packets.model import ClaimItem
 from neptune_context.query import Budget, CivilTime, Instant, Query, Subject, Why
 from neptune_context.query.model import Diff
 from neptune_context.sdk import Client
+from sdk_testing_context import golden_packet
 
 HOSTILE = "ok`` \n# Pwned\n[click](https://evil.example) <script>x</script>\u2028[E1] |"
 EVENT = NodeRef(NodeType.EVENT, f"record:{X.rec('incident:hostile')}")
@@ -143,3 +156,94 @@ def test_bare_uris_and_ids_in_prose_are_code_never_live_links() -> None:
     assert "`https://evil.example/x`" in line and "`neptune://claim/c`" in line
     assert "`claim:sha256:ab`\\." in line
     assert "](" not in line
+
+
+# --- Calibration deltas and older graphs (ADR 0012) -------------------------------------------
+
+
+def delta_engine(names: list[str]) -> tuple[LocalEngine, NodeRef]:
+    """A sensor with one parameter delta per (hostile) declared name, in millimetres, and a
+    quaternion delta, whose form has no unit."""
+    sensor = NodeRef(NodeType.SENSOR, "asset-tag:CAM-`5")
+    graph = X.rec("frame graph")
+    quaternion = Delta(
+        X.CAL_MARCH_REC,
+        X.CAL_APRIL_REC,
+        DeltaQuantity.ROTATION,
+        "quaternion",
+        (0.0, 0.0, 0.001, -0.0005),
+        edge=(FrameRef("base_link", graph), FrameRef("camera", graph)),
+        transform=DeclaredTransform("base_link", "camera", TransformDirection.PARENT_TO_CHILD),
+        adjustment=DeltaAdjustment.NONE,
+    )
+    values = [
+        Delta(X.CAL_MARCH_REC, X.CAL_APRIL_REC, DeltaQuantity.PARAMETER, "values", (-0.1,), name=n)
+        for n in names
+    ]
+    mm: Knowledge[Unit] = Known(unit_from_json("mm"))
+    none: Knowledge[Unit] = NotApplicable()
+    pairs = [(quaternion, none), *((d, mm) for d in values)]
+    claims = tuple(
+        X.claim(
+            sensor,
+            "drift",
+            TypedLiteral(ValueType.DELTA, delta, unit),
+            X.MAR_1 + n,
+            evidence=(X.ref(X.CAL_MARCH, pointer="/k"), X.ref(X.CAL_APRIL, pointer="/k")),
+            records=(X.CAL_MARCH_REC, X.CAL_APRIL_REC),
+            kind=AssertionKind.OBSERVED,
+        )
+        for n, (delta, unit) in enumerate(pairs)
+    )
+    document = GraphDocument(
+        Resolution(tuple(sorted(claims, key=lambda c: c.id)), ()),
+        resolver_config(CORE_PREDICATES, X.PRIORITIES),
+        X.HEAD,
+    )
+    return LocalEngine(IndexedReader(document), X.Catalog()), sensor
+
+
+def test_a_delta_renders_as_declared_json_and_unit_inside_code_spans() -> None:
+    names = [HOSTILE, "translation", "x`` y", "a\nb", "| [E9] |"]
+    engine, sensor = delta_engine(names)
+    query = Query(
+        include_inferred=False,
+        budget=Budget(items=20),
+        subjects=frozenset({Subject("sensor", sensor.node_id)}),
+    )
+    packet = Client(engine).query(query)
+    drifts = [i for i in packet.items if isinstance(i, ClaimItem)]
+    assert len(drifts) == len(names) + 1
+    rendered = render_markdown(packet)
+    lines = [ln for ln in rendered.splitlines() if " *drift* " in ln]
+    assert len(lines) == len(drifts)  # no declared name breaks a line
+    for line in lines:
+        assert '"quantity":' in line and '"earlier":"rec:sha256:' in line
+        for word in ("large", "small", "significant", "exceeds", "within"):
+            assert word not in line.split()
+    (rotation,) = [ln for ln in lines if '"representation":"quaternion"' in ln]
+    assert '`{"knowledge":"not_applicable"}`' in rotation
+    assert sum('`{"knowledge":"known","value":"mm"}`' in ln for ln in lines) == len(names)
+    live = re.sub(r"(`+).*?\1", "", rendered)
+    assert "evil.example" not in live and "<script>" not in live and "[E9]" not in live
+    links = re.findall(r"\]\(([^)]*)\)", live)
+    assert all(link.startswith("neptune://") for link in links)
+
+
+def test_an_older_graph_is_stated_once_in_the_header() -> None:
+    packet = golden_packet("q01")
+    assert packet.memory.graph_schema_version == 1
+    rendered = render_markdown(packet)
+    notice = pinned.older_graph_notice(1)
+    assert notice is not None and f"- {notice.removesuffix('.')}" in rendered.splitlines()
+    assert rendered.count("Graph read: graph-schema 1.x") == 1
+    current = Client(hostile_engine()).query(
+        Query(
+            include_inferred=False,
+            budget=Budget(items=10),
+            subjects=frozenset({Subject("event", EVENT.node_id)}),
+        )
+    )
+    assert current.memory.graph_schema_version == 2
+    assert pinned.older_graph_notice(2) is None
+    assert "Graph read:" not in render_markdown(current)

@@ -14,7 +14,12 @@ structure around claims and the explicit states that say why there are none:
   section's ``same_event`` claims join, ADR 0014); every one is shown, none is chosen.
 - A section with no entries is ``not_covered`` with its reason (what was looked for, about which
   nodes, in which snapshot, and what was left out); a section the template does not hold for the
-  subject's type is ``not_applicable``.
+  subject's type is ``not_applicable``. A section that does not read the snapshot's graph-schema
+  major is ``not_covered`` with a ``section_not_covered`` reason, and the pack lists it as a
+  finding (ADR 0018 §5): never an empty section that reads as "nothing happened".
+- A ``changes`` section reads each node's configuration changes from its own spans (graph-schema
+  2.x rule 12, ADR 0018 §3): a change is two ``known`` spans of different objects meeting at one
+  instant; a boundary an ``ambiguous`` or ``unknown`` span meets is shown in that state.
 
 Claims on a clock other than the pack interval's are never compared with it: they are listed
 under ``other_clocks`` (in a timeline, "not placed"), or counted as ``other_clock_restated`` when a
@@ -35,7 +40,7 @@ from neptune.identity.hashing import content_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune_deploy.packs.appendix import Appendix, build_appendix
 from neptune_deploy.packs.errors import PackError
-from neptune_deploy.packs.snapshot import Claim, Interval, Node, Snapshot
+from neptune_deploy.packs.snapshot import Claim, Interval, Node, Snapshot, Stamp
 from neptune_deploy.packs.spec import PackSpec
 from neptune_deploy.packs.templates import Hop, SectionTemplate, Template, TemplateRegistry
 
@@ -43,6 +48,7 @@ PACK_SCHEMA: Final = "neptune-deploy.evidence-pack/1"
 COMPILER_ID: Final = "neptune-deploy.packs"
 COMPILER_VERSION: Final = "3"
 PACK_PREFIX: Final = "pack:"
+SECTION_NOT_COVERED: Final = "section_not_covered"
 _OPEN_END: Final = 2**64  # past every int64 tick: an open end in the overlap sweep
 
 
@@ -95,6 +101,30 @@ class Difference:
 
 
 @dataclass(frozen=True)
+class Change:
+    """A boundary on one node's spans: ``before`` end and ``after`` start at ``at``, one instant on
+    one clock. Known when both are decided spans of different objects (a change, rule 12);
+    ambiguous or unknown when a candidate, inferred or unknown span meets it."""
+
+    at: Stamp
+    before: tuple[str, ...]  # claim ids of the spans ending at ``at``
+    after: tuple[str, ...]  # claim ids of the spans starting at ``at``
+    # An ambiguous or unknown boundary at an instant where a decided change is also read: another
+    # reading also starts or ends here, beside that change (ADR 0018 §3).
+    beside_change: bool = False
+
+    def to_json(self) -> JsonObject:
+        out: dict[str, JsonValue] = {
+            "after": list(self.after),
+            "at": self.at.to_json(),
+            "before": list(self.before),
+        }
+        if self.beside_change:
+            out["beside_change"] = True
+        return out
+
+
+@dataclass(frozen=True)
 class Entry:
     node: Node
     valid: Interval
@@ -106,14 +136,19 @@ class Entry:
     identity: tuple[Node, ...] = ()
     identity_claims: tuple[str, ...] = ()
     differences: tuple[Difference, ...] = ()
+    # ``changes`` sections only: the boundary the entry is (its ``valid`` is the instant, internal).
+    change: "Change | None" = None
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {
             "knowledge": self.knowledge,
             "node": self.node.to_json(),
             "statements": [s.to_json() for s in self.statements],
-            "valid": self.valid.to_json(),
         }
+        if self.change is not None:
+            out["change"] = self.change.to_json()
+        else:
+            out["valid"] = self.valid.to_json()
         if self.placement_records is not None:
             out["placement_records"] = list(self.placement_records)
         if self.identity:
@@ -208,11 +243,13 @@ class EvidencePack:
     def to_json(self) -> JsonObject:
         snapshot: dict[str, JsonValue] = {
             "generation": self.snapshot.generation,
-            "graph_schema_version": 1,
+            "graph_schema_version": self.snapshot.major,
             "head": self.snapshot.head,
             "id": self.snapshot.id,
             "vocabulary_version": self.snapshot.vocabulary_version,
         }
+        if self.snapshot.release is not None:  # a 2.x snapshot names its release (ADR 0018 §2)
+            snapshot["graph_schema"] = self.snapshot.release
         out: dict[str, JsonValue] = {
             "appendix": self.appendix.to_json(),
             "claims": [claim.raw for claim in self.claims],
@@ -236,9 +273,17 @@ class EvidencePack:
                 "version": self.template.version,
             },
         }
+        findings: list[JsonValue] = []
         if self.snapshot.unread:  # only a snapshot of a newer minor has any (ADR 0015)
             snapshot["declared_schema_version"] = str(self.snapshot.declared_schema_version)
-            out["findings"] = [u.to_json() for u in self.snapshot.unread]
+            findings.extend(u.to_json() for u in self.snapshot.unread)
+        findings.extend(
+            {**s.reason, "section": s.template.id}
+            for s in self.sections
+            if s.reason is not None and s.reason.get("code") == SECTION_NOT_COVERED
+        )
+        if findings:
+            out["findings"] = findings
         return out
 
 
@@ -323,9 +368,12 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
                 "subject_type": spec.subject.node_type,
             },
         )
+    if snapshot.major not in template.graph_schema_majors:
+        return _unread_major(template, snapshot)
     include = spec.inference == "include"
     excluded: set[str] = set()
     scope = _scope(template.about, spec.subject, snapshot, include, excluded)
+    selected: list[Statement] = []
     inside: list[Statement] = []
     beyond: list[Statement] = []  # on the pack clock, outside the interval
     other: list[Statement] = []
@@ -338,6 +386,9 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
                 excluded.add(claim.id)
                 continue
             statement = Statement(claim, role)
+            selected.append(statement)
+            if template.kind == "changes":
+                continue  # placed by its boundaries, not its span
             if claim.valid.overlaps(spec.interval):
                 inside.append(statement)
             elif claim.valid.clock == spec.clock:
@@ -345,6 +396,7 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
             else:
                 other.append(statement)
     restated = 0
+    boundaries_beyond = 0
     identity_claims: set[str] = set()
     if template.kind == "timeline":
         identity = _identities(scope, snapshot, template.same_event, include, excluded)
@@ -365,12 +417,16 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
     elif template.kind == "states":
         entries = _grouped(inside, snapshot.cardinality)
         other_entries = _grouped(other, snapshot.cardinality)
+    elif template.kind == "changes":
+        entries, other_entries, boundaries_beyond = _changes(selected, spec)
     else:
         entries = _each(inside)
         other_entries = _each(other)
     scope_nodes = tuple(ScopeNode(node, tuple(sorted(scope[node]))) for node in sorted(scope))
     shown = frozenset(i for e in (*entries, *other_entries) for i in e.claim_ids)
     outside = sum(1 for s in beyond if s.claim.id not in shown)
+    if template.kind == "changes":
+        outside = boundaries_beyond
     cited = shown | identity_claims | {i for s in scope_nodes for i in s.via}
     findings = tuple(
         FindingNote(f.id, f.code, f.claim, f.others)
@@ -391,6 +447,7 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
             "outside_interval": outside,
             "predicates": sorted(template.predicates),
             "snapshot": snapshot.id,
+            **({"spans_read": len(selected)} if template.kind == "changes" else {}),
         }
     return Section(
         template=template,
@@ -404,6 +461,41 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
         reason=reason,
         cited=cited,
         other_clock_restated=restated,
+    )
+
+
+def _unread_major(template: SectionTemplate, snapshot: Snapshot) -> Section:
+    """A section that does not read the snapshot's major (ADR 0018 §5): not covered, saying why;
+    nothing is selected, so no claim of it is cited."""
+    majors = ", ".join(map(str, template.graph_schema_majors))
+    version = snapshot.release or str(snapshot.major)
+    if template.meaning_changed:
+        why = (
+            f"the section selects {', '.join(template.meaning_changed)}, whose meaning"
+            f" graph-schema {snapshot.major} changed; it reads graph-schema {majors} only and the"
+            f" snapshot is graph-schema {version}"
+        )
+    else:
+        why = (
+            f"the template declares this section reads graph-schema {majors} only; the snapshot"
+            f" is graph-schema {version}"
+        )
+    return Section(
+        template=template,
+        knowledge="not_covered",
+        scope=(),
+        entries=(),
+        other_clocks=(),
+        findings=(),
+        excluded_inferred=(),
+        outside_interval=0,
+        reason={
+            "code": SECTION_NOT_COVERED,
+            "graph_schema_major": snapshot.major,
+            "meaning_changed": list(template.meaning_changed),
+            "reason": why,
+            "section_reads_majors": list(template.graph_schema_majors),
+        },
     )
 
 
@@ -677,3 +769,71 @@ def _timeline(
             )
         )
     return tuple(sorted(entries, key=_entry_key))
+
+
+def _changes(
+    statements: Sequence[Statement], spec: PackSpec
+) -> tuple[tuple[Entry, ...], tuple[Entry, ...], int]:
+    """``changes`` sections: each node's boundaries, as graph-schema 2.x rule 12 reads them.
+
+    A boundary is an instant (one ``Stamp``, so one clock) where spans of one node end and others
+    start. A span is decided when its role is ``known`` and it is not inferred: an inferred span
+    never forms a change, even when the spec includes inference. Each pair of decided spans of
+    different objects there is a change (``known``): Memory's ``transitions`` over the claims the
+    section selects, with no consolidator filter and without inferred claims. A boundary that an
+    ``unknown``, ``ambiguous`` or inferred span meets is one more entry in that state (unknown
+    first), holding every span there. With no change beside it, no change is read across it;
+    beside a change (``beside_change``) it says another reading also starts or ends there. Spans
+    that do not meet (a gap, two clocks) are no boundary. Changes are never read from
+    ``succeeds``. Returns the boundaries in the pack interval, those on other clocks, and how many
+    on the pack clock fall outside the interval."""
+    ending: dict[tuple[Node, Stamp], list[Statement]] = defaultdict(list)
+    starting: dict[tuple[Node, Stamp], list[Statement]] = defaultdict(list)
+    for s in statements:
+        starting[(s.claim.subject, s.claim.valid.start)].append(s)
+        if isinstance(s.claim.valid.end, Stamp):
+            ending[(s.claim.subject, s.claim.valid.end)].append(s)
+
+    def role(s: Statement) -> str:
+        return "ambiguous" if s.role == "known" and s.claim.inferred else s.role
+
+    found: list[Entry] = []
+    for boundary in sorted(ending.keys() & starting.keys()):
+        node, at = boundary
+        before, after = _order(ending[boundary]), _order(starting[boundary])
+        changes = 0
+        for b in before:
+            for a in after:
+                if role(b) == role(a) == "known" and b.claim.object_key != a.claim.object_key:
+                    change = Change(at, (b.claim.id,), (a.claim.id,))
+                    found.append(Entry(node, Interval(at, at), "known", (b, a), change=change))
+                    changes += 1
+        roles = {role(s) for s in (*before, *after)}
+        if roles != {"known"}:
+            change = Change(
+                at,
+                tuple(s.claim.id for s in before),
+                tuple(s.claim.id for s in after),
+                beside_change=changes > 0,
+            )
+            knowledge = "unknown" if "unknown" in roles else "ambiguous"
+            found.append(Entry(node, Interval(at, at), knowledge, (*before, *after), change=change))
+    inside: list[Entry] = []
+    other: list[Entry] = []
+    beyond = 0
+    end = spec.interval.end
+    for entry in found:
+        at = entry.valid.start
+        if at.domain != spec.clock:
+            other.append(entry)
+        elif at.ticks >= spec.interval.start.ticks and (
+            isinstance(end, str) or at.ticks < end.ticks
+        ):
+            inside.append(entry)
+        else:
+            beyond += 1
+
+    def order(e: Entry) -> tuple[str, int, Node, str, tuple[str, ...]]:
+        return (e.valid.start.domain, e.valid.start.ticks, e.node, e.knowledge, e.claim_ids)
+
+    return tuple(sorted(inside, key=order)), tuple(sorted(other, key=order)), beyond

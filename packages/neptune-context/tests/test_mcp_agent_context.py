@@ -3,16 +3,15 @@
 The transcript fixture (``golden/agent/transcript-arm-cell.json``) is an agent asking "why did the
 arm-cell incident happen, what changed" over the two-site corpus snapshot: it lists declared
 identities, finds names in the question, drafts a query with ``neptune_plan`` (a replayed model),
-runs it with and without inferences, follows with ``neptune_why`` and ``neptune_diff`` and opens a
-source. The same calls must give the same bytes in process, over a real stdio subprocess, and on
-every run.
+runs it with and without inferences, follows with ``neptune_why`` and ``neptune_diff`` (cited
+trails, ADR 0011) and opens a source. The same calls must give the same bytes in process, over a
+real stdio subprocess, and on every run.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import sys
 from datetime import timedelta
@@ -44,6 +43,9 @@ from sdk_testing_context import golden_stub
 PACKAGE = Path(__file__).resolve().parents[1]
 SKILL = PACKAGE / "claude" / "skills" / "neptune" / "SKILL.md"
 SAMPLE = PACKAGE / "claude" / "mcp.sample.json"
+
+
+WHY_DIFF = ("neptune_why", "neptune_diff")
 
 
 def golden_transcript() -> dict[str, Any]:
@@ -81,6 +83,39 @@ def test_the_transcript_fixture_is_current() -> None:
     assert document["steps"] == golden["steps"]
 
 
+def test_why_and_diff_over_the_demo_answer_with_cited_trails() -> None:
+    steps = {s["tool"]: s for s in golden_transcript()["steps"] if s["tool"] in WHY_DIFF}
+    assert set(steps) == set(WHY_DIFF)
+    changed = steps["neptune_why"]["arguments"]["claim_id"]
+    why = steps["neptune_why"]["text"]
+    parsed = parse_answer(why)
+    (root,) = [ln for ln in parsed.trail_lines if ln.trail == "why"]
+    assert root.label == "Root claim" and root.claim_id == changed and root.evidence
+    assert '"servicenow.u_after:TCP z=145.5 mm"' in why and "Why Memory holds " + changed in why
+    diff = steps["neptune_diff"]["text"]
+    moved = [ln for ln in parse_answer(diff).trail_lines if ln.trail == "diff"]
+    assert [ln.label for ln in moved] == ["Superseded", "Replaced by"]
+    assert all(ln.carried and ln.evidence for ln in moved)
+    assert changed in {ln.claim_id for ln in moved}  # the claim the agent asked "why" about
+    assert 'has_configuration configuration "servicenow.u_after:5.6.0"' in diff
+    assert 'What changed about machine "servicenow.ci:ARM-3A" between tick 1780000000 on' in diff
+
+
+def test_the_agent_asks_about_the_incident_and_gets_its_cited_claims() -> None:
+    # The planner cannot name the incident (a content address is not a declared name) and Memory
+    # states no link from it to the arm, so the agent queries the incident's own node.
+    incident = next(
+        s
+        for s in golden_transcript()["steps"]
+        if s["tool"] == "neptune_query" and F.DEMO_INCIDENT[1] in json.dumps(s["arguments"])
+    )
+    parsed = parse_answer(incident["text"])
+    assert 'has_description text "Operator reached into the pallet gate' in incident["text"]
+    assert 'event_kind text "incident"' in incident["text"]
+    assert parsed.evidence and len(incident["links"]) == len(parsed.evidence)
+    assert "involves" not in incident["text"]
+
+
 def test_the_agent_transcript_replays_in_process() -> None:
     check_against_golden(run_in_process(demo_client(), calls()))
 
@@ -101,13 +136,12 @@ def test_the_planned_query_is_what_the_agent_runs() -> None:
         {"include_inferred": planned.pop("include_inferred"), "query": planned},
     )
     answer = ran["text"]
-    assert 'has_configuration configuration "cfg:cfg-c3-1.5"' in answer
-    assert "not_covered_by_authorisation" in answer
+    assert 'has_configuration configuration "servicenow.u_after:TCP z=145.5 mm"' in answer
+    assert "Graph read:" not in answer  # a graph-schema 2.0.0 document: no older-graph notice
 
 
-def test_the_agent_transcript_replays_over_a_stdio_subprocess(tmp_path: Path) -> None:
-    graph = tmp_path / "graph.json"
-    graph.write_text(json.dumps(F.demo_document().to_json()), encoding="utf-8")
+def test_the_agent_transcript_replays_over_a_stdio_subprocess() -> None:
+    graph = F.DEMO_SNAPSHOT  # served as the .json.gz it is
     params = StdioServerParameters(
         command=sys.executable,
         args=[
@@ -182,10 +216,10 @@ def test_tool_arguments_are_checked() -> None:
 
 def test_entities_filter_matches_by_kind() -> None:
     client = demo_client()
-    text = "ARM-3A and CELL-3"
-    arguments = {"text": text, "kind": "zone", "include_inferred": False}
-    zone_only = _one(client, "neptune_entities", arguments)["text"]
-    assert "zone-code:CELL-3" in zone_only and "asset-tag:ARM-3A" not in zone_only
+    text = "ARM-3A at PLANT-2"
+    arguments = {"text": text, "kind": "site", "include_inferred": False}
+    site_only = _one(client, "neptune_entities", arguments)["text"]
+    assert "manifest:PLANT-2" in site_only and "servicenow.ci:ARM-3A" not in site_only
 
 
 def _nested(depth: int) -> Any:
@@ -255,25 +289,31 @@ def test_the_sample_mcp_json_launches_the_cli_with_a_configurable_graph() -> Non
     config = json.loads(SAMPLE.read_text(encoding="utf-8"))
     server = config["mcpServers"]["neptune"]
     args = server["args"]
-    assert server["command"] == "uv" and "${NEPTUNE_MEMORY_GRAPH}" in args
+    live = "packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz"
+    graph = "${NEPTUNE_MEMORY_GRAPH:-" + live + "}"  # Memory's snapshot unless overridden
+    assert server["command"] == "uv" and graph in args
     cli = args[args.index("neptune_context.mcp") + 1 :]
     parsed = build_parser().parse_args(cli)
-    assert parsed.memory == Path("${NEPTUNE_MEMORY_GRAPH}")
+    assert parsed.memory == Path(graph)  # wiring only: the live file is the smoke test's to read
 
 
-def test_the_export_script_writes_a_graph_the_server_reads(tmp_path: Path) -> None:
-    import subprocess
+def test_the_export_script_checks_a_snapshot_and_copies_it_where_asked(tmp_path: Path) -> None:
+    import importlib.util
 
-    out = tmp_path / "demo.json"
     script = PACKAGE / "scripts" / "export_demo_graph.py"
-    env = {**os.environ, "NEPTUNE_MEMORY_GRAPH": str(out)}
-    done = subprocess.run(
-        [sys.executable, str(script)], env=env, capture_output=True, text=True, check=False
-    )
-    assert done.returncode == 0, done.stderr
-    from neptune_context.engine import read_graph_document
-
-    assert read_graph_document(out).head == F.demo_document().head
+    spec = importlib.util.spec_from_file_location("export_demo_graph", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # The frozen copy stands in for Memory's live file, so a Memory regeneration moves nothing here.
+    assert module.SNAPSHOT.name == "acceptance_corpus.graph.json.gz"
+    out = tmp_path / "demo.json.gz"
+    assert module.main([str(out)], F.DEMO_SNAPSHOT) == 0
+    assert out.read_bytes() == F.DEMO_SNAPSHOT.read_bytes()  # copied as it is, not rewritten
+    assert module.main([], F.DEMO_SNAPSHOT) == 0  # no target: check only
+    bad = tmp_path / "bad.json.gz"
+    bad.write_bytes(b"not gzip")
+    assert module.main([str(tmp_path / "x.json.gz")], bad) == 2  # a snapshot the server refuses
 
 
 def test_an_oversized_question_is_refused_and_never_echoed() -> None:
@@ -293,6 +333,6 @@ def test_entities_needs_the_inference_choice_and_honours_as_of() -> None:
     assert _error(_one(client, "neptune_entities", {}))["code"] == "invalid_argument"
     at_head = _one(client, "neptune_entities", {"include_inferred": False})["text"]
     early = _one(client, "neptune_entities", {"include_inferred": False, "as_of": 0})["text"]
-    assert "asset-tag:ARM-3A" in at_head and "asset-tag:ARM-3A" not in early
+    assert "servicenow.ci:ARM-3A" in at_head and "servicenow.ci:ARM-3A" not in early
     beyond = _one(client, "neptune_entities", {"include_inferred": True, "as_of": 10**6})
     assert _error(beyond)["code"] == "not_found"

@@ -7,7 +7,7 @@ published golden graph (``contracts/graph-schema/v<version>/golden/graph.json``)
     import pytest
     from neptune_memory.contract.suite import CHECKS, load_golden
 
-    GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.8.0/golden/graph.json")
+    GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.9.0/golden/graph.json")
 
     @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
     def test_graph_schema_contract(check):
@@ -31,7 +31,6 @@ from neptune.identity.ids import record_id
 from neptune.model.frames import FrameRef
 from neptune.model.knowledge import Known, NotCovered
 from neptune.model.time import Timestamp
-from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import Claim, ClaimId, is_inferred
 from neptune_memory.schema.codec import GraphDocument, graph_from_json
 from neptune_memory.schema.interval import OPEN, Interval, LedgerTx, Open, ledger_tx
@@ -106,8 +105,8 @@ def check_identity(factory: ReaderFactory, golden: GraphDocument) -> None:
     reader = factory(golden)
     _expect(isinstance(reader, MemoryReader), "the reader does not implement MemoryReader")
     _expect(
-        reader.graph_schema_version == GRAPH_SCHEMA_VERSION,
-        f"graph_schema_version {reader.graph_schema_version} != {GRAPH_SCHEMA_VERSION}",
+        reader.graph_schema_version == golden.graph_schema_version,
+        f"graph_schema_version {reader.graph_schema_version} != {golden.graph_schema_version}",
     )
     _expect(reader.generation == golden.generation, "generation differs from the document's")
     _expect(reader.head == golden.head, f"head {reader.head} != {golden.head}")
@@ -413,7 +412,7 @@ class StubReader:
 
     @property
     def graph_schema_version(self) -> int:
-        return GRAPH_SCHEMA_VERSION
+        return self._document.graph_schema_version
 
     @property
     def generation(self) -> ConfigHash:

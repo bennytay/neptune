@@ -15,6 +15,9 @@ package-schema shape (``identity_link`` since 3, ``assertion`` since 5, ``timest
   names the assertion it withdraws by that assertion's declared ``identifier``.
 - ``timestamp_domain``: read only to place a stated instant on a shared civil clock when the
   domain declares its timescale, epoch and resolution (Memory ADR 0002 §3).
+- ``incident_record`` and ``intervention`` (root ADR 0051): read only for the ids they declare
+  themselves by (``identifiers``), so an assertion that names an event by its declared id reaches
+  the event node ``memory.events`` keyed by the record (ADR 0019 §1).
 
 Two kinds are Ledger stand-ins until Memory reads the catalog API (MVL-85) and the compiler emits
 configuration lineage (MVL-38): ``ledger_thread {id, logical_id, node_type, valid_from, evidence}``
@@ -30,6 +33,7 @@ from neptune.model.alignment import identity_link_from_json
 from neptune.model.assertion import AssertionType, assertion_from_json
 from neptune.model.ids import LogicalId, RecordId, logical_id_from_json, parse_record_id
 from neptune.model.knowledge import Ambiguous, AssertionKind, Known
+from neptune.model.lifecycle import incident_record_from_json, intervention_from_json
 from neptune.model.provenance import EvidenceRef, Provenance, evidence_ref_from_json
 from neptune.model.reference import timestamp_domain_from_json
 from neptune.model.time import Timestamp, timestamp_from_json
@@ -54,6 +58,8 @@ IDENTITY_LINK: Final = "identity_link"
 CONFIGURATION_LINEAGE: Final = "configuration_lineage"
 ASSERTION: Final = "assertion"
 TIMESTAMP_DOMAIN: Final = "timestamp_domain"
+INCIDENT_RECORD: Final = "incident_record"
+INTERVENTION: Final = "intervention"
 
 # What grounds a ``same_as`` (ADR 0003 §1.2): the record kind it rests on.
 Ground = Literal["identity_link", "configuration_lineage", "operator_assertion"]
@@ -298,8 +304,9 @@ class Statement:
     """A person's assertion (root ADR 0062), as far as identity reads it.
 
     ``None`` is a field the record does not state as ``Known``. ``nodes`` are the logical ids of
-    a ``Known`` scope in declared order, each once (record ids in a scope name evidence, not
-    things, so identity does not read them); ``None`` when the scope is not ``Known``.
+    a ``Known`` scope in declared order, each once; ``None`` when the scope is not ``Known``.
+    ``records`` are its record ids, likewise: a record id names evidence, and identity reads one
+    only where it is the record of an event node (ADR 0019 §1).
     ``windows`` holds from ``authored_at``, one per reading: several, and ``timed`` ``False``,
     when ``authored_at`` is ``Ambiguous`` (empty past ``MAX_WINDOWS``). ``identifiers`` and
     ``retracts`` are every id the field may be: one when ``Known``, each candidate when
@@ -316,17 +323,22 @@ class Statement:
     windows: tuple[Window, ...]
     timed: bool
     evidence: tuple[EvidenceRef, ...]
+    records: tuple[RecordId, ...] = ()
 
 
 def assertion(record: Mapping[str, object]) -> Statement:
     """The compiler's ``Assertion``, read by the compiler's strict reader."""
     parsed = _strict(assertion_from_json, record)
     nodes: tuple[LogicalId, ...] | None = None
+    records: list[RecordId] = []
     if isinstance(parsed.scope, Known):
         found: list[LogicalId] = []
         for ref in parsed.scope.value:
-            if isinstance(ref, LogicalId) and declared(ref) not in found:
-                found.append(ref)
+            if isinstance(ref, LogicalId):
+                if declared(ref) not in found:
+                    found.append(ref)
+            elif ref not in records:
+                records.append(ref)
         nodes = tuple(found)
     starts = _readings(parsed.authored_at)
     return Statement(
@@ -342,7 +354,59 @@ def assertion(record: Mapping[str, object]) -> Statement:
         else tuple(Window(start, OPEN, cited) for start, cited in starts),
         timed=not isinstance(parsed.authored_at, Ambiguous),
         evidence=(parsed.provenance.evidence,),
+        records=tuple(records),
     )
+
+
+# --- Event records ------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Declaring:
+    """The ids an event's record declares itself by (its ``identifiers``): ``certain`` the
+    ``Known`` items of a ``Known`` list; ``possible`` every candidate of an ``Ambiguous`` item, or
+    of every reading of an ``Ambiguous`` list. A list not stated declares nothing. ``refused``
+    counts ids that are blank or padded (ADR 0006 §9): they name nothing, and the rest still do."""
+
+    record: RecordId
+    certain: tuple[LogicalId, ...]
+    possible: tuple[LogicalId, ...]
+    refused: int = 0
+
+
+def _declaring(
+    record_id: RecordId, listed: Knowledge[tuple[Knowledge[LogicalId], ...]]
+) -> Declaring:
+    certain: list[LogicalId] = []
+    possible: list[LogicalId] = []
+    refused = 0
+    lists = (
+        [(listed.value, True)]
+        if isinstance(listed, Known)
+        else [(c.value, False) for c in listed.candidates]
+        if isinstance(listed, Ambiguous)
+        else []
+    )
+    for items, decided in lists:
+        for item in items:
+            for value in _values(item):
+                into = certain if decided and isinstance(item, Known) else possible
+                if not is_declared_value(value.value):
+                    refused += 1
+                elif value not in into:
+                    into.append(value)
+    possible = [p for p in possible if p not in certain]
+    return Declaring(record_id, tuple(certain), tuple(possible), refused)
+
+
+def incident_identifiers(record: Mapping[str, object]) -> Declaring:
+    parsed = _strict(incident_record_from_json, record)
+    return _declaring(parsed.id, parsed.identifiers)
+
+
+def intervention_identifiers(record: Mapping[str, object]) -> Declaring:
+    parsed = _strict(intervention_from_json, record)
+    return _declaring(parsed.id, parsed.identifiers)
 
 
 # --- Clocks -------------------------------------------------------------------------------------

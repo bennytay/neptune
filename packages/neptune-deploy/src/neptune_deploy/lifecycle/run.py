@@ -2,19 +2,27 @@
 the records of a new package (ADR 0002 §7, ADR 0003 §6, ADR 0012 §3)."""
 
 from collections.abc import Iterator, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from neptune.store.package import IngestPackage
 from neptune_deploy.lifecycle.documents import map_documents
-from neptune_deploy.lifecycle.mapper import carried, plan_tables
+from neptune_deploy.lifecycle.mapper import carried, plan_tables, tables_of
 from neptune_deploy.lifecycle.mapping import LifecycleMapping, MappingError
 from neptune_deploy.lifecycle.templates import DocumentTemplate
 
+if TYPE_CHECKING:
+    from neptune_deploy.eventlogs.mapping import EventLogMapping
+
 
 def check_declared(
-    mappings: Sequence[LifecycleMapping], templates: Sequence[DocumentTemplate]
+    mappings: Sequence[LifecycleMapping],
+    templates: Sequence[DocumentTemplate],
+    event_logs: Sequence["EventLogMapping"] = (),
 ) -> None:
     """Refuse a run that names a file twice, before anything is written."""
+    log_hashes = [log.sha256 for log in event_logs]
+    if len(set(log_hashes)) != len(log_hashes):
+        raise MappingError("the same event-log mapping file is given twice")
     hashes = [template.sha256 for template in templates]
     if len(set(hashes)) != len(hashes):
         raise MappingError("the same template file is given twice")
@@ -30,27 +38,68 @@ def iter_records(
     base: IngestPackage,
     mappings: Sequence[LifecycleMapping] = (),
     templates: Sequence[DocumentTemplate] = (),
+    event_logs: Sequence["EventLogMapping"] = (),
 ) -> Iterator[Any]:
     """Every record of the mapped package, one at a time: the base's source ledger and the
     transforms its records name, then each template's and each mapping's transform, lifecycle
     records, clocks and findings. A table's rows are mapped as the iterator is read, and none is
-    kept, so the compiler's streaming writer bounds the memory of the whole run."""
-    check_declared(mappings, templates)
+    kept, so the compiler's streaming writer bounds the memory of the whole run.
+
+    Everything that can refuse the run (a file named twice, a zone no table receives) is checked
+    when this is called, before a record is produced or anything is written."""
+    check_declared(mappings, templates, event_logs)
     documents, claimed = map_documents(base, templates)
-    plan = plan_tables(base, mappings, claimed) if mappings else None
+    taken = set(claimed)
+    runs = []
+    if event_logs:
+        from neptune_deploy.eventlogs.mapper import plan_event_logs
+
+        # A log a mapping writes as a typed table is that mapping's: no lifecycle rule reads it
+        # again, as a document's tables are its template's (ADR 0017 §1).
+        tables = [t for t in tables_of(base.records)[0] if t.record.id not in taken]
+        runs = plan_event_logs(base, event_logs, tables)
+        for run in runs:
+            taken |= run.claimed
+    plan = plan_tables(base, mappings, taken) if mappings else None
+    _check_zones_received([*runs, *(plan.mappers if plan is not None else [])])
+    logs = [run for run in runs if run.tables]
     transforms = [r for r in documents if r.kind == "transform_record"]
+    transforms += [run.transform for run in logs]
     if plan is not None:
         transforms += plan.transforms
+    return _records(base, transforms, documents, logs, plan)
+
+
+def _records(
+    base: IngestPackage, transforms: list[Any], documents: list[Any], logs: list[Any], plan: Any
+) -> Iterator[Any]:
     yield from carried(base, transforms)
     yield from documents
+    for run in logs:
+        yield from run.records()
     if plan is not None:
         yield from plan.records()
+
+
+def _check_zones_received(runs: Sequence[Any]) -> None:
+    """Refuse a zone a caller declared for a source none of whose tables that mapping maps: it
+    would enter the transform's config and move its id, yet no clock would receive it (ADR 0017
+    §2). Each run has ``mapping``, ``zone_sources`` (declared path to content id) and ``tables``."""
+    for run in runs:
+        mapped = {table.evidence.source for table in run.tables}
+        unused = sorted(path for path, cid in run.zone_sources.items() if cid not in mapped)
+        if unused:
+            raise MappingError(
+                f"civil_time_zone: {run.mapping.id} maps no table of {unused}; the zone would be"
+                " recorded and applied to nothing"
+            )
 
 
 def map_records(
     base: IngestPackage,
     mappings: Sequence[LifecycleMapping] = (),
     templates: Sequence[DocumentTemplate] = (),
+    event_logs: Sequence["EventLogMapping"] = (),
 ) -> list[Any]:
     """``iter_records`` held as a list, for a package that fits in memory."""
-    return list(iter_records(base, mappings, templates))
+    return list(iter_records(base, mappings, templates, event_logs))

@@ -16,6 +16,7 @@ import pytest
 from memory_event_records import SECOND, incident, intervention, table
 from memory_identity_records import Record, ambiguous, ledger
 from memory_run_records import domain, mapping
+from memory_time_records import estimate
 from neptune.identity import canonical_json
 from neptune.model.alignment import ValidityWindow
 from neptune.model.ids import LogicalId, RecordId
@@ -104,6 +105,16 @@ def test_an_inferred_record_is_never_a_ground() -> None:
     result = consolidate({"p": [CLOCK, record]})
     assert result.claims == ()
     assert codes(result) == ["events.inferred_record"]
+
+
+def test_an_estimated_clock_mapping_line_never_aligns_an_event() -> None:
+    """The compiler's estimated clock fit (a ``derived/clock_mapping`` line) is an INFO
+    ``inferred_record``: no event time or co-occurrence is ever derived through it."""
+    record, _ = incident("x", occurred=at(5))
+    result = consolidate({"p": [CLOCK, record, estimate("fit", "a", "b", anchor=(0, 0))]})
+    assert codes(result) == ["events.inferred_record"]
+    assert result.claims
+    assert all(str(c.assertion_kind) != "inferred" for c in result.claims)
 
 
 def test_one_record_id_with_two_contents_is_used_nowhere() -> None:

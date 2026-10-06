@@ -70,7 +70,8 @@ _DELETE = object()
     ("path", "value", "code", "pointer"),
     [
         (["kind"], "memory.other", "snapshot_malformed", "/kind"),
-        (["graph_schema_version"], 2, "snapshot_unsupported", "/graph_schema_version"),
+        (["graph_schema_version"], 3, "snapshot_unsupported", "/graph_schema_version"),
+        (["graph_schema_version"], 0, "snapshot_unsupported", "/graph_schema_version"),
         (["graph_schema_version"], True, "snapshot_unsupported", "/graph_schema_version"),
         (["graph_schema_version"], 1.0, "snapshot_unsupported", "/graph_schema_version"),
         (["claims", 0, "predicate"], "\ud800", "snapshot_malformed", "/claims/0/predicate"),

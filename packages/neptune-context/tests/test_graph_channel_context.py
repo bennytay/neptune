@@ -15,6 +15,7 @@ from neptune_ledger.api import CatalogFinding, FrameWindow, Resolution, TimeWind
 
 import retrieve_fixtures_context as F
 from neptune.model.knowledge import Known
+from neptune_context import pins
 from neptune_context.answer import answer_problems
 from neptune_context.engine import ENGINE_ID, LocalEngine
 from neptune_context.packets.codec import canonical_bytes, decode
@@ -306,14 +307,12 @@ def test_inferences_are_withheld_by_name_unless_included() -> None:
 
 
 def test_a_value_newer_than_the_pin_is_a_gap_never_an_item() -> None:
-    drift = claim_id("drift", "lidar yaw 0.4 deg")
+    beyond = claim_id(F.BEYOND_PIN, "lidar yaw 0.4 deg")
     packet = ask(q(subjects=frozenset({AMR})))
-    assert drift not in packet.claim_ids
+    assert beyond not in packet.claim_ids
     ((at, refs),) = gaps(packet, GapCode.NOT_COVERED)
-    assert (at, refs) == ("", (drift,))
-    assert "graph-schema 1.6.0" in packet.gaps[0].detail or any(
-        "1.6.0" in g.detail for g in packet.gaps
-    )
+    assert (at, refs) == ("", (beyond,))
+    assert any(f"graph-schema {pins.GRAPH_SCHEMA_VERSION}" in g.detail for g in packet.gaps)
 
 
 def test_a_stale_snapshot_lists_what_memory_changed_since() -> None:

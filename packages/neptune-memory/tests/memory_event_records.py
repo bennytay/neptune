@@ -10,6 +10,7 @@ come from ``memory_run_records``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Final
 
 from memory_identity_records import STATED, Record, cite, provenance, rid, source
@@ -20,8 +21,6 @@ from neptune.model.provenance import EvidenceRef, Provenance, Row
 from neptune.model.world import StructuredRecord, StructuredTable
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from neptune.model.knowledge import Knowledge
     from neptune.model.time import Timestamp
 
@@ -95,13 +94,15 @@ def intervention(
     reason: str | None = None,
     machines: Sequence[LogicalId] | None = None,
     site: LogicalId | None = None,
+    identifiers: Sequence[LogicalId] | Knowledge[tuple[Knowledge[LogicalId], ...]] = (),
 ) -> tuple[Record, RecordId]:
-    """An ``intervention`` stated by ``name`` (a Formant intervention request, a form)."""
+    """An ``intervention`` stated by ``name`` (a Formant intervention request, a CMMS downtime
+    row, a form); ``identifiers`` the ids it declares itself by, or the field as any state."""
     declared = provenance(cite(name), STATED)
     record = Intervention(
         id=rid("intervention", declared.evidence),
         provenance=declared,
-        identifiers=Known(()),
+        identifiers=identifiers if not isinstance(identifiers, Sequence) else _ids(identifiers),
         site=_opt(site),  # type: ignore[arg-type]
         machines=_ids(machines),
         configuration=Unknown(),

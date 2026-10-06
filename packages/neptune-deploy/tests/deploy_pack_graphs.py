@@ -18,6 +18,12 @@ never re-derives Memory's ids. ``python deploy_pack_graphs.py`` rewrites the fil
   HMI clock mapped onto the civil clock, a fault row on the civil clock, an intervention mapped by
   two clock mappings to two times (a conflict), an event on an unmapped clock, an event that might
   involve either machine, and a co-occurrence pair.
+- ``dock_fleet_configuration_v2``: graph-schema 2.0.0 (vocabulary 11, ``graph_schema`` and
+  ``builds``; Deploy ADR 0018). Two AMRs share one configuration node and only AMR-05 changes
+  (rule 12: a change is one machine's own abutting spans); a ``succeeds`` statement about the two
+  configurations that no change may be read from; a palletising arm whose decided span meets an
+  Ambiguous span, then an Unknown one; a legged inspection robot that changes on its own clock;
+  and an incident involving AMR-06, the machine that did not change.
 """
 
 import hashlib
@@ -31,6 +37,7 @@ ROOT: Final = Path(__file__).resolve().parent
 REPO: Final = ROOT.parents[2]
 FIXTURES: Final = ROOT / "fixtures" / "packs"
 VOCABULARY_1_2: Final = REPO / "contracts/graph-schema/v1.2.0/golden/vocabulary.json"
+VOCABULARY_2_0: Final = REPO / "contracts/graph-schema/v2.0.0/golden/vocabulary.json"
 
 
 def sha(text: str) -> str:
@@ -80,6 +87,7 @@ def claim(
     evidence: tuple[dict[str, Any], ...],
     kind: str = "stated",
     consolidator: str = "memory.configuration",
+    consolidator_version: str = "1",
     recorded_at: int = 1,
     superseded_at: int | str = "open",
     model: dict[str, str] | None = None,
@@ -88,7 +96,7 @@ def claim(
     provenance: dict[str, Any] = {
         "config_hash": f"sha256:{sha('config ' + consolidator)}",
         "consolidator_id": consolidator,
-        "consolidator_version": "1",
+        "consolidator_version": consolidator_version,
         "evidence": list(evidence),
         "records": [rec(r) for r in records],
     }
@@ -139,14 +147,17 @@ def graph(
     head: int,
     vocabulary: dict[str, Any],
     vocabulary_version: int,
+    release: str | None = None,
 ) -> dict[str, Any]:
+    """A graph document: graph-schema 1.x, or with ``release`` the 2.x document that names it, with
+    one build per consolidator listing every claim it emitted."""
     resolver: dict[str, Any] = {
         "priorities": {"memory.configuration": 3, "memory.events": 4, "memory.identity": 2},
         "vocabulary": vocabulary,
         "vocabulary_version": vocabulary_version,
     }
     order = sorted(claims, key=lambda c: (c["recorded_at"], c["id"]))
-    return {
+    document: dict[str, Any] = {
         "claims": order,
         "findings": sorted(findings, key=lambda f: (f["recorded_at"], f["id"])),
         "generation": f"sha256:{sha(canonical_json.dumps(resolver).decode())}",
@@ -154,6 +165,31 @@ def graph(
         "head": head,
         "kind": "memory.graph",
         "resolver_config": resolver,
+    }
+    if release is None:
+        return document
+    builds: dict[str, dict[str, Any]] = {}
+    for c in order:
+        provenance = c["provenance"]
+        build = builds.setdefault(
+            provenance["consolidator_id"],
+            {
+                "claims": [],
+                "config_hash": provenance["config_hash"],
+                "consolidator_id": provenance["consolidator_id"],
+                "recorded_at": 0,
+                "version": provenance["consolidator_version"],
+            },
+        )
+        build["claims"].append(c["id"])
+        build["recorded_at"] = max(build["recorded_at"], c["recorded_at"])
+    for build in builds.values():
+        build["claims"].sort()
+    return {
+        **document,
+        "builds": sorted(builds.values(), key=lambda b: (b["recorded_at"], b["consolidator_id"])),
+        "graph_schema": release,
+        "graph_schema_version": int(release.split(".")[0]),
     }
 
 
@@ -610,9 +646,192 @@ def arm_cell_events() -> dict[str, Any]:
     return graph(claims, [], 4, _event_vocabulary(), 8)
 
 
+# --- graph-schema 2.0.0: machine-scoped configuration changes (Deploy ADR 0018) --------------
+
+DOCK: Final = node("site", "site-code:DOCK-1")
+AMR05: Final = node("machine", "asset-tag:AMR-05")
+AMR06: Final = node("machine", "asset-tag:AMR-06")
+PALLET_ARM: Final = node("machine", "asset-tag:ARM-09")
+QUAD: Final = node("machine", "asset-tag:QUAD-03")
+QUAD_CLOCK: Final = rec("domain quad-03 controller clock")  # no mapping relates it to civil time
+INCIDENT: Final = event("INC-D1-0004")
+HOUR: Final = 3_600 * 10**9
+
+
+def dock_fleet_configuration_v2() -> dict[str, Any]:
+    nav_old, nav_new = config("fleet-nav-4.2.0"), config("fleet-nav-4.3.1")
+    arm_a, arm_b, arm_c, arm_d = (config(f"ARM09-{n}") for n in "ABCD")
+    quad_1, quad_2 = config("QUAD03-gait-1"), config("QUAD03-gait-2")
+    identity: dict[str, Any] = {"consolidator": "memory.identity", "consolidator_version": "3"}
+    configuration: dict[str, Any] = {"consolidator_version": "2"}
+    events: dict[str, Any] = {"consolidator": "memory.events", "consolidator_version": "1"}
+
+    def located(machine: dict[str, Any], line: int) -> dict[str, Any]:
+        return claim(
+            machine,
+            "located_at",
+            DOCK,
+            (at(CIVIL, T0), "open"),
+            records=(f"asset register {machine['node_id']}",),
+            evidence=(row("assets.csv", line),),
+            **identity,
+        )
+
+    def span(
+        machine: dict[str, Any],
+        predicate: str,
+        obj: dict[str, Any],
+        valid: tuple[dict[str, Any], dict[str, Any] | str],
+        record_name: str,
+        source: str,
+        line: int,
+    ) -> dict[str, Any]:
+        return claim(
+            machine,
+            predicate,
+            obj,
+            valid,
+            records=(record_name,),
+            evidence=(row(source, line),),
+            recorded_at=2,
+            **configuration,
+        )
+
+    claims = [located(m, i) for i, m in enumerate((AMR05, AMR06, PALLET_ARM, QUAD), start=1)]
+    claims += [
+        # Both AMRs commissioned on the shared 4.2.0 node; only AMR-05 moves to 4.3.1.
+        span(
+            AMR05,
+            "has_configuration",
+            nav_old,
+            (at(CIVIL, T0), at(CIVIL, T0 + DAY)),
+            "commissioning AMR-05",
+            "cmms.csv",
+            1,
+        ),
+        span(
+            AMR05,
+            "has_configuration",
+            nav_new,
+            (at(CIVIL, T0 + DAY), "open"),
+            "change record CR-40 AMR-05",
+            "changes.csv",
+            1,
+        ),
+        span(
+            AMR06,
+            "has_configuration",
+            nav_old,
+            (at(CIVIL, T0), "open"),
+            "commissioning AMR-06",
+            "cmms.csv",
+            2,
+        ),
+        # The palletising arm: decided, then Ambiguous (two readings), then Unknown, then decided.
+        span(
+            PALLET_ARM,
+            "has_configuration",
+            arm_a,
+            (at(CIVIL, T0), at(CIVIL, T0 + DAY)),
+            "commissioning ARM-09",
+            "cmms.csv",
+            3,
+        ),
+        span(
+            PALLET_ARM,
+            "configuration_candidate",
+            arm_b,
+            (at(CIVIL, T0 + DAY), at(CIVIL, T0 + 2 * DAY)),
+            "change record CR-41",
+            "changes.csv",
+            2,
+        ),
+        span(
+            PALLET_ARM,
+            "configuration_candidate",
+            arm_c,
+            (at(CIVIL, T0 + DAY), at(CIVIL, T0 + 2 * DAY)),
+            "work order WO-77",
+            "work_orders.csv",
+            7,
+        ),
+        span(
+            PALLET_ARM,
+            "configuration_unknown",
+            record("work order WO-80"),
+            (at(CIVIL, T0 + 2 * DAY), at(CIVIL, T0 + 3 * DAY)),
+            "work order WO-80",
+            "work_orders.csv",
+            8,
+        ),
+        span(
+            PALLET_ARM,
+            "has_configuration",
+            arm_d,
+            (at(CIVIL, T0 + 3 * DAY), "open"),
+            "requalification RQ-9",
+            "requalifications.csv",
+            1,
+        ),
+        # The legged robot changes gait configuration on its own controller clock only.
+        span(
+            QUAD,
+            "has_configuration",
+            quad_1,
+            (at(QUAD_CLOCK, 0), at(QUAD_CLOCK, 5_000)),
+            "commissioning QUAD-03",
+            "cmms.csv",
+            4,
+        ),
+        span(
+            QUAD,
+            "has_configuration",
+            quad_2,
+            (at(QUAD_CLOCK, 5_000), "open"),
+            "change record CR-42",
+            "changes.csv",
+            3,
+        ),
+        # A statement about the two configurations themselves (the reading 2.0.0 keeps): it says
+        # nothing about which machine changed, and no change is read from it.
+        claim(
+            nav_new,
+            "succeeds",
+            nav_old,
+            (at(CIVIL, T0 + DAY), "open"),
+            records=("release note fleet-nav 4.3.1",),
+            evidence=(row("releases.csv", 1),),
+            consolidator="memory.release_notes",
+            recorded_at=2,
+        ),
+    ]
+    onset = (at(CIVIL, T0 + DAY + 2 * HOUR), at(CIVIL, T0 + DAY + 2 * HOUR + 1))
+    for predicate, obj in (
+        ("event_kind", text("collision")),
+        ("involves", AMR06),
+        ("at_site", DOCK),
+        ("evidenced_by", record("incident INC-D1-0004")),
+    ):
+        claims.append(
+            claim(
+                INCIDENT,
+                predicate,
+                obj,
+                onset,
+                records=("incident INC-D1-0004",),
+                evidence=(row("incidents.csv", 4),),
+                recorded_at=3,
+                **events,
+            )
+        )
+    vocabulary = json.loads(VOCABULARY_2_0.read_text(encoding="utf-8"))
+    return graph(claims, [], 3, vocabulary, 11, release="2.0.0")
+
+
 GENERATORS: Final = {
     "arm_cell_configuration": arm_cell_configuration,
     "arm_cell_events": arm_cell_events,
+    "dock_fleet_configuration_v2": dock_fleet_configuration_v2,
 }
 
 

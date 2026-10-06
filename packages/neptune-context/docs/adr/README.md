@@ -17,3 +17,6 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0008](0008-lexical-channel-bm25-over-text-bearing-records-and-claims.md) | The lexical channel: in-process BM25 over text-bearing records and claims | Accepted |
 | [0009](0009-agent-renderer-and-mcp-tool-surface.md) | The agent renderer and the MCP tool surface: cited sentences, six read-only tools, a skill | Accepted |
 | [0010](0010-why-and-diff-trails-and-the-human-renderer.md) | Why and diff trails: provenance trees, what-changed lists, and the human renderer | Accepted |
+| [0011](0011-agent-renderer-trails-why-outlines-and-diff-change-lines.md) | Agent renderer trails: why outlines and diff change lines, with a checked grammar | Accepted |
+| [0012](0012-graph-schema-2-0-0-pin-and-query-packet-1-3-0.md) | Context pins graph-schema 2.0.0; query-packet 1.3.0 stays additive | Accepted |
+| [0013](0013-demo-reads-memorys-gzip-snapshot.md) | The Demo reads Memory's pipeline-built snapshot (`.json.gz`), frozen for the goldens | Accepted |

@@ -37,6 +37,40 @@
         ],
         "type": "object"
       },
+      "Build": {
+        "additionalProperties": false,
+        "description": "one run of one consolidator lineage over one Ledger snapshot and every claim id it emitted, sorted: a complete statement of the lineage, so a later build that does not emit a claim withdraws it (neptune-memory ADR 0007 §5, ADR 0016)",
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/$defs/ClaimId"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "config_hash": {
+            "$ref": "#/$defs/ConfigHash"
+          },
+          "consolidator_id": {
+            "$ref": "#/$defs/Token"
+          },
+          "recorded_at": {
+            "$ref": "#/$defs/LedgerTx"
+          },
+          "version": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "claims",
+          "config_hash",
+          "consolidator_id",
+          "recorded_at",
+          "version"
+        ],
+        "type": "object"
+      },
       "ByteRange": {
         "additionalProperties": false,
         "properties": {
@@ -557,6 +591,534 @@
         "pattern": "^sha256:[0-9a-f]{64}$",
         "type": "string"
       },
+      "Delta": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "name": {
+                "type": "string"
+              },
+              "quantity": {
+                "const": "parameter"
+              },
+              "representation": {
+                "const": "values"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 100000,
+                "minItems": 1,
+                "type": "array"
+              }
+            },
+            "required": [
+              "earlier",
+              "later",
+              "name",
+              "quantity",
+              "representation",
+              "values"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "child": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "parent": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "quantity": {
+                "const": "translation"
+              },
+              "representation": {
+                "const": "homogeneous_matrix"
+              },
+              "transform": {
+                "additionalProperties": false,
+                "properties": {
+                  "child": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "child_to_parent",
+                      "parent_to_child"
+                    ]
+                  },
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "child",
+                  "direction",
+                  "parent"
+                ],
+                "type": "object"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              }
+            },
+            "required": [
+              "child",
+              "earlier",
+              "later",
+              "parent",
+              "quantity",
+              "representation",
+              "transform",
+              "values"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "child": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "parent": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "quantity": {
+                "const": "translation"
+              },
+              "representation": {
+                "const": "translation"
+              },
+              "transform": {
+                "additionalProperties": false,
+                "properties": {
+                  "child": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "child_to_parent",
+                      "parent_to_child"
+                    ]
+                  },
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "child",
+                  "direction",
+                  "parent"
+                ],
+                "type": "object"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              }
+            },
+            "required": [
+              "child",
+              "earlier",
+              "later",
+              "parent",
+              "quantity",
+              "representation",
+              "transform",
+              "values"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "adjustment": {
+                "enum": [
+                  "wrapped"
+                ]
+              },
+              "child": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "parent": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "quantity": {
+                "const": "rotation"
+              },
+              "representation": {
+                "const": "euler_angles"
+              },
+              "transform": {
+                "additionalProperties": false,
+                "properties": {
+                  "child": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "child_to_parent",
+                      "parent_to_child"
+                    ]
+                  },
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "child",
+                  "direction",
+                  "parent"
+                ],
+                "type": "object"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              }
+            },
+            "required": [
+              "adjustment",
+              "child",
+              "earlier",
+              "later",
+              "parent",
+              "quantity",
+              "representation",
+              "transform",
+              "values"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "adjustment": {
+                "enum": [
+                  "none"
+                ]
+              },
+              "child": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "parent": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "quantity": {
+                "const": "rotation"
+              },
+              "representation": {
+                "const": "homogeneous_matrix"
+              },
+              "transform": {
+                "additionalProperties": false,
+                "properties": {
+                  "child": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "child_to_parent",
+                      "parent_to_child"
+                    ]
+                  },
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "child",
+                  "direction",
+                  "parent"
+                ],
+                "type": "object"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 9,
+                "minItems": 9,
+                "type": "array"
+              }
+            },
+            "required": [
+              "adjustment",
+              "child",
+              "earlier",
+              "later",
+              "parent",
+              "quantity",
+              "representation",
+              "transform",
+              "values"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "adjustment": {
+                "enum": [
+                  "later_negated",
+                  "none"
+                ]
+              },
+              "child": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "parent": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "quantity": {
+                "const": "rotation"
+              },
+              "representation": {
+                "const": "quaternion"
+              },
+              "transform": {
+                "additionalProperties": false,
+                "properties": {
+                  "child": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "child_to_parent",
+                      "parent_to_child"
+                    ]
+                  },
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "child",
+                  "direction",
+                  "parent"
+                ],
+                "type": "object"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 4,
+                "minItems": 4,
+                "type": "array"
+              }
+            },
+            "required": [
+              "adjustment",
+              "child",
+              "earlier",
+              "later",
+              "parent",
+              "quantity",
+              "representation",
+              "transform",
+              "values"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "adjustment": {
+                "enum": [
+                  "none"
+                ]
+              },
+              "child": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "parent": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "quantity": {
+                "const": "rotation"
+              },
+              "representation": {
+                "const": "rotation_matrix"
+              },
+              "transform": {
+                "additionalProperties": false,
+                "properties": {
+                  "child": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "child_to_parent",
+                      "parent_to_child"
+                    ]
+                  },
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "child",
+                  "direction",
+                  "parent"
+                ],
+                "type": "object"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 9,
+                "minItems": 9,
+                "type": "array"
+              }
+            },
+            "required": [
+              "adjustment",
+              "child",
+              "earlier",
+              "later",
+              "parent",
+              "quantity",
+              "representation",
+              "transform",
+              "values"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "adjustment": {
+                "enum": [
+                  "none"
+                ]
+              },
+              "child": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "earlier": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "later": {
+                "$ref": "#/$defs/RecordId"
+              },
+              "parent": {
+                "$ref": "#/$defs/FrameRef"
+              },
+              "quantity": {
+                "const": "rotation"
+              },
+              "representation": {
+                "const": "rotation_vector"
+              },
+              "transform": {
+                "additionalProperties": false,
+                "properties": {
+                  "child": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "child_to_parent",
+                      "parent_to_child"
+                    ]
+                  },
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "child",
+                  "direction",
+                  "parent"
+                ],
+                "type": "object"
+              },
+              "values": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              }
+            },
+            "required": [
+              "adjustment",
+              "child",
+              "earlier",
+              "later",
+              "parent",
+              "quantity",
+              "representation",
+              "transform",
+              "values"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "later - earlier, component by component, between two calibration records, in their declared form and unit; never converted. A rotation states how later was read: a quaternion negated when the two point opposite ways, Euler angles wrapped into a half turn either side (neptune-memory ADR 0014)"
+      },
       "Duration": {
         "additionalProperties": false,
         "properties": {
@@ -818,8 +1380,15 @@
       },
       "Graph": {
         "additionalProperties": false,
-        "description": "one resolved history: every claim version ordered by (recorded_at, id), every finding, and the resolver configuration whose hash is its generation (ADR 0006)",
+        "description": "one resolved history: every claim version ordered by (recorded_at, id), every finding, the resolver configuration whose hash is its generation (ADR 0006) and, from 1.9.0, the builds it was resolved with, ordered by (recorded_at, consolidator_id)",
         "properties": {
+          "builds": {
+            "items": {
+              "$ref": "#/$defs/Build"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
           "claims": {
             "items": {
               "$ref": "#/$defs/Claim"
@@ -835,8 +1404,13 @@
           "generation": {
             "$ref": "#/$defs/ConfigHash"
           },
+          "graph_schema": {
+            "description": "the full graph-schema release the document was written to; any minor of this major reads it (ADR 0019 §3)",
+            "pattern": "^2\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+            "type": "string"
+          },
           "graph_schema_version": {
-            "const": 1
+            "const": 2
           },
           "head": {
             "$ref": "#/$defs/LedgerTx"
@@ -852,6 +1426,7 @@
           "claims",
           "findings",
           "generation",
+          "graph_schema",
           "graph_schema_version",
           "head",
           "kind",
@@ -1382,7 +1957,7 @@
             "$ref": "#/$defs/PredicateRegistry"
           },
           "vocabulary_version": {
-            "description": "the core vocabulary's version: 8 when this schema was exported (VOCABULARY_VERSION)",
+            "description": "the core vocabulary's version: 11 when this schema was exported (VOCABULARY_VERSION)",
             "minimum": 1,
             "type": "integer"
           }
@@ -1784,6 +2359,51 @@
               "value"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "datatype": {
+                "const": "delta"
+              },
+              "kind": {
+                "const": "literal"
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "knowledge": {
+                        "const": "known"
+                      },
+                      "value": {
+                        "$ref": "#/$defs/Unit"
+                      }
+                    },
+                    "required": [
+                      "knowledge",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "$ref": "#/$defs/NotApplicable"
+                  }
+                ],
+                "description": "the unit both calibrations declare, as declared; not_applicable for a form without one (a quaternion, a rotation matrix)"
+              },
+              "value": {
+                "$ref": "#/$defs/Delta"
+              }
+            },
+            "required": [
+              "datatype",
+              "kind",
+              "unit",
+              "value"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -1795,6 +2415,7 @@
         "enum": [
           "boolean",
           "clock_map",
+          "delta",
           "instant",
           "integer",
           "quantity",
@@ -1836,6 +2457,9 @@
       "at_site",
       "at_site_candidate",
       "authorised_configuration",
+      "calibrated_by",
+      "calibrated_with",
+      "calibration_candidate",
       "clock_map",
       "co_occurs_within",
       "configuration_active_during",
@@ -1845,6 +2469,7 @@
       "continues_candidate",
       "declared_kind",
       "deployed_at",
+      "drift",
       "ends_at",
       "ends_at_candidate",
       "episode_of",
@@ -1852,6 +2477,7 @@
       "evidenced_by",
       "executes_task",
       "executes_task_candidate",
+      "gap",
       "governed_by",
       "has_calibration",
       "has_clock",
@@ -1862,6 +2488,7 @@
       "has_summary",
       "in_zone",
       "in_zone_candidate",
+      "integrity_finding",
       "intervened",
       "intervened_candidate",
       "involves",
@@ -1875,18 +2502,685 @@
       "operated_by",
       "outcome",
       "part_of_programme",
+      "rate_declared",
+      "rate_observed",
       "rated_payload",
+      "recorded",
       "recorded_by",
       "recorded_by_candidate",
       "runs_model",
       "runs_software",
       "same_as",
       "same_as_candidate",
+      "sensor_not_recorded",
+      "sensor_presence_unknown",
+      "sensor_recorded",
       "starts_at",
       "stated_severity",
       "succeeds",
       "zone_of"
     ],
-    "version": "1.6.0"
+    "signatures": {
+      "at_site": {
+        "domain": [
+          "event",
+          "run"
+        ],
+        "range": [
+          "site"
+        ]
+      },
+      "at_site_candidate": {
+        "domain": [
+          "event",
+          "run"
+        ],
+        "range": [
+          "site"
+        ]
+      },
+      "authorised_configuration": {
+        "domain": [
+          "site"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "calibrated_by": {
+        "domain": [
+          "configuration"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "calibrated_with": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "calibration_candidate": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "clock_map": {
+        "domain": [
+          "clock"
+        ],
+        "range": [
+          "clock_map"
+        ]
+      },
+      "co_occurs_within": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "event"
+        ]
+      },
+      "configuration_active_during": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "configuration_candidate": {
+        "domain": [
+          "machine",
+          "run"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "configuration_unknown": {
+        "domain": [
+          "machine",
+          "run"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "continues": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "continues_candidate": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "declared_kind": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "integer",
+          "text"
+        ]
+      },
+      "deployed_at": {
+        "domain": [
+          "deployment"
+        ],
+        "range": [
+          "site"
+        ]
+      },
+      "drift": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "delta"
+        ]
+      },
+      "ends_at": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "instant"
+        ]
+      },
+      "ends_at_candidate": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "instant"
+        ]
+      },
+      "episode_of": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "event_kind": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "evidenced_by": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "executes_task": {
+        "domain": [
+          "episode",
+          "run"
+        ],
+        "range": [
+          "task"
+        ]
+      },
+      "executes_task_candidate": {
+        "domain": [
+          "episode",
+          "run"
+        ],
+        "range": [
+          "task"
+        ]
+      },
+      "gap": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "governed_by": {
+        "domain": [
+          "deployment",
+          "fleet",
+          "machine",
+          "site"
+        ],
+        "range": [
+          "policy"
+        ]
+      },
+      "has_calibration": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "has_clock": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "clock"
+        ]
+      },
+      "has_configuration": {
+        "domain": [
+          "deployment",
+          "machine",
+          "sensor"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "has_description": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "has_member": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "has_name": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "has_summary": {
+        "domain": [
+          "deployment",
+          "fleet",
+          "programme"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "in_zone": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "zone"
+        ]
+      },
+      "in_zone_candidate": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "zone"
+        ]
+      },
+      "integrity_finding": {
+        "domain": [
+          "run",
+          "stream"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "intervened": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "intervened_candidate": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "record"
+        ]
+      },
+      "involves": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "asset",
+          "machine"
+        ]
+      },
+      "involves_candidate": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "asset",
+          "machine"
+        ]
+      },
+      "located_at": {
+        "domain": [
+          "asset",
+          "machine"
+        ],
+        "range": [
+          "site",
+          "zone"
+        ]
+      },
+      "maintenance_state": {
+        "domain": [
+          "asset",
+          "machine",
+          "sensor"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "maps_to": {
+        "domain": [
+          "clock"
+        ],
+        "range": [
+          "clock"
+        ]
+      },
+      "member_of_fleet": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "fleet"
+        ]
+      },
+      "mounted_on": {
+        "domain": [
+          "sensor"
+        ],
+        "range": [
+          "asset",
+          "machine"
+        ]
+      },
+      "not_covered_by_authorisation": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "operated_by": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "person"
+        ]
+      },
+      "outcome": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "text"
+        ]
+      },
+      "part_of_programme": {
+        "domain": [
+          "deployment",
+          "fleet"
+        ],
+        "range": [
+          "programme"
+        ]
+      },
+      "rate_declared": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "quantity"
+        ]
+      },
+      "rate_observed": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "quantity"
+        ]
+      },
+      "rated_payload": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "quantity"
+        ]
+      },
+      "recorded": {
+        "domain": [
+          "stream"
+        ],
+        "range": [
+          "run"
+        ]
+      },
+      "recorded_by": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "machine"
+        ]
+      },
+      "recorded_by_candidate": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "machine"
+        ]
+      },
+      "runs_model": {
+        "domain": [
+          "machine"
+        ],
+        "range": [
+          "model_version"
+        ]
+      },
+      "runs_software": {
+        "domain": [
+          "machine",
+          "sensor"
+        ],
+        "range": [
+          "software_version"
+        ]
+      },
+      "same_as": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ]
+      },
+      "same_as_candidate": {
+        "domain": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ],
+        "range": [
+          "asset",
+          "clock",
+          "configuration",
+          "deployment",
+          "document",
+          "episode",
+          "event",
+          "fleet",
+          "machine",
+          "model_version",
+          "person",
+          "policy",
+          "programme",
+          "run",
+          "sensor",
+          "site",
+          "software_version",
+          "stream",
+          "task",
+          "zone"
+        ]
+      },
+      "sensor_not_recorded": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "sensor"
+        ]
+      },
+      "sensor_presence_unknown": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "sensor"
+        ]
+      },
+      "sensor_recorded": {
+        "domain": [
+          "run"
+        ],
+        "range": [
+          "sensor"
+        ]
+      },
+      "starts_at": {
+        "domain": [
+          "episode"
+        ],
+        "range": [
+          "instant"
+        ]
+      },
+      "stated_severity": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "integer",
+          "text"
+        ]
+      },
+      "succeeds": {
+        "domain": [
+          "configuration"
+        ],
+        "range": [
+          "configuration"
+        ]
+      },
+      "zone_of": {
+        "domain": [
+          "zone"
+        ],
+        "range": [
+          "site"
+        ]
+      }
+    },
+    "version": "2.0.0"
   }
 }

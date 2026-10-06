@@ -6,7 +6,7 @@ Memory's), over four transactions and four embodiments:
 - site B (``site-code:S-007``): the lift AMR ``AMR-07`` with its configuration chain, a March run,
   an e-stop event in aisle 3, an identity link and an inferred identity candidate, a reading on
   its own device clock joined to UTC by a stated clock mapping, a renamed display name
-  (superseded at transaction 3), a value newer than the graph-schema pin, a resolver finding;
+  (superseded at transaction 3), a predicate newer than the graph-schema pin, a resolver finding;
   a second AMR and an inspection drone at the same site;
 - site A (``site-code:PLANT-2``): the arm ``ARM-3A`` in cell 3 and the legged robot ``LEG-01``.
 
@@ -70,6 +70,8 @@ CATALOG_GOLDEN: Final = ROOT / "contracts" / "catalog-api" / "v1.7.0" / "golden"
 UTC_NS: Final = CivilClock(Timescale.UTC, Epoch.UNIX, Fraction(1, 1_000_000_000))
 UTC: Final = str(UTC_NS.domain_id)
 HOUR: Final = 3600 * 10**9
+# A predicate no released graph-schema has: Memory running ahead of Context's pin.
+BEYOND_PIN: Final = "predicate_after_the_pin"
 
 
 def ns(year: int, month: int, day: int) -> int:
@@ -252,7 +254,7 @@ def claims() -> list[Claim]:
             records=(RecordId(MAPPING),),
         ),
         # A value newer than the graph-schema pin (a predicate Memory added later).
-        claim(AMR, "drift", "lidar yaw 0.4 deg", MAR_10),
+        claim(AMR, BEYOND_PIN, "lidar yaw 0.4 deg", MAR_10),
         # A renamed display name: the old version is superseded at transaction 3.
         old_name,
         claim(AMR, "has_name", "AMR-07 Lift", FEB_1, tx=3, supersedes=(old_name.id,)),
@@ -398,53 +400,34 @@ class FakeCatalog:
 
 # --- The Demo v1 corpus snapshot -------------------------------------------------------------
 
-DEMO_SNAPSHOT: Final = (
-    ROOT
-    / "packages"
-    / "neptune-deploy"
-    / "tests"
-    / "fixtures"
-    / "packs"
-    / "acceptance_corpus.graph.json"
+# Memory's pipeline-built graph of the acceptance corpus, frozen here by
+# ``scripts/freeze_demo_graph.py`` (a byte copy checked against the pinned codec). Goldens read
+# this copy, never Memory's live file: Memory regenerates that one as the corpus grows.
+DEMO_SNAPSHOT: Final = Path(__file__).resolve().parent / "golden" / "demo-graph-2.0.0.json.gz"
+MEMORY_SNAPSHOT: Final = (
+    ROOT / "packages" / "neptune-memory" / "tests" / "fixtures" / "acceptance_corpus.graph.json.gz"
 )
 
 
 def demo_document() -> GraphDocument:
-    """NORMALISING A NON-CONFORMANT DEPLOY SNAPSHOT.
+    """The frozen Demo v1 snapshot (``DEMO_SNAPSHOT``), read by the server's own reader and
+    so by Memory's strict codec: a graph-schema 2.0.0 document, used as written."""
+    from neptune_context.engine import read_graph_document
 
-    Deploy's frozen Memory graph of the acceptance corpus (Platform ADR 0007; Deploy ADR 0014),
-    with each claim id recomputed under Memory's claim-id scheme and the generation recomputed
-    from its resolver configuration, then read by Memory's strict codec.
+    return read_graph_document(DEMO_SNAPSHOT)
 
-    The snapshot is hand-written in graph-schema's shape (Memory cannot build it from the corpus
-    yet): its stored ids follow another scheme and some provenance record lists are unsorted, so
-    the ids are recomputed and the record lists sorted; every other part of every claim is used as
-    written. Calibration-drift predicates in it are newer than graph-schema 1.6.0.
-    """
-    from neptune_memory.schema.claim import CLAIM_ID_SCHEME
-    from neptune_memory.schema.codec import graph_from_json
 
-    from neptune.identity.canonical_json import dumps
-
-    data = json.loads(DEMO_SNAPSHOT.read_bytes())
-    # Normalising a non-conformant Deploy snapshot: the file is not a valid Memory graph
-    # document (the coordinator raised it with Deploy and Platform). Each fix-up below exists only
-    # so Memory's strict codec accepts it; drop them when the snapshot conforms.
-    # The two ``drift`` claims hold a ``delta`` value (graph-schema 1.7.0, unmerged); Memory's codec
-    # at this commit cannot read them at all, so they are left out. The snapshot's other values
-    # newer than Context's pin (``calibrated_with``, ``calibrated_by``) stay and must surface as
-    # gaps.
-    data["claims"] = [c for c in data["claims"] if c["object"].get("datatype") != "delta"]
-    keys = ("assertion_kind", "confidence", "object", "predicate", "provenance", "subject", "valid")
-    renamed: dict[str, str] = {}
-    for item in data["claims"]:
-        provenance = item["provenance"]
-        provenance["records"] = sorted(set(provenance["records"]))  # Memory: unique and sorted
-        payload: Any = {"claim": {k: item[k] for k in keys}, "scheme": CLAIM_ID_SCHEME}
-        renamed[item["id"]] = "claim:" + content_id(dumps(payload))
-    for item in data["claims"]:
-        item["id"] = renamed[item["id"]]
-        item["supersedes"] = sorted(renamed[i] for i in item["supersedes"])
-    data["claims"].sort(key=lambda c: (c["recorded_at"], c["id"]))
-    data["generation"] = config_hash(data["resolver_config"])
-    return graph_from_json(data)
+# What the snapshot calls the arm ``ARM-3A`` and its incident. Memory states no identity link
+# between the three names (one per source system) and no link from the incident to the arm, and
+# a content-addressed node is not a declared name, so a planner cannot resolve the incident:
+# queries about it name its node.
+DEMO_ARM: Final = ("machine", "servicenow.ci:ARM-3A")
+DEMO_ARM_NAMES: Final = (
+    DEMO_ARM,
+    ("machine", "cmms.asset:ARM-3A"),
+    ("machine", "manifest:ARM-3A"),
+)
+DEMO_INCIDENT: Final = (
+    "event",
+    "record:rec:sha256:9564b327cb9e51cee67926cba43467d4eefc51f6ee75092f8e7f34b6085847f2",
+)

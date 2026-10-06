@@ -28,7 +28,6 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
-from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import Claim, ClaimId
 from neptune_memory.schema.codec import GraphDocument, graph_from_json
 from neptune_memory.schema.interval import OPEN, Interval, LedgerTx, Open
@@ -282,7 +281,12 @@ def assemble(
         as_of=LedgerTx(as_of),
         head=sources.head,
         during=during,
-        memory=MemorySnapshot(GRAPH_SCHEMA_VERSION, sources.document.generation, LedgerTx(as_of)),
+        memory=MemorySnapshot(
+            # The major of the graph read (a 1.x document stays major 1), as the engine reports it.
+            sources.document.graph_schema_version,
+            sources.document.generation,
+            LedgerTx(as_of),
+        ),
         ledger=LedgerSnapshot(CATALOG_API_VERSION),
         produced_by=ENGINE,
         inference_included=include_inferred,

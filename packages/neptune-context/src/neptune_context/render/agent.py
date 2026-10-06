@@ -6,6 +6,9 @@
   trails, the world-time window on its clock, the inference policy, the item count and any cut);
 - **What changed** first, when Memory superseded a carried claim after its snapshot, so an agent
   reads "this is no longer current" before it reads the fact;
+- **Why and what changed trails** (ADR 0011), when the packet holds them: each ``why`` tree as an
+  indented outline, each ``diff`` as change lines grouped by predicate; every node or change a
+  sentence naming its claim and citing its evidence;
 - **Facts**: one sentence per item, numbered ``1..n``, each ending with its citation run
   ``[I<n>][E<k>]...``: the item key and the evidence keys of the sources behind it. Inferred items
   open with ``INFERRED (model ..., confidence ...)``; evidence items open with ``Observed`` or
@@ -42,6 +45,7 @@ from typing import TYPE_CHECKING, Final, TypeVar
 from neptune_memory.schema.claim import TypedLiteral, ValueType
 from neptune_memory.schema.interval import Open
 from neptune_memory.schema.nodes import NodeRef
+from neptune_memory.schema.supersede import is_closure
 
 from neptune.identity.canonical_json import dumps
 from neptune.model.knowledge import Ambiguous, Known, KnownAbsent, NotApplicable, NotCovered
@@ -56,6 +60,17 @@ from neptune_context.packets.model import (
     SceneItem,
     SeriesWindowItem,
 )
+from neptune_context.packets.trails import (
+    Change,
+    DiffChange,
+    DiffTrail,
+    Relation,
+    TxPoint,
+    WhyStep,
+    WhyTrail,
+    trail_index,
+)
+from neptune_context.pinned import older_graph_notice
 from neptune_context.render.citations import FOOTER, CitationError, parse_citations
 
 if TYPE_CHECKING:
@@ -65,6 +80,7 @@ if TYPE_CHECKING:
     from neptune.model.knowledge import Knowledge
     from neptune.model.provenance import EvidenceRef
     from neptune.model.time import Timestamp
+    from neptune_context.packets.trails import DiffPoint
     from neptune_context.query.plan import Entity, Mention, PlannedQuery
 
 T = TypeVar("T")
@@ -78,10 +94,17 @@ ITEMS: Final = "Items:"
 _CHANGED: Final = "What changed since transaction {n} (the facts below are as Memory knew them):"
 
 _HEX: Final = r"[0-9a-f]{64}"
+_QUERY_LINE: Final = re.compile(
+    rf"Query query:sha256:{_HEX}, as of transaction (?P<as_of>\d+) \(head \d+\)\."
+)
 _HEADER: Final = (
     re.compile(rf"Context packet packet:sha256:{_HEX}"),
-    re.compile(rf"Query query:sha256:{_HEX}, as of transaction \d+ \(head \d+\)\."),
+    _QUERY_LINE,
     re.compile(r"Claims as Memory knew them at transaction \d+ \(it trails the Ledger's \d+\)\."),
+    re.compile(
+        r"Graph read: graph-schema \d+\.x, older than Context's pin \d+\.\d+\.\d+; predicates"
+        r" such as succeeds carry their \d+\.x meaning\."
+    ),
     re.compile(rf"World time: ticks \[-?\d+, (?:-?\d+|open)\) on clock rec:sha256:{_HEX}\."),
     re.compile(
         r"Inferred items: (?:included, each marked INFERRED; inferences are not evidence"
@@ -99,6 +122,61 @@ _RUN: Final = re.compile(r"((?:\[I[1-9][0-9]*\])+)((?:\[E[1-9][0-9]*\])+)$")
 _KEY: Final = re.compile(r"\[[IE]([1-9][0-9]*)\]")
 _FACT: Final = re.compile(r"([1-9][0-9]*)\. \S")
 _GAP: Final = re.compile(r'- [a-z_]+ at "')
+_Q: Final = r'"(?:[^"\\]|\\.)*"'  # a quoted JSON string; its quotes inside are escaped
+_QUOTED: Final = re.compile(_Q)
+_NODE: Final = rf"[a-z_]+ {_Q}"
+_CLAIM: Final = rf"claim:sha256:{_HEX}"
+_POINT: Final = rf"(?:transaction \d+|tick -?\d+ on clock rec:sha256:{_HEX})"
+_WHY_HEAD: Final = re.compile(
+    rf"Why Memory holds (?P<claim>{_CLAIM}) \(explain clause (?P<clause>\d+), as Memory knew it at"
+    r" transaction \d+; (?P<claims>\d+) claims?, (?P<repeats>\d+) repeated,"
+    r" (?P<gaps>\d+) gaps? listed under Not answered\):"
+)
+_DIFF_HEAD: Final = re.compile(
+    rf"What changed about {_NODE}(?:, with its declared identities {_NODE}(?: and {_NODE})*)?"
+    rf" between (?P<before>{_POINT}) and (?P<after>{_POINT}) \(explain clause (?P<clause>\d+);"
+    r" (?P<claims>\d+) claims?, (?P<gaps>\d+) gaps? listed under Not answered\):"
+)
+_PREDICATE: Final = re.compile(r"Predicate ([a-z][a-z0-9_.-]*):")
+_WHY_LABELS: Final = {
+    Relation.ROOT: "Root claim",
+    Relation.CORROBORATES: "Corroborated by",
+    Relation.CONFLICTS: "Conflicts with",
+    Relation.ALTERNATIVE: "Alternative reading",
+}
+_DIFF_LABELS: Final = {
+    Change.OPENED: "Opened",
+    Change.CLOSED: "Closed",
+    Change.SUPERSEDED: "Superseded",
+    Change.BETWEEN: "Between",
+}
+_SUB_LABELS: Final = ("Narrowed to", "Replaced by")
+_LABELS: Final = "|".join([*_WHY_LABELS.values(), *_DIFF_LABELS.values(), *_SUB_LABELS])
+_TRAIL_LINE: Final = re.compile(
+    rf"( *)- ({_LABELS})(?: \(resolver finding (finding:sha256:{_HEX})\))?: (.*)"
+)
+_BETWEEN_NOTE: Final = "held only between the two points, at neither of them"
+_GONE: Final = (
+    "Memory no longer holds it at the later transaction",
+    "it no longer holds at the later instant",
+)
+_REPEAT_NOTE: Final = "already shown above and not expanded again"
+_UNCARRIED_INFERRED: Final = "INFERRED (model and confidence are not in this packet)"
+# A why step whose claim the packet does not carry: named, its evidence cited, nothing described.
+_WHY_UNCARRIED: Final = re.compile(
+    rf"(Observed|Stated|INFERRED \(model and confidence are not in this packet\)): ({_CLAIM}),"
+    rf" whose content is not in this packet(; {_REPEAT_NOTE})?\. ((?:\[E[1-9][0-9]*\])+)"
+)
+# A diff claim the packet does not carry (the budget cut it, or it is an older version): named
+# only, with the transaction at which ``neptune_why`` reads it. No evidence is in the packet.
+_NAMED_ONLY: Final = re.compile(
+    rf"(?P<claim>{_CLAIM}) is not carried in this packet, so its content and its evidence are"
+    rf" not here(?:; (?P<note>{'|'.join(map(re.escape, (*_GONE, _BETWEEN_NOTE)))}))?"
+    r"(?:; neptune_why with as_of (?P<asof>\d+) reads it)?\."
+)
+_CARRIED_MARK: Final = re.compile(r"(?:Observed|Stated): |INFERRED \(model ")
+_REPEATED_ITEM: Final = re.compile(rf"item I(?P<key>[1-9][0-9]*) is {_REPEAT_NOTE}\. ")
+_GAP_AT: Final = re.compile(rf"- [a-z_]+ at ({_Q})")
 _ITEM_LINE: Final = re.compile(
     rf"\[I([1-9][0-9]*)\] ([a-z_]+) (item:sha256:{_HEX})(?: (claim:sha256:{_HEX}))?"
 )
@@ -237,6 +315,10 @@ def _literal(literal: TypedLiteral) -> str:
         return _instant(value)  # type: ignore[arg-type]
     if literal.datatype is ValueType.CLOCK_MAP:
         return f"clock map {quote(value.to_json())}"  # type: ignore[union-attr]
+    if literal.datatype is ValueType.DELTA:
+        # later - earlier between two calibration records, as Memory wrote it (graph-schema 2.0.0):
+        # the declared form, numbers and unit only, never a size or a verdict on them.
+        return f"delta {quote(value.to_json())} ({_unit(literal)}, as declared)"  # type: ignore[union-attr]
     return quote(value)  # type: ignore[arg-type]
 
 
@@ -324,6 +406,9 @@ def _header(packet: ContextPacket) -> list[str]:
             f"Claims as Memory knew them at transaction {packet.memory.as_of}"
             f" (it trails the Ledger's {packet.as_of})."
         )
+    notice = older_graph_notice(packet.memory.graph_schema_version)
+    if notice is not None:
+        lines.append(notice)
     if packet.during is not None:
         end = "open" if packet.during.end is None else str(packet.during.end)
         lines.append(
@@ -343,23 +428,163 @@ def _header(packet: ContextPacket) -> list[str]:
     return lines
 
 
+def answer_evidence_refs(packet: ContextPacket) -> tuple[EvidenceRef, ...]:
+    """The evidence refs an answer cites, in key order: the items' (``packet.evidence_refs()``),
+    then those only a why step names (a claim the packet cannot carry still cites its bytes)."""
+    refs = dict.fromkeys(packet.evidence_refs())
+    for trail in packet.trails:
+        if isinstance(trail, WhyTrail):
+            for step in trail.steps:
+                refs.update(dict.fromkeys(step.evidence))
+    return tuple(refs)
+
+
+@dataclass(frozen=True)
+class _Ctx:
+    """What the trail sentences need to cite: the item and evidence keys of one answer."""
+
+    packet: ContextPacket
+    keys: dict[str, int]  # item id and claim id -> item number
+    evidence: dict[EvidenceRef, int]
+    by_claim: dict[str, ClaimItem]
+
+    def cite(self, items: list[Item]) -> str:
+        unique = list(dict.fromkeys(items))
+        refs = dict.fromkeys(ref for item in unique for ref in item.evidence_refs())
+        return "".join(f"[I{self.keys[i.id]}]" for i in unique) + "".join(
+            f"[E{self.evidence[ref]}]" for ref in refs
+        )
+
+    def cite_refs(self, refs: tuple[EvidenceRef, ...]) -> str:
+        return "".join(f"[E{self.evidence[ref]}]" for ref in dict.fromkeys(refs))
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _gaps_at(packet: ContextPacket, at: str) -> int:
+    return sum(1 for g in packet.gaps if g.at == at or g.at.startswith(f"{at}/"))
+
+
+def _point(point: DiffPoint) -> str:
+    if isinstance(point, TxPoint):
+        return f"transaction {point.tx}"
+    return f"tick {point.ticks} on clock {point.clock}"
+
+
+def _why_lines(ctx: _Ctx, trail: WhyTrail) -> list[str]:
+    """A why tree as an indented outline, root first: one cited sentence per step, naming the
+    claim (by its item key, or by id when the packet does not carry it) and its evidence."""
+    packet = ctx.packet
+    repeats = sum(1 for s in trail.steps if s.repeat)
+    lines = [
+        f"Why Memory holds {trail.claim} (explain clause {trail_index(trail.at)}, as Memory knew it"
+        f" at transaction {packet.memory.as_of}; {_count(len(trail.claims), 'claim')},"
+        f" {repeats} repeated, {_count(_gaps_at(packet, trail.at), 'gap')} listed under Not"
+        f" answered):"
+    ]
+    for step in trail.steps:
+        lines.append(_why_step(ctx, step))
+    return lines
+
+
+def _why_step(ctx: _Ctx, step: WhyStep) -> str:
+    label = _WHY_LABELS[step.relation]
+    if step.finding is not None:
+        label += f" (resolver finding {step.finding})"
+    head = f"{'  ' * step.depth}- {label}: "
+    item = ctx.by_claim.get(step.claim)
+    if item is not None:
+        if step.repeat:
+            return f"{head}item I{ctx.keys[item.id]} is {_REPEAT_NOTE}. {ctx.cite([item])}"
+        return f"{head}{_mark(item)}: {_summary(item, ctx.keys)}. {ctx.cite([item])}"
+    mark = _UNCARRIED_INFERRED if step.is_inferred else str(step.assertion_kind).capitalize()
+    repeat = f"; {_REPEAT_NOTE}" if step.repeat else ""
+    return (
+        f"{head}{mark}: {step.claim}, whose content is not in this packet{repeat}."
+        f" {ctx.cite_refs(step.evidence)}"
+    )
+
+
+def _diff_lines(ctx: _Ctx, trail: DiffTrail) -> list[str]:
+    """A diff as change lines grouped by predicate: opened, closed, superseded, then ``between``
+    (held at neither point). A replacement is indented under the claim it replaces or narrows."""
+    packet = ctx.packet
+    tx = isinstance(trail.before, TxPoint)
+    others = [n for n in trail.nodes if n != trail.subject]
+    identities = (
+        f", with its declared identities {' and '.join(map(_node, others))}" if others else ""
+    )
+    lines = [
+        f"What changed about {_node(trail.subject)}{identities} between {_point(trail.before)} and"
+        f" {_point(trail.after)} (explain clause {trail_index(trail.at)};"
+        f" {_count(len(trail.claims), 'claim')},"
+        f" {_count(_gaps_at(packet, trail.at), 'gap')} listed under Not answered):"
+    ]
+    # Where neptune_why reads a claim: the snapshot a transaction diff compared it at, or the
+    # packet's snapshot on a world-time diff. A version that opened and closed in between was
+    # current at neither transaction.
+    old = trail.before.tx if isinstance(trail.before, TxPoint) else packet.as_of
+    new = trail.after.tx if isinstance(trail.after, TxPoint) else packet.as_of
+    order = list(_DIFF_LABELS)
+    by_predicate: dict[str, list[DiffChange]] = {}
+    for change in trail.changes:
+        by_predicate.setdefault(change.predicate, []).append(change)
+    for predicate, changes in by_predicate.items():
+        lines.append(f"Predicate {predicate}:")
+        for change in sorted(changes, key=lambda c: order.index(c.change)):
+            label = _DIFF_LABELS[change.change]
+            if change.change is Change.OPENED:
+                lines += [_change(ctx, "", label, c, new) for c in change.after]
+            elif change.change is Change.BETWEEN:
+                lines.append(
+                    _change(ctx, "", label, change.after[0], None if tx else new, _BETWEEN_NOTE)
+                )
+            else:
+                gone = "" if change.after else _GONE[0 if tx else 1]
+                lines.append(_change(ctx, "", label, change.before[0], old, gone))
+                for claim_id in change.after:
+                    item = ctx.by_claim.get(claim_id)
+                    narrowed = change.change is Change.CLOSED or (
+                        item is not None and is_closure(item.claim)
+                    )
+                    lines.append(_change(ctx, "  ", _SUB_LABELS[not narrowed], claim_id, new))
+    return lines
+
+
+def _change(
+    ctx: _Ctx, pad: str, label: str, claim_id: str, as_of: int | None, note: str = ""
+) -> str:
+    """One change sentence. A claim the packet carries is described and cited; one it does not is
+    only named, with where ``neptune_why`` reads it (nothing else about it is in the packet)."""
+    item = ctx.by_claim.get(claim_id)
+    tail = f"; {note}" if note else ""
+    if item is not None:
+        return (
+            f"{pad}- {label}: {_mark(item)}: {_summary(item, ctx.keys)}{tail}. {ctx.cite([item])}"
+        )
+    where = f"; neptune_why with as_of {as_of} reads it" if as_of is not None else ""
+    return (
+        f"{pad}- {label}: {claim_id} is not carried in this packet, so its content and its"
+        f" evidence are not here{tail}{where}."
+    )
+
+
 def render_answer(packet: ContextPacket) -> str:
     """The packet as cited sentences. Deterministic: the same packet, byte-identical text."""
-    evidence = {ref: n for n, ref in enumerate(packet.evidence_refs(), start=1)}
+    evidence = {ref: n for n, ref in enumerate(answer_evidence_refs(packet), start=1)}
     keys: dict[str, int] = {}  # item id and claim id -> item number
     for number, item in enumerate(packet.items, start=1):
         keys[item.id] = number
         if isinstance(item, ClaimItem):
             keys[item.claim.id] = number
-    by_claim = {i.claim.id: i for i in packet.items if isinstance(i, ClaimItem)}
+    by_claim: dict[str, ClaimItem] = {
+        i.claim.id: i for i in packet.items if isinstance(i, ClaimItem)
+    }
 
-    def cite(items: list[Item]) -> str:
-        unique = list(dict.fromkeys(items))
-        refs = dict.fromkeys(ref for item in unique for ref in item.evidence_refs())
-        return "".join(f"[I{keys[i.id]}]" for i in unique) + "".join(
-            f"[E{evidence[ref]}]" for ref in refs
-        )
-
+    ctx = _Ctx(packet, keys, evidence, by_claim)
+    cite = ctx.cite
     lines = _header(packet)
     if packet.superseded_since:
         lines += ["", _CHANGED.format(n=packet.memory.as_of)]
@@ -369,6 +594,9 @@ def render_answer(packet: ContextPacket) -> str:
                 f" transaction {entry.superseded_at} with {', '.join(entry.by)}."
                 f" {cite([by_claim[entry.claim]])}"
             )
+    for trail in packet.trails:
+        lines.append("")
+        lines += _why_lines(ctx, trail) if isinstance(trail, WhyTrail) else _diff_lines(ctx, trail)
     lines += ["", FACTS]
     for number, item in enumerate(packet.items, start=1):
         lines.append(f"{number}. {_mark(item)}: {_summary(item, keys)}. {cite([item])}")
@@ -458,10 +686,38 @@ class Statement:
 
 
 @dataclass(frozen=True)
+class TrailLine:
+    """One line of a why outline or a diff: the claim it names and what it cites.
+
+    ``label`` is the line's role (``Root claim``, ``Corroborated by``, ``Opened``, ``Replaced by``
+    ...), ``depth`` its indentation level, ``clause`` the explain clause its section answers.
+    ``items`` is the one item key of a claim the packet carries and ``evidence`` the sources it
+    cites; a claim the packet does not carry is named in the line itself, with its evidence on a
+    why step and none on a diff change (``carried`` is false). ``finding`` is the resolver
+    finding behind ``Conflicts with``; ``predicate`` the diff group; ``repeat`` a claim shown
+    earlier in the tree.
+    """
+
+    line: int
+    trail: str  # "why" or "diff"
+    clause: int
+    label: str
+    depth: int
+    claim_id: str
+    items: tuple[ItemKey, ...]
+    evidence: tuple[EvidenceRef, ...]
+    carried: bool
+    finding: str | None = None
+    predicate: str | None = None
+    repeat: bool = False
+
+
+@dataclass(frozen=True)
 class ParsedAnswer:
     items: tuple[ItemKey, ...]
     evidence: tuple[EvidenceRef, ...]
     statements: tuple[Statement, ...]
+    trail_lines: tuple[TrailLine, ...] = ()
 
     @property
     def claim_ids(self) -> tuple[str, ...]:
@@ -475,6 +731,239 @@ def _last(lines: list[str], marker: str, before: int) -> int:
     raise CitationError(f"no {marker} footer")
 
 
+class _Trails:
+    """The trail sections of one answer while it is read: each line must be a cited sentence of
+    the grammar, in the shape its section allows, and each heading's counts must match."""
+
+    def __init__(self, items: list[ItemKey], evidence: tuple[EvidenceRef, ...], as_of: int) -> None:
+        self.items, self.evidence, self.as_of = items, evidence, as_of
+        self.parsed: list[TrailLine] = []
+        self.sections: list[tuple[str, int, re.Match[str], list[TrailLine]]] = []
+        self.heading = ""
+        self.finished = False
+        self.predicate: str | None = None
+        self.group: list[TrailLine] = []  # the lines of the current predicate group
+        self.shown: set[str] = set()  # claims shown in full so far in a why outline
+        self.main: tuple[int, str, bool] | None = None  # open Closed/Superseded: line, label, gone
+        self.children = 0
+
+    def active(self, section: str) -> bool:
+        return bool(self.sections) and section == self.heading
+
+    def open(self, index: int, line: str) -> None:
+        self.close()
+        why = _WHY_HEAD.fullmatch(line)
+        match = why or _DIFF_HEAD.fullmatch(line)
+        assert match is not None
+        self.sections.append(("why" if why else "diff", int(match["clause"]), match, []))
+        self.heading, self.finished = line, False
+        self.predicate, self.group, self.shown = None, [], set()
+        self.main, self.children = None, 0
+
+    def _end_main(self) -> None:
+        """A closed or superseded line says nothing replaced it exactly when nothing follows it."""
+        if self.main is None:
+            return
+        index, label, gone = self.main
+        if gone == (self.children > 0):
+            raise CitationError(
+                f"line {index + 1}: a {label} line says nothing replaced it exactly when it has"
+                " no Narrowed to or Replaced by lines"
+            )
+        self.main, self.children = None, 0
+
+    def close(self) -> None:
+        """End the open trail section: its lines must agree with its heading's counts."""
+        if not self.sections or self.finished:
+            return
+        self.finished = True
+        self._end_main()
+        kind, _, match, lines = self.sections[-1]
+        heading = match.group(0)
+        if not lines:
+            if kind == "why" or int(match["claims"]):
+                raise CitationError(f"{kind} section with no lines: {heading!r}")
+            return
+        claims = len({ln.claim_id for ln in lines})
+        if claims != int(match["claims"]):
+            raise CitationError(f"{heading!r} counts {match['claims']} claims, lines name {claims}")
+        if kind == "why":
+            repeats = sum(1 for ln in lines if ln.repeat)
+            if repeats != int(match["repeats"]):
+                raise CitationError(f"{heading!r} counts {match['repeats']} repeats, not {repeats}")
+            if lines[0].claim_id != match["claim"]:
+                raise CitationError(f"{heading!r} is not about its root line's claim")
+
+    def check_gaps(self, pointers: list[str]) -> None:
+        for _, clause, match, _ in self.sections:
+            at = f"/explain/{clause}"
+            found = sum(1 for p in pointers if p == at or p.startswith(f"{at}/"))
+            stated = int(match["gaps"])
+            if found != stated:
+                raise CitationError(
+                    f"{match.group(0)!r} counts {stated} gaps, Not answered has {found}"
+                )
+
+    def line(self, index: int, text: str) -> None:
+        kind, clause, heading, lines = self.sections[-1]
+        where = f"line {index + 1}"
+        predicate = _PREDICATE.fullmatch(text)
+        if predicate is not None and kind == "diff":
+            self._end_main()
+            self.predicate, self.group = predicate.group(1), []
+            return
+        head = _TRAIL_LINE.fullmatch(text)
+        if head is None:
+            raise CitationError(f"{where} is not a {kind} line: {text!r}")
+        pad, label, finding, body = head.groups()
+        depth = len(pad) // 2
+        if len(pad) % 2:
+            raise CitationError(f"{where}: indentation is two spaces a level")
+        if (finding is not None) != (label == "Conflicts with"):
+            raise CitationError(f"{where}: exactly 'Conflicts with' names a resolver finding")
+        scope = self.group if kind == "diff" else lines
+        previous = scope[-1] if scope else None
+        parent = next((ln for ln in reversed(scope) if ln.depth == 0), None)
+        self._shape(where, kind, label, depth, previous, parent)
+        if kind == "diff":
+            if self.predicate is None:
+                raise CitationError(f"{where}: a change before any Predicate heading")
+            if depth == 0:
+                self._end_main()
+            else:
+                self.children += 1
+        # Quoted source text is data: shape checks read the line with every quoted string removed.
+        outside = _QUOTED.sub('""', body)
+        named = _NAMED_ONLY.fullmatch(body)
+        run = _RUN.search(body)
+        uncarried = _WHY_UNCARRIED.fullmatch(body)
+        repeat = False
+        note = ""
+        found_items: tuple[ItemKey, ...]
+        refs: tuple[EvidenceRef, ...]
+        if named is not None and kind == "diff":
+            claim, carried, found_items, refs = named["claim"], False, (), ()
+            note = named["note"] or ""
+            self._check_hint(where, heading, label, named["asof"])
+        elif run is not None:
+            numbers = [int(k) for k in _KEY.findall(run.group(1))]
+            ref_numbers = [int(k) for k in _KEY.findall(run.group(2))]
+            if len(numbers) != 1 or max(numbers) > len(self.items):
+                raise CitationError(f"{where}: a line names one claim item that has a footer entry")
+            if max(ref_numbers) > len(self.evidence):
+                raise CitationError(f"{where} cites a key with no footer entry")
+            found_items = (self.items[numbers[0] - 1],)
+            if found_items[0].claim_id is None:
+                raise CitationError(f"{where}: the item it cites is not a claim")
+            claim, carried = found_items[0].claim_id, True
+            refs = tuple(self.evidence[n - 1] for n in ref_numbers)
+            again = _REPEATED_ITEM.match(body)
+            repeat = again is not None
+            if again is not None:
+                if kind != "why" or int(again["key"]) != numbers[0]:
+                    raise CitationError(f"{where}: a repeat names the item it cites")
+            elif not _CARRIED_MARK.match(body):
+                raise CitationError(
+                    f"{where}: a claim line opens with Observed, Stated or INFERRED"
+                )
+            else:
+                sentence = outside[: _RUN.search(outside).start()]  # type: ignore[union-attr]
+                if not sentence.endswith(". "):
+                    raise CitationError(f"{where}: a sentence ends with a full stop")
+                note = sentence[:-2].rpartition("; ")[2] if "; " in sentence else ""
+        elif uncarried is not None and kind == "why":
+            claim, carried, found_items = uncarried.group(2), False, ()
+            repeat = uncarried.group(3) is not None
+            numbers = [int(k) for k in _KEY.findall(uncarried.group(4))]
+            if max(numbers) > len(self.evidence):
+                raise CitationError(f"{where} cites a key with no footer entry")
+            refs = tuple(self.evidence[n - 1] for n in numbers)
+        else:
+            raise CitationError(f"{where} states a claim without a citation: {text!r}")
+        if kind == "why":
+            self._check_repeat(where, claim, repeat, depth, previous)
+        else:
+            self._check_note(where, heading, label, note, index)
+        parsed = TrailLine(
+            index, kind, clause, label, depth, claim, found_items, refs, carried,
+            finding, self.predicate if kind == "diff" else None, repeat,
+        )  # fmt: skip
+        lines.append(parsed)
+        self.group.append(parsed)
+        self.parsed.append(parsed)
+
+    def _check_repeat(
+        self, where: str, claim: str, repeat: bool, depth: int, previous: TrailLine | None
+    ) -> None:
+        """A repeat names a claim shown in full earlier, has no children, and a claim is shown in
+        full once."""
+        if previous is not None and previous.repeat and depth > previous.depth:
+            raise CitationError(f"{where}: a repeat is not expanded, so nothing is under it")
+        if repeat != (claim in self.shown):
+            raise CitationError(
+                f"{where}: {claim} is shown twice in full, or repeated before it is shown"
+            )
+        self.shown.add(claim)
+
+    def _check_note(
+        self, where: str, heading: re.Match[str], label: str, note: str, index: int
+    ) -> None:
+        """The note ending a diff sentence belongs to its label and to the diff's axis."""
+        world = not heading["before"].startswith("transaction")
+        if label == "Between":
+            allowed = {_BETWEEN_NOTE}
+        elif label in ("Closed", "Superseded"):
+            allowed = {"", _GONE[1 if world else 0]}
+        else:
+            allowed = {""}
+        if note not in allowed:
+            raise CitationError(f"{where}: a {label} line cannot end with {note!r}")
+        if label in ("Closed", "Superseded"):
+            self.main = (index, label, bool(note))
+
+    def _check_hint(self, where: str, heading: re.Match[str], label: str, asof: str | None) -> None:
+        """Where ``neptune_why`` reads a named-only claim: the diff's own transaction for its
+        side (before for closed and superseded, after for the rest), the packet's snapshot on a
+        world-time diff, and nowhere for a version current at neither transaction."""
+        before, after = heading["before"], heading["after"]
+        if before.startswith("transaction"):
+            if label == "Between":
+                want = None
+            else:
+                side = before if label in ("Closed", "Superseded") else after
+                want = int(side.rsplit(" ", 1)[1])
+        else:
+            want = self.as_of
+        if (None if asof is None else int(asof)) != want:
+            raise CitationError(
+                f"{where}: neptune_why reads this claim at as_of {want}, not {asof}"
+            )
+
+    @staticmethod
+    def _shape(
+        where: str,
+        kind: str,
+        label: str,
+        depth: int,
+        previous: TrailLine | None,
+        parent: TrailLine | None,
+    ) -> None:
+        if kind == "why":
+            if label not in _WHY_LABELS.values():
+                raise CitationError(f"{where}: {label!r} is not a why label")
+            if (previous is None) != (label == "Root claim") or (depth == 0) != (previous is None):
+                raise CitationError(f"{where}: exactly the first line is the root, at depth 0")
+            if previous is not None and depth > previous.depth + 1:
+                raise CitationError(f"{where}: an outline deepens one level at a time")
+            return
+        if label in _SUB_LABELS:
+            allowed = {"Closed": ("Narrowed to",), "Superseded": _SUB_LABELS}
+            if depth != 1 or parent is None or label not in allowed.get(parent.label, ()):
+                raise CitationError(f"{where}: {label!r} does not follow a claim it can refine")
+        elif label not in _DIFF_LABELS.values() or depth != 0:
+            raise CitationError(f"{where}: {label!r} is a top-level diff label")
+
+
 def parse_answer(text: str) -> ParsedAnswer:
     """Every citation in a rendered answer; ``CitationError`` if any line breaks the grammar.
 
@@ -482,7 +971,10 @@ def parse_answer(text: str) -> ParsedAnswer:
     ``Quantities`` and ``Resolver findings`` every line is a statement ending with ``[I..]`` keys
     then ``[E..]`` keys, all defined in the footers; in ``Not answered`` every line is a gap line;
     the ``Items:`` and ``Evidence:`` footers number their keys ``1..n`` in order. A fact line
-    numbered ``n`` cites item ``I<n>`` first.
+    numbered ``n`` cites item ``I<n>`` first. A why or diff section (ADR 0011) holds only its two
+    heading forms, ``Predicate`` lines and trail lines of the fixed forms ``_Trails`` checks:
+    cited, evidence-only (a why step whose claim the packet does not carry) or named-only (a diff
+    claim it does not carry); ``ParsedAnswer.trail_lines`` returns each with its claim.
     """
     evidence = parse_citations(text)
     lines = text.split("\n")
@@ -503,6 +995,9 @@ def parse_answer(text: str) -> ParsedAnswer:
             raise CitationError(f"[I{offset}]: a claim item names its claim id, no other does")
         items.append(ItemKey(offset, match.group(2), match.group(3), match.group(4)))
     statements: list[Statement] = []
+    trails = _Trails(items, evidence, 0)
+    after_facts = False
+    gap_pointers: list[str] = []
     section = "header"
     for index, line in enumerate(lines[:start]):
         if line == "":
@@ -511,16 +1006,37 @@ def parse_answer(text: str) -> ParsedAnswer:
         if section == "header":
             if not any(p.fullmatch(line) for p in _HEADER):
                 raise CitationError(f"line {index + 1} is not a header line: {line!r}")
+            query = _QUERY_LINE.fullmatch(line)
+            if query is not None:
+                trails.as_of = int(query["as_of"])
             continue
         if line in _HEADINGS or _CHANGED_LINE.fullmatch(line):
+            trails.close()
+            section = line
+            after_facts = after_facts or line == FACTS
+            continue
+        if _WHY_HEAD.fullmatch(line) or _DIFF_HEAD.fullmatch(line):
+            if after_facts:
+                raise CitationError(f"line {index + 1}: a trail section comes before Facts")
+            trails.open(index, line)
             section = line
             continue
         if section == GAPS:
-            if not _GAP.match(line) or _RUN.search(line):
+            at = _GAP_AT.match(line)
+            if at is None or _RUN.search(line):
                 raise CitationError(f"line {index + 1} is not a gap line: {line!r}")
+            try:
+                gap_pointers.append(json.loads(at.group(1)))
+            except ValueError as exc:
+                raise CitationError(
+                    f"line {index + 1}: a gap's pointer is not a JSON string"
+                ) from exc
             continue
         if not section:
             raise CitationError(f"line {index + 1} is outside any section: {line!r}")
+        if trails.active(section):
+            trails.line(index, line)
+            continue
         run = _RUN.search(line)
         if run is None:
             raise CitationError(f"line {index + 1} states something without a citation: {line!r}")
@@ -540,7 +1056,9 @@ def parse_answer(text: str) -> ParsedAnswer:
                 tuple(evidence[n - 1] for n in cited_refs),
             )
         )
-    return ParsedAnswer(tuple(items), evidence, tuple(statements))
+    trails.close()
+    trails.check_gaps(gap_pointers)
+    return ParsedAnswer(tuple(items), evidence, tuple(statements), tuple(trails.parsed))
 
 
 def literal_values(line: str) -> list[str]:

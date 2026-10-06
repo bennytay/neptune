@@ -316,21 +316,51 @@ def _memory_defs() -> dict[str, JsonValue]:
                 "resolver_version": {"minLength": 1, "type": "string"},
             }
         ),
+        "Build": {
+            **_obj(
+                {
+                    "claims": {**_array(_ref("ClaimId")), "uniqueItems": True},
+                    "config_hash": _ref("ConfigHash"),
+                    "consolidator_id": _ref("Token"),
+                    "recorded_at": _ref("LedgerTx"),
+                    "version": {"minLength": 1, "type": "string"},
+                }
+            ),
+            "description": (
+                "one run of one consolidator lineage over one Ledger snapshot and every claim id"
+                " it emitted, sorted: a complete statement of the lineage, so a later build that"
+                " does not emit a claim withdraws it (neptune-memory ADR 0007 §5, ADR 0016)"
+            ),
+        },
         "Graph": {
             **_obj(
                 {
+                    "builds": _array(_ref("Build"), min_items=1),
                     "claims": _array(_ref("Claim")),
                     "findings": _array(_ref("ResolutionFinding")),
                     "generation": _ref("ConfigHash"),
+                    "graph_schema": {
+                        "type": "string",
+                        "pattern": (
+                            f"^{GRAPH_SCHEMA_VERSION}\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+                        ),
+                        "description": (
+                            "the full graph-schema release the document was written to; any"
+                            " minor of this major reads it (ADR 0019 §3)"
+                        ),
+                    },
                     "graph_schema_version": {"const": GRAPH_SCHEMA_VERSION},
                     "head": _ref("LedgerTx"),
                     "kind": _const("memory.graph"),
                     "resolver_config": _ref("ResolverConfig"),
-                }
+                },
+                optional=("builds",),
             ),
             "description": (
                 "one resolved history: every claim version ordered by (recorded_at, id), every"
-                " finding, and the resolver configuration whose hash is its generation (ADR 0006)"
+                " finding, the resolver configuration whose hash is its generation (ADR 0006) and,"
+                " from 1.9.0, the builds it was resolved with, ordered by (recorded_at,"
+                " consolidator_id)"
             ),
         },
         "Interval": _obj(

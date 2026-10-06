@@ -919,7 +919,7 @@ class _Retrieve:
                 GapCode.NOT_COVERED,
                 "",
                 state.beyond[reason],
-                f"{reason} is newer than Context's pinned graph-schema {GRAPH_SCHEMA_VERSION};"
+                f"{reason} is not in Context's pinned graph-schema {GRAPH_SCHEMA_VERSION};"
                 " the packet cannot describe it",
             )
         for at in sorted(state.truncated):

@@ -4,14 +4,18 @@ Three things, each from declared records only, each cited:
 
 - **Machine chains.** Commissioning, maintenance, change and requalification records place a
   configuration on a machine at an instant on the record's own clock. Ordered per machine and clock,
-  they give ``has_configuration`` spans (each until the next placement, or open) and a ``succeeds``
-  claim at every decided change of configuration. Records that disagree on one instant, or a field
-  that is ``Ambiguous``, give ``configuration_candidate`` claims and a ``chain_overlap`` finding; a
-  record that leaves the configuration unknown gives ``configuration_unknown`` and a ``chain_gap``
-  finding. Nothing bridges a gap: no ``succeeds`` is claimed across one.
+  they give ``has_configuration`` spans, each until the next placement (or open), so a change is
+  where one machine's span of one configuration ends and its span of another begins: ``transitions``
+  reads it back (ADR 0019 §2). Configuration nodes are shared across machines, so no
+  configuration-to-configuration ``succeeds`` is claimed from a chain: it would read fleet-wide.
+  Records that disagree on one instant, or a field that is ``Ambiguous``, give
+  ``configuration_candidate`` claims and a ``chain_overlap`` finding; a record that leaves the
+  configuration unknown gives ``configuration_unknown`` and a ``chain_gap`` finding. Nothing bridges
+  a gap: no change is read across one.
 - **Runs.** ``configuration_active_during`` from each compiler ``SnapshotBinding``, over the bound
-  part of the run on the run's clock. A run no binding names is ``configuration_unknown`` over the
-  run, never the nearest configuration in time.
+  part of the run on the run's clock. A bound ``configuration_snapshot``, which no Ledger thread
+  holds, names the anchored configuration node its evidence keys (ADR 0022). A run no binding
+  names is ``configuration_unknown`` over the run, never the nearest configuration in time.
 - **Authorisation.** ``authorised_configuration`` from each ``AuthorisationEnvelope``; the part of
   a bound run window no envelope naming its configuration covers is an observed
   ``not_covered_by_authorisation`` claim. Windows are compared on one clock only; otherwise the
@@ -28,7 +32,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Final, Literal
 
-from neptune.identity import canonical_json
 from neptune.model.finding import Severity
 from neptune.model.knowledge import AssertionKind
 from neptune.model.time import Timestamp
@@ -42,6 +45,7 @@ from neptune_memory.consolidate.base import (
 from neptune_memory.consolidate.configuration_records import (
     AUTHORISATION_ENVELOPE,
     CHAIN_KINDS,
+    CONFIGURATION_SNAPSHOT,
     RUN,
     SNAPSHOT_BINDING,
     SNAPSHOT_KINDS,
@@ -60,6 +64,14 @@ from neptune_memory.consolidate.identity_records import (
     Malformed,
     clock,
 )
+from neptune_memory.consolidate.threads import (
+    RESERVED_NAMESPACES,
+    UNTHREADED_KINDS,
+    CatalogThreads,
+    anchored_node,
+    catalog_threads,
+    ref_key,
+)
 from neptune_memory.schema.claim import LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, CivilClock, Interval, Open
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -69,7 +81,6 @@ from neptune_memory.schema.predicates import (
     CONFIGURATION_CANDIDATE,
     CONFIGURATION_UNKNOWN,
     NOT_COVERED_BY_AUTHORISATION,
-    SUCCEEDS,
 )
 
 if TYPE_CHECKING:
@@ -111,10 +122,6 @@ def _safe(reason: str) -> str:
     return reason if reason.isprintable() else "unprintable text"
 
 
-def _ref_key(ref: EvidenceRef) -> bytes:
-    return canonical_json.dumps(ref.to_json())
-
-
 def _span(start: Timestamp, end: Timestamp | Open) -> JsonValue:
     return {"end": end.to_json(), "start": start.to_json()}
 
@@ -152,6 +159,11 @@ class _View:
     nodes: set[NodeRef] = field(default_factory=set)
     anchors: dict[tuple[NodeType, bytes], set[NodeRef]] = field(default_factory=dict)
     starts: dict[NodeRef, Timestamp] = field(default_factory=dict)
+    catalog: CatalogThreads = field(default_factory=CatalogThreads)
+    own: set[RecordId] = field(default_factory=set)  # lifecycle records: they declare their ids
+    # Configuration snapshots' anchored nodes no Ledger thread answers (ADR 0022): like the
+    # catalog's ``anchor_only``, never an id an envelope names.
+    unthreaded_anchors: set[NodeRef] = field(default_factory=set)
     findings: list[ConsolidationFinding] = field(default_factory=list)
 
     def place(self, stamp: Timestamp) -> Timestamp:
@@ -160,10 +172,27 @@ class _View:
         return stamp if civil is None else civil.at(stamp.ticks)
 
     def declared(self, node_type: NodeType, node: LogicalId, record: RecordId) -> NodeRef | None:
-        """The node a declared id names; a finding if no Ledger thread declares it."""
+        """The node a declared id names: one a Ledger thread declares, or, for a lifecycle record
+        the Ledger holds in no thread by design, the id the record itself declares (ADR 0018 §2).
+        A finding otherwise: no thread declares it, or the Ledger does not hold the record."""
         ref = node_ref(node_type, node)
         if ref in self.nodes:
             return ref
+        held = self.catalog.holds(record) if record in self.own else None
+        if held is True and node.namespace not in RESERVED_NAMESPACES:
+            return ref
+        if held is False:
+            self.findings.append(
+                _finding(
+                    "uncatalogued_record",
+                    "the Ledger does not hold this record (threads_of: unknown_record); the ids"
+                    " it names are not placed",
+                    (record,),
+                    node_type=str(node_type),
+                    logical_id=node.to_json(),
+                )
+            )
+            return None
         self.findings.append(
             _finding(
                 "unthreaded_id",
@@ -175,11 +204,14 @@ class _View:
         )
         return None
 
-    def anchored(self, node_type: NodeType, anchor: EvidenceRef) -> tuple[NodeRef, ...]:
-        """The nodes whose threads cite ``anchor``: a record's thread when it declares no id."""
-        return tuple(
-            sorted(self.anchors.get((node_type, _ref_key(anchor)), ()), key=lambda n: n.node_id)
-        )
+    def anchored(
+        self, node_type: NodeType, anchor: EvidenceRef, record: RecordId
+    ) -> tuple[NodeRef, ...]:
+        """A record's thread when it declares no id: the stand-in threads citing ``anchor``, and
+        the anchored threads the catalog says ``record`` opens (ADR 0018 §2.1)."""
+        found = self.anchors.get((node_type, ref_key(anchor)), set())
+        found = found | self.catalog.subject_of(record, node_type)
+        return tuple(sorted(found, key=lambda n: n.node_id))
 
 
 def _read(ledger: LedgerReader) -> _View:
@@ -235,8 +267,12 @@ def _read(ledger: LedgerReader) -> _View:
         parsed = seen[rid]
         if isinstance(parsed, Event):
             view.events.append(parsed)
+            if parsed.kind in UNTHREADED_KINDS:
+                view.own.add(rid)
         elif isinstance(parsed, Envelope):
             view.envelopes.append(parsed)
+            if AUTHORISATION_ENVELOPE in UNTHREADED_KINDS:
+                view.own.add(rid)
         elif isinstance(parsed, RunRecord):
             view.runs.append(parsed)
         elif isinstance(parsed, Binding):
@@ -250,7 +286,9 @@ def _read(ledger: LedgerReader) -> _View:
         view.starts[node] = threads[0].valid_from
         for thread in threads:
             for cited in thread.evidence:
-                view.anchors.setdefault((node.node_type, _ref_key(cited)), set()).add(node)
+                view.anchors.setdefault((node.node_type, ref_key(cited)), set()).add(node)
+    view.catalog = catalog_threads(ledger, seen.keys() - conflicted)
+    view.nodes |= view.catalog.nodes
     return view
 
 
@@ -419,8 +457,10 @@ def _cites(steps: Iterable[_Step]) -> tuple[list[EvidenceRef], list[RecordId]]:
 
 
 def _chain_drafts(view: _View, machine: NodeRef, spans: list[_Span]) -> list[ClaimDraft]:
+    """A chain's spans as claims about the machine. A decided span ends exactly where the next
+    span begins, so a change of configuration is two abutting ``has_configuration`` claims of
+    this machine (ADR 0019 §2), never a claim between two shared configuration nodes."""
     drafts: list[ClaimDraft] = []
-    previous: _Span | None = None
     for span in spans:
         evidence, records = _cites(span.steps)
         if span.state.kind == "decided":
@@ -437,20 +477,6 @@ def _chain_drafts(view: _View, machine: NodeRef, spans: list[_Span]) -> list[Cla
                     records,
                 )
             )
-            if previous is not None and previous.state.kind == "decided":
-                cited, cited_records = _cites([*previous.instants[-1], *span.instants[0]])
-                drafts.append(
-                    _draft(
-                        configuration,
-                        SUCCEEDS,
-                        previous.state.configurations[0],
-                        span.start,
-                        span.end,
-                        _STATED,
-                        cited,
-                        cited_records,
-                    )
-                )
         elif span.state.kind == "unknown":
             view.findings.append(
                 _finding(
@@ -490,7 +516,6 @@ def _chain_drafts(view: _View, machine: NodeRef, spans: list[_Span]) -> list[Cla
                         cited_records,
                     )
                 )
-        previous = span
     return drafts
 
 
@@ -683,6 +708,22 @@ def _coverage(
     end) exists, or an open run window is only partly covered, the coverage is undecided: a
     finding, never a claim (ADR 0010 §5).
     """
+    anchor_only = view.catalog.anchor_only | view.unthreaded_anchors
+    if configuration in anchor_only and view.envelopes:
+        # Envelopes name declared configuration ids; a configuration the Ledger keys only by its
+        # evidence anchor is never one of them by construction. Whether it is the configuration
+        # an envelope names is an identity question no record settles (ADR 0018 §3).
+        _undecided(
+            view,
+            found,
+            run,
+            node,
+            binding,
+            configuration,
+            "the bound configuration is known only by its evidence anchor, and no record says"
+            " whether it is a configuration an envelope names",
+        )
+        return []
     naming = found.naming.get(configuration, [])
     comparable: list[Interval] = []
     undecided: list[RecordId] = []
@@ -744,7 +785,7 @@ def _run_node(view: _View, run: RunRecord) -> NodeRef | None:
     """A run's node: by its declared logical id, else by its anchored thread (Ledger ADR 0003)."""
     if run.logical_id is not None:
         return view.declared(NodeType.RUN, run.logical_id, run.record)
-    nodes = view.anchored(NodeType.RUN, run.anchor)
+    nodes = view.anchored(NodeType.RUN, run.anchor, run.record)
     if len(nodes) == 1:
         return nodes[0]
     view.findings.append(
@@ -759,9 +800,20 @@ def _run_node(view: _View, run: RunRecord) -> NodeRef | None:
     return None
 
 
-def _run_window(view: _View, run: RunRecord, node: NodeRef) -> Interval:
-    """The run's own ``[first, last + 1 tick)``: ``first`` else its thread's start (a convention,
-    ADR 0008 §2); open where ``last`` is not stated on the start's clock."""
+def _run_window(view: _View, run: RunRecord, node: NodeRef) -> Interval | None:
+    """The run's own ``[first, last + 1 tick)``: ``first`` else its stand-in thread's start (a
+    convention, ADR 0008 §2); open where ``last`` is not stated on the start's clock. ``None``
+    (and a finding) when neither is stated: a catalog thread states no start (ADR 0018 §3)."""
+    if run.first is None and node not in view.starts:
+        view.findings.append(
+            _finding(
+                "untimeable_window",
+                "a run states no first instant and its thread states no start; nothing about"
+                " its configuration is placed in time",
+                (run.record,),
+            )
+        )
+        return None
     start = view.place(run.first) if run.first is not None else view.place(view.starts[node])
     if run.last is not None:
         last = view.place(run.last)
@@ -853,6 +905,8 @@ def _runs(view: _View, found: _Authorisations) -> list[ClaimDraft]:
         if node is None:
             continue
         run_window = _run_window(view, run, node)
+        if run_window is None:
+            continue
         bindings = by_run.get(run.record, [])
         if not bindings:
             drafts.append(
@@ -918,6 +972,52 @@ def _runs(view: _View, found: _Authorisations) -> list[ClaimDraft]:
     return drafts
 
 
+def _snapshot_configurations(
+    view: _View, binding: Binding, snapshot: Snapshot
+) -> tuple[NodeRef, ...]:
+    """The configuration node a bound snapshot names, and one finding unless there is exactly one.
+
+    A snapshot's node is its anchored configuration thread's (ADR 0010 §1). The Ledger's thread
+    table has no row for a ``configuration_snapshot`` (Ledger ADR 0003 §2), so for one no thread
+    cites, the node is the anchored configuration thread its record-level evidence keys by the
+    Ledger's published rule (ADR 0022 §1), and only where that thread could exist: the catalog
+    answers that it holds the snapshot (``found``), and its evidence source is a content id. An
+    ``unknown_record`` answer is ``uncatalogued_record``; a reader answering no thread queries, or
+    a source that is not a content id, keeps ADR 0010's rule (``unthreaded_id``).
+    Transitional: delete the ``CONFIGURATION_SNAPSHOT`` branch once the Ledger threads snapshots
+    (ADR 0022, Consequences).
+    """
+    configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor, snapshot.record)
+    if not configurations and snapshot.kind == CONFIGURATION_SNAPSHOT:
+        held = view.catalog.holds(snapshot.record)
+        if held is False:
+            view.findings.append(
+                _finding(
+                    "uncatalogued_record",
+                    "the Ledger does not hold the bound configuration snapshot (threads_of:"
+                    " unknown_record); the run's configuration is not placed",
+                    (binding.record, snapshot.record),
+                    snapshot=snapshot.record,
+                )
+            )
+            return ()
+        if held is True and isinstance(snapshot.anchor.source, str):  # a content id
+            node = anchored_node(NodeType.CONFIGURATION, snapshot.anchor)
+            view.unthreaded_anchors.add(node)
+            return (node,)
+    if len(configurations) != 1:
+        view.findings.append(
+            _finding(
+                "unthreaded_id" if not configurations else "ambiguous_anchor",
+                f"a bound {snapshot.kind} has "
+                + ("no configuration thread" if not configurations else "several threads"),
+                (binding.record, snapshot.record),
+                nodes=[n.node_id for n in configurations],
+            )
+        )
+    return configurations
+
+
 def _bind(
     view: _View,
     run: RunRecord,
@@ -955,17 +1055,7 @@ def _bind(
             )
         )
     else:
-        configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor)
-        if len(configurations) != 1:
-            view.findings.append(
-                _finding(
-                    "unthreaded_id" if not configurations else "ambiguous_anchor",
-                    f"a bound {snapshot.kind} has "
-                    + ("no configuration thread" if not configurations else "several threads"),
-                    (binding.record, snapshot.record),
-                    nodes=[n.node_id for n in configurations],
-                )
-            )
+        configurations = _snapshot_configurations(view, binding, snapshot)
     if binding.ambiguous:
         view.findings.append(
             _finding(
@@ -1015,10 +1105,17 @@ def _bind(
 
 
 class ConfigurationLineageConsolidator:
-    """Machine chains, run configurations and authorisation coverage. Takes no configuration."""
+    """Machine chains, run configurations and authorisation coverage. Takes no configuration.
+
+    Version 2 (ADR 0019 §2) claims no ``succeeds`` from a machine's chain: a change is the
+    machine's own abutting ``has_configuration`` spans, read back by ``transitions``. Version 3
+    (ADR 0022) resolves a bound ``configuration_snapshot`` no thread cites to the anchored
+    configuration node its evidence keys, so a pinned parameter document is the run's
+    configuration rather than ``configuration_unknown``.
+    """
 
     consolidator_id: Final = CONFIGURATION_CONSOLIDATOR_ID
-    version: Final = "1"
+    version: Final = "3"
     model: Final[ModelRef | None] = None
 
     def consolidate(
@@ -1041,3 +1138,62 @@ class ConfigurationLineageConsolidator:
         drafts.extend(authorised)
         drafts.extend(_runs(view, found))
         return ConsolidatorOutput(tuple(drafts), tuple(view.findings))
+
+
+# --- Reading changes back -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Transition:
+    """One decided change on one machine's chain (ADR 0019 §2): ``before`` was in force until
+    ``at`` and ``after`` from ``at``, on one clock. ``claims`` are the two ``has_configuration``
+    claims it is read from, which cite the records on each side."""
+
+    machine: NodeRef
+    before: NodeRef
+    after: NodeRef
+    at: Timestamp
+    claims: tuple[Claim, Claim]
+
+
+def transitions(claims: Iterable[Claim], machine: NodeRef) -> tuple[Transition, ...]:
+    """The changes of configuration on ``machine``, from ``memory.configuration``'s
+    ``has_configuration`` claims about it. Pass the claims current at one ``as_of``.
+
+    A change is a span of one configuration whose end is exactly the start of a span of another
+    (one ``Timestamp``, so one clock). A span that ends where an unknown or candidate span begins,
+    or on another clock, meets no decided span: no change is read across a gap, a tie or two
+    clocks, as no ``succeeds`` was claimed across one (ADR 0010 §2). In time order per clock.
+    """
+    spans = [
+        c
+        for c in claims
+        if c.predicate == HAS_CONFIGURATION
+        and c.subject == machine
+        and c.provenance.consolidator_id == CONFIGURATION_CONSOLIDATOR_ID
+        and isinstance(c.object, NodeRef)
+    ]
+    starting: dict[Timestamp, list[Claim]] = {}
+    for claim in spans:
+        starting.setdefault(claim.valid_from, []).append(claim)
+    found: list[Transition] = []
+    for before in spans:
+        if not isinstance(before.valid_to, Timestamp):
+            continue
+        for after in starting.get(before.valid_to, ()):
+            if after.object != before.object:
+                found.append(
+                    Transition(
+                        machine,
+                        before.object,  # type: ignore[arg-type]
+                        after.object,  # type: ignore[arg-type]
+                        after.valid_from,
+                        (before, after),
+                    )
+                )
+    return tuple(
+        sorted(
+            found,
+            key=lambda t: (t.at.domain_id, t.at.ticks, t.before.node_id, t.after.node_id),
+        )
+    )
