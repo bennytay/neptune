@@ -76,7 +76,7 @@ A case maps with Deploy when it carries a declaration (`Case.deploy`). The accep
 `harness/acceptance/deploy.json`:
 
 ```json
-{"deploy_format": 1, "corpus": "acceptance", "corpus_version": "2.1.0",
+{"deploy_format": 1, "corpus": "acceptance", "corpus_version": "3.0.0",
  "presets": ["cmms_generic", "jira_json", "register_zone", "servicenow_csv"],
  "templates": [], "at_least": {"maintenance_event": 15},
  "sources": [{"preset": "...", "source": "<corpus path>", "civil_time_zone": "<IANA name>"}]}

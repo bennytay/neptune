@@ -131,20 +131,28 @@ def test_the_package_holds_both_stops_32_s_apart_and_the_assertion_joining_them(
     assert [s["value"] for s in assertion["scope"]["value"]] == ["DT-26-0914-01", "4182"]
 
 
-def test_the_calibrations_land_as_configuration_until_the_compiler_reads_easy_handeye(
+def test_the_hand_eye_calibrations_are_calibrations_with_an_extrinsic(
     package: resolve.Package,
 ) -> None:
-    """MVL-207 adds the format; until then each file is a configuration snapshot whose values the
-    gold answers cite by pointer, and only the vision PC's OpenCV export is a calibration."""
-    for ident in ("CAL-ARM3A-0818", "CAL-ARM3A-0911"):
+    """Compiler MVL-207 (ADR 0073) reads each easy_handeye file as a calibration whose extrinsic
+    holds the pose, so the gold answers cite the extrinsic translation, not a config value."""
+    transforms = {t["id"]: t for t in package.kind("frame_transform")}
+    for ident, z in (("CAL-ARM3A-0818", 0.0745), ("CAL-ARM3A-0911", 0.0702)):
         content = package.content(f"sites/PLANT-2/cell3/calibration/{ident}.yaml")
-        values = [
-            v["path"]
+        (record,) = [
+            c
+            for c in package.kind("calibration")
+            if c["provenance"]["evidence"]["source"] == content
+        ]
+        (extrinsic,) = record["extrinsics"]
+        assert transforms[extrinsic]["value"]["translation"]["values"][2] == z
+        assert not [
+            v
             for v in package.kind("configuration_value")
             if v["provenance"]["evidence"]["source"] == content
         ]
-        assert ["transformation", "z"] in values
-    assert len(package.kind("calibration")) == 1
+    # five easy_handeye files and the vision PC's OpenCV export
+    assert len(package.kind("calibration")) == 6
 
 
 def test_one_corrupt_bag_is_findings_not_a_failed_job(
