@@ -187,6 +187,22 @@ def test_malformed_2x_documents_are_refused(
     assert (caught.value.code, caught.value.pointer) == (code, pointer)
 
 
+def test_builds_are_optional_but_never_empty() -> None:
+    """graph-schema 2.0.0: ``builds`` may be absent; present, it has at least one entry."""
+    document = _document()
+    del document["builds"]
+    _validator("2.0.0").validate(document)
+    snap = read_snapshot(document)
+    assert (snap.major, snap.release, snap.builds) == (2, "2.0.0", ())
+    assert len(snap.claims) == len(dock().claims)
+    document["builds"] = []
+    with pytest.raises(ValidationError):
+        _validator("2.0.0").validate(document)
+    with pytest.raises(PackError) as caught:
+        read_snapshot(document)
+    assert (caught.value.code, caught.value.pointer) == ("snapshot_malformed", "/builds")
+
+
 def test_a_build_lists_each_claim_once() -> None:
     document = _document()
     build = document["builds"][0]
