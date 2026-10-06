@@ -66,6 +66,8 @@ CHAIN_KINDS: Final[Mapping[str, tuple[Callable[[JsonValue], object], str]]] = {
 AUTHORISATION_ENVELOPE: Final = "authorisation_envelope"
 RUN: Final = "run"
 SNAPSHOT_BINDING: Final = "snapshot_binding"
+# The one snapshot kind the Ledger's thread table has no row for (Ledger ADR 0003 §2; ADR 0022).
+CONFIGURATION_SNAPSHOT: Final = str(SnapshotKind.CONFIGURATION_SNAPSHOT)
 SNAPSHOT_KINDS: Final[Mapping[str, Callable[[JsonValue], object]]] = {
     str(SnapshotKind.HARDWARE_CONFIGURATION): hardware_configuration_from_json,
     str(SnapshotKind.SOFTWARE_CONFIGURATION): software_configuration_from_json,

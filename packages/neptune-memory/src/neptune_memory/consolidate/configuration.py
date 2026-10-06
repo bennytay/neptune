@@ -13,8 +13,9 @@ Three things, each from declared records only, each cited:
   configuration unknown gives ``configuration_unknown`` and a ``chain_gap`` finding. Nothing bridges
   a gap: no change is read across one.
 - **Runs.** ``configuration_active_during`` from each compiler ``SnapshotBinding``, over the bound
-  part of the run on the run's clock. A run no binding names is ``configuration_unknown`` over the
-  run, never the nearest configuration in time.
+  part of the run on the run's clock. A bound ``configuration_snapshot``, which no Ledger thread
+  holds, names the anchored configuration node its evidence keys (ADR 0022). A run no binding
+  names is ``configuration_unknown`` over the run, never the nearest configuration in time.
 - **Authorisation.** ``authorised_configuration`` from each ``AuthorisationEnvelope``; the part of
   a bound run window no envelope naming its configuration covers is an observed
   ``not_covered_by_authorisation`` claim. Windows are compared on one clock only; otherwise the
@@ -44,6 +45,7 @@ from neptune_memory.consolidate.base import (
 from neptune_memory.consolidate.configuration_records import (
     AUTHORISATION_ENVELOPE,
     CHAIN_KINDS,
+    CONFIGURATION_SNAPSHOT,
     RUN,
     SNAPSHOT_BINDING,
     SNAPSHOT_KINDS,
@@ -66,6 +68,7 @@ from neptune_memory.consolidate.threads import (
     RESERVED_NAMESPACES,
     UNTHREADED_KINDS,
     CatalogThreads,
+    anchored_node,
     catalog_threads,
     ref_key,
 )
@@ -158,6 +161,9 @@ class _View:
     starts: dict[NodeRef, Timestamp] = field(default_factory=dict)
     catalog: CatalogThreads = field(default_factory=CatalogThreads)
     own: set[RecordId] = field(default_factory=set)  # lifecycle records: they declare their ids
+    # Configuration snapshots' anchored nodes no Ledger thread answers (ADR 0022): like the
+    # catalog's ``anchor_only``, never an id an envelope names.
+    unthreaded_anchors: set[NodeRef] = field(default_factory=set)
     findings: list[ConsolidationFinding] = field(default_factory=list)
 
     def place(self, stamp: Timestamp) -> Timestamp:
@@ -702,7 +708,8 @@ def _coverage(
     end) exists, or an open run window is only partly covered, the coverage is undecided: a
     finding, never a claim (ADR 0010 §5).
     """
-    if configuration in view.catalog.anchor_only and view.envelopes:
+    anchor_only = view.catalog.anchor_only | view.unthreaded_anchors
+    if configuration in anchor_only and view.envelopes:
         # Envelopes name declared configuration ids; a configuration the Ledger keys only by its
         # evidence anchor is never one of them by construction. Whether it is the configuration
         # an envelope names is an identity question no record settles (ADR 0018 §3).
@@ -965,6 +972,46 @@ def _runs(view: _View, found: _Authorisations) -> list[ClaimDraft]:
     return drafts
 
 
+def _snapshot_configurations(
+    view: _View, binding: Binding, snapshot: Snapshot
+) -> tuple[NodeRef, ...]:
+    """The configuration node a bound snapshot names, and one finding unless there is exactly one.
+
+    A snapshot's node is its anchored configuration thread's (ADR 0010 §1). The Ledger's thread
+    table has no row for a ``configuration_snapshot`` (Ledger ADR 0003 §2), so for one no thread
+    cites, the node is the anchored configuration thread its record-level evidence keys by the
+    Ledger's published rule (ADR 0022): the configuration the document's bytes declare. Only when
+    the Ledger holds the snapshot: an ``unknown_record`` answer leaves it unresolved.
+    """
+    configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor, snapshot.record)
+    if not configurations and snapshot.kind == CONFIGURATION_SNAPSHOT:
+        if view.catalog.holds(snapshot.record) is False:
+            view.findings.append(
+                _finding(
+                    "uncatalogued_record",
+                    "the Ledger does not hold the bound configuration snapshot (threads_of:"
+                    " unknown_record); the run's configuration is not placed",
+                    (binding.record, snapshot.record),
+                    snapshot=snapshot.record,
+                )
+            )
+            return ()
+        node = anchored_node(NodeType.CONFIGURATION, snapshot.anchor)
+        view.unthreaded_anchors.add(node)
+        return (node,)
+    if len(configurations) != 1:
+        view.findings.append(
+            _finding(
+                "unthreaded_id" if not configurations else "ambiguous_anchor",
+                f"a bound {snapshot.kind} has "
+                + ("no configuration thread" if not configurations else "several threads"),
+                (binding.record, snapshot.record),
+                nodes=[n.node_id for n in configurations],
+            )
+        )
+    return configurations
+
+
 def _bind(
     view: _View,
     run: RunRecord,
@@ -1002,17 +1049,7 @@ def _bind(
             )
         )
     else:
-        configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor, snapshot.record)
-        if len(configurations) != 1:
-            view.findings.append(
-                _finding(
-                    "unthreaded_id" if not configurations else "ambiguous_anchor",
-                    f"a bound {snapshot.kind} has "
-                    + ("no configuration thread" if not configurations else "several threads"),
-                    (binding.record, snapshot.record),
-                    nodes=[n.node_id for n in configurations],
-                )
-            )
+        configurations = _snapshot_configurations(view, binding, snapshot)
     if binding.ambiguous:
         view.findings.append(
             _finding(
@@ -1065,11 +1102,14 @@ class ConfigurationLineageConsolidator:
     """Machine chains, run configurations and authorisation coverage. Takes no configuration.
 
     Version 2 (ADR 0019 §2) claims no ``succeeds`` from a machine's chain: a change is the
-    machine's own abutting ``has_configuration`` spans, read back by ``transitions``.
+    machine's own abutting ``has_configuration`` spans, read back by ``transitions``. Version 3
+    (ADR 0022) resolves a bound ``configuration_snapshot`` no thread cites to the anchored
+    configuration node its evidence keys, so a pinned parameter document is the run's
+    configuration rather than ``configuration_unknown``.
     """
 
     consolidator_id: Final = CONFIGURATION_CONSOLIDATOR_ID
-    version: Final = "2"
+    version: Final = "3"
     model: Final[ModelRef | None] = None
 
     def consolidate(
