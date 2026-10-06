@@ -10,9 +10,9 @@ flowchart LR
     RET["retrieve/ channel interface + graph channel (ADR 0007)"]
     ENG["engine.py LocalEngine (ADR 0007)"]
     PKT["packets/"]
-    RND["render/"]
+    RND["render/ agent text renderer (ADR 0009)"]
     SDK["sdk/ Client + engine seam (ADR 0004)"]
-    MCP["mcp/ 4 read-only tools (ADR 0004)"]
+    MCP["mcp/ 6 read-only tools + Claude Code skill (ADR 0004, 0009)"]
     EXP["explain/"]
     EVA["eval/"]
   end
@@ -24,6 +24,7 @@ flowchart LR
   QRY --> RET --> PKT --> RND
   RET --> EXP
   PKT --> SDK
+  QRY -->|planner| SDK
   MCP --> SDK
   RET --> ENG -->|engine seam| SDK
   EVA -.-> RET

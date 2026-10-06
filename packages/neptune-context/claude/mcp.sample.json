@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "neptune": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${NEPTUNE_REPO:-.}",
+        "--all-packages",
+        "python",
+        "-m",
+        "neptune_context.mcp",
+        "--memory",
+        "${NEPTUNE_MEMORY_GRAPH}"
+      ]
+    }
+  }
+}
