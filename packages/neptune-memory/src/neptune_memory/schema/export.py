@@ -14,9 +14,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Final
 
+from neptune.model.frames import TransformDirection
 from neptune.model.schema import canonical_schema
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
-from neptune_memory.schema.claim import ValueType
+from neptune_memory.schema.claim import (
+    DELTA_FORMS,
+    MAX_DELTA_VALUES,
+    DeltaAdjustment,
+    DeltaQuantity,
+    ValueType,
+)
 from neptune_memory.schema.clock_map import MapMethod
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import EVENT_KINDS, VOCABULARY_VERSION, Cardinality
@@ -133,6 +140,19 @@ def _memory_defs() -> dict[str, JsonValue]:
         "description": "a quantity's unit exactly as declared; it inherits the claim's provenance",
     }
     na: JsonObject = _ref("NotApplicable")
+    delta_unit: JsonObject = {
+        "anyOf": [_obj({"knowledge": _const("known"), "value": _ref("Unit")}), na],
+        "description": (
+            "the unit both calibrations declare, as declared; not_applicable for a form without"
+            " one (a quaternion, a rotation matrix)"
+        ),
+    }
+    finite: JsonObject = {"type": "number"}
+    delta_common: dict[str, JsonValue] = {
+        "earlier": _ref("RecordId"),
+        "later": _ref("RecordId"),
+        "values": {**_array(finite, min_items=1), "maxItems": MAX_DELTA_VALUES},
+    }
     return {
         "ClockMap": {
             **_obj(
@@ -198,6 +218,71 @@ def _memory_defs() -> dict[str, JsonValue]:
             ),
         },
         "ClaimId": _pattern("claim:"),
+        "Delta": {
+            "anyOf": [
+                _obj(
+                    {
+                        **delta_common,
+                        "name": {"type": "string"},
+                        "quantity": _const(str(DeltaQuantity.PARAMETER)),
+                        "representation": _const("values"),
+                    }
+                ),
+                *(
+                    _obj(
+                        {
+                            **delta_common,
+                            "child": _ref("FrameRef"),
+                            "parent": _ref("FrameRef"),
+                            "quantity": _const(str(quantity)),
+                            "representation": _const(form),
+                            "transform": _obj(
+                                {
+                                    "child": {"type": "string"},
+                                    "direction": {
+                                        "enum": sorted(str(d) for d in TransformDirection)
+                                    },
+                                    "parent": {"type": "string"},
+                                }
+                            ),
+                            "values": {
+                                **_array(finite, min_items=count or 1),
+                                "maxItems": count or 1,
+                            },
+                            **(
+                                {
+                                    "adjustment": {
+                                        "enum": sorted(
+                                            str(a)
+                                            for a in (
+                                                {
+                                                    DeltaAdjustment.NONE,
+                                                    DeltaAdjustment.LATER_NEGATED,
+                                                }
+                                                if form == "quaternion"
+                                                else {DeltaAdjustment.WRAPPED}
+                                                if form == "euler_angles"
+                                                else {DeltaAdjustment.NONE}
+                                            )
+                                        )
+                                    }
+                                }
+                                if quantity is DeltaQuantity.ROTATION
+                                else {}
+                            ),
+                        }
+                    )
+                    for quantity in (DeltaQuantity.TRANSLATION, DeltaQuantity.ROTATION)
+                    for form, (count, _) in sorted(DELTA_FORMS[quantity].items())
+                ),
+            ],
+            "description": (
+                "later - earlier, component by component, between two calibration records, in"
+                " their declared form and unit; never converted. A rotation states how later was"
+                " read: a quaternion negated when the two point opposite ways, Euler angles"
+                " wrapped into a half turn either side (neptune-memory ADR 0014)"
+            ),
+        },
         "ClaimObject": {"anyOf": [_ref("NodeRef"), _ref("TypedLiteral"), _ref("LedgerRecordRef")]},
         "ClaimProvenance": _obj(
             {
@@ -336,6 +421,7 @@ def _memory_defs() -> dict[str, JsonValue]:
                 _literal(ValueType.QUANTITY, number, quantity_unit),
                 _literal(ValueType.INSTANT, _ref("Timestamp"), na),
                 _literal(ValueType.CLOCK_MAP, _ref("ClockMap"), na),
+                _literal(ValueType.DELTA, _ref("Delta"), delta_unit),
             ]
         },
         "ValueType": {"enum": sorted(str(t) for t in ValueType)},

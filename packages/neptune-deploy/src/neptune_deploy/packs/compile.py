@@ -41,7 +41,7 @@ from neptune_deploy.packs.templates import Hop, SectionTemplate, Template, Templ
 
 PACK_SCHEMA: Final = "neptune-deploy.evidence-pack/1"
 COMPILER_ID: Final = "neptune-deploy.packs"
-COMPILER_VERSION: Final = "2"
+COMPILER_VERSION: Final = "3"
 PACK_PREFIX: Final = "pack:"
 _OPEN_END: Final = 2**64  # past every int64 tick: an open end in the overlap sweep
 
@@ -206,7 +206,14 @@ class EvidencePack:
     included_inferred: int
 
     def to_json(self) -> JsonObject:
-        return {
+        snapshot: dict[str, JsonValue] = {
+            "generation": self.snapshot.generation,
+            "graph_schema_version": 1,
+            "head": self.snapshot.head,
+            "id": self.snapshot.id,
+            "vocabulary_version": self.snapshot.vocabulary_version,
+        }
+        out: dict[str, JsonValue] = {
             "appendix": self.appendix.to_json(),
             "claims": [claim.raw for claim in self.claims],
             "compiler": {"id": COMPILER_ID, "version": COMPILER_VERSION},
@@ -218,13 +225,7 @@ class EvidencePack:
             },
             "schema": PACK_SCHEMA,
             "sections": [s.to_json() for s in self.sections],
-            "snapshot": {
-                "generation": self.snapshot.generation,
-                "graph_schema_version": 1,
-                "head": self.snapshot.head,
-                "id": self.snapshot.id,
-                "vocabulary_version": self.snapshot.vocabulary_version,
-            },
+            "snapshot": snapshot,
             "spec": self.spec.to_json(),
             "subject": self.spec.subject.to_json(),
             "template": {
@@ -235,6 +236,10 @@ class EvidencePack:
                 "version": self.template.version,
             },
         }
+        if self.snapshot.unread:  # only a snapshot of a newer minor has any (ADR 0015)
+            snapshot["declared_schema_version"] = str(self.snapshot.declared_schema_version)
+            out["findings"] = [u.to_json() for u in self.snapshot.unread]
+        return out
 
 
 def pack_id(spec: PackSpec, template: Template) -> str:

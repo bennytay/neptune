@@ -342,6 +342,12 @@ def _header(out: _Layout, pack: EvidencePack) -> None:
     )
     for key, value in rows:
         out.line(f"{key + ':':<10} {value}")
+    for unread in pack.snapshot.unread:
+        out.line(
+            f"Not read: {unread.key_path} ({unread.occurrences} at {unread.pointer}), a key of"
+            f" graph-schema {pack.snapshot.declared_schema_version} this compiler does not read;"
+            " its content is not shown"
+        )
     out.space(4)
     out.line(pack.template.description, font="F4", size=SMALL)
     out.line(

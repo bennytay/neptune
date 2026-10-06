@@ -5,13 +5,13 @@ that hold it. The selectors read the package as package-schema publishes it (``r
 ``derived/*.jsonl``, ``series/*.parquet``), never the corpus's raw bytes.
 
 Each result lists ``citations``: per record (per row for ``message``) its ``record`` id, the gold
-``path`` and a ``locator`` (``row``, ``page``, ``pointer``, ``topic`` and ``log_time``,
-``parameter`` or ``code``; ``None`` where only the record id identifies it). ``supports`` is the
-shared scoring rule (ADR 0007 section 6): a citation supports an item when it names one of its
-records, or its path and an equal locator. A ``message`` item is met only by a row (the stream's
-record with the row's ``seq``, or path, topic and log time): citing the stream alone never counts.
-A consumer whose package holds no compiler base records (Deploy D3) resolves against the base
-package of the same corpus version and matches on path and locator.
+``path`` and a ``locator`` (``row``, ``page``, ``pointer`` (a configuration value's or an
+assertion's), ``topic`` and ``log_time``, ``parameter`` or ``code``; ``None`` where only the record
+id identifies it). ``supports`` is the shared scoring rule (ADR 0007 section 6): a citation supports
+an item when it names one of its records, or its path and an equal locator. A ``message`` item is
+met only by a row (the stream's record with the row's ``seq``, or path, topic and log time): citing
+the stream alone never counts. A consumer whose package holds no compiler base records (Deploy D3)
+resolves against the base package of the same corpus version and matches on path and locator.
 
 Selectors (``select.kind``):
 
@@ -28,6 +28,9 @@ Selectors (``select.kind``):
 - ``message`` ``{path, topic, contains}``: rows of that stream with a text value containing
   ``contains``; the stream's record and each row's ``seq`` and first clock reading.
 - ``finding`` ``{path, code}``: ``ingest_finding`` records with the code whose subject is the path.
+- ``assertion`` ``{path, id}``: ``assertion`` records (root ADR 0062) of the path whose declared
+  ``identifier`` is ``id`` (``{namespace, value}``); located by the entry's JSON pointer. Platform
+  ADR 0008.
 - ``clock_mapping`` ``{path, offset_s}``: derived ``clock_mapping`` lines evidenced by the path
   whose anchor offset, target minus source in seconds by each clock's stated resolution, lies in
   ``[low, high]``; a clock without a known resolution is never compared.
@@ -56,6 +59,7 @@ SELECTORS: Final = (
     "message",
     "finding",
     "clock_mapping",
+    "assertion",
 )
 
 
@@ -229,6 +233,13 @@ def resolve_one(package: Package, select: Json) -> Json:
             for f in package.kind("ingest_finding")
             if f["code"] == code and f.get("subject", {}).get("ref", {}).get("source") == content
         ]
+    elif kind == "assertion":
+        (declared,) = _need(select, "id")
+        found = [
+            a
+            for a in package.kind("assertion")
+            if _source(a) == content and _known(a.get("identifier")) == declared
+        ]
     elif kind == "clock_mapping":
         (bounds,) = _need(select, "offset_s")
         low, high = Fraction(str(bounds[0])), Fraction(str(bounds[1]))
@@ -285,6 +296,10 @@ def _locator(kind: str, record: Json, select: Json) -> Json | None:
         return {"topic": select["topic"]}
     if kind == "finding":
         return {"code": select["code"]}
+    if kind == "assertion":
+        locator = record["provenance"]["evidence"]["locator"]
+        at = next((p["pointer"] for p in locator if p.get("kind") == "json_pointer"), None)
+        return {"pointer": at} if at is not None else None
     if kind == "source":
         return {}  # the whole file
     return None  # no_table_row, clock_mapping: only the record id identifies them

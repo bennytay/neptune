@@ -1,11 +1,18 @@
-"""The four stages, compiler -> ledger -> memory -> context, and how each one runs.
+"""The five stages, compiler -> deploy -> ledger -> memory -> context, and how each one runs.
+
+The deploy stage maps each compiled package with the Deploy presets and templates its case
+declares (``Case.deploy``; Platform ADR 0008), and its packages flow into the ledger stage beside
+the compiler's.
 
 A stage runs *real* (the package's own code) only when all of these hold, and as a *stub*
 otherwise; the report says which, and why:
 
-1. the package's contract entry point (``contract.toml`` ``[owner].module``) is importable;
+1. the package's contract entry point (``contract.toml`` ``[owner].module``) is importable, and so
+   is the stage's own ``entry`` module when it names one (Deploy owns no contract: its stage writes
+   package-schema packages through ``neptune_deploy``);
 2. its version constant, when it declares one, matches the registry's latest version of the contract
-   it owns (an integer constant is the registry major, a string constant must equal the version);
+   it owns (an integer constant is the registry major, a string constant must equal the version),
+   and so does the stage's ``built_against`` constant (Deploy's ``PACKAGE_SCHEMA_VERSION``);
 3. every contract the package locks in ``contracts/lock.toml`` is within its latest major;
 4. the harness has a real driver for it (``Stage.real``).
 
@@ -21,16 +28,18 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import subprocess
+import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from harness.contracts import load_tool
+from harness.corpus import REPO
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from harness.corpus import Case
 
 Json = dict[str, Any]
@@ -50,10 +59,18 @@ class Context:
         """Where the compiler stage writes, and the ledger stage registers, a case's package."""
         return self.work / "packages" / case_id
 
-    def package_ids(self) -> list[str]:
-        """The package id of every case the compiler stage ingested (sorted by case)."""
-        compiled = self.upstream.get("compiler", {})
-        return [str(item["package"]) for item in compiled.get("cases", []) if item.get("package")]
+    def deploy_root(self, case_id: str) -> Path:
+        """Where the deploy stage writes, and the ledger stage registers, a case's mapped one."""
+        return self.work / "packages" / f"{case_id}.deploy"
+
+    def package_ids(self, stage: str = "compiler") -> list[str]:
+        """The package id of every case ``stage`` wrote (default the compiler; sorted by case)."""
+        written = self.upstream.get(stage, {})
+        return [str(item["package"]) for item in written.get("cases", []) if item.get("package")]
+
+    def flowing_ids(self) -> list[str]:
+        """Every package that flows downstream: the compiled ones, then the mapped ones."""
+        return self.package_ids() + self.package_ids("deploy")
 
 
 @dataclass(frozen=True)
@@ -75,6 +92,10 @@ class Stage:
     needs_services: bool  # a real run needs harness/compose.yaml
     real: Driver | None
     stub: Driver
+    entry: str | None = None  # a module of the stage's package that a real run also needs
+    # the stage package's own constant naming the contract version it was built against, for a
+    # package that writes a contract it does not own; checked as the owner's constant is
+    built_against: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,27 +133,30 @@ def resolve(stage: Stage, registry: Any) -> Resolution:
     owner = contract.owner
     if not _importable(owner.module):
         return stub(f"{owner.module} is not importable")
+    if stage.entry is not None and not _importable(stage.entry):
+        return stub(f"{stage.entry} is not importable")
     if latest is None:
         return stub(f"{stage.contract} has no published version")
-    if owner.version_constant is not None:
+    for constant in (owner.version_constant, stage.built_against):
+        if constant is None:
+            continue
         try:
-            value = _constant(owner.version_constant)
+            value = _constant(constant)
         except (ImportError, AttributeError) as error:
-            return stub(f"{owner.version_constant} cannot be read ({type(error).__name__})")
+            return stub(f"{constant} cannot be read ({type(error).__name__})")
         expected: object = (
             latest.version[0] if isinstance(value, int) else tool.show(latest.version)
         )
         if value != expected:
-            return stub(
-                f"{owner.version_constant} is {value!r}, the registry's latest is {version}"
-            )
+            return stub(f"{constant} is {value!r}, the registry's latest is {version}")
     for contract_id, locked in sorted(registry.lock().get(stage.package, {}).items()):
         newest = registry.latest(contract_id, stable=True)
         if newest is not None and tool.parse_semver(locked)[0] < newest.version[0]:
             return stub(f"{stage.package} locks {contract_id} {locked}, a major behind")
     if stage.real is None:
         return stub(f"the harness has no real driver for {stage.package} yet")
-    return Resolution("real", f"{owner.module} is importable and matches {version}", version)
+    module = stage.entry or owner.module
+    return Resolution("real", f"{module} is importable and matches {version}", version)
 
 
 # --- Compiler (real) -------------------------------------------------------------------------
@@ -145,20 +169,48 @@ def _pointer(version: Any, suffix: str) -> str:
     raise LookupError(f"{version.contract} {version.version} has no golden ending {suffix}")
 
 
+@dataclass(frozen=True)
+class _PackageSchema:
+    """The registry's stable package-schema, and the goldens a manifest and a receipt match."""
+
+    tool: Any
+    schema: Json
+    manifest_at: str
+    receipt_at: str
+
+    @staticmethod
+    def latest(registry: Any) -> _PackageSchema | None:
+        version = registry.latest("package-schema", stable=True)
+        if version is None:
+            return None
+        return _PackageSchema(
+            load_tool(),
+            json.loads(version.schema_text),
+            _pointer(version, ".manifest.json"),
+            _pointer(version, ".receipt.json"),
+        )
+
+    def check(self, label: str, root: Path, row: Json, problems: list[str]) -> None:
+        """``manifest_valid`` and ``receipt_valid`` on ``row``; schema breaks, as problems."""
+        for field_name, pointer, document in (
+            ("manifest_valid", self.manifest_at, "manifest.json"),
+            ("receipt_valid", self.receipt_at, "receipt.json"),
+        ):
+            errors = self.tool.validate_golden(
+                self.schema, pointer, json.loads((root / document).read_text(encoding="utf-8"))
+            )
+            row[field_name] = not errors
+            problems.extend(f"{label}: {document} breaks package-schema: {e}" for e in errors[:3])
+
+
 def compiler_real(ctx: Context) -> Outcome:
     """Ingest every case with the compiler's SDK, read each package back and verify it, and
     validate its manifest and receipt against the registry's package-schema."""
     from neptune.sdk import Neptune, NeptuneError
 
-    tool = load_tool()
-    version = ctx.registry.latest("package-schema", stable=True)
-    if version is None:
+    schema = _PackageSchema.latest(ctx.registry)
+    if schema is None:
         return Outcome({"cases": []}, ("package-schema has no stable version to validate against",))
-    schema = json.loads(version.schema_text)
-    manifest_at, receipt_at = (
-        _pointer(version, ".manifest.json"),
-        _pointer(version, ".receipt.json"),
-    )
     cases: list[Json] = []
     problems: list[str] = []
     for case in ctx.cases:
@@ -185,15 +237,7 @@ def compiler_real(ctx: Context) -> Outcome:
             findings=dict(sorted(Counter(f.code for f in receipt.findings).items())),
             package_verified=True,
         )
-        for field_name, pointer, document in (
-            ("manifest_valid", manifest_at, "manifest.json"),
-            ("receipt_valid", receipt_at, "receipt.json"),
-        ):
-            errors = tool.validate_golden(
-                schema, pointer, json.loads((destination / document).read_text(encoding="utf-8"))
-            )
-            row[field_name] = not errors
-            problems.extend(f"{case.id}: {document} breaks package-schema: {e}" for e in errors[:3])
+        schema.check(case.id, destination, row, problems)
         if case.gold is not None:
             gold = resolve_gold(destination, case.gold)
             row["gold"] = gold
@@ -218,6 +262,224 @@ def resolve_gold(package: Path, gold_path: Path) -> Json:
         "problems": resolve.check_gold(gold),
         "questions": len(gold.get("questions", [])),
     }
+
+
+# --- Deploy (real) ---------------------------------------------------------------------------
+
+DEPLOY_FORMAT: Final = 1
+DEPLOY_TIMEOUT_S: Final = 900  # the mapper streams; the acceptance corpus maps in about a second
+
+
+@dataclass(frozen=True)
+class DeployPlan:
+    """A case's declaration (``deploy.json``, Platform ADR 0008): Deploy presets by name, document
+    templates by repository-relative path (a file or a directory of them), and the lifecycle
+    record counts the mapped package must reach."""
+
+    presets: tuple[str, ...]
+    templates: tuple[str, ...]
+    at_least: dict[str, int]
+
+
+def read_deploy(path: Path) -> tuple[DeployPlan | None, list[str]]:
+    """The declaration at ``path``, or ``None`` and why it cannot be used."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return None, [f"the deploy declaration cannot be read ({type(error).__name__})"]
+    if not isinstance(document, dict):
+        return None, ["the deploy declaration is not a JSON object"]
+    problems: list[str] = []
+    if document.get("deploy_format") != DEPLOY_FORMAT:
+        problems.append(f"deploy_format is {document.get('deploy_format')!r}, not {DEPLOY_FORMAT}")
+    names: dict[str, list[str]] = {}
+    for key in ("presets", "templates"):
+        value = document.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+            problems.append(f"{key} is not a list of names")
+            value = []
+        if len(set(value)) != len(value):
+            problems.append(f"{key} repeats an entry")
+        names[key] = sorted(set(value))
+    for template in names["templates"]:
+        where = (REPO / template).resolve()
+        if Path(template).is_absolute() or not where.is_relative_to(REPO):
+            problems.append(f"template {template} is not a path inside the repository")
+        elif not where.exists():
+            problems.append(f"template {template} does not exist")
+    at_least = document.get("at_least", {})
+    if not isinstance(at_least, dict) or not all(
+        isinstance(k, str) and type(v) is int and v >= 1 for k, v in at_least.items()
+    ):
+        problems.append("at_least is not an object of record kinds to counts of at least 1")
+        at_least = {}
+    if not names["presets"] and not names["templates"]:
+        problems.append("the deploy declaration names no preset and no template")
+    if problems:
+        return None, problems
+    return DeployPlan(tuple(names["presets"]), tuple(names["templates"]), dict(at_least)), []
+
+
+def _declarations(plan: DeployPlan) -> tuple[dict[str, str], list[str]]:
+    """Each declared preset and template file, by the sha256 its transform record names, mapped to
+    the declaration that brought it in (``preset:<name>``, ``template:<path>``); and why the
+    declaration cannot run: a preset Deploy does not ship, a file declared twice. Only Deploy's
+    public names are used (``PRESETS``, ``preset``, ``TemplateRegistry``)."""
+    from neptune_deploy.lifecycle import PRESETS, TemplateRegistry, preset
+
+    labels: dict[str, str] = {}
+    problems = [f"Deploy ships no preset {name!r}" for name in plan.presets if name not in PRESETS]
+    declared = [
+        (str(preset(name).sha256), f"preset:{name}") for name in plan.presets if name in PRESETS
+    ]
+    for path in plan.templates:
+        declared += [
+            (str(template.sha256), f"template:{path}")
+            for template in TemplateRegistry.from_paths([REPO / path]).templates()
+        ]
+    for sha, label in declared:
+        if sha in labels:
+            problems.append(f"{label} declares the same file as {labels[sha]}")
+        labels.setdefault(sha, label)
+    return labels, problems
+
+
+def _lifecycle_records(root: Path) -> tuple[dict[str, int], Counter[str]]:
+    """The mapped package's lifecycle record counts by kind, and by the transform that made each."""
+    from neptune.model.lifecycle import LIFECYCLE_KINDS
+
+    kinds: dict[str, int] = {}
+    transforms: Counter[str] = Counter()
+    for kind in sorted(k.kind for k in LIFECYCLE_KINDS):
+        path = root / "records" / f"{kind}.jsonl"
+        if not path.is_file():
+            continue
+        with path.open(encoding="utf-8") as lines:  # one record at a time (ADR 0070)
+            for line in lines:
+                if line.strip():
+                    record = json.loads(line)
+                    kinds[kind] = kinds.get(kind, 0) + 1
+                    transforms[str(record.get("provenance", {}).get("transform"))] += 1
+    return kinds, transforms
+
+
+def _transform_sources(root: Path) -> dict[str, str]:
+    """Each Deploy transform record's id, mapped to the sha256 of the mapping or template file it
+    applied (its config's ``mapping_sha256`` or ``template_sha256``)."""
+    path = root / "records" / "transform_record.jsonl"
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        record = json.loads(line)
+        config = record.get("config") or {}
+        applied = config.get("mapping_sha256") or config.get("template_sha256")
+        if applied:
+            out[str(record["id"])] = str(applied)
+    return out
+
+
+def _map(
+    ctx: Context,
+    case: Case,
+    plan: DeployPlan,
+    schema: _PackageSchema,
+    row: Json,
+    problems: list[str],
+) -> None:
+    """``python -m neptune_deploy map`` over one compiled package, then the mapped package read
+    back, verified, validated and counted."""
+    from neptune_deploy.lifecycle import PRESETS
+
+    from neptune.store.package import PackageError, read_package
+
+    labels, refused = _declarations(plan)
+    problems.extend(f"{case.id}: {problem}" for problem in refused)
+    out = ctx.deploy_root(case.id)
+    argv = [sys.executable, "-m", "neptune_deploy", "map", str(ctx.package_root(case.id))]
+    argv += [arg for name in plan.presets if name in PRESETS for arg in ("-p", name)]
+    argv += [arg for path in plan.templates for arg in ("-t", str(REPO / path))]
+    argv += ["-o", str(out)]
+    done = subprocess.run(
+        argv, cwd=REPO, capture_output=True, text=True, timeout=DEPLOY_TIMEOUT_S, check=False
+    )
+    if done.returncode != 0:
+        row["state"] = "error"
+        last = (done.stderr.strip().splitlines() or ["no message"])[-1]
+        problems.append(f"{case.id}: neptune_deploy map exited {done.returncode}: {last}")
+        return
+    try:
+        package = read_package(out)
+    except PackageError as error:
+        row["state"] = "error"
+        problems.append(f"{case.id}: the mapped package does not verify: {error}")
+        return
+    receipt = json.loads((out / "receipt.json").read_text(encoding="utf-8"))
+    kinds, by_transform = _lifecycle_records(out)
+    applied = _transform_sources(out)
+    made: Counter[str] = Counter({label: 0 for label in labels.values()})
+    for transform, count in by_transform.items():
+        label = labels.get(applied.get(transform, ""))
+        if label is not None:
+            made[label] += count
+    row.update(
+        state="committed",
+        package=str(package.id),
+        package_verified=True,
+        records=kinds,
+        by_declaration=dict(sorted(made.items())),
+        findings=dict(sorted(Counter(f["code"] for f in receipt.get("findings", [])).items())),
+    )
+    schema.check(f"{case.id} (deploy)", out, row, problems)
+    if not kinds:  # never green on nothing: the case declares mappings, so records are owed
+        problems.append(f"{case.id}: the Deploy map wrote no lifecycle record")
+    problems.extend(
+        f"{case.id}: {label} mapped no record" for label, count in sorted(made.items()) if not count
+    )
+    problems.extend(
+        f"{case.id}: {kind} records are {kinds.get(kind, 0)}, the declaration needs at least {n}"
+        for kind, n in sorted(plan.at_least.items())
+        if kinds.get(kind, 0) < n
+    )
+
+
+def deploy_real(ctx: Context) -> Outcome:
+    """Map every compiled case that declares Deploy mappings with ``python -m neptune_deploy map``
+    into a new package (``Context.deploy_root``), which the ledger stage registers beside the
+    compiled one. A case that declares none is passed over; one whose mapping fails is that case's
+    problem, and an unmapped table is a finding in the mapped package's receipt, never a problem.
+    Platform ADR 0008."""
+    compiled = {str(row["case"]): row for row in ctx.upstream.get("compiler", {}).get("cases", [])}
+    cases: list[Json] = []
+    problems: list[str] = []
+    schema = _PackageSchema.latest(ctx.registry)
+    if schema is None:
+        return Outcome({"cases": []}, ("package-schema has no stable version to validate against",))
+    for case in ctx.cases:
+        row: Json = {"case": case.id, "declared": case.deploy is not None}
+        cases.append(row)
+        if case.deploy is None:
+            continue
+        plan, unusable = read_deploy(case.deploy)
+        problems.extend(f"{case.id}: {problem}" for problem in unusable)
+        if plan is None:
+            continue
+        row.update(presets=list(plan.presets), templates=list(plan.templates))
+        if not compiled.get(case.id, {}).get("package"):
+            row["state"] = "not_attempted"
+            problems.append(f"{case.id}: the compiler stage committed no package to map")
+            continue
+        try:
+            _map(ctx, case, plan, schema, row, problems)
+        except Exception as error:  # one case's failure is a problem, not the stage's (partial)
+            # The type only: a timeout's or a parser's message carries paths and arguments.
+            row["state"] = "error"
+            problems.append(f"{case.id}: the Deploy map raised {type(error).__name__}")
+    return Outcome({"cases": cases}, tuple(problems))
+
+
+def deploy_stub(ctx: Context) -> Outcome:
+    """Maps nothing (the stage is a stub only when Deploy cannot run): the packages flow on as
+    the compiler wrote them, and the report says so."""
+    return Outcome({"cases": [], "mapped": "nothing: the deploy stage is a stub"})
 
 
 # --- Ledger (real) ---------------------------------------------------------------------------
@@ -259,14 +521,28 @@ def _known(slot: Any) -> Any:
     return slot.value if isinstance(slot, Known) else None
 
 
+def _to_register(ctx: Context) -> list[tuple[str, str, Path, str | None]]:
+    """(label, stage, root, package id) of every package to register: each case the compiler
+    stage compiled, then each package the deploy stage mapped (labelled ``<case>.deploy``)."""
+    out: list[tuple[str, str, Path, str | None]] = []
+    for upstream in ctx.upstream.get("compiler", {}).get("cases") or []:
+        case = str(upstream["case"])
+        out.append((case, "compiler", ctx.package_root(case), upstream.get("package")))
+    for upstream in ctx.upstream.get("deploy", {}).get("cases") or []:
+        case = str(upstream["case"])
+        if upstream.get("package"):
+            out.append((f"{case}.deploy", "deploy", ctx.deploy_root(case), upstream["package"]))
+    return out
+
+
 def ledger_real(ctx: Context) -> Outcome:
-    """Register every package the compiler stage committed into the Ledger's real catalog
-    (``PostgresCatalog`` on an embedded PostgreSQL), register it again, verify it, and validate
-    every response against the registry's catalog-api schema. The package-schema version each
-    package needs (its manifest's ``schema_version``, the lowest version whose readers read it;
-    compiler ADR 0037) must be within the major ``neptune-ledger`` locks in ``contracts/lock.toml``.
-    One case's refusal or error is that case's problem; the other cases still run. Platform
-    ADR 0006."""
+    """Register every package the compiler and deploy stages committed into the Ledger's real
+    catalog (``PostgresCatalog`` on an embedded PostgreSQL), register it again, verify it, and
+    validate every response against the registry's catalog-api schema. The package-schema version
+    each package needs (its manifest's ``schema_version``, the lowest version whose readers read
+    it; compiler ADR 0037) must be within the major ``neptune-ledger`` locks in
+    ``contracts/lock.toml``. One package's refusal or error is that package's problem; the others
+    still run. Platform ADR 0006."""
     from neptune_ledger.catalog.registry import PostgresCatalog
 
     tool = load_tool()
@@ -298,16 +574,15 @@ def ledger_real(ctx: Context) -> Outcome:
         uri = _catalog_database(server)
         roots = (ctx.work / "packages",)
         with PostgresCatalog(uri, LEDGER_TENANT, package_roots=roots) as catalog:
-            for upstream in compiled:
-                case, package = str(upstream["case"]), upstream.get("package")
-                row: Json = {"case": case}
+            for case, stage, root, package in _to_register(ctx):
+                row: Json = {"case": case, "stage": stage}
                 cases.append(row)
                 if not package:
                     row["registration"] = "not_attempted"
-                    check.problems.append(f"{case}: the compiler stage committed no package")
+                    check.problems.append(f"{case}: the {stage} stage committed no package")
                     continue
                 try:
-                    check.case(catalog, row, ctx.package_root(case), str(package))
+                    check.case(catalog, row, root, str(package))
                 except Exception as error:  # one case's failure is a finding, not the stage's
                     # The type only: a message can carry the server's socket path.
                     row["error"] = type(error).__name__
@@ -405,7 +680,7 @@ def _golden_stub(contract_id: str, consumes: str | None) -> Driver:
             "contract_version": tool.show(version.version) if version else None,
             "served": "goldens" if goldens else "canned",
             "goldens": goldens,
-            "consumed_packages": len(ctx.package_ids()) if consumes else 0,
+            "consumed_packages": len(ctx.flowing_ids()) if consumes else 0,
         }
         if consumes:
             output["consumed_from"] = consumes
@@ -416,7 +691,7 @@ def _golden_stub(contract_id: str, consumes: str | None) -> Driver:
 
 def ledger_stub(ctx: Context) -> Outcome:
     """Serves the goldens of catalog-api's latest version (used only when the stage is a stub)."""
-    return _golden_stub("catalog-api", "compiler")(ctx)
+    return _golden_stub("catalog-api", "deploy")(ctx)
 
 
 def memory_stub(ctx: Context) -> Outcome:
@@ -470,6 +745,16 @@ STAGES: Final[tuple[Stage, ...]] = (
         False,
         compiler_real,
         _golden_stub("package-schema", None),
+    ),
+    Stage(
+        "deploy",
+        "neptune-deploy",
+        "package-schema",
+        False,
+        deploy_real,
+        deploy_stub,
+        entry="neptune_deploy.lifecycle",
+        built_against="neptune_deploy:PACKAGE_SCHEMA_VERSION",
     ),
     Stage("ledger", "neptune-ledger", "catalog-api", False, ledger_real, ledger_stub),
     Stage("memory", "neptune-memory", "graph-schema", True, None, memory_stub),
