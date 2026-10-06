@@ -29,8 +29,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   [ADR 0016](adr/0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md).
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
-  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
-    (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
+  - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **2.0.0**
+    (`graph_schema_version: 2`, `graph_schema: "2.0.0"`, with `builds`), head 2, written by Memory's codec. It is what
     `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
     1. The harness's compiler stage compiles the corpus into one package, registered at tx 1.
     2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
@@ -69,8 +69,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       records. There are 11 `has_configuration` spans, on the machine id each system states:
       - `cmms.asset:ARM-3A` is on `firmware:5.6.0`; WO-26-0911 is among the eight work orders that span cites.
       - `servicenow.ci:ARM-3A` goes from `5.6.0` to `TCP z=145.5 mm`, via `servicenow.u_after`.
-    - Two `succeeds`: AMR-07's `firmware:4.3.1` after `firmware:4.2.0` (CMMS), and ARM-3A's ServiceNow
-      `TCP z=145.5 mm` after `5.6.0`.
+    - No `succeeds` (ADR 0019 §2). The changes are each machine's own abutting `has_configuration` spans:
+      AMR-07's `firmware:4.2.0` to `firmware:4.3.1` (CMMS), and ARM-3A's ServiceNow `5.6.0` to `TCP z=145.5 mm`.
     - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
       The 13th run states no first instant (`untimeable_window`).
   - What it lacks:
@@ -83,7 +83,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
         `servicenow.ci:ARM-3A`, and the register declares `asset:ARM-3A`. These are four nodes until an
         `identity_link` or an operator assertion joins them, and the corpus has neither.
     - No `authorised_configuration`: no envelope places a configuration on its site.
-    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
+    - No calibration `drift` (MVL-207, then #129) and no `same_as` for events. INC-C3-0011's stops are not
+      events here, and the corpus assertion names `plant-2.cmms.downtime:…` and `plant-2.syslog.log-p2:4182`.
+      No record declares either id (ADR 0019 §1).
 
     This file is regenerated as those land, never edited.
 ## Consumes
