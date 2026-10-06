@@ -19,7 +19,7 @@ from neptune_deploy.packs import (
     render_json,
     render_pdf,
 )
-from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_PIN, snapshot_id
+from neptune_deploy.packs.snapshot import GRAPH_SCHEMA_1X_PIN, snapshot_id
 
 NEWER = "1.9.0"
 BUILDS = [{"consolidator_id": "memory.events", "recorded_at": 1, "version": "1"}]
@@ -98,7 +98,9 @@ def test_a_snapshot_without_unknown_keys_is_unchanged_by_a_newer_declaration() -
     assert "findings" not in json.loads(render_json(pack))
 
 
-@pytest.mark.parametrize("declared", [None, GRAPH_SCHEMA_PIN, "1.2.0", "1.6.9", "2.0.0", "0.9.0"])
+@pytest.mark.parametrize(
+    "declared", [None, GRAPH_SCHEMA_1X_PIN, "1.2.0", "1.6.9", "2.0.0", "2.1.0", "0.9.0"]
+)
 def test_the_pin_an_older_minor_and_another_major_refuse_the_same_keys(
     declared: str | None,
 ) -> None:
