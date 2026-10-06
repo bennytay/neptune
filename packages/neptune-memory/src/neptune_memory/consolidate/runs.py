@@ -827,7 +827,7 @@ def _roles(
             view.findings.append(
                 _finding(
                     "dangling_declaration",
-                    "a run declaration names a run record no package holds",
+                    "a run declaration names a run record that is not an admitted run",
                     (declaration.id,),
                     run=declaration.run,
                 )
