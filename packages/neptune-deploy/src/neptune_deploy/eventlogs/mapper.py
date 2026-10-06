@@ -12,7 +12,8 @@ source row, in order:
 
 A blank time is ``Unknown`` with ``value_blank``, one that does not read is ``Unknown`` with
 ``value_unreadable``; the row is kept. A time of day without a date never reads (ADR 0016 §1). Two
-rows stating one identifier are both kept, with ``identifier_repeated``. A civil clock has a
+rows stating one identifier are both kept, with ``identifier_repeated``; a row stating none is kept,
+its identifier ``Unknown``, with ``identifier_blank``. A civil clock has a
 ``civil_time_zone`` companion: the mapping's zone, or the caller's for the source (ADR 0017 §2).
 """
 
@@ -42,6 +43,7 @@ from neptune_deploy.lifecycle.mapper import (
     source_paths,
     source_zones,
     unique_domains,
+    zone_sources,
 )
 from neptune_deploy.lifecycle.mapping import MappingError
 from neptune_deploy.lifecycle.times import read_time
@@ -66,6 +68,12 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
         "a log row's time does not read under the declared format; its typed time is Unknown and"
         " the row is kept",
     ),
+    "identifier_blank": (
+        Severity.WARNING,
+        FindingCategory.MISSING,
+        "a log row states no identifier; its identifier is Unknown, so no assertion can name it,"
+        " and the row is kept",
+    ),
     "identifier_repeated": (
         Severity.WARNING,
         FindingCategory.INCONSISTENT,
@@ -85,7 +93,8 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
 
 
 class _Text:
-    """One cell's text, its state and its citation."""
+    """One cell's text, its state and its citation. A short row's missing cell is blank: the
+    compiler already reports the row (``tabular.csv_ragged_rows``, in the base's receipt)."""
 
     def __init__(self, table: _Table, row: StructuredRecord, column: str) -> None:
         index = table.columns.get(column)
@@ -116,7 +125,9 @@ class EventLogRun(_Clocks):
             t for t in tables if t.header is not None and all(map(t.has, mapping.requires))
         ]
         self.tables = [t for t in self.tables if t.has(mapping.time_column)]
-        self.source_zones = source_zones(mapping.source_zones, source_paths(base))
+        paths = source_paths(base)
+        self.zone_sources = zone_sources(mapping.source_zones, paths)
+        self.source_zones = source_zones(mapping.source_zones, paths)
         self.transform = transform_record(
             adapter_id=MAPPER_ID,
             adapter_version=MAPPER_VERSION,
@@ -199,8 +210,22 @@ class EventLogRun(_Clocks):
         cells.extend(self._time(table, row, time, record_id))
         if mapping.identifier is not None:
             ident = _Text(table, row, mapping.identifier[0])
-            cells.append(self._copy(ident))
             text = ident.text
+            if text is None and not ident.absent:
+                # The row's identity is what an assertion names (``{syslog, "4182"}``): a row
+                # that states none is kept, and says so.
+                cells.append(Unknown(self.prov(ident.place)))
+                self.findings.add(
+                    "identifier_blank",
+                    table,
+                    ident.place,
+                    key=mapping.identifier[0],
+                    details={"column": mapping.identifier[0]},
+                    row=row.row,
+                    record=record_id,
+                )
+            else:
+                cells.append(self._copy(ident))
             if text is not None:
                 first = holders.setdefault(text, ident.place)
                 if first != ident.place:

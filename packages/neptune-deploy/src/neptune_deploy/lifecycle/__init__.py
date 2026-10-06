@@ -164,9 +164,10 @@ def map_package(
     check_declared(mappings, templates, event_logs)
     base_package = read_package(base_root)
     _check_sources(base_package, [*mappings, *event_logs])
+    # Planned (and every declared zone checked against the tables it reaches) before ``out``.
+    records = iter_records(base_package, mappings, templates, event_logs)
     spill = out.parent if scratch is None else scratch
     spill.mkdir(parents=True, exist_ok=True)
-    records = iter_records(base_package, mappings, templates, event_logs)
     return write_package_stream(out, records, scratch=spill)
 
 

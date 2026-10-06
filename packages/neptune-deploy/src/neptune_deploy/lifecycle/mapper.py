@@ -890,6 +890,7 @@ class _Mapper(_Clocks):
         paths: Mapping[str, ContentId] | None = None,
     ) -> None:
         self.mapping = mapping
+        self.zone_sources = zone_sources(mapping.source_zones, paths or {})
         self.source_zones = source_zones(mapping.source_zones, paths or {})
         self.applicable = {
             table.record.id: [r for r in mapping.rules if all(table.has(c) for c in r.requires)]
@@ -1154,17 +1155,23 @@ def source_paths(base: IngestPackage) -> dict[str, ContentId]:
     }
 
 
+def zone_sources(
+    declared: Sequence[tuple[str, str]], paths: Mapping[str, ContentId]
+) -> dict[str, ContentId]:
+    """Each declared path's source content id. A path the package does not hold is refused: a
+    zone for nothing is the caller's mistake, and silently unused it would look applied."""
+    for path, _ in declared:
+        if path not in paths:
+            raise MappingError(f"civil_time_zone: the package has no source at {path!r}")
+    return {path: paths[path] for path, _ in declared}
+
+
 def source_zones(
     declared: Sequence[tuple[str, str]], paths: Mapping[str, ContentId]
 ) -> dict[ContentId, str]:
-    """The caller's zones by source content id. A path the package does not hold is refused: a
-    zone for nothing is the caller's mistake, and silently unused it would look applied."""
-    out: dict[ContentId, str] = {}
-    for path, zone in declared:
-        if path not in paths:
-            raise MappingError(f"civil_time_zone: the package has no source at {path!r}")
-        out[paths[path]] = zone
-    return out
+    """The caller's zones by source content id (``zone_sources`` refuses an unknown path)."""
+    found = zone_sources(declared, paths)
+    return {found[path]: zone for path, zone in declared}
 
 
 def plan_tables(

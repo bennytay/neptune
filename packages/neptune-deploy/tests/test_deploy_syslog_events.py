@@ -244,6 +244,30 @@ def test_a_source_zone_for_a_source_or_preset_the_run_lacks_is_refused(tmp_path:
         presets(["syslog_csv"], {("cmms_downtime", G.DOWNTIME_PATH): ZONE})
 
 
+def test_a_zone_for_a_held_source_the_preset_maps_no_table_of_is_refused(tmp_path: Path) -> None:
+    # neptune.yaml is in the package, but syslog_csv maps no table of it: no clock would get it.
+    argv = ["map", str(G.SYSLOG_PACKAGE), "-p", "syslog_csv"]
+    unused = ["--source-zone", "syslog_csv", "neptune.yaml", "UTC"]
+    assert main([*argv, *unused, "-o", str(tmp_path / "a")]) == 2
+    assert not (tmp_path / "a").exists()
+    mapping = eventlogs.preset("syslog_csv").with_source_zones({"neptune.yaml": "UTC"})
+    with pytest.raises(MappingError, match="maps no table"):
+        map_files(BASE, event_logs=[mapping])
+
+
+def test_a_downtime_zone_on_the_syslog_source_is_refused_not_ignored(tmp_path: Path) -> None:
+    # Both presets run; the syslog's table is syslog_csv's, so cmms_downtime's zone reaches nothing.
+    argv = ["map", str(G.SYSLOG_PACKAGE), "-p", "syslog_csv", "-p", "cmms_downtime"]
+    wrong = ["--source-zone", "cmms_downtime", G.SYSLOG_PATH, ZONE]
+    assert main([*argv, *wrong, "-o", str(tmp_path / "a")]) == 2
+    assert not (tmp_path / "a").exists()
+    (downtime,), logs = presets(
+        ["cmms_downtime", "syslog_csv"], {("cmms_downtime", G.SYSLOG_PATH): ZONE}
+    )
+    with pytest.raises(MappingError, match="maps no table"):
+        map_files(BASE, [downtime], event_logs=logs)
+
+
 def test_the_command_line_takes_source_zones_and_refuses_unused_ones(tmp_path: Path) -> None:
     base = str(G.SYSLOG_PACKAGE)
     zone = ["--source-zone", "syslog_csv", G.SYSLOG_PATH, ZONE]
@@ -303,6 +327,40 @@ def test_a_repeated_seq_keeps_both_rows_and_a_repeated_msgid_is_no_finding() -> 
     (repeated,) = _codes(package)["identifier_repeated"]
     assert repeated.details["identifier"] == "4182" and len(repeated.related) == 1
     assert set(_codes(package)) == {"identifier_repeated"}
+
+
+@pytest.mark.parametrize("seq", ["", "   "])
+def test_a_row_with_no_seq_is_kept_with_an_unknown_id_and_a_finding(seq: str) -> None:
+    package = _mapped(_with_cells({"4183": seq}.get))
+    (table,) = _of(package, "structured_table")
+    rows = sorted(
+        (r for r in _of(package, "structured_record") if r.table == table.id), key=lambda r: r.row
+    )
+    assert len(rows) == 4
+    estop = rows[2]
+    assert _cell(estop, "MsgID").value == "ESTOP"
+    assert isinstance(_cell(estop, "@id:syslog"), Unknown)
+    assert isinstance(_cell(estop, "Timestamp.sec"), Known)  # the row keeps its time
+    (blank,) = _codes(package)["identifier_blank"]
+    assert blank.details["column"] == "Seq" and blank.details["rows"] == [3]
+    assert blank.records == (estop.id,)
+
+
+def test_a_short_row_keeps_its_cells_and_its_missing_time_is_blank() -> None:
+    """The compiler reports a short row (``csv_ragged_rows``); its missing cells are blank."""
+
+    def cut(record: Any) -> Any:
+        if record.kind == "structured_record" and record.cells[0] == Known(
+            "4186", record.cells[0].provenance
+        ):
+            return replace(record, cells=record.cells[:1])
+        return record
+
+    package = _mapped(replace(BASE, records=tuple(cut(r) for r in BASE.records)))
+    _, rows = _typed(package)
+    assert isinstance(_cell(rows["4186"], "Timestamp.sec"), Unknown)
+    (blank,) = _codes(package)["value_blank"]
+    assert blank.details["rows"] == [4]
 
 
 # --- The mapping file ----------------------------------------------------------------------------

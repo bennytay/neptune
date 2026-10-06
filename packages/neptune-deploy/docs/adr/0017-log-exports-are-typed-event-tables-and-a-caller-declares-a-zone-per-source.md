@@ -26,9 +26,12 @@ passes it per source (corpus 2.1.0: `America/New_York` for PLANT-2's syslog and 
    - each listed column, verbatim, citing its cell. A column the log lacks is `NotCovered` with
      `column_absent`;
    - the time column verbatim, then `<time>.sec` and `<time>.nanosec`, integers read by the
-     declared format (`lifecycle.times`: the precision the text states, on the log's own clock,
-     never moved to UTC). Then `@clock:<time>`, the `TimestampDomain` id they count on, as the
-     diagnostics table writes `@clock:stamp`;
+     declared format (`lifecycle.times`, at the precision the text states). They count from
+     1970-01-01T00:00:00 on the log's own civil wall clock (root ADR 0061 §2). They equal the wall
+     time read as if it were UTC, but they are not POSIX instants: the clock's timescale is
+     `Unknown`, and an instant comes only from a derived transform that applies a tz database to
+     the declared zone, never from this table. Then `@clock:<time>`, the `TimestampDomain` id they
+     count on, as the diagnostics table writes `@clock:stamp`;
    - `@id:<namespace>`, the row's identifier text. For syslog this is `Seq` under `syslog`, which
      the corpus same-event assertion names (`{syslog, "4182"}`).
 
@@ -37,7 +40,10 @@ passes it per source (corpus 2.1.0: `America/New_York` for PLANT-2's syslog and 
    `value_blank`. One that does not read is `Unknown` with `value_unreadable`, and a time of day
    without a date never reads (ADR 0016 §1). Either way the row is kept. Rows that cross midnight
    read the dates they state. Two rows stating one identifier are both kept, with
-   `identifier_repeated`. `MsgID` is a typed field and repeats freely. A log a mapping writes is
+   `identifier_repeated`. A row stating no identifier is kept, its `@id` is `Unknown`, and it gets
+   `identifier_blank`: an assertion cannot name it. `MsgID` is a typed field and repeats freely. A
+   short row's missing cells are blank, and the compiler already reports the row
+   (`tabular.csv_ragged_rows`). A log a mapping writes is
    that mapping's, and no lifecycle rule reads it again (no `table_unmapped`). It runs inside
    `python -m neptune_deploy map`: `-p` takes event-log presets as well as lifecycle ones.
 2. **A caller may declare a civil zone per source, for any mapping** (root ADR 0061 §3).
@@ -55,8 +61,10 @@ passes it per source (corpus 2.1.0: `America/New_York` for PLANT-2's syslog and 
    - Absent the option, the zone is the mapping's own, which every shipped preset leaves
      `unstated`, so it is `Unknown`.
    - Refused before anything is written (`MappingError`, exit 2): a zone for a preset the run does
-     not map, for a path the package does not hold, a malformed zone, or two zones for one pair.
-     An unused zone would look applied.
+     not map, for a path the package does not hold, or for a source none of whose tables that
+     preset maps (`-p syslog_csv --source-zone syslog_csv neptune.yaml UTC`, or a `cmms_downtime`
+     zone on the syslog path). Also refused: a malformed zone, or two zones for one pair. An
+     unused zone would move the transform id and look applied while no clock received it.
    - The caller's zone replaces the mapping's own for that source's tables. Document templates do
      not take it yet: no template source needs it.
 3. **Versions.** The event-log mapper is `deploy_event_log_map` `0.1.0`. The lifecycle mappers keep
