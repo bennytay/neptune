@@ -15,7 +15,7 @@ from typing import Any, Final
 
 import pytest
 import yaml
-from harness import acceptance, corpus
+from harness import acceptance, corpus, stages
 from harness.acceptance import __main__ as acceptance_cli
 from harness.acceptance import generate, resolve
 from harness.stages import read_deploy
@@ -206,6 +206,13 @@ def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str
     pstop = datetime.fromisoformat(syslog["4182"]["Timestamp"])
     assert (cmms - pstop).total_seconds() == 32
     assert syslog["4182"]["Host"] == "ARM-3A" and "PSTOP" in syslog["4182"]["Message"]
+    # One RFC 5424 MSGID per event type, for a mapping to key on (the storyline's four events).
+    assert {seq: row["MsgID"] for seq, row in syslog.items()} == {
+        "4170": "PGM_START",
+        "4182": "PSTOP",
+        "4183": "ESTOP",
+        "4186": "LOTO",
+    }
     assert stops["DT-26-0914-01"]["Restarted"] == ""  # a blank, never a restart time
     seconds = int((pstop - datetime(1970, 1, 1)).total_seconds())  # local wall time, as written
     assert generate.local_ns(2026, 9, 14, 14, 32, 38) == (seconds + 4 * 3600) * 10**9  # EDT
@@ -215,7 +222,10 @@ def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str
     assert (document["format"], document["version"]) == ("neptune.assertions", 1)
     (entry,) = document["assertions"]
     assert entry["assertion_type"] == "same_identity"
-    assert [s["value"] for s in entry["scope"]] == ["DT-26-0914-01", "4182"]
+    assert entry["scope"] == [
+        {"namespace": "cmms.downtime", "value": "DT-26-0914-01"},
+        {"namespace": "syslog", "value": "4182"},
+    ]
     assert entry["author"] == {"namespace": "plant-2.staff", "value": "a.novak"}
     assert entry["authored_at"] == "2026-09-15T09:05:00-04:00"
     assert entry["payload"] == {"incident": "INC-C3-0011", "relation": "same_event"}
@@ -470,13 +480,67 @@ def test_a_package_without_base_records_scores_by_path_and_locator() -> None:
 
 
 def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None:
-    from neptune_deploy.lifecycle import PRESETS
-
     plan, problems = read_deploy(acceptance.DEPLOY)
     assert problems == [] and plan is not None
-    assert set(plan.presets) <= set(PRESETS)
+    shipped, clashes = stages._shipped_presets()  # every family: lifecycle and event-log
+    assert set(plan.presets) <= set(shipped) and clashes == []
     assert {"cmms_generic", "jira_json", "register_zone", "servicenow_csv"} <= set(plan.presets)
-    assert plan.at_least["authorisation_envelope"] == 5  # S-007's two and PLANT-2's three
+    assert {"cmms_downtime", "requalification_csv", "syslog_csv"} <= set(plan.presets)
+    assert plan.templates == (
+        "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/templates/incident_report.json",
+    )
+    # What Deploy maps from the corpus, pinned so a missing record goes red (MVL-191).
+    assert plan.at_least == {
+        "authorisation_envelope": 5,  # S-007's two and PLANT-2's three
+        "change_record": 5,
+        "incident_record": 3,
+        "intervention": 3,  # the downtime log's three stops
+        "maintenance_event": 16,
+        "requalification_record": 4,
+        "structured_record": 4,  # the syslog export's four events (syslog_csv)
+    }
+    # The two zone-less exports of the same-event join are read in PLANT-2's zone, and the join
+    # may not dangle (Platform ADR 0009).
+    assert {(z.preset, z.source, z.civil_time_zone) for z in plan.sources} == {
+        ("cmms_downtime", "sites/PLANT-2/cmms/downtime_log.csv", generate.PLANT_ZONE),
+        (
+            "syslog_csv",
+            "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv",
+            generate.PLANT_ZONE,
+        ),
+    }
+    assert plan.require_assertion_scopes
+
+
+_ZONE: Final = {"preset": "x", "source": "sites/a/log.csv", "civil_time_zone": "Europe/Berlin"}
+_ZONED: Final = {"deploy_format": 1, "presets": ["x"]}
+
+
+def test_a_deploy_declaration_states_the_civil_zone_of_sources_that_state_none(
+    tmp_path: Path,
+) -> None:
+    """``sources`` (Platform ADR 0009): per preset and corpus path, the zone the reading transform
+    declares; optional, so a declaration without it reads as before."""
+    path = tmp_path / "deploy.json"
+    later = {**_ZONE, "source": "sites/a/z.csv", "civil_time_zone": "America/New_York"}
+    path.write_text(json.dumps({**_ZONED, "sources": [later, _ZONE]}), encoding="utf-8")
+    plan, problems = read_deploy(path)
+    assert problems == [] and plan is not None
+    assert [(z.source, z.civil_time_zone) for z in plan.sources] == [
+        ("sites/a/log.csv", "Europe/Berlin"),
+        ("sites/a/z.csv", "America/New_York"),
+    ]
+    path.write_text(json.dumps(_ZONED), encoding="utf-8")
+    assert read_deploy(path)[0] == stages.DeployPlan(("x",), (), {}, ())
+    # Presets that do not read are the problem; the zones are not judged against them.
+    path.write_text(json.dumps({**_ZONED, "presets": [""], "sources": [_ZONE]}), encoding="utf-8")
+    assert read_deploy(path) == (
+        None,
+        [
+            "presets is not a list of names",
+            "the deploy declaration names no preset and no template",
+        ],
+    )
 
 
 @pytest.mark.parametrize(
@@ -492,6 +556,16 @@ def test_the_deploy_declaration_names_shipped_presets_and_owes_records() -> None
         ({"deploy_format": 1, "presets": ["x"], "at_least": {"k": 0}}, "at_least is not"),
         ({"deploy_format": 1, "presets": ["x"], "at_least": {"k": True}}, "at_least is not"),
         ([], "is not a JSON object"),
+        ({**_ZONED, "sources": {}}, "sources is not a list of entries"),
+        ({**_ZONED, "sources": [{"preset": "x", "source": "a.csv"}]}, "sources[0] is not {"),
+        ({**_ZONED, "sources": [{**_ZONE, "zone": "UTC"}]}, "sources[0] is not {"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": ""}]}, "has a value that is not a name"),
+        ({**_ZONED, "sources": [{**_ZONE, "preset": "y"}]}, "names preset y, which is not"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": "../a.csv"}]}, "is not a plain corpus path"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": "/a.csv"}]}, "is not a plain corpus path"),
+        ({**_ZONED, "sources": [{**_ZONE, "source": "a\\b.csv"}]}, "is not a plain corpus path"),
+        ({**_ZONED, "sources": [{**_ZONE, "civil_time_zone": "+01:00"}]}, "not spelled as an"),
+        ({**_ZONED, "sources": [_ZONE, {**_ZONE, "civil_time_zone": "UTC"}]}, "source twice"),
     ],
 )
 def test_a_malformed_deploy_declaration_is_refused_whole(
@@ -552,3 +626,86 @@ def test_the_assertion_selector_matches_the_declared_id_and_locates_the_entry(
     assert resolve.resolve_one(package, other)["records"] == []
     with pytest.raises(resolve.GoldError, match="needs id"):
         resolve.resolve_one(package, {"kind": "assertion", "path": "a.json"})
+
+
+def test_the_declaration_selector_cites_a_zone_the_deploy_declaration_states(
+    tmp_path: Path,
+) -> None:
+    """A source that states no zone is read in the zone its mapping's declaration states (root
+    ADR 0061 §3); the gold cites that declaration by preset, path and field (Platform ADR 0009)."""
+    root = tmp_path / "package"
+    (root / "records").mkdir(parents=True)
+    (root / "records" / "source_revision.jsonl").write_text(
+        json.dumps({"content_id": "sha256:" + "2" * 64, "id": "r", "location": {"path": "a.csv"}})
+        + "\n"
+    )
+    other = {"preset": "p", "source": "b.csv", "civil_time_zone": "UTC"}
+    entry = {"preset": "p", "source": "a.csv", "civil_time_zone": "Europe/Berlin"}
+    package = resolve.Package(root, declaration={"sources": [other, entry, "junk"]})
+    select = {"kind": "declaration", "path": "a.csv", "preset": "p", "field": "civil_time_zone"}
+    found = resolve.resolve_one(package, {**select, "equals": "Europe/Berlin"})
+    (record,) = found["records"]
+    assert record.startswith("declaration:sha256:") and len(record) == 19 + 64
+    locator = {
+        "declaration": "harness/acceptance/deploy.json",
+        "pointer": "/sources/1/civil_time_zone",
+    }
+    assert found["citations"] == [{"locator": locator, "path": "a.csv", "record": record}]
+    assert resolve.supports(found, {"record": record})
+    assert resolve.supports(found, {"path": "a.csv", "locator": locator})
+    assert not resolve.supports(found, {"path": "a.csv", "locator": {"pointer": "/sources/1"}})
+    # Another value, another preset, or a source the package does not hold resolve to nothing.
+    assert resolve.resolve_one(package, {**select, "equals": "UTC"})["records"] == []
+    assert resolve.resolve_one(package, {**select, "preset": "q"})["records"] == []
+    assert (
+        "no source at b.csv" in resolve.resolve_one(package, {**select, "path": "b.csv"})["problem"]
+    )
+    with pytest.raises(resolve.GoldError, match="needs preset, field"):
+        resolve.resolve_one(package, {"kind": "declaration", "path": "a.csv"})
+    # The id is the entry's content: the same entry elsewhere in the list keeps it, and the
+    # locator names the declaration the package was given.
+    moved = resolve.Package(root, declaration={"sources": [entry]}, declaration_path="d.json")
+    (citation,) = resolve.resolve_one(moved, select)["citations"]
+    assert citation["record"] == record and citation["locator"]["declaration"] == "d.json"
+
+
+def test_the_pin_selector_cites_a_stated_binding_by_its_pin(tmp_path: Path) -> None:
+    """A run sheet's pin (root ADR 0072 §4) by manifest, run file and snapshot file (ADR 0009)."""
+    root = tmp_path / "package"
+    (root / "records").mkdir(parents=True)
+    content = {name: "sha256:" + str(i) * 64 for i, name in enumerate(("m", "r", "c", "o"), 1)}
+    paths = {"m": "neptune.yaml", "r": "run.mcap", "c": "cal.yaml", "o": "other.yaml"}
+
+    def write(kind: str, *records: dict[str, Any]) -> None:
+        lines = "".join(json.dumps(r) + "\n" for r in records)
+        (root / "records" / f"{kind}.jsonl").write_text(lines)
+
+    def cited(name: str, kind: str = "stated", pointer: str = "") -> dict[str, Any]:
+        locator = [{"kind": "json_pointer", "pointer": pointer}] if pointer else []
+        evidence = {"locator": locator, "source": content[name]}
+        return {"assertion_kind": kind, "evidence": evidence}
+
+    write(
+        "source_revision",
+        *({"content_id": content[k], "id": k, "location": {"path": v}} for k, v in paths.items()),
+    )
+    write("run", {"id": "run", "provenance": cited("r")})
+    write("calibration", {"id": "cal", "provenance": cited("c")})
+    write("configuration_snapshot", {"id": "oth", "provenance": cited("o")})
+    pin = "/runs/0/snapshots/0"
+    write(
+        "snapshot_binding",
+        {"id": "b1", "provenance": cited("m", pointer=pin), "run": "run", "snapshot": "cal"},
+        {"id": "b2", "provenance": cited("m", "inferred", pin), "run": "run", "snapshot": "cal"},
+        {"id": "b3", "provenance": cited("m", pointer=pin), "run": "run", "snapshot": "oth"},
+    )
+    package = resolve.Package(root)
+    select = {"kind": "pin", "path": "neptune.yaml", "run": "run.mcap", "snapshot": "cal.yaml"}
+    found = resolve.resolve_one(package, select)
+    assert found["records"] == ["b1"]  # stated only, and only this snapshot
+    assert found["citations"] == [
+        {"locator": {"pointer": pin}, "path": "neptune.yaml", "record": "b1"}
+    ]
+    assert resolve.resolve_one(package, {**select, "snapshot": "nowhere.yaml"})["records"] == []
+    with pytest.raises(resolve.GoldError, match="needs run, snapshot"):
+        resolve.resolve_one(package, {"kind": "pin", "path": "neptune.yaml"})

@@ -21,6 +21,13 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
 * the code the harness's deploy stage runs (``DEPLOY_STAGE_INPUTS``: Deploy's source, whose command
   line imports its lifecycle mapper, presets, templates and pack commands, and its project file)
   also runs ``neptune-platform``, whose tests map the acceptance corpus with it (platform ADR 0008);
+* what Memory's acceptance snapshot is built through (``MEMORY_SNAPSHOT_INPUTS``: every format
+  adapter, the acceptance corpus under ``harness/acceptance/``, its imported generators, the
+  harness stages that compile and map it, and the deploy stage's code) also runs
+  ``neptune-memory``, whose snapshot test rebuilds from the harness's compiled and mapped packages
+  (platform ADR 0009); only Memory, not its dependents: its code did not change. ``main`` asks for
+  it (``snapshots=True``); ``scripts/merge_freshness.py`` does not, so it leaves that overlap to the
+  ``push`` run on ``main``, as it leaves the platform's harness overlap (platform ADR 0005);
 * the template smoke runs when ``packages/_template/**`` or ``scripts/new-package.sh`` changed.
 
 Writes ``compiler``, ``packages`` (a JSON list) and ``template`` to ``$GITHUB_OUTPUT`` when set, and
@@ -67,6 +74,20 @@ CORPUS_INPUTS = frozenset(
 DEPLOY_STAGE_INPUTS = (
     "packages/neptune-deploy/src/",
     "packages/neptune-deploy/pyproject.toml",
+)
+# Memory's acceptance snapshot is built from the harness's compiled and mapped packages of the
+# acceptance corpus: any adapter, the corpus itself, the writers it imports or the deploy stage's
+# code can change it, so Memory's job (its snapshot test) must run on them (platform ADR 0009).
+MEMORY_MEMBER = "neptune-memory"
+MEMORY_SNAPSHOT_INPUTS = (
+    "src/neptune/adapters/",
+    "harness/acceptance/",
+    # the stages Memory's snapshot generator runs (``harness.run.run_stage`` over ``STAGES``)
+    "harness/stages.py",
+    "harness/run.py",
+    "harness/corpus.py",
+    "harness/contracts.py",
+    *DEPLOY_STAGE_INPUTS,
 )
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
@@ -126,10 +147,13 @@ def plan(
     changed: list[str] | None,
     members: dict[str, frozenset[str]],
     owners: dict[str, str] | None = None,
+    *,
+    snapshots: bool = False,
 ) -> Plan:
     """The jobs to run; ``changed=None`` means unfiltered (every job).
 
-    ``owners`` maps contract ids to owner packages (``contract_owners``).
+    ``owners`` maps contract ids to owner packages (``contract_owners``). ``snapshots`` adds the
+    jobs whose committed snapshots a change can move (``MEMORY_SNAPSHOT_INPUTS``); CI asks for it.
     """
     if changed is None or any(p in PLUMBING_FILES or p.startswith(".github/") for p in changed):
         return Plan(compiler=True, packages=tuple(sorted(members)), template=True)
@@ -164,6 +188,13 @@ def plan(
             if (core and COMPILER in deps) or any(projects.get(d) in affected for d in deps):
                 affected.add(name)
                 grew = True
+    # After the propagation: Memory's snapshot moved, not its code, so its dependents need not run.
+    if (
+        snapshots
+        and MEMORY_MEMBER in members
+        and any(p.startswith(MEMORY_SNAPSHOT_INPUTS) or p in CORPUS_INPUTS for p in changed)
+    ):
+        affected.add(MEMORY_MEMBER)
     template = any(p.startswith(TEMPLATE_DIR) or p == "scripts/new-package.sh" for p in changed)
     return Plan(compiler=compiler, packages=tuple(sorted(affected)), template=template)
 
@@ -186,7 +217,7 @@ def main(argv: list[str]) -> int:
         changed_paths(argv[1], argv[2]) if argv[0] == "pull_request" and len(argv) == 3 else None
     )
     root = Path.cwd()
-    result = plan(changed, workspace_members(root), contract_owners(root)).outputs()
+    result = plan(changed, workspace_members(root), contract_owners(root), snapshots=True).outputs()
     sys.stdout.write(result)
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a", encoding="utf-8") as handle:

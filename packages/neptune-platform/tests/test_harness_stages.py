@@ -305,7 +305,7 @@ def test_a_real_deploy_map_that_writes_no_record_is_red(tmp_path: Path) -> None:
     assert row["state"] == "committed" and row["records"] == {}
     assert row["by_declaration"] == {"preset:register_zone": 0}
     assert entry["problems"] == [
-        "manipulator: the Deploy map wrote no lifecycle record",
+        "manipulator: the Deploy map wrote no lifecycle record or event-table row",
         "manipulator: preset:register_zone mapped no record",
     ]
     # The mapped package is kept in the report (evidence of what did not map); the red stage stops
@@ -365,3 +365,301 @@ def test_a_map_that_raises_is_that_cases_problem_not_a_stage_error(
     assert entry["status"] == "failed"
     assert entry["problems"] == ["manipulator: the Deploy map raised ValueError"]
     assert entry["output"]["cases"][0]["state"] == "error"
+
+
+def test_a_declared_source_zone_is_passed_to_the_map_by_preset_and_corpus_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each ``sources`` entry becomes ``--source-zone PRESET SOURCE ZONE`` (Platform ADR 0009); a
+    Deploy that does not take the option exits non-zero, which is the case's problem."""
+    import subprocess
+
+    zone = {"preset": "cmms_generic", "source": "handeye.yaml", "civil_time_zone": "Asia/Tokyo"}
+    ctx = _declaring(tmp_path, {"deploy_format": 1, "presets": ["cmms_generic"], "sources": [zone]})
+    seen: list[list[str]] = []
+
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 2, "", "map: unrecognized arguments")
+
+    monkeypatch.setattr(subprocess, "run", run)  # the stage's ``subprocess.run``, at call time
+    entry = run_stage(DEPLOY, ctx, services_up=False, upstream_ok=True)
+    (argv,) = seen
+    at = argv.index("--source-zone")
+    assert argv[at : at + 4] == ["--source-zone", "cmms_generic", "handeye.yaml", "Asia/Tokyo"]
+    assert entry["problems"] == [
+        "manipulator: neptune_deploy map exited 2: map: unrecognized arguments"
+    ]
+    # A zone for a preset Deploy does not ship is never passed: that preset is the problem.
+    seen.clear()
+    unshipped = {**zone, "preset": "no_such_preset"}
+    declaration = {"deploy_format": 1, "presets": ["cmms_generic", "no_such_preset"]}
+    (tmp_path / "deploy.json").write_text(json.dumps({**declaration, "sources": [unshipped]}))
+    entry = run_stage(DEPLOY, ctx, services_up=False, upstream_ok=True)
+    assert "--source-zone" not in seen[0]
+    assert "manipulator: Deploy ships no preset 'no_such_preset'" in entry["problems"]
+
+
+def _zones_package(root: Path, records: list[dict[str, object]]) -> Path:
+    (root / "records").mkdir(parents=True)
+    revision = {"content_id": "sha256:" + "a" * 64, "id": "r", "location": {"path": "log.csv"}}
+    (root / "records" / "source_revision.jsonl").write_text(json.dumps(revision) + "\n")
+    lines = "".join(json.dumps(record) + "\n" for record in records)
+    (root / "records" / "civil_time_zone.jsonl").write_text(lines)
+    return root
+
+
+def _zone(zone: dict[str, object], source: str = "sha256:" + "a" * 64) -> dict[str, object]:
+    evidence = {"locator": [], "source": source}
+    return {"id": "z", "provenance": {"evidence": evidence, "transform": "t"}, "zone": zone}
+
+
+@pytest.mark.parametrize(
+    ("records", "problem"),
+    [
+        ([_zone({"knowledge": "known", "value": "Asia/Tokyo"})], None),
+        ([], "preset:syslog_csv wrote no civil time zone for log.csv (declared Asia/Tokyo)"),
+        (
+            [_zone({"knowledge": "known", "value": "Asia/Tokyo"}, "sha256:" + "b" * 64)],
+            "preset:syslog_csv wrote no civil time zone for log.csv (declared Asia/Tokyo)",
+        ),
+        (
+            [
+                _zone({"knowledge": "known", "value": "Asia/Tokyo"}),
+                _zone({"knowledge": "unknown"}),
+            ],
+            "preset:syslog_csv did not apply the declared zone Asia/Tokyo"
+            " to every clock of log.csv",
+        ),
+    ],
+)
+def test_a_declared_zone_the_map_did_not_apply_is_red(
+    tmp_path: Path, records: list[dict[str, object]], problem: str | None
+) -> None:
+    """No green on nothing (ADR 0008 §3, ADR 0009): each declared zone must come back as a
+    ``civil_time_zone`` citing that source, made by that preset, stating that zone."""
+    from harness import stages
+
+    plan = stages.DeployPlan(
+        ("syslog_csv",), (), {}, (stages.SourceZone("syslog_csv", "log.csv", "Asia/Tokyo"),)
+    )
+    compiled = _zones_package(tmp_path / "compiled", [])
+    mapped = _zones_package(tmp_path / "mapped", records)
+    labels, applied = {"sha-of-preset": "preset:syslog_csv"}, {"t": "sha-of-preset"}
+    found = stages._zone_problems(plan, compiled, mapped, labels, applied)
+    assert found == ([] if problem is None else [problem])
+    # A zone by another transform does not count, and a source the base package lacks is named.
+    assert stages._zone_problems(plan, compiled, mapped, labels, {}) == [
+        "preset:syslog_csv wrote no civil time zone for log.csv (declared Asia/Tokyo)"
+    ]
+    absent = stages.SourceZone("syslog_csv", "nope.csv", "Asia/Tokyo")
+    assert stages._zone_problems(
+        stages.DeployPlan(("syslog_csv",), (), {}, (absent,)), compiled, mapped, labels, applied
+    ) == ["sources names nope.csv, which the compiled package does not hold"]
+
+
+def _known(value: object) -> dict[str, object]:
+    return {"knowledge": "known", "value": value}
+
+
+def _assertion(scope: list[dict[str, str]], relation: str = "same_event") -> dict[str, object]:
+    payload = json.dumps({"incident": "INC-1", "relation": relation}, indent=2)  # text, as read
+    return {
+        "assertion_type": _known("same_identity"),
+        "id": "a",
+        "identifier": _known({"namespace": "ops.review", "value": "ASR-1"}),
+        "payload": _known(payload),
+        "provenance": {"assertion_kind": "stated", "evidence": {"locator": [], "source": "s"}},
+        "scope": _known(scope),
+    }
+
+
+def _write(root: Path, kind: str, records: list[dict[str, object]]) -> None:
+    (root / "records").mkdir(parents=True, exist_ok=True)
+    lines = "".join(json.dumps(record) + "\n" for record in records)
+    (root / "records" / f"{kind}.jsonl").write_text(lines)
+
+
+DOWNTIME: Final = {"namespace": "cmms.downtime", "value": "DT-26-0914-01"}
+SYSLOG: Final = {"namespace": "syslog", "value": "4182"}
+
+
+def _mapped(root: Path, *, known_list: bool = False) -> Path:
+    """A mapped package declaring the downtime stop on an intervention (a bare list, or a
+    ``Known`` list with its own provenance) and the syslog stop in a typed table's ``@id`` column.
+    """
+    identifiers: object = [_known(DOWNTIME)]
+    if known_list:
+        identifiers = {**_known([DOWNTIME]), "provenance": {"assertion_kind": "stated"}}
+    _write(root, "intervention", [{"id": "i", "identifiers": identifiers}])
+    header = ["Seq", "MsgID", "@id:syslog"]
+    _write(root, "structured_table", [{"header": _known(header), "id": "t"}])
+    row: dict[str, object] = {
+        "cells": [_known("4182"), _known("PSTOP"), _known("4182")],
+        "table": "t",
+    }
+    _write(root, "structured_record", [row, {"cells": [_known("x")], "table": "other"}])
+    return root
+
+
+@pytest.mark.parametrize("known_list", [False, True])
+def test_every_same_event_scope_entry_is_an_identifier_the_mapped_package_declares(
+    tmp_path: Path, known_list: bool
+) -> None:
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    _write(compiled, "assertion", [_assertion([DOWNTIME, SYSLOG])])
+    mapped = _mapped(tmp_path / "mapped", known_list=known_list)
+    assert stages._dangling_scopes(compiled, mapped) == []
+
+
+@pytest.mark.parametrize(
+    ("entry", "shown"),
+    [
+        ({"namespace": "plant-2.syslog.log-p2", "value": "4182"}, "(plant-2.syslog.log-p2, 4182)"),
+        ({"namespace": "syslog", "value": "04182"}, "(syslog, 04182)"),  # never padded or read
+        ({"namespace": "MsgID", "value": "PSTOP"}, "(MsgID, PSTOP)"),  # only @id columns declare
+        ({"namespace": "syslog:4182", "value": ""}, "(syslog:4182, )"),  # a pair, never joined
+    ],
+)
+def test_a_scope_entry_no_mapped_record_declares_is_a_dangling_link(
+    tmp_path: Path, entry: dict[str, str], shown: str
+) -> None:
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    _write(compiled, "assertion", [_assertion([DOWNTIME, entry])])
+    mapped = _mapped(tmp_path / "mapped")
+    assert stages._dangling_scopes(compiled, mapped) == [
+        f"assertion ops.review/ASR-1: scope {shown} is no identifier the mapped package declares"
+        " (a dangling link)"
+    ]
+
+
+def test_the_scope_check_is_never_green_on_nothing(tmp_path: Path) -> None:
+    """Only stated same-event assertions count; a case that requires the check needs one."""
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    other = _assertion([{"namespace": "nowhere", "value": "1"}], relation="supersedes")
+    inferred = {**_assertion([{"namespace": "nowhere", "value": "2"}]), "provenance": {}}
+    _write(compiled, "assertion", [other, inferred])
+    mapped = _mapped(tmp_path / "mapped")
+    assert stages._dangling_scopes(compiled, mapped) == [
+        "require_assertion_scopes, but the package holds no stated same-event assertion"
+    ]
+    _write(compiled, "assertion", [_assertion([{"namespace": "x"}])])
+    assert stages._dangling_scopes(compiled, mapped) == [
+        "assertion ops.review/ASR-1: a scope entry is not a namespace and value"
+    ]
+    # A scope that is not a non-empty Known list is never green on nothing.
+    unknown = {**_assertion([]), "scope": {"knowledge": "unknown"}}
+    _write(compiled, "assertion", [_assertion([]), unknown])
+    assert (
+        stages._dangling_scopes(compiled, mapped)
+        == ["assertion ops.review/ASR-1: its scope is not a non-empty known list"] * 2
+    )
+
+
+def test_a_scope_entry_naming_a_record_must_be_a_record_either_package_holds(
+    tmp_path: Path,
+) -> None:
+    """Root ADR 0062's scope entry may be a record id (a string), not only a logical id."""
+    from harness import stages
+
+    compiled = tmp_path / "compiled"
+    mapped = _mapped(tmp_path / "mapped")  # holds records "i" and "t"
+    _write(compiled, "assertion", [_assertion(["i", "rec:sha256:gone"])])  # type: ignore[list-item]
+    assert stages._dangling_scopes(compiled, mapped) == [
+        "assertion ops.review/ASR-1: scope rec:sha256:gone is no record either package holds"
+        " (a dangling link)"
+    ]
+
+
+def test_a_case_that_requires_assertion_scopes_runs_the_check_after_the_map(
+    tmp_path: Path,
+) -> None:
+    declaration = {
+        "deploy_format": 1,
+        "presets": ["cmms_generic"],
+        "require_assertion_scopes": True,
+    }
+    ctx = _declaring(tmp_path, declaration)
+    entry = run_stage(DEPLOY, ctx, services_up=False, upstream_ok=True)
+    (row,) = entry["output"]["cases"]
+    assert row["assertion_scopes"] == "dangling"
+    assert (
+        "manipulator: require_assertion_scopes, but the package holds no stated same-event"
+        " assertion" in entry["problems"]
+    )
+    (tmp_path / "deploy.json").write_text(
+        json.dumps({**declaration, "require_assertion_scopes": 1})
+    )
+    assert (
+        _read_problem(tmp_path / "deploy.json") == "require_assertion_scopes is not true or false"
+    )
+
+
+def _read_problem(path: Path) -> str:
+    from harness.stages import read_deploy
+
+    plan, problems = read_deploy(path)
+    assert plan is None
+    (problem,) = problems
+    return problem
+
+
+def test_presets_are_discovered_in_every_family_deploy_ships(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``-p`` takes a lifecycle or an event-log preset (Deploy ADR 0017 §1); a family this Deploy
+    lacks is passed over, and a name two families share is a problem."""
+    import sys
+    import types
+
+    from harness import stages
+    from neptune_deploy.lifecycle import PRESETS
+
+    family = types.ModuleType("fake_eventlogs")
+    family.PRESETS = ("syslog_csv", "cmms_generic")  # type: ignore[attr-defined]
+    family.preset = lambda name: types.SimpleNamespace(sha256=f"sha256:{name}")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "fake_eventlogs", family)
+    # A namespace package (a directory holding only a stale __pycache__) is not a family.
+    monkeypatch.setitem(sys.modules, "fake_empty", types.ModuleType("fake_empty"))
+    families = ("neptune_deploy.lifecycle", "fake_eventlogs", "fake_empty", "no_such_family")
+    monkeypatch.setattr(stages, "PRESET_FAMILIES", families)
+    shipped, problems = stages._shipped_presets()
+    assert set(shipped) == {*PRESETS, "syslog_csv"}
+    assert shipped["syslog_csv"] == "sha256:syslog_csv"
+    assert problems == ["Deploy ships preset 'cmms_generic' in two families"]
+    plan = stages.DeployPlan(("syslog_csv", "nope"), (), {})
+    labels, refused = stages._declarations(plan)
+    assert labels == {"sha256:syslog_csv": "preset:syslog_csv"}
+    assert "Deploy ships no preset 'nope'" in refused
+
+
+def test_event_table_rows_are_counted_by_table_and_attributed_to_their_preset(
+    tmp_path: Path,
+) -> None:
+    """``syslog_csv`` writes a typed table, not lifecycle records: its rows are what it mapped."""
+    from collections import Counter
+
+    from harness import stages
+
+    root = tmp_path / "mapped"
+    _write(
+        root,
+        "structured_table",
+        [{"header": _known(["Seq"]), "id": "t", "name": _known("syslog events")}],
+    )
+    rows: list[dict[str, object]] = [
+        {"cells": [], "provenance": {"transform": "tr"}, "table": "t"} for _ in range(4)
+    ]
+    _write(root, "structured_record", [*rows, {"cells": [], "provenance": {}, "table": "u"}])
+    _write(root, "transform_record", [{"config": {"mapping_sha256": "sha256:s"}, "id": "tr"}])
+    tables, transforms = stages._event_rows(root)
+    assert tables == {"syslog events": 4, "u": 1}
+    assert transforms == Counter({"tr": 4, "None": 1})
+    assert stages._transform_sources(root) == {"tr": "sha256:s"}
+    assert stages._event_rows(tmp_path / "empty") == ({}, Counter())

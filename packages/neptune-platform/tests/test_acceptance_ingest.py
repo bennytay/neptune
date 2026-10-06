@@ -87,9 +87,13 @@ def test_the_deploy_stage_maps_every_declaration_and_the_ledger_registers_both(
     assert plan is not None
     assert row["state"] == "committed" and row["package_verified"]
     assert row["manifest_valid"] and row["receipt_valid"]
-    assert set(row["by_declaration"]) == {f"preset:{name}" for name in plan.presets}
+    assert set(row["by_declaration"]) == {
+        *(f"preset:{name}" for name in plan.presets),
+        *(f"template:{path}" for path in plan.templates),
+    }
     assert all(count > 0 for count in row["by_declaration"].values())
-    assert all(row["records"].get(kind, 0) >= n for kind, n in plan.at_least.items())
+    counted = {**row["records"], "structured_record": sum(row["event_rows"].values())}
+    assert all(counted.get(kind, 0) >= n for kind, n in plan.at_least.items())
     # What no mapping reads (the PDFs' tables, the syslog and downtime exports, the calibration
     # log) is a finding in the mapped package's receipt, and the stage is still green.
     assert row["findings"]["deploy_lifecycle_map.table_unmapped"] >= 3
@@ -251,3 +255,63 @@ def test_every_item_lists_citations_that_support_it(
     assert page == {"page": 1}
     log_time = generate.local_ns(2026, 9, 14, 14, 32, 41) + generate.IPC_AHEAD_2026_09_14
     assert estop["citations"][0]["locator"] == {"log_time": log_time, "topic": "/diagnostics"}
+
+
+def _paths_by_content(package: resolve.Package) -> dict[str, list[str]]:
+    """Every path of each content id: byte-identical copies (the vendor share) share one."""
+    out: dict[str, list[str]] = {}
+    for revision in package.kind("source_revision"):
+        out.setdefault(str(revision["content_id"]), []).append(revision["location"]["path"])
+    return out
+
+
+def test_the_run_sheet_pins_bind_their_runs_stated_and_nothing_else_is_pinned(
+    package: resolve.Package,
+) -> None:
+    """Root ADR 0072 §4: each run's pins become stated snapshot_binding records citing the
+    manifest; their count is what the run sheet's pins times each run's recordings give."""
+    paths = _paths_by_content(package)
+    manifest = package.content("neptune.yaml")
+    stated = [
+        b
+        for b in package.kind("snapshot_binding")
+        if resolve._source(b) == manifest and b["provenance"]["assertion_kind"] == "stated"
+    ]
+    runs_of: dict[str, set[str]] = {}
+    for recording in package.kind("run"):
+        for path in paths[str(resolve._source(recording))]:
+            runs_of.setdefault(path, set()).add(str(recording["id"]))
+    expected = 0
+    for declared in generate.RUNS:
+        recordings = {
+            r for path, ids in runs_of.items() if path.startswith(declared.path) for r in ids
+        }
+        expected += len(recordings) * len(declared.snapshots)
+    assert expected == 12  # 2 + 2 + 4 (ARM-3A), 1 + 2 (LEG-01), 1 (AMR-07 after the rollout)
+    assert len(stated) == expected
+    codes = Counter(f["code"] for f in package.kind("ingest_finding"))
+    for code in ("pin_unresolved", "pin_not_a_snapshot", "pin_repeated"):
+        assert codes[f"neptune.manifest.{code}"] == 0
+
+
+def test_every_declared_machine_alias_is_a_stated_identifier_with_no_finding(
+    package: resolve.Package,
+) -> None:
+    """Memory joins ARM-3A's runs, maintenance and changes through the manifest's declared aliases
+    (root ADR 0072 §1): each is a stated identifier of the machine record, citing its pointer."""
+    manifest = package.content("neptune.yaml")
+    declared: dict[str, set[tuple[str, str]]] = {}
+    for record in package.kind("machine"):
+        if resolve._source(record) != manifest:
+            continue
+        ids = set()
+        for item in record["identifiers"]:
+            assert item["provenance"]["assertion_kind"] == "stated"
+            ids.add((item["value"]["namespace"], item["value"]["value"]))
+        own = next(value for namespace, value in ids if namespace == "manifest")
+        declared[own] = ids
+    assert declared == {
+        ident: {("manifest", ident), *aliases.items()} for ident, _, aliases in generate.MACHINES
+    }
+    codes = Counter(f["code"] for f in package.kind("ingest_finding"))
+    assert codes["neptune.manifest.alias_namespace_unrepresentable"] == 0

@@ -315,3 +315,55 @@ def test_deploy_tests_and_docs_do_not_run_the_platform() -> None:
 def test_the_deploy_stage_inputs_exist() -> None:
     root = Path(__file__).parents[2]
     assert all((root / path).exists() for path in ci_plan.DEPLOY_STAGE_INPUTS)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/neptune/adapters/mcap/adapter.py",
+        "src/neptune/adapters/tabular/csv_reader.py",
+        "src/neptune/adapters/registry.py",  # core: Memory depends on the compiler anyway
+        "harness/acceptance/generate.py",
+        "harness/acceptance/deploy.json",
+        "tests/fixtures/mcap/make_mcap.py",
+        "packages/neptune-deploy/src/neptune_deploy/lifecycle/mapper.py",
+        "harness/stages.py",
+        "harness/run.py",
+    ],
+)
+def test_what_memorys_acceptance_snapshot_is_built_through_runs_memory(path: str) -> None:
+    """Memory's snapshot is rebuilt from the harness's compiled and mapped corpus packages
+    (platform ADR 0009), so an adapter, the corpus, the stages or Deploy's code runs its job, and
+    not its dependents' (Memory's code did not change)."""
+    members = {
+        **MEMBERS,
+        "neptune-memory": frozenset({"neptune"}),
+        "neptune-context": frozenset({"neptune-memory"}),
+        "neptune-deploy": frozenset(),
+    }
+    packages = ci_plan.plan([path], members, snapshots=True).packages
+    assert "neptune-memory" in packages
+    # a compiler path outside one adapter's own subpackage is core: every compiler dependent runs
+    core = path in ("src/neptune/adapters/registry.py", "tests/fixtures/mcap/make_mcap.py")
+    assert ("neptune-context" in packages) is core
+
+
+def test_the_rest_of_the_harness_does_not_run_memory() -> None:
+    members = {**MEMBERS, "neptune-memory": frozenset({"neptune"})}
+    for path in ("harness/publish.py", "harness/report.py", "harness/acceptancy/x.py"):
+        assert "neptune-memory" not in ci_plan.plan([path], members, snapshots=True).packages
+
+
+def test_only_ci_asks_for_the_snapshot_jobs() -> None:
+    """merge_freshness.py plans without ``snapshots``: an adapter PR and a Memory change on main do
+    not overlap through the snapshot (left to main's push run, platform ADR 0005)."""
+    members = {**MEMBERS, "neptune-memory": frozenset({"neptune"})}
+    adapter = ["src/neptune/adapters/mcap/adapter.py"]
+    assert "neptune-memory" not in ci_plan.plan(adapter, members).packages
+    assert "neptune-memory" in ci_plan.plan(adapter, members, snapshots=True).packages
+
+
+def test_the_memory_snapshot_inputs_exist() -> None:
+    root = Path(__file__).parents[2]
+    assert all((root / path).exists() for path in ci_plan.MEMORY_SNAPSHOT_INPUTS)
+    assert ci_plan.MEMORY_MEMBER in ci_plan.workspace_members(root)

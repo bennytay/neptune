@@ -1,10 +1,16 @@
 """Demo v1, end to end (ADR 0007 §5): the local engine over the acceptance corpus's Memory graph.
 
-The graph is Deploy's frozen snapshot of the two-site corpus (``harness/acceptance``: PLANT-2's
-arm cell and legged robot, S-007's lift AMR), read through Memory's reference reader. The agent's
-question, "why did the arm-cell incident happen, what changed", is asked as a typed query, through
-the SDK and through the MCP server (in process and as a real stdio subprocess), and must come back
-cited, scoped and byte-identical every time.
+The graph is Memory's pipeline-built snapshot of the two-site corpus (``harness/acceptance``:
+PLANT-2's arm cell and legged robot, S-007's lift AMRs), frozen under ``golden/`` and read through
+Memory's reference reader. The agent's question, "why did the arm-cell incident happen, what
+changed", is asked as a typed query, through the SDK and through the MCP server (in process and as
+a real stdio subprocess), and must come back cited, scoped and byte-identical every time.
+
+What the snapshot states, and what it does not: the arm ``ARM-3A`` is named by three source
+systems (``servicenow.ci:``, ``cmms.asset:``, ``manifest:``) with no identity link between them,
+its configuration changes are ServiceNow's and the CMMS's, and the incident is an event node whose
+claims name its kind, severity and description, with no link to the arm. Context carries all of
+that as stated and adds none of the missing links.
 """
 
 from __future__ import annotations
@@ -23,7 +29,9 @@ from mcp.client.stdio import stdio_client
 from mcp.shared.memory import create_connected_server_and_client_session
 from neptune_memory.schema.reference import ReferenceReader
 
+import explain_fixtures_context as X
 import retrieve_fixtures_context as F
+from neptune_context import pinned
 from neptune_context.answer import answer_problems
 from neptune_context.engine import LocalEngine, read_graph
 from neptune_context.explain import render_markdown
@@ -41,11 +49,13 @@ if TYPE_CHECKING:
 
     from neptune_context.packets.model import ContextPacket
 
-ARM = Subject("machine", "asset-tag:ARM-3A", same_as_depth=1)
+ARM_NAMES = frozenset(Subject(*n) for n in F.DEMO_ARM_NAMES)
+ARM_NAMES_IDS = {s.declared_id for s in ARM_NAMES}
+INCIDENT = Subject(*F.DEMO_INCIDENT)
 WHY_THE_ARM_CELL = Query(
     include_inferred=True,
     budget=Budget(items=60, tokens=24_000),
-    subjects=frozenset({ARM}),
+    subjects=ARM_NAMES | {INCIDENT},
     graph=GraphClause(None, 2, Direction.BOTH),
 )
 
@@ -70,73 +80,84 @@ def facts(packet: ContextPacket) -> set[tuple[str, str]]:
 def test_why_did_the_arm_cell_incident_happen_and_what_changed() -> None:
     packet = ask(WHY_THE_ARM_CELL)
     found = facts(packet)
-    # The incident, where it happened, and the configuration chain the cell ran with.
-    assert ("involves", "asset-tag:ARM-3A") in found
-    assert ("in_zone", "zone-code:CELL-3") in found
-    assert ("has_configuration", "cfg:cfg-c3-1.4") in found
-    assert ("has_configuration", "cfg:cfg-c3-1.5") in found
-    assert ("configuration_active_during", "cfg:cfg-c3-1.5") in found
-    assert ("not_covered_by_authorisation", "cfg:cfg-c3-1.5") in found
-    assert ("mounted_on", "asset-tag:ARM-3A") in found  # the wrist camera
-    descriptions = [
-        i.claim.object.value  # type: ignore[union-attr]
+    # What changed on the arm: ServiceNow's firmware and tool-centre-point records and the CMMS's.
+    assert ("has_configuration", "servicenow.u_after:5.6.0") in found
+    assert ("has_configuration", "servicenow.u_after:TCP z=145.5 mm") in found
+    assert ("has_configuration", "firmware:5.6.0") in found
+    assert ("recorded_by", "manifest:ARM-3A") in found  # the arm's runs
+    # The incident: its kind, severity and description, each with the record's evidence.
+    incident = [
+        i.claim
         for i in packet.items
-        if isinstance(i, ClaimItem) and i.claim.predicate == "has_description"
+        if isinstance(i, ClaimItem) and i.claim.subject.node_id == INCIDENT.declared_id
     ]
-    assert descriptions
+    assert {c.predicate for c in incident} >= {"event_kind", "has_description", "stated_severity"}
+    assert all(c.provenance.evidence for c in incident)
+    descriptions = [
+        str(c.object.value)  # type: ignore[union-attr]
+        for c in incident
+        if c.predicate == "has_description"
+    ]
+    assert descriptions and "light curtain was muted" in descriptions[0]
+    # Memory states no link between the incident and the arm: none is made up.
+    assert not [c for c in incident if getattr(c.object, "node_id", "") in ARM_NAMES_IDS]
     assert answer_problems(WHY_THE_ARM_CELL, packet) == ()
     text = render_text(packet)
     assert "[E1]" in text and parse_citations(text) == packet.evidence_refs()
 
 
-def test_the_lift_amr_carries_its_calibration_claims_inside_the_pin() -> None:
-    # calibrated_with and calibrated_by are graph-schema 2.0.0 vocabulary (ADR 0012): carried as
-    # items, never reported as newer than the pin.
+def test_every_predicate_the_snapshot_uses_is_inside_the_pin() -> None:
+    # graph-schema 2.0.0 vocabulary (ADR 0012): carried as items, never reported as newer than
+    # the pin, and the document is a 2.x one, so no "older graph" notice is owed.
+    used = {c.predicate for c in F.demo_document().resolution.claims}
+    assert used <= pinned.predicates()
     query = Query(
         include_inferred=False,
         budget=Budget(items=80),
-        subjects=frozenset({Subject("machine", "asset-tag:AMR-07")}),
+        subjects=frozenset({Subject("machine", "cmms.asset:AMR-07")}),
         graph=GraphClause(None, 2, Direction.BOTH),
     )
     packet = ask(query)
     assert not [g for g in packet.gaps if "not in Context's pinned" in g.detail]
-    carried = {i.claim.predicate for i in packet.items if isinstance(i, ClaimItem)}
-    assert "calibrated_with" in carried
+    assert packet.memory.graph_schema_version == 2
+    assert pinned.older_graph_notice(packet.memory.graph_schema_version) is None
+    assert "Graph read:" not in render_answer(packet)
     assert answer_problems(query, packet) == ()
-
-
-def test_a_calibration_drift_renders_its_declared_delta() -> None:
-    # The snapshot's drift claims hold graph-schema 2.0.0 delta values: both renderers state the
-    # declared numbers, form and unit, and nothing about their size.
-    query = Query(
-        include_inferred=False,
-        budget=Budget(items=40),
-        subjects=frozenset({Subject("sensor", "asset-tag:WCAM-3A")}),
-    )
-    packet = ask(query)
-    drifts = [i for i in packet.items if isinstance(i, ClaimItem) and i.claim.predicate == "drift"]
-    assert drifts and answer_problems(query, packet) == ()
-    text = render_answer(packet)
-    lines = [ln for ln in text.split("\n") if " drift delta {" in ln]
-    assert len(lines) == len(drifts)
-    for line in lines:
-        assert '"quantity":"parameter"' in line and '(unit "m", as declared)' in line
-        for adjective in ("large", "small", "significant", "high", "low", "exceeds", "within"):
-            assert adjective not in line.split()
-    assert parse_citations(text) == packet.evidence_refs()
-    markdown = [ln for ln in render_markdown(packet).split("\n") if " *drift* " in ln]
-    assert len(markdown) == len(drifts)
-    assert all('"quantity":"parameter"' in ln and '"value":"m"' in ln for ln in markdown)
 
 
 def test_the_legged_robot_answers_too() -> None:
     query = Query(
         include_inferred=True,
         budget=Budget(items=40),
-        subjects=frozenset({Subject("machine", "asset-tag:LEG-01")}),
-        graph=GraphClause(None, 1, Direction.BOTH),
+        subjects=frozenset({Subject("machine", "manifest:LEG-01")}),
+        graph=GraphClause(None, 2, Direction.BOTH),
     )
-    assert ("located_at", "site-code:PLANT-2") in facts(ask(query))
+    assert ("at_site", "manifest:PLANT-2") in facts(ask(query))  # via the runs it recorded
+
+
+def test_a_calibration_drift_renders_its_declared_delta() -> None:
+    # Memory's pipeline snapshot holds no ``drift`` claim yet, so the calibration fixture graph
+    # (graph-schema 2.0.0 ``delta`` values) is what proves it: both renderers state the declared
+    # numbers, form and unit, and nothing about their size.
+    query = Query(
+        include_inferred=False,
+        budget=Budget(items=40),
+        subjects=frozenset({Subject("sensor", "asset-tag:WCAM-7")}),
+    )
+    packet = Client(LocalEngine(ReferenceReader(X.document()))).query(query)
+    drifts = [i for i in packet.items if isinstance(i, ClaimItem) and i.claim.predicate == "drift"]
+    assert drifts and answer_problems(query, packet) == ()
+    text = render_answer(packet)
+    lines = [ln for ln in text.split("\n") if " drift delta {" in ln]
+    assert len(lines) == len(drifts)
+    for line in lines:
+        assert '"quantity":"parameter"' in line and '(unit "mm", as declared)' in line
+        for adjective in ("large", "small", "significant", "high", "low", "exceeds", "within"):
+            assert adjective not in line.split()
+    assert parse_citations(text) == packet.evidence_refs()
+    markdown = [ln for ln in render_markdown(packet).split("\n") if " *drift* " in ln]
+    assert len(markdown) == len(drifts)
+    assert all('"quantity":"parameter"' in ln and '"value":"mm"' in ln for ln in markdown)
 
 
 def test_the_demo_answer_is_byte_identical_every_time() -> None:
@@ -165,9 +186,8 @@ def test_claude_code_asks_over_mcp_and_gets_cited_text() -> None:
     assert any(isinstance(block, types.ResourceLink) for block in result.content)
 
 
-def test_the_cli_serves_a_memory_graph_over_stdio(tmp_path: Path) -> None:
-    graph = tmp_path / "graph.json"
-    graph.write_text(json.dumps(F.demo_document().to_json()), encoding="utf-8")
+def test_the_cli_serves_a_memory_graph_over_stdio() -> None:
+    graph = F.DEMO_SNAPSHOT  # the .json.gz itself: the CLI reads it as it is
     assert read_graph(graph).head == demo_reader().head
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "neptune_context.mcp", "--memory", str(graph)]
@@ -190,8 +210,9 @@ def test_the_cli_serves_a_memory_graph_over_stdio(tmp_path: Path) -> None:
 
 
 def test_a_2x_document_names_its_release_and_the_packet_its_major(tmp_path: Path) -> None:
-    # graph-schema 2.0.0 documents carry the full release string; a 1.x document (the demo
-    # snapshot) is read as written and stays major 1 (Memory ADR 0019 §3, Context ADR 0012).
+    # graph-schema 2.0.0 documents carry the full release string, and the packet names major 2
+    # (Memory ADR 0019 §3, Context ADR 0012); the demo snapshot is one. A 1.x document stays
+    # major 1: ``test_explain_markdown_context`` reads one.
     current = tmp_path / "current.json"
     data = F.document().to_json()
     assert data["graph_schema"] == "2.0.0" and data["graph_schema_version"] == 2
@@ -203,7 +224,7 @@ def test_a_2x_document_names_its_release_and_the_packet_its_major(tmp_path: Path
     )
     packet = Client(LocalEngine(read_graph(current))).query(query)
     assert packet.memory.graph_schema_version == 2 and packet.items
-    assert ask(WHY_THE_ARM_CELL).memory.graph_schema_version == 1
+    assert ask(WHY_THE_ARM_CELL).memory.graph_schema_version == 2
     for release in ("3.0.0", "2.0", "1.6.0"):
         wrong = tmp_path / f"release-{release}.json"
         wrong.write_text(json.dumps({**data, "graph_schema": release}), encoding="utf-8")

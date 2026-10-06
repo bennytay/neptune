@@ -23,8 +23,8 @@ also shared under a second name. A vendor bulletin carries prompt-injection text
 
 Every name, number and serial is invented. All times are written as each source would write them:
 bags in nanoseconds since the Unix epoch on the recording PC's clock, header stamps on the
-controller's, CMMS and HMI times as local wall time without a zone, calibration times with an
-offset.
+controller's, CMMS, syslog and HMI times as local wall time without a zone (the Deploy declaration,
+``deploy.json``, states PLANT-2's: ``PLANT_ZONE``), calibration times with an offset.
 """
 
 # ruff: noqa: E501  (CSV rows and document lines read as a person would see them)
@@ -81,6 +81,8 @@ LEGGED: Final = f"{PLANT}/legged"
 SECOND: Final = 10**9
 MS: Final = 10**6
 EDT_HOURS: Final = 4  # PLANT-2 and S-007 keep US Eastern daylight time in September
+# PLANT-2's civil time zone: what its zone-less exports are declared in (``deploy.json``).
+PLANT_ZONE: Final = "America/New_York"
 
 # The cell PC (CELL3-IPC) records the bags; its clock is free-running and ahead of the controller.
 IPC_AHEAD_2026_09_09: Final = 95_600 * MS
@@ -522,7 +524,8 @@ def calibrations() -> dict[str, bytes]:
 # --- PLANT-2: the stop of INC-C3-0011 in the CMMS and in syslog, and who joined them -----------
 
 # The CMMS's downtime log: the operator enters the stop at the HMI terminal, by hand, after the
-# fact. Its INC-C3-0011 stop says 14:33:10; the controller logged its protective stop at 14:32:38
+# fact, in plant local wall time without a zone; the declaration that maps it states the zone
+# (``deploy.json`` ``sources``, Platform ADR 0009). Its INC-C3-0011 stop says 14:33:10; the controller logged its protective stop at 14:32:38
 # (the incident report's HMI time and the bag's header stamp): the same stop, 32 s apart.
 CMMS_STOP: Final = "2026-09-14 14:33:10"
 SYSLOG_PSTOP: Final = "2026-09-14 14:32:38"
@@ -578,12 +581,14 @@ DOWNTIME: Final = (
 )
 
 # The plant's syslog collector (LOG-P2), exported as CSV for the review: its sequence number, the
-# sender's own timestamp (local time, as the collector shows it), host, facility, severity, tag.
-# ARM-3A's controller and PLC-C3 keep synchronised time (the site survey); the cell PC does not
-# send syslog.
+# sender's own timestamp (local wall time without a zone, as the collector shows it), host,
+# facility, severity, tag, the sender's RFC 5424 MSGID (one code per event type, what a mapping
+# keys on) and the message. The export states no zone: the declaration that maps it does
+# (``deploy.json`` ``sources``, Platform ADR 0009). ARM-3A's controller and PLC-C3 keep
+# synchronised time (the site survey); the cell PC does not send syslog.
 SYSLOG_PSTOP_SEQ: Final = "4182"
 SYSLOG: Final = (
-    ("Seq", "Timestamp", "Host", "Facility", "Severity", "Tag", "Message"),
+    ("Seq", "Timestamp", "Host", "Facility", "Severity", "Tag", "MsgID", "Message"),
     (
         "4170",
         "2026-09-14 14:28:00",
@@ -591,6 +596,7 @@ SYSLOG: Final = (
         "user",
         "notice",
         "PALLET_C3",
+        "PGM_START",
         "program PALLET_C3 1.4.0 started from the HMI",
     ),
     (
@@ -600,6 +606,7 @@ SYSLOG: Final = (
         "local0",
         "err",
         "SAFETY",
+        "PSTOP",
         "PSTOP: collision detection joint 5, external torque 41.7 Nm > 35.0 Nm, pick P1",
     ),
     (
@@ -609,6 +616,7 @@ SYSLOG: Final = (
         "local0",
         "crit",
         "SAFETY",
+        "ESTOP",
         "ESTOP: OP-2.ES1 pressed",
     ),
     (
@@ -618,13 +626,16 @@ SYSLOG: Final = (
         "local0",
         "notice",
         "SAFETY",
+        "LOTO",
         "cell 3 locked out (LOTO-C3-2)",
     ),
 )
 
 # A person's statement that the CMMS stop and the syslog stop are one event (root ADR 0062's
 # ``neptune.assertions`` file, as the review console writes it): stated evidence, applied by
-# nobody but Memory.
+# nobody but Memory. Its scope names each stop as Deploy's mappings identify it, in Deploy's
+# generic namespaces: ``cmms.downtime`` + the Downtime ID (``cmms_downtime``) and ``syslog`` + the
+# Seq (``syslog_csv``); the ticket is a ``cmms.work_order`` (``cmms_generic``).
 SAME_EVENT_ASSERTION: Final = {
     "format": "neptune.assertions",
     "version": 1,
@@ -634,17 +645,17 @@ SAME_EVENT_ASSERTION: Final = {
             "assertion_type": "same_identity",
             "author": {"namespace": "plant-2.staff", "value": "a.novak"},
             "authored_at": "2026-09-15T09:05:00-04:00",
-            "authored_zone": "America/New_York",
+            "authored_zone": PLANT_ZONE,
             "scope": [
-                {"namespace": "plant-2.cmms.downtime", "value": "DT-26-0914-01"},
-                {"namespace": "plant-2.syslog.log-p2", "value": SYSLOG_PSTOP_SEQ},
+                {"namespace": "cmms.downtime", "value": "DT-26-0914-01"},
+                {"namespace": "syslog", "value": SYSLOG_PSTOP_SEQ},
             ],
             "payload": {"incident": "INC-C3-0011", "relation": "same_event"},
             "rationale": (
                 "Same stop. I entered DT-26-0914-01 at the HMI terminal after the E-stop; it is"
                 " the protective stop the controller logged as syslog 4182. Both are INC-C3-0011."
             ),
-            "ticket": {"namespace": "plant-2.cmms", "value": "WO-26-0915"},
+            "ticket": {"namespace": "cmms.work_order", "value": "WO-26-0915"},
         }
     ],
 }
@@ -1456,38 +1467,184 @@ def asset_register() -> bytes:
     return table(header, rows)
 
 
-MANIFEST: Final = """\
+# What the site integrator's run sheet states for each declared run (root ADR 0072): the task, the
+# software it ran (firmware and controller versions), and the snapshot files it ran with. A pin
+# is only what the hand-over can show was in force at the run:
+# - ARM-3A: the hand-eye calibration loaded (the last good run CAL-ARM3A-0818, before WO-26-0911,
+#   as its start line says; the incident run CAL-ARM3A-0911 and the vision PC's export of it). The
+#   2026-08-20 run's bag names no calibration; the integrator pins CAL-ARM3A-0818, the one in force
+#   from WO-26-0391 (2026-08-18) to the next calibration on 2026-09-11. The tool change of
+#   WO-26-0911 has no snapshot (no change record, and the managed cell_config.yaml is stale, so it
+#   is never pinned).
+# - LEG-01: the dated patrol configuration of its firmware.
+# - The AMRs: the fleet manager's navigation export is revision 12, for firmware 4.3.1, flashed
+#   2026-04-14 (CHG0050021..23), so it is pinned only to the run after the rollout. The runs before it
+#   (AMR-05 and AMR-06 on 2026-03-03, AMR-07 at INC-0007 on 2026-04-02) are deliberately unpinned:
+#   which navigation configuration they ran is not in the hand-over.
+# - The hand-eye calibration sessions record no run, so they name their procedure and pin nothing.
+@dataclass(frozen=True)
+class DeclaredRun:
+    name: str
+    path: str
+    machine: str
+    site: str
+    task: str | None = None
+    software: tuple[str, ...] = ()
+    snapshots: tuple[str, ...] = ()
+
+
+ARM_SOFTWARE: Final = ("ARM-3A-controller-5.6.0", "PALLET_C3-1.4.0")
+RUNS: Final = (
+    DeclaredRun(
+        "cell3-2026-08-20",
+        f"{CELL}/bags/pick_place_2026-08-20",
+        "ARM-3A",
+        "PLANT-2",
+        software=ARM_SOFTWARE[:1],
+        snapshots=(f"{CELL}/calibration/CAL-ARM3A-0818.yaml",),
+    ),
+    DeclaredRun(
+        "cell3-2026-09-09",
+        f"{CELL}/bags/{LAST_GOOD_RUN}",
+        "ARM-3A",
+        "PLANT-2",
+        "PALLET_C3",
+        ARM_SOFTWARE,
+        (f"{CELL}/calibration/CAL-ARM3A-0818.yaml",),
+    ),
+    DeclaredRun(
+        "cell3-2026-09-14",
+        f"{CELL}/bags/{INCIDENT_RUN}",
+        "ARM-3A",
+        "PLANT-2",
+        "PALLET_C3",
+        ARM_SOFTWARE,
+        (f"{CELL}/calibration/CAL-ARM3A-0911.yaml", f"{CELL}/vision/wrist_camera_handeye.yml"),
+    ),
+    DeclaredRun(
+        "leg01-2026-09-12",
+        f"{LEGGED}/runs/patrol_2026-09-12.mcap",
+        "LEG-01",
+        "PLANT-2",
+        "PATROL-A",
+        ("LEG-01-firmware-3.1.4",),
+        (f"{LEGGED}/config/2026-09-01/LEG-01_patrol.yaml",),
+    ),
+    DeclaredRun(
+        "leg01-2026-09-14",
+        f"{LEGGED}/runs/patrol_2026-09-14",
+        "LEG-01",
+        "PLANT-2",
+        "PATROL-A",
+        ("LEG-01-firmware-3.2.0",),
+        (f"{LEGGED}/config/2026-09-13/LEG-01_patrol.yaml",),
+    ),
+    *(
+        DeclaredRun(
+            f"arm3a-handeye-{c.performed[:10]}",
+            f"{CELL}/calibration/{c.ident}.yaml",
+            "ARM-3A",
+            "PLANT-2",
+            "SOP-CELL-021",
+        )
+        for c in HANDEYE
+    ),
+    DeclaredRun(
+        "amr05-2026-03-03",
+        f"{S007}/runs/amr-05_2026-03-03.mcap",
+        "AMR-05",
+        "S-007",
+        software=("AMR-firmware-4.2.0",),
+    ),
+    DeclaredRun(
+        "amr06-2026-03-03",
+        f"{S007}/runs/amr-06_2026-03-03.mcap",
+        "AMR-06",
+        "S-007",
+        software=("AMR-firmware-4.2.0",),
+    ),
+    DeclaredRun(
+        "amr07-2026-04-02",
+        f"{S007}/runs/amr-07_2026-04-02.mcap",
+        "AMR-07",
+        "S-007",
+        software=("AMR-firmware-4.2.0",),
+    ),
+    DeclaredRun(
+        "amr07-2026-04-15",
+        f"{S007}/runs/amr-07_2026-04-15.mcap",
+        "AMR-07",
+        "S-007",
+        software=("AMR-firmware-4.3.1",),
+        snapshots=(f"{S007}/config/AMR-07/nav2_params.yaml",),
+    ),
+)
+
+
+# The machines, with the ids each enterprise export gives them, as those exports write them: the
+# CMMS work orders' and downtime log's ``Asset ID`` (Deploy's ``cmms.asset``) and the ServiceNow
+# changes' ``cmdb_ci`` (``servicenow.ci``). LEG-01 has no ServiceNow CI in the hand-over.
+MACHINES: Final = (
+    ("AMR-05", "mobile_base", {"cmms.asset": "AMR-05", "servicenow.ci": "AMR-05"}),
+    ("AMR-06", "mobile_base", {"cmms.asset": "AMR-06", "servicenow.ci": "AMR-06"}),
+    ("AMR-07", "mobile_base", {"cmms.asset": "AMR-07", "servicenow.ci": "AMR-07"}),
+    ("ARM-3A", "manipulator", {"cmms.asset": "ARM-3A", "servicenow.ci": "ARM-3A"}),
+    ("LEG-01", "legged", {"cmms.asset": "LEG-01"}),
+)
+
+
+def _machine_line(machine: tuple[str, str, dict[str, str]]) -> str:
+    ident, embodiment, aliases = machine
+    named = ", ".join(f"{namespace}: {value}" for namespace, value in sorted(aliases.items()))
+    return f"  - {{id: {ident}, embodiment: {embodiment}, aliases: {{{named}}}}}"
+
+
+def _run_line(run: DeclaredRun) -> str:
+    fields = [f"name: {run.name}", f"paths: [{run.path}]", f"machine: {run.machine}"]
+    fields.append(f"site: {run.site}")
+    if run.task:
+        fields.append(f"task: {run.task}")
+    if run.software:
+        fields.append(f"software: [{', '.join(run.software)}]")
+    if run.snapshots:
+        fields.append(f"snapshots: [{', '.join(f'{{path: {p}}}' for p in run.snapshots)}]")
+    return f"  - {{{', '.join(fields)}}}"
+
+
+MANIFEST: Final = (
+    """\
 # The hand-over folder for the INC-C3-0011 review (PLANT-2) and the S-007 fleet.
 # Read every CSV here with its first row as the header (root ADR 0042 section 2).
 # Each hand-eye calibration is declared as a session of ARM-3A: easy_handeye's file names no robot.
+# Each run states its task, software and the snapshot files it ran with, as the integrator's run
+# sheet does (root ADR 0072); a run with no snapshots is one whose configuration is not here.
 neptune: 1
 machines:
-  - {id: AMR-05, embodiment: mobile_base}
-  - {id: AMR-06, embodiment: mobile_base}
-  - {id: AMR-07, embodiment: mobile_base}
-  - {id: ARM-3A, embodiment: manipulator}
-  - {id: LEG-01, embodiment: legged}
+"""
+    + "".join(_machine_line(machine) + "\n" for machine in MACHINES)
+    + """\
 sites:
   - {id: S-007, name: "Northgate distribution centre"}
   - {id: PLANT-2, name: "Riverside plant 2"}
+tasks:
+  - {id: PALLET_C3, name: "PALLET_C3 palletising at CELL-3"}
+  - {id: PATROL-A, name: "LEG-01 inspection patrol A"}
+  - {id: SOP-CELL-021, name: "Wrist camera hand-eye calibration (SOP-CELL-021)"}
+software:
+  - {id: ARM-3A-controller-5.6.0, name: "ARM-3A controller software", version: "5.6.0"}
+  - {id: PALLET_C3-1.4.0, name: "PALLET_C3 application", version: "1.4.0"}
+  - {id: LEG-01-firmware-3.1.4, name: "LEG-01 firmware", version: "3.1.4"}
+  - {id: LEG-01-firmware-3.2.0, name: "LEG-01 firmware", version: "3.2.0"}
+  - {id: AMR-firmware-4.2.0, name: "AMR drive controller firmware", version: "4.2.0"}
+  - {id: AMR-firmware-4.3.1, name: "AMR drive controller firmware", version: "4.3.1"}
 runs:
-  - {name: cell3-2026-08-20, paths: [sites/PLANT-2/cell3/bags/pick_place_2026-08-20], machine: ARM-3A, site: PLANT-2}
-  - {name: cell3-2026-09-09, paths: [sites/PLANT-2/cell3/bags/pallet_2026-09-09], machine: ARM-3A, site: PLANT-2}
-  - {name: cell3-2026-09-14, paths: [sites/PLANT-2/cell3/bags/pallet_2026-09-14], machine: ARM-3A, site: PLANT-2}
-  - {name: leg01-2026-09-12, paths: [sites/PLANT-2/legged/runs/patrol_2026-09-12.mcap], machine: LEG-01, site: PLANT-2}
-  - {name: leg01-2026-09-14, paths: [sites/PLANT-2/legged/runs/patrol_2026-09-14], machine: LEG-01, site: PLANT-2}
-  - {name: arm3a-handeye-2026-02-26, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0226.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-04-15, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0415.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-06-23, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0623.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-08-18, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: arm3a-handeye-2026-09-11, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml], machine: ARM-3A, site: PLANT-2}
-  - {name: amr05-2026-03-03, paths: [sites/S-007/runs/amr-05_2026-03-03.mcap], machine: AMR-05, site: S-007}
-  - {name: amr06-2026-03-03, paths: [sites/S-007/runs/amr-06_2026-03-03.mcap], machine: AMR-06, site: S-007}
-  - {name: amr07-2026-04-02, paths: [sites/S-007/runs/amr-07_2026-04-02.mcap], machine: AMR-07, site: S-007}
-  - {name: amr07-2026-04-15, paths: [sites/S-007/runs/amr-07_2026-04-15.mcap], machine: AMR-07, site: S-007}
+"""
+    + "".join(_run_line(run) + "\n" for run in RUNS)
+    + """\
 adapters:
   tabular: {options: {csv_header: first_row}}
 """
+)
 
 
 def build() -> dict[str, bytes]:

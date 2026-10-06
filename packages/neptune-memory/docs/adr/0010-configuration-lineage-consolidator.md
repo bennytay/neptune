@@ -1,6 +1,6 @@
 # 0010 — The configuration lineage consolidator
 
-- Status: Accepted; §2's `succeeds` at each chain change and §6's reading of `succeeds` superseded by 0019 §2
+- Status: Accepted; §2's `succeeds` at each chain change and §6's reading of `succeeds` superseded by 0019 §2; §3's `configuration_unknown` for a bound `configuration_snapshot` no thread holds superseded by 0022
 - Date: 2026-10-05
 - Issue: MVL-127
 

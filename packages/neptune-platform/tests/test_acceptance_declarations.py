@@ -1,12 +1,12 @@
 """The acceptance corpus's manifest, as stated records (root ADR 0072, MVL-205).
 
-The corpus's ``neptune.yaml`` declares five machines, two sites and nine runs. Ingested by the
-compiler, every recording a declared run holds names its declared machine and site through a
-stated ``run_declaration`` citing the manifest, and each declared machine and site is a stated
-record. A copy of the corpus whose manifest also pins the legged robot's dated patrol
-configurations and each AMR's navigation parameters binds those runs to them, stated, with no
-inference: what Memory's run and configuration consolidators read. The locked corpus itself is
-not edited (its cell configuration is a stale trap, gold T2).
+The corpus's ``neptune.yaml`` declares five machines, two sites and nine recorded runs (and five
+hand-eye sessions that record no run). Ingested by the compiler, every recording a declared run
+holds names its declared machine and site through a stated ``run_declaration`` citing the
+manifest, and each declared machine and site is a stated record. The run sheet's pins bind their
+runs to the calibrations and configurations they ran with, stated, with no inference: what
+Memory's run and configuration consolidators read. The stale cell configuration (gold T2) is never
+pinned, and the AMR runs before the firmware rollout are deliberately unpinned.
 """
 
 from pathlib import Path
@@ -14,6 +14,7 @@ from typing import Any, Final
 
 import pytest
 from harness import acceptance
+from harness.acceptance import generate
 
 from neptune.model.alignment import SnapshotBinding, SnapshotKind
 from neptune.model.knowledge import AssertionKind, Known
@@ -36,32 +37,16 @@ DECLARED: Final = {
     "amr07-2026-04-02": ("AMR-07", "S-007"),
     "amr07-2026-04-15": ("AMR-07", "S-007"),
 }
-LEGGED: Final = "sites/PLANT-2/legged"
-PINS: Final = {
-    "leg01-2026-09-12": f"{LEGGED}/config/2026-09-01/LEG-01_patrol.yaml",
-    "leg01-2026-09-14": f"{LEGGED}/config/2026-09-13/LEG-01_patrol.yaml",
-    "amr05-2026-03-03": "sites/S-007/config/AMR-05/nav2_params.yaml",
-    "amr06-2026-03-03": "sites/S-007/config/AMR-06/nav2_params.yaml",
-    "amr07-2026-04-02": "sites/S-007/config/AMR-07/nav2_params.yaml",
-    "amr07-2026-04-15": "sites/S-007/config/AMR-07/nav2_params.yaml",
-}
+# What the run sheet pins, by run name: the snapshot files (generate.RUNS). The AMR runs before the
+# 4.3.1 rollout are deliberately unpinned: their navigation configuration is not in the hand-over.
+PINS: Final = {run.name: set(run.snapshots) for run in generate.RUNS if run.snapshots}
+UNPINNED: Final = {"amr05-2026-03-03", "amr06-2026-03-03", "amr07-2026-04-02"}
 
 
 def _ingest(root: Path, out: Path, workspace: Path) -> Any:
     result = Neptune(workspace).ingest(root, out)
     assert result.committed
     return read_package(out)
-
-
-def _pinned(manifest: str) -> str:
-    """The corpus's manifest with each run of ``PINS`` pinned to its configuration file."""
-    lines = []
-    for line in manifest.splitlines():
-        for name, path in PINS.items():
-            if line.startswith(f"  - {{name: {name}, "):
-                line = line.removesuffix("}") + f", snapshots: [{{path: {path}}}]}}"
-        lines.append(line)
-    return "\n".join(lines) + "\n"
 
 
 @pytest.fixture(scope="module")
@@ -123,24 +108,14 @@ def test_declared_machines_and_sites_are_stated_records(package: Any) -> None:
     assert sites == {("S-007", "Northgate distribution centre"), ("PLANT-2", "Riverside plant 2")}
 
 
-def test_pinned_configurations_bind_their_runs_stated(
-    corpus: Path, tmp_path_factory: pytest.TempPathFactory
+def test_the_run_sheet_binds_each_pinned_run_stated_and_leaves_the_gaps_unpinned(
+    package: Any,
 ) -> None:
-    tmp = tmp_path_factory.mktemp("pinned")
-    copy = tmp / "corpus"
-    for path in corpus.rglob("*"):
-        if path.is_file():
-            target = copy / path.relative_to(corpus)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(path.read_bytes())
-    manifest = copy / "neptune.yaml"
-    manifest.write_text(_pinned(manifest.read_text(encoding="utf-8")), encoding="utf-8")
-    package = _ingest(copy, tmp / "package", tmp / "workspace")
     paths = _paths(package)
     snapshots = {
         r.id: paths[r.provenance.evidence.source]
         for r in package.records
-        if r.kind == "configuration_snapshot"
+        if r.kind in ("configuration_snapshot", "calibration")
     }
     names = {
         d.run: d.logical_id.value.value
@@ -154,9 +129,15 @@ def test_pinned_configurations_bind_their_runs_stated(
         if paths[binding.provenance.evidence.source] != ["neptune.yaml"]:
             continue
         assert binding.provenance.assertion_kind is AssertionKind.STATED
-        assert binding.snapshot_kind is SnapshotKind.CONFIGURATION_SNAPSHOT
+        assert binding.snapshot_kind in (
+            SnapshotKind.CONFIGURATION_SNAPSHOT,
+            SnapshotKind.CALIBRATION,
+        )
         bound.setdefault(names[binding.run], set()).update(snapshots[binding.snapshot])
-    assert bound == {name: {path} for name, path in PINS.items()}
+    assert bound == PINS
+    assert not UNPINNED & set(bound)
+    # The stale managed export is never pinned (gold trap T2).
+    assert all("cell_config.yaml" not in path for pins in bound.values() for path in pins)
     unresolved = {
         f.details["run"]
         for f in package.records
