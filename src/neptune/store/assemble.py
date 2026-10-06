@@ -42,7 +42,6 @@ from neptune.store.package import (
     PackageError,
     copy_file,
     open_file,
-    package_contents,
     package_id,
     read_package,
 )
@@ -216,12 +215,12 @@ def _staged(destination: Path) -> Iterator[Path]:
 
 
 def _lay_out(
-    staging: Path, contents: Mapping[str, Content], *, movable: Path | None = None
+    staging: Path, contents: Mapping[str, Content], *, movable: Collection[Path] = ()
 ) -> list[str]:
-    """Write ``contents`` under ``staging``: bytes as given, paths beneath ``movable`` moved, the
-    rest copied as streams (``copy_file``: no symlink followed, no special file opened). Returns
-    the paths it copied: a copied file can have changed since it was hashed, so what landed must
-    be checked (``_check_copies``).
+    """Write ``contents`` under ``staging``: bytes as given, paths beneath one of ``movable``
+    moved, the rest copied as streams (``copy_file``: no symlink followed, no special file
+    opened). Returns the paths it copied: a copied file can have changed since it was hashed, so
+    what landed must be checked (``_check_copies``).
     """
     copied = []
     for relative, data in sorted(contents.items()):
@@ -229,7 +228,7 @@ def _lay_out(
         target.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(data, bytes):
             target.write_bytes(data)
-        elif movable is not None and data.is_relative_to(movable):
+        elif any(data.is_relative_to(directory) for directory in movable):
             data.rename(target)
         else:
             copy_file(data, target)
@@ -386,7 +385,7 @@ def stage(
                 store={"series": SERIES_SETTINGS} if series else {},
                 derived=derived,
             )
-        copied = _lay_out(staging, contents, movable=scratch)
+        copied = _lay_out(staging, contents, movable=(scratch,))
         _remove_empty(scratch)  # every merged series, landed source and written file was moved
         _check_copies(staging, contents, copied)
     except BaseException:
@@ -395,26 +394,39 @@ def stage(
     return StagedPackage(staging, destination, package_id(contents), tuple(uses))
 
 
-def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -> StagedPackage:
+def amend(
+    staged: StagedPackage,
+    package: IngestPackage,
+    extra: Iterable[Any],
+    *,
+    spill: Path | None = None,
+) -> StagedPackage:
     """Stage ``package`` again with ``extra`` records added: validation's transform and findings.
 
     ``package`` is ``staged`` as ``read_package`` read it. The new package is built in a fresh
-    sibling: its tables, receipt and manifest are rewritten, and its series and blobs are moved
-    (never copied) out of ``staged``, which is then removed. ``package_contents`` checks the
+    sibling as a stream (``PackageWriter``, ADR 0065): its tables are read from ``staged`` and
+    rewritten, spilling to ``spill`` (by default the sibling's own scratch), and its series and
+    blobs are moved (never copied) out of ``staged``, which is then removed. The writer checks the
     whole as the reader does (ADR 0065 §4) before anything moves, so the result needs no second
     read. On failure the new sibling is removed and ``staged`` may have lost files; the caller
     discards it.
     """
-    contents = package_contents(
-        [*package.records, *extra],
-        series=package.series,
-        blobs=package.blobs,
-        store=package.manifest.store,
-        derived=package.derived,
-    )
     staging = _sibling(staged.destination)
     try:
-        copied = _lay_out(staging, contents, movable=staged.path)
+        scratch = staging / ".scratch"
+        scratch.mkdir()
+        with PackageWriter(spill if spill is not None else scratch) as writer:
+            writer.extend(package.records)
+            writer.extend(extra)
+            contents = writer.finish(
+                scratch / "package",
+                series=package.series,
+                blobs=package.blobs,
+                store=package.manifest.store,
+                derived=package.derived,
+            )
+        copied = _lay_out(staging, contents, movable=(scratch, staged.path))
+        _remove_empty(scratch)  # every table and receipt file the writer wrote was moved
         _check_copies(staging, contents, copied)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -523,23 +535,27 @@ def export(package_root: Path, destination: Path, source: SourceOpener) -> Conte
     stays referenced: nothing in the package was read from it. The export appears at
     ``destination``, which must not exist, whole or not at all.
     """
-    package = read_package(package_root)
-    wanted = [h.content_id for h in package.manifest.sources if h.content_id not in package.blobs]
-    locations = _head_locations(package.records, wanted)
-    if lost := sorted(cited_sources(package.records).intersection(wanted) - set(locations)):
-        raise PackageError(f"no local location holds sources the package cites: {lost}")
     with _staged(destination) as staging:
         scratch = staging / ".scratch"
         scratch.mkdir()
+        package = read_package(package_root, scratch=scratch)
+        wanted = [
+            h.content_id for h in package.manifest.sources if h.content_id not in package.blobs
+        ]
+        locations = _head_locations(package.records, wanted)
+        if lost := sorted(cited_sources(package.records).intersection(wanted) - set(locations)):
+            raise PackageError(f"no local location holds sources the package cites: {lost}")
         blobs = {**package.blobs, **_land(scratch, locations, source)}
-        contents = package_contents(
-            package.records,
-            series=package.series,
-            blobs=blobs,
-            store=package.manifest.store,
-            derived=package.derived,
-        )
-        copied = _lay_out(staging, contents, movable=scratch)
-        scratch.rmdir()  # every landed source was moved into place
+        with PackageWriter(scratch) as writer:  # bounded: tables spill to the export's scratch
+            writer.extend(package.records)
+            contents = writer.finish(
+                scratch / "package",
+                series=package.series,
+                blobs=blobs,
+                store=package.manifest.store,
+                derived=package.derived,
+            )
+        copied = _lay_out(staging, contents, movable=(scratch,))
+        _remove_empty(scratch)  # every landed source and written file was moved into place
         _check_copies(staging, contents, copied)  # the original's series, hashed then copied
     return package_id(contents)

@@ -18,11 +18,16 @@ series are read in batches of a few columns, and the output is capped (``Bounds`
 ``findings_per_rule`` findings a rule, each naming at most ``records_per_finding`` records and
 ``related_per_finding`` other citations. A cut is counted in the finding (``records_omitted``) or
 reported once (``neptune.validate.findings_capped``).
+
+Memory does not grow with the records (ADR 0070): rules read each kind from the package's table as
+they iterate it, never an index of the whole package, and the one join over every record (which
+references resolve) is sorted in a ``SpillSpace`` under the caller's scratch. A rule holds the few
+records it groups (streams, runs, clocks, configurations, frames, entities) and what it reports.
 """
 
-from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Final
 
 from neptune.identity.findings import ingest_finding
@@ -37,7 +42,7 @@ from neptune.model.finding import (
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, TransformRecord
-from neptune.store.package import IngestPackage
+from neptune.store.package import IngestPackage, PackageError, records_of
 
 VALIDATOR_ID: Final = "neptune.validate"
 # Changes whenever a rule is added or removed; each rule's own version changes with its logic.
@@ -109,35 +114,39 @@ class Inputs:
 
 
 class Context:
-    """A package indexed once for every rule: records by kind and id, sizes, foreign findings."""
+    """A package as every rule reads it: records by kind, read from their tables as they are
+    iterated (never held whole, ADR 0070), source sizes, and the other producers' findings.
 
-    def __init__(self, package: IngestPackage, bounds: Bounds, inputs: Inputs) -> None:
+    ``spill`` is a directory of the caller's (a workspace's scratch space) where a rule that must
+    sort what it reads, such as ``dangling_reference``, spills; without one it sorts in memory.
+    """
+
+    def __init__(
+        self, package: IngestPackage, bounds: Bounds, inputs: Inputs, spill: Path | None = None
+    ) -> None:
         self.package = package
         self.bounds = bounds
         self.inputs = inputs
+        self.spill = spill
         self.memo: dict[str, Any] = {}  # work two rules share, done once
-        self.by_kind: dict[str, list[Any]] = defaultdict(list)
-        self.by_id: dict[str, Any] = {}
-        for record in package.records:
-            self.by_kind[record.kind].append(record)
-            identifier = getattr(record, "id", None)
-            if isinstance(identifier, str):
-                self.by_id[identifier] = record
         self.sizes: dict[str, int] = {
-            artifact.content_id: artifact.size for artifact in self.by_kind["source_artifact"]
-        }
-        own = {
-            transform.id
-            for transform in self.by_kind["transform_record"]
-            if transform.adapter_id == VALIDATOR_ID
+            artifact.content_id: artifact.size for artifact in self.records("source_artifact")
         }
         # A rule reads the other producers' findings, never its own: validating twice adds nothing.
-        self.findings: list[IngestFinding] = [
-            finding for finding in self.by_kind["ingest_finding"] if finding.transform not in own
-        ]
+        self.own = frozenset(
+            transform.id
+            for transform in self.records("transform_record")
+            if transform.adapter_id == VALIDATOR_ID
+        )
 
-    def records(self, kind: str) -> list[Any]:
-        return self.by_kind.get(kind, [])
+    def records(self, kind: str) -> Collection[Any]:
+        """The package's records of one kind, in table order (sorted by id), read as iterated."""
+        return records_of(self.package.records, kind)
+
+    @property
+    def findings(self) -> Iterator[IngestFinding]:
+        """The other producers' findings, in id order: a fresh pass each time it is read."""
+        return (f for f in self.records("ingest_finding") if f.transform not in self.own)
 
     def whole(self, source: str) -> EvidenceRef | None:
         """The whole of a source the package lists, as evidence."""
@@ -349,10 +358,13 @@ def validate_package(
     *,
     bounds: Bounds | None = None,
     inputs: Inputs | None = None,
+    spill: Path | None = None,
 ) -> ValidationReport:
     """Run ``rules`` (by default every rule whose inputs are on main) over a verified package.
 
-    Deterministic: the same package, rules and bounds give the same findings, in id order.
+    Deterministic: the same package, rules and bounds give the same findings, in id order. The
+    records are read from the package's tables as each rule iterates them; ``spill`` is where a
+    rule sorts what it must (``Context``), so memory does not grow with the records.
     """
     from neptune.validate import pending  # the rules import this module
     from neptune.validate.rules import ALL_RULES, DEFAULT_RULES
@@ -365,7 +377,7 @@ def validate_package(
     if len({rule.code for rule in chosen}) != len(chosen):
         raise ValueError("each rule may run once")
     bounds = bounds or Bounds()
-    context = Context(package, bounds, inputs)
+    context = Context(package, bounds, inputs, spill)
     transform = validator_transform(chosen, bounds)
     findings: dict[RecordId, IngestFinding] = {}
     outcomes: list[RuleOutcome] = []
@@ -386,6 +398,8 @@ def validate_package(
                 else:
                     omitted += 1
                     first_omitted = first_omitted or draft.subject
+        except PackageError:
+            raise  # the package's files changed or vanished under a rule: not the rule's fault
         except Exception as exc:  # one rule's fault never costs the package (non-negotiable 7)
             failure = _failed(rule, exc, context, transform)
             if failure is not None:
