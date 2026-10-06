@@ -128,6 +128,7 @@ from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
 from neptune.manifest import LoadedManifest, ManifestError
+from neptune.manifest.records import ManifestRecords, declared_records
 from neptune.model import references
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, ExternalObjectRef, RecordId
@@ -2482,6 +2483,7 @@ class IngestJob:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
             assembled = self._assemble_runs()
+            stated = self._declare() if self._declared is not None else None
             # A degraded run records its runtime transform even with no findings, so the receipt
             # always names the guarantees it could not give; a sound run adds a transform only to
             # carry a finding, keeping its lineage unchanged (ADR 0030).
@@ -2521,7 +2523,12 @@ class IngestJob:
                 derived = {**(derived or {}), **frames_found.tables()}
             if (
                 self._grouping is not None
-                and (bindings := self._bind_snapshots(self._grouping, assembled)) is not None
+                and (
+                    bindings := self._bind_snapshots(
+                        self._grouping, [*assembled, *(stated.bindings if stated else ())]
+                    )
+                )
+                is not None
             ):
                 cited.add(bindings.transform.id)
                 derived = {**(derived or {}), **bindings.tables()}
@@ -2532,6 +2539,7 @@ class IngestJob:
                 *self._findings.values(),
                 *(declared_found.records if declared_found is not None else ()),
                 *assembled,
+                *(stated.records if stated is not None else ()),
                 *bound,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
@@ -2697,12 +2705,25 @@ class IngestJob:
         )
         return assembly.records
 
+    def _declare(self) -> ManifestRecords:
+        """The manifest's machines, sites, run declarations and snapshot pins as stated records
+        (ADR 0072), over the runs and snapshots ``_assemble_runs`` kept and the scan's layout.
+        Reads records only: no source byte is read and no adapter called."""
+        assert self._declared is not None
+        self._check_cancel()
+        loaded = self._declared.loaded
+        found = declared_records(loaded, self._binding_inputs, self._layout)
+        for finding in found.findings:
+            self._record(finding, loaded.transform)
+        return found
+
     def _bind_snapshots(self, grouping: Grouping, assembled: Sequence[object]) -> Bindings | None:
         """Bind each admitted run to the configuration, software, hardware and calibration
         snapshots evidence relates it to (ADR 0064), over the assembled grouping and run
         assemblies. Reads what ``_assemble_runs`` kept in its one pass over the committed records:
         runs, snapshots and canonical bindings, and the declared rows of the sources that hold a
-        run. A package with no run gets no binding: no table, no transform, no finding."""
+        run; ``assembled`` adds the run assemblies and the manifest's pins. A package with no run
+        gets no binding: no table, no transform, no finding."""
         self._check_cancel()
         found = bind_snapshots(
             [*self._binding_inputs, *assembled], self._statements, self._layout, grouping

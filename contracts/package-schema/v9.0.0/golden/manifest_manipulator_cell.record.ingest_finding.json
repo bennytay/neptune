@@ -1,0 +1,34 @@
+{
+  "category": "missing",
+  "code": "neptune.bindings.no_software_identity",
+  "details": {
+    "run": "rec:sha256:fecd699331854a745187c71ffb0bcc1315028ff7746cfc3a050292502ae09f74",
+    "sessions": [
+      "rec:sha256:0cff056b651a66dbc153ea4007637b8101f8efc8dffc41c61a6a78b9dfef8845"
+    ],
+    "snapshot_kind": "software_configuration"
+  },
+  "id": "rec:sha256:64786a2ed0274a6619da8029453ee11cb08876668088e22a5479158244b26c62",
+  "kind": "ingest_finding",
+  "message": "the run has no software identity: no software, build, firmware or checkpoint record is bound to it",
+  "records": [
+    "rec:sha256:fecd699331854a745187c71ffb0bcc1315028ff7746cfc3a050292502ae09f74"
+  ],
+  "related": [],
+  "schema_version": 1,
+  "severity": "warning",
+  "subject": {
+    "kind": "evidence",
+    "ref": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 38,
+          "offset": 8
+        }
+      ],
+      "source": "sha256:0a35978d52fc40d9e9373fe0aeb61647d80c070ec7b41bd9463cbb48c3251efb"
+    }
+  },
+  "transform": "rec:sha256:6651fbb0d4461f0af9312d4b3a17062a59c33b78c45b720e60cb02d3fbcab5ec"
+}

@@ -1,9 +1,9 @@
 # The Neptune manifest
 
-Status: MVL-14, ADR 0047. Optional. Most folders need none: `neptune ingest` discovers, probes and
-groups on its own. A manifest is for what discovery cannot settle: two adapters that claim a file
-equally, session readings grouping cannot choose between, and what no file says (which robot,
-site, task or software a run involved).
+Status: MVL-14, ADR 0047; declarations as records MVL-205, ADR 0072. Optional. Most folders need
+none: `neptune ingest` discovers, probes and groups on its own. A manifest is for what discovery
+cannot settle: two adapters that claim a file equally, session readings grouping cannot choose
+between, and what no file says (which robot, site, task or software a run involved).
 
 ## Start from the folder
 
@@ -43,6 +43,9 @@ runs:                                        # declared sessions
     site: lab-a
     task: pick-place
     software: [driver]
+    snapshots:                               # what the run ran with: a file, or bytes by content id
+      - {path: arm/config/controller.yaml}
+      - {content: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}
   - {name: trot, paths: [quadruped/], machine: anymal-c-03}
 
 sources:                                     # which adapter reads which files
@@ -83,7 +86,10 @@ pointer) as its provenance. Nothing it declares overrides the evidence silently.
 | `sources` adapter its probe declines | **not applied**; `pin_refused` (warning); the probe's selection stands | |
 | `sources` rule matching nothing | `rule_unmatched` (warning) | |
 | `sources` rules disagreeing on one file's copies | none applied; `rules_conflict` (warning) | |
-| `machines`, `sites`, `tasks`, `software` | recorded, stated, in the `neptune.manifest` transform's config; runs reference them | |
+| `machines`, `sites` | a stated `machine` / `site` record each, identified as `("manifest", id)` plus its aliases, every id citing where it is written (ADR 0072) | |
+| a run's `machine`, `site`, `task` | a stated `run_declaration` for every run record the files in its `paths` declare | a run record a second entry also covers: both stand, `run_declared_twice`; paths holding files but no recording: `run_unrecorded`; a run stating its machine in a namespace the declared machine has aliases in, as none of them: `machine_contradicts_run` |
+| a run's `snapshots` | a stated `snapshot_binding` from every run record it covers to every snapshot record of the pinned bytes | nothing at the path (missing, a directory, a symlink), no file holding the content: `pin_unresolved`; bytes that hold no snapshot: `pin_not_a_snapshot` |
+| `tasks`, `software`, a machine's `name` and `embodiment` | recorded, stated, in the `neptune.manifest` transform's config | |
 
 The last rule matching a path applies to it. Rule `options` are resolved per rule, so a rule with
 options is a new transform for what it matches. `adapters` options join the SDK's
@@ -95,7 +101,11 @@ A package made under a manifest holds the `neptune.manifest` transform: its conf
 manifest's location, its content id and every declaration. The manifest file is also a listed
 source, read by whichever adapter claims it. So the package id changes exactly when the manifest's
 bytes change, and is byte-identical when they do not. The grouping transform names the manifest
-transform as its upstream.
+transform as its upstream. The manifest's own records (machines, sites, run declarations, pins) are
+made at assembly from the records the adapters committed, under `neptune.manifest` 0.2.0, citing the
+manifest by JSON pointer; one entry covering several recordings gives one record per recording, its
+citation made finer by a step naming the run (`neptune.manifest:run`, `neptune.manifest:binding`).
+A package holding a run declaration is schema version 9.
 
 ## Limits and refusals
 
@@ -117,6 +127,7 @@ A manifest is untrusted input and is used whole or not at all: any problem is ex
 
 ## Not yet
 
-- Canonical `Machine`, `Site` and `Run` records from declarations, and a task record kind (needs a
-  package-schema change).
+- Records for tasks and software entries, and machine fields beyond ids (embodiment, model): manifest
+  version 2 and a task identity kind.
+- Validity windows on pins (a manifest `start` / `end`): a pin says which snapshot, not when.
 - Manifests outside a read-only folder (needs a package-level source kind for out-of-root files).

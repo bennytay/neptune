@@ -332,6 +332,7 @@ _TARGET_KINDS: Final = {
     ("frame_binding", "transform"): "frame_transform",
     ("hardware_component", "configuration"): "hardware_configuration",
     ("stream", "clocks"): "timestamp_domain",
+    ("run_declaration", "run"): "run",
     ("stream", "run"): "run",
     ("structured_record", "table"): "structured_table",
     ("video", "clock"): "timestamp_domain",

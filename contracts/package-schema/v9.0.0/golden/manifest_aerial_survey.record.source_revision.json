@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+  "id": "rec:sha256:5e5c9b2c74f2ff5f97afba0bfe5167e8f8990b74ff5ba701823970667bc27465",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "flights/flight.ulg"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

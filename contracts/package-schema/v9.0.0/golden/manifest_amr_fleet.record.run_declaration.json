@@ -1,0 +1,86 @@
+{
+  "id": "rec:sha256:78d9c40dec3a99a8fd2ddc0475f9f145dcf3af8802ea40455c3bed0af09124b3",
+  "kind": "run_declaration",
+  "logical_id": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/runs/1/name"
+          }
+        ],
+        "source": "sha256:c12ebb1202058aa3cfd50d59fee0f8ab8f1d0eab3dce9cd9c4b517c15356ecb7"
+      },
+      "transform": "rec:sha256:8856e251e3ef339046830982fac19a8b08d8e710eb91250c4ed26af46d4771e0"
+    },
+    "value": {
+      "namespace": "manifest",
+      "value": "amr02-shift-1"
+    }
+  },
+  "machine": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/runs/1/machine"
+          }
+        ],
+        "source": "sha256:c12ebb1202058aa3cfd50d59fee0f8ab8f1d0eab3dce9cd9c4b517c15356ecb7"
+      },
+      "transform": "rec:sha256:8856e251e3ef339046830982fac19a8b08d8e710eb91250c4ed26af46d4771e0"
+    },
+    "value": {
+      "namespace": "manifest",
+      "value": "AMR-02"
+    }
+  },
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "json_pointer",
+          "pointer": "/runs/1"
+        },
+        {
+          "kind": "neptune.manifest:run",
+          "run": "rec:sha256:3dfc2d57cf0a66e8eb96db8df78b483080994800c7b26d8584aef4b25514cf59"
+        }
+      ],
+      "source": "sha256:c12ebb1202058aa3cfd50d59fee0f8ab8f1d0eab3dce9cd9c4b517c15356ecb7"
+    },
+    "transform": "rec:sha256:8856e251e3ef339046830982fac19a8b08d8e710eb91250c4ed26af46d4771e0"
+  },
+  "run": "rec:sha256:3dfc2d57cf0a66e8eb96db8df78b483080994800c7b26d8584aef4b25514cf59",
+  "schema_version": 9,
+  "site": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/runs/1/site"
+          }
+        ],
+        "source": "sha256:c12ebb1202058aa3cfd50d59fee0f8ab8f1d0eab3dce9cd9c4b517c15356ecb7"
+      },
+      "transform": "rec:sha256:8856e251e3ef339046830982fac19a8b08d8e710eb91250c4ed26af46d4771e0"
+    },
+    "value": {
+      "namespace": "manifest",
+      "value": "DC-7"
+    }
+  },
+  "task": {
+    "knowledge": "unknown"
+  }
+}

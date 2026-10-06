@@ -10,7 +10,9 @@ restates what it does say: no source content is copied into it.
   identities itself). A machine may name its ``embodiment``; software its ``version``.
 - ``runs``: sessions by ``name``, each holding root-relative ``paths`` (a file, or a directory
   meaning everything below it) and naming the ``machine``, ``site``, ``task`` and ``software`` it
-  involved. Each is a declared session for grouping (ADR 0036 §6).
+  involved. Each is a declared session for grouping (ADR 0036 §6). ``snapshots`` pins the
+  configuration, software, hardware or calibration files the run ran with, each by a root-relative
+  ``path`` or a ``content`` id (ADR 0072 §4).
 - ``sources``: rules by ``path`` (a file or a directory) or ``glob`` (the ignore-rule syntax,
   anchored at the root), choosing the ``adapter`` for what they match and its ``options``.
 - ``adapters``: options for every source an adapter reads, by adapter id.
@@ -39,6 +41,7 @@ SCHEMA_VERSION: Final = 1
 SCHEMA_ID: Final = "https://neptune.dev/schema/manifest/v1.json"
 
 _ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}")
+_CONTENT: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _OPTION: Final = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _MAX_TEXT: Final = 1000
 EMBODIMENTS: Final = (
@@ -170,26 +173,28 @@ def _glob(node: Node, pointer: str) -> IgnoreRule:
     return rule
 
 
-def _aliases(node: Node | None, pointer: str) -> tuple[tuple[str, str], ...]:
-    """``{namespace: value}`` or ``{namespace: [values]}``, as sorted ``(namespace, value)``."""
+def _aliases(node: Node | None, pointer: str) -> tuple[tuple[str, str, str], ...]:
+    """``{namespace: value}`` or ``{namespace: [values]}``, as sorted ``(namespace, value)``, each
+    with the pointer of the first place it is written."""
     if node is None:
         return ()
     if not isinstance(node, Map):
         raise _fail(pointer, node, "expected a mapping of namespace to identifier(s)")
-    pairs: set[tuple[str, str]] = set()
+    found: dict[tuple[str, str], str] = {}
     for namespace, value in node.items:
         here = _pointer(pointer, namespace)
         if not _ID.fullmatch(namespace):
             raise _fail(here, node, f"{namespace!r} is not a namespace id")
         values = (
-            [_text(v, _pointer(here, n)) for n, v in enumerate(value.items)]
+            [(_text(v, _pointer(here, n)), _pointer(here, n)) for n, v in enumerate(value.items)]
             if isinstance(value, Seq)
-            else [_text(value, here)]
+            else [(_text(value, here), here)]
         )
         if not values:
             raise _fail(here, value, "expected at least one identifier")
-        pairs.update((namespace, v) for v in values)
-    return tuple(sorted(pairs))
+        for text, at in values:
+            found.setdefault((namespace, text), at)
+    return tuple((namespace, text, at) for (namespace, text), at in sorted(found.items()))
 
 
 def _optional(
@@ -206,7 +211,8 @@ class Entity:
     """A machine, site, task or software item: its declared id and what is said of it.
 
     ``extra`` holds the kind's own field (a machine's ``embodiment``, software's ``version``).
-    ``pointer`` is where it is declared: every value the job takes from it cites that place.
+    ``pointer`` is where it is declared: every value the job takes from it cites that place, and
+    ``alias_pointers`` where each alias is written, in the order of ``aliases``.
     """
 
     section: str
@@ -216,6 +222,7 @@ class Entity:
     aliases: tuple[tuple[str, str], ...]
     extra: tuple[tuple[str, str], ...]
     pointer: str
+    alias_pointers: tuple[str, ...] = ()
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {"id": self.id}
@@ -241,8 +248,30 @@ _ENTITY_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
 
 
 @dataclass(frozen=True)
+class SnapshotPin:
+    """A snapshot a run ran with, as the manifest names it: the file at a root-relative ``path``,
+    or the bytes with ``content`` id (``sha256:<hex>``), whichever path holds them (ADR 0072 §4).
+    ``pointer`` is where the pin is written: the stated binding it gives cites it."""
+
+    path: str | None
+    content: str | None
+    pointer: str
+
+    def __post_init__(self) -> None:
+        if (self.path is None) == (self.content is None):
+            raise ValueError("a snapshot pin names exactly one of a path and a content id")
+
+    def to_json(self) -> JsonObject:
+        if self.path is not None:
+            return {"path": self.path}
+        assert self.content is not None
+        return {"content": self.content}
+
+
+@dataclass(frozen=True)
 class RunDecl:
-    """A session the user declares: its name, what it holds, and what it involved."""
+    """A session the user declares: its name, what it holds, what it involved, and the snapshots
+    it ran with."""
 
     name: str
     paths: tuple[str, ...]
@@ -252,6 +281,7 @@ class RunDecl:
     software: tuple[str, ...]
     description: str | None
     pointer: str
+    snapshots: tuple[SnapshotPin, ...] = ()
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {"name": self.name, "paths": list(self.paths)}
@@ -260,6 +290,8 @@ class RunDecl:
                 out[key] = value
         if self.software:
             out["software"] = list(self.software)
+        if self.snapshots:
+            out["snapshots"] = [pin.to_json() for pin in self.snapshots]
         return out
 
 
@@ -387,15 +419,17 @@ def _entities(
         extra = tuple(
             (key, _text(fields[key], _pointer(here, key))) for key in extra_keys if key in fields
         )
+        aliases = _aliases(fields.get("aliases"), _pointer(here, "aliases"))
         out.append(
             Entity(
                 section,
                 ident,
                 _optional(fields, "name", here, _text),
                 _optional(fields, "description", here, _text),
-                _aliases(fields.get("aliases"), _pointer(here, "aliases")),
+                tuple((namespace, text) for namespace, text, _ in aliases),
                 extra,
                 here,
+                tuple(at for _, _, at in aliases),
             )
         )
     return out
@@ -406,7 +440,7 @@ def _runs(node: Node | None, known: set[tuple[str, str]]) -> tuple[RunDecl, ...]
         return ()
     out: list[RunDecl] = []
     names: set[str] = set()
-    keys = {"name", "paths", "machine", "site", "task", "software", "description"}
+    keys = {"name", "paths", "machine", "site", "task", "software", "description", "snapshots"}
     for n, item in enumerate(_seq(node, "/runs")):
         here = _pointer("/runs", n)
         fields = _map(item, here, keys, {"name", "paths"})
@@ -449,9 +483,37 @@ def _runs(node: Node | None, known: set[tuple[str, str]]) -> tuple[RunDecl, ...]
                 software,
                 _optional(fields, "description", here, _text),
                 here,
+                _pins(fields.get("snapshots"), _pointer(here, "snapshots")),
             )
         )
     return tuple(out)
+
+
+def _pins(node: Node | None, pointer: str) -> tuple[SnapshotPin, ...]:
+    """A run's ``snapshots``: each ``{path: ...}`` or ``{content: sha256:<hex>}``, none twice."""
+    if node is None:
+        return ()
+    out: list[SnapshotPin] = []
+    seen: set[tuple[str | None, str | None]] = set()
+    for n, item in enumerate(_seq(node, pointer)):
+        here = _pointer(pointer, n)
+        fields = _map(item, here, {"path", "content"})
+        if len(fields) != 1:
+            raise _fail(here, item, "a snapshot pin has exactly one of 'path' and 'content'")
+        path = _optional(fields, "path", here, _path)
+        content = _optional(fields, "content", here, _content)
+        if (path, content) in seen:
+            raise _fail(here, item, "this snapshot is pinned twice for the run")
+        seen.add((path, content))
+        out.append(SnapshotPin(path, content, here))
+    return tuple(out)
+
+
+def _content(node: Node, pointer: str) -> str:
+    value = _text(node, pointer)
+    if not _CONTENT.fullmatch(value):
+        raise _fail(pointer, node, f"{value!r} is not a content id: 'sha256:' and 64 lowercase hex")
+    return value
 
 
 def _options(node: Node | None, pointer: str) -> JsonObject:
@@ -603,6 +665,29 @@ def json_schema() -> JsonObject:
                         "task": ident,
                         "software": {"type": "array", "items": ident},
                         "description": text,
+                        "snapshots": {
+                            "type": "array",
+                            "description": (
+                                "The configuration, software, hardware or calibration files the "
+                                "run ran with: each a root-relative path or a content id."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "oneOf": [{"required": ["path"]}, {"required": ["content"]}],
+                                "properties": {
+                                    "path": {
+                                        **path,
+                                        "description": "Root-relative path of one file.",
+                                    },
+                                    "content": {
+                                        "type": "string",
+                                        "pattern": f"^{_CONTENT.pattern}$",
+                                        "description": "The file's content id, at any path.",
+                                    },
+                                },
+                            },
+                        },
                     },
                 }
             ),
