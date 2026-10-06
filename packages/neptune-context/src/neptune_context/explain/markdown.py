@@ -58,7 +58,12 @@ _SEPARATORS: Final = {"\x85": "\\u0085", "\u2028": "\\u2028", "\u2029": "\\u2029
 _MARKDOWN: Final = re.compile(r"([\\`*_{}\[\]()<>#+\-.!|~])")
 _TICKS: Final = re.compile(r"`+")
 _IDENT: Final = re.compile(r"[A-Za-z0-9:_./-]+")
-_CHANGE_ORDER: Final = (Change.OPENED, Change.CLOSED, Change.SUPERSEDED)
+# A URI (any scheme) or a Neptune identifier in prose; it ends at whitespace or closing punctuation.
+_BARE: Final = re.compile(
+    r"(?:[A-Za-z][A-Za-z0-9+.-]*://|www\.|(?:claim|rec|sha256|finding|item|packet|query):)"
+    r"[^\s)\]>\"',;]+"
+)
+_CHANGE_ORDER: Final = (Change.OPENED, Change.CLOSED, Change.SUPERSEDED, Change.BETWEEN)
 
 
 def code(value: JsonValue) -> str:
@@ -80,9 +85,18 @@ def ident(value: str) -> str:
 
 
 def text(value: str) -> str:
-    """Engine prose (gap details may quote upstream text): one line, Markdown escaped."""
+    """Engine prose (gap details may quote upstream text): one line, Markdown escaped, and
+    every bare URI or identifier in a code span, so no reader turns it into a live link."""
     line = " ".join(value.split())
-    return _MARKDOWN.sub(r"\\\1", line)
+    out: list[str] = []
+    last = 0
+    for match in _BARE.finditer(line):
+        bare = match.group(0).rstrip(".")  # a sentence's full stop is prose
+        out.append(_MARKDOWN.sub(r"\\\1", line[last : match.start()]))
+        out.append(ident(bare))
+        last = match.start() + len(bare)
+    out.append(_MARKDOWN.sub(r"\\\1", line[last:]))
+    return "".join(out)
 
 
 def _node(node: NodeRef) -> str:
@@ -260,6 +274,11 @@ class _Writer:
         if change.change is Change.OPENED:
             for claim_id in change.after:
                 self.add(f"- **opened**: {self.claim(claim_id, as_of=new)}")
+            return
+        if change.change is Change.BETWEEN:
+            (claim_id,) = change.after
+            self.add(f"- **between**: {self.claim(claim_id, as_of=new)}")
+            self.add("  - held at neither point: opened and closed in between")
             return
         (before,) = change.before
         self.add(f"- **{change.change}**: {self.claim(before, as_of=old)}")

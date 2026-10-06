@@ -41,7 +41,8 @@ Four facts constrain the design:
 2. **Claim history by id.** `explain.history.ClaimHistory` is `version(claim_id)` (the stored version, with
    its real `superseded_at`) plus `superseded_by(claim_id)`. `IndexedReader` is Memory's `ReferenceReader`
    with that index, built from the decoded `GraphDocument` (public schema types only). `read_graph` now
-   returns it, so the MCP CLI answers `why`. With a reader that lacks the seam, `why` is a `not_covered`
+   returns it, and the MCP CLI's `local_client` uses it, so `neptune_why` answers. With a reader
+   that lacks the seam, `why` is a `not_covered`
    gap that says so. `LocalEngine(..., history=...)` can pass the index explicitly.
 3. **`why(c)` at Memory's snapshot.**
    - **Root.** The claim as Memory knows it then.
@@ -61,7 +62,8 @@ Four facts constrain the design:
    - **Caps.** Depth 3, 16 claims per step and 128 steps. Every cut is a gap naming the claims not
      followed. Inferred relatives are withheld in an `inferred_withheld` gap when inference is excluded.
 4. **`diff(s, t1, t2)`.** It compares the claims whose subject or object is `s`, or a node `s` is declared
-   `same_as` up to its depth (candidates are never followed).
+   `same_as` up to its depth (candidates are never followed). Subject identity is resolved once, at
+   Memory's snapshot, for both axes. A transaction diff does not re-resolve `same_as` at `t1` or `t2`.
    - **Transactions.** The claims current at `t1` are compared with those current at `t2`.
      - `superseded`: a version current at `t2` with another object lists the old claim, through Memory's
        `supersedes` chain.
@@ -69,11 +71,19 @@ Four facts constrain the design:
        or a new lineage's restatement with the same start and an earlier end. A claim that nothing replaced
        (a retired lineage) is also `closed`.
      - `opened`: everything else that is new at `t2`.
+     - `between`: a version met on a `supersedes` chain that was recorded and replaced inside
+       `(t1, t2]`. Versions recorded and retired inside the window with no chain to a `t1` claim are not
+       listed: Memory's reader has no by-node history.
    - **Instants on one clock.** The claims valid at `t1` are compared with those valid at `t2`, as known at
      the snapshot.
      - `closed` or `opened` as validity starts or ends.
      - `superseded` when a claim with the same subject and predicate took over at the very tick the old one
        ended.
+     - The comparison is by fact (subject, predicate, object), so a fact held at both instants is no
+       change, whichever claims carry it.
+     - `between`: a claim valid at neither instant that starts after `t1` and before `t2`. It opened and
+       closed inside the window and is listed, never dropped. On the demo, the cell's
+       `configuration_unknown` period between configurations 1.4 and 1.5 is listed this way.
      - Claims on other clocks are an `other_clock` gap.
    - **Refused as gaps.** Instants on two clocks are not compared, even when bridged: no conversion is
      assumed. An `after` beyond Memory's snapshot is a gap at `/explain/i/after`.
@@ -98,8 +108,10 @@ Four facts constrain the design:
    - **Links.** `neptune://claim/<id>?as_of=N` opens `why` at `N`. `neptune://evidence/<token>?as_of=N`
      hydrates through the Ledger and is the MCP server's resource URI, so one link works in both.
    - **Quoting.** Every value from evidence is a JSON literal in a code span longer than any backtick run
-     in it, with line breaks escaped, and prose is Markdown-escaped. Source text cannot start a heading,
-     forge a link or pose as a claim.
+     in it, with line breaks escaped. Prose is Markdown-escaped, and any bare URI or identifier in it
+     (such as a gap detail quoting upstream text) goes in a code span. Source text cannot start a
+     heading, forge a link or pose as a claim. The console follows only real
+     `[...](neptune://...)` links, never a URI that merely appears in text.
    - The renderer adds no fact.
 
 ## Alternatives considered

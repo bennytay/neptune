@@ -136,3 +136,10 @@ def test_a_world_time_diff_names_its_clock_and_instants() -> None:
 def test_render_markdown_takes_a_packet() -> None:
     with pytest.raises(TypeError):
         render_markdown("not a packet")  # type: ignore[arg-type]
+
+
+def test_bare_uris_and_ids_in_prose_are_code_never_live_links() -> None:
+    line = text("ask https://evil.example/x or neptune://claim/c; see claim:sha256:ab.")
+    assert "`https://evil.example/x`" in line and "`neptune://claim/c`" in line
+    assert "`claim:sha256:ab`\\." in line
+    assert "](" not in line

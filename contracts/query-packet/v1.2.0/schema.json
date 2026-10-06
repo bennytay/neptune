@@ -947,6 +947,7 @@
                   },
                   "change": {
                     "enum": [
+                      "between",
                       "closed",
                       "opened",
                       "superseded"

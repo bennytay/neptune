@@ -287,6 +287,11 @@ def assertions() -> list[Claim]:
             evidence=(ref(HUM_LOG, 3),),
             by="fixture.telemetry",
         ),
+        # Humanoid on the floor: dock, then aisle (tx 2), then cell (tx 3); the aisle version is
+        # recorded and replaced between transactions 1 and 3.
+        claim(HUM, "located_at", DOCK, JAN_1, evidence=(ref(REGISTER, 11),)),
+        claim(HUM, "located_at", AISLE, FEB_1, evidence=(ref(HUM_LOG, 4),), tx=2),
+        claim(HUM, "located_at", CELL, MAR_1, evidence=(ref(HUM_LOG, 5),), tx=3),
         # Marine: three sources agree on the berth.
         claim(USV, "located_at", HARBOUR, FEB_1, evidence=(ref(HARBOUR_LOG, 2),)),
         claim(

@@ -27,7 +27,7 @@ from neptune_context.packets.model import ClaimItem
 from neptune_context.packets.trails import Change, DiffTrail, WhyTrail
 from neptune_context.query import Budget, DomainClock, Instant, Query, Subject
 from neptune_context.query.model import Diff, Why
-from neptune_context.render.citations import render_text
+from neptune_context.render.agent import render_answer
 from neptune_context.sdk import AsyncClient, Client
 
 if TYPE_CHECKING:
@@ -175,7 +175,17 @@ def test_claude_code_gets_why_and_diff_over_mcp_unchanged() -> None:
     assert not why.isError and not diff.isError
     expected = Client(LocalEngine(reader())).why(involves.id, include_inferred=True)
     first = why.content[0]
-    assert isinstance(first, types.TextContent) and first.text == render_text(expected)
+    assert isinstance(first, types.TextContent) and first.text == render_answer(expected)
     assert expected.trails and involves.id in first.text
     text = diff.content[0]
     assert isinstance(text, types.TextContent) and "has_configuration" in text.text
+
+
+def test_what_changed_between_the_configurations_names_the_unstated_period() -> None:
+    packet = ask(what_changed(IN_1_4, IN_1_5))
+    (trail,) = packet.trails
+    assert isinstance(trail, DiffTrail)
+    between = [c for c in trail.changes if c.change is Change.BETWEEN]
+    assert {c.predicate for c in between} == {"configuration_unknown"}
+    assert len(between) == 2  # the two records that leave the configuration open, 2026-03..09
+    assert "**between**" in render_markdown(packet)

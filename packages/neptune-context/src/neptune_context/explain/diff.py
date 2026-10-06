@@ -68,6 +68,11 @@ def _within(inner: Claim, outer: Claim) -> bool:
     return starts_inside and ends_inside and not same
 
 
+def _inside(claim: Claim, t1: int, t2: int) -> bool:
+    """``claim`` starts after ``t1`` and before ``t2`` (so, held at neither, it ends by ``t2``)."""
+    return t1 < claim.valid_from.ticks < t2
+
+
 def _held(claim: Claim, ticks: int) -> bool:
     end = claim.valid_to
     return claim.valid_from.ticks <= ticks and (isinstance(end, Open) or ticks < end.ticks)
@@ -81,6 +86,7 @@ class _Diff:
         self.withheld: set[str] = set()
         self.named: dict[str, set[str]] = {}
         self.nodes: tuple[NodeRef, ...] = ()
+        self.passing: dict[ClaimId, Claim] = {}  # versions recorded and replaced in between
 
     def identities(self, subject: NodeRef) -> tuple[NodeRef, ...]:
         """``subject`` and the nodes it is declared ``same_as`` within the subject's depth, at
@@ -148,6 +154,7 @@ class _Diff:
                 if later.id in after:
                     found.add(later.id)
                 else:
+                    self.passing.setdefault(later.id, later)
                     todo.append(later.id)
         return found
 
@@ -196,6 +203,12 @@ class _Diff:
         for new in sorted(held_after.values(), key=lambda c: c.id):
             if new.id not in held_before and new.id not in replacements:
                 changes.append(DiffChange(new.predicate, Change.OPENED, (), (new.id,)))
+        # Versions recorded and replaced between the two transactions, met on a chain.
+        for passing in sorted(self.passing.values(), key=lambda c: c.id):
+            if self.run.withheld(passing):
+                self.withheld.add(passing.id)
+            elif passing.id not in held_before and passing.id not in held_after:
+                changes.append(DiffChange(passing.predicate, Change.BETWEEN, (), (passing.id,)))
         return changes
 
     def instants(
@@ -241,6 +254,10 @@ class _Diff:
         for new in opened:
             if new.id not in took_over:
                 changes.append(DiffChange(new.predicate, Change.OPENED, (), (new.id,)))
+        # Claims valid at neither instant but in between: opened and closed inside the window.
+        for passing in on:
+            if not _held(passing, t1) and not _held(passing, t2) and _inside(passing, t1, t2):
+                changes.append(DiffChange(passing.predicate, Change.BETWEEN, (), (passing.id,)))
         return changes
 
     def run_diff(self) -> DiffTrail | None:

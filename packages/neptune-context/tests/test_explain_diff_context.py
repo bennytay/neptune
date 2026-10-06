@@ -27,6 +27,8 @@ from neptune_context.query.model import Diff
 from neptune_context.sdk import Client
 
 if TYPE_CHECKING:
+    import pytest
+
     from neptune_context.packets.model import ContextPacket
 
 UTC_NS = CivilTime("utc", "unix", Fraction(1, 10**9))
@@ -209,3 +211,50 @@ def test_a_fact_that_holds_at_both_instants_is_no_change_whichever_claims_carry_
     # One of the three berth claims ends on 1 June; the other two keep the fact.
     packet = ask(diff(usv, Instant(UTC_NS, X.MAR_1), Instant(UTC_NS, X.JUN_1 + 1)))
     assert trail(packet).changes == ()
+
+
+def test_a_claim_valid_only_between_the_instants_is_listed_not_hidden() -> None:
+    closure = X.find(X.AMR, "located_at", X.DOCK)  # the dock, [1 Feb, 1 Mar)
+    aisle = X.find(X.AMR, "located_at", X.AISLE)
+    packet = ask(diff(AMR, Instant(UTC_NS, X.JAN_1), Instant(UTC_NS, X.APR_1)))
+    assert ("located_at", Change.BETWEEN, (), (closure.id,)) in changes(packet)
+    assert ("located_at", Change.OPENED, (), (aisle.id,)) in changes(packet)
+    text = render_markdown(packet)
+    assert "**between**" in text and "held at neither point" in text
+
+
+def test_a_version_recorded_and_replaced_between_two_transactions_is_listed() -> None:
+    hum = Subject("machine", "asset-tag:HUM-1")
+    dock = X.find(X.HUM, "located_at", X.DOCK, current=False)  # the open-ended original
+    passing = X.find(X.HUM, "located_at", X.AISLE, current=False)  # recorded 2, replaced 3
+    packet = ask(diff(hum, 1, 3))
+    found = changes(packet)
+    (superseded,) = [c for c in found if c[1] is Change.SUPERSEDED]
+    assert superseded[2] == (dock.id,) and passing.id not in superseded[3]
+    assert ("located_at", Change.BETWEEN, (), (passing.id,)) in found
+
+
+def test_findings_survive_a_clause_that_failed_after_reading_the_same_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neptune_context.explain import diff as diff_module
+
+    calls = {"n": 0}
+    finish = diff_module._Diff.finish
+
+    def flaky(self: diff_module._Diff) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("first clause fails late")
+        finish(self)
+
+    monkeypatch.setattr(diff_module._Diff, "finish", flaky)
+    truck = Subject("machine", "vin:av-2")
+    query = Query(
+        include_inferred=True,
+        budget=Budget(items=40),
+        explain=(Diff(truck, 1, 2), Diff(truck, 1, 3)),
+    )
+    packet = ask(query)
+    assert [t.at for t in packet.trails] == ["/explain/1"]
+    assert [str(f.code) for f in packet.findings] == ["clock_mismatch"]

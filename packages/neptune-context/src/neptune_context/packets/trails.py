@@ -274,6 +274,7 @@ class Change(StrEnum):
     OPENED = "opened"  # holds at after, did not at before
     CLOSED = "closed"  # held at before; at after over a strictly narrower interval, or not at all
     SUPERSEDED = "superseded"  # held at before; at after other versions took its place
+    BETWEEN = "between"  # held at neither point: opened after before and closed by after
 
 
 @dataclass(frozen=True)
@@ -282,7 +283,9 @@ class DiffChange:
     ``after`` holds at the later one. ``closed`` names the narrowed versions (same object, a
     strictly narrower interval) in ``after``, or nothing when the claim stopped holding at all.
     ``superseded`` names the versions that took its place: another object, or (in transaction
-    time) the same object over an interval that is not narrower."""
+    time) the same object over an interval that is not narrower. ``between`` names, in
+    ``after``, one claim that held at neither point but in between: opened and closed inside the
+    interval, so a diff never hides what came and went."""
 
     predicate: str
     change: Change
@@ -305,6 +308,10 @@ class DiffChange:
             raise _fail(
                 Code.BAD_VALUE, "an opened change names one or more claims after, none before"
             )
+        if self.change is Change.BETWEEN:
+            if self.before or len(self.after) != 1:
+                raise _fail(Code.BAD_VALUE, "a between change names exactly one claim after")
+            return
         if self.change is not Change.OPENED and shape[0] != 1:
             raise _fail(Code.BAD_VALUE, f"a {self.change} change names exactly one claim before")
         if self.change is Change.SUPERSEDED and not self.after:
@@ -366,9 +373,13 @@ class DiffTrail:
         befores = [i for c in changes for i in c.before]
         if len(set(befores)) != len(befores):
             raise _fail(Code.DUPLICATE, "a claim changes at most once")
-        opened = [i for c in changes if c.change is Change.OPENED for i in c.after]
+        opened = [
+            i for c in changes if c.change in (Change.OPENED, Change.BETWEEN) for i in c.after
+        ]
         if len(set(opened)) != len(opened) or set(opened) & set(befores):
-            raise _fail(Code.DUPLICATE, "an opened claim is opened once and held nothing before")
+            raise _fail(
+                Code.DUPLICATE, "an opened or between claim is named once and held nothing before"
+            )
 
     @property
     def claims(self) -> tuple[ClaimId, ...]:

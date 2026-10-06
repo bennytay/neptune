@@ -99,7 +99,9 @@ class Run:
     findings: dict[str, ResolutionFinding] = field(default_factory=dict)
     gaps: list[Gap] = field(default_factory=list)
     _subjects: dict[tuple[NodeRef, int], ClaimsResult] = field(default_factory=dict)
-    _views: dict[tuple[NodeRef, int], tuple[Claim, ...]] = field(default_factory=dict)
+    _views: dict[tuple[NodeRef, int], tuple[tuple[Claim, ...], tuple[ResolutionFinding, ...]]] = (
+        field(default_factory=dict)
+    )
 
     @property
     def as_of(self) -> LedgerTx:
@@ -145,6 +147,7 @@ class Run:
         if key not in self._views:
             view = self.memory.node(node, ledger_tx(tx), include_inferred=True)
             claims: tuple[Claim, ...] = ()
+            findings: tuple[ResolutionFinding, ...] = ()
             if isinstance(view, Known):
                 claims = tuple(
                     sorted(
@@ -152,11 +155,13 @@ class Run:
                         key=lambda c: c.id,
                     )
                 )
-                if tx == self.as_of:
-                    for finding in view.value.findings:
-                        self.findings.setdefault(finding.id, finding)
-            self._views[key] = claims
-        return self._views[key]
+                findings = view.value.findings
+            self._views[key] = (claims, findings)
+        claims, findings = self._views[key]
+        if tx == self.as_of:  # every read, so a rolled-back clause never hides them from the next
+            for finding in findings:
+                self.findings.setdefault(finding.id, finding)
+        return claims
 
     # --- Admission -----------------------------------------------------------------------------
 

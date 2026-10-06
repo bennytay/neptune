@@ -41,7 +41,7 @@
     "query.worked-q10.json": "#/$defs/Query"
   },
   "owner_version": 1,
-  "schema_sha256": "sha256:f82f211788c9b9e25e838afa31d80ce2961309cd67a0817b308066bcc56cdf53",
+  "schema_sha256": "sha256:9d88a0479b595d57e25792fed490f836d81b743756acb56f877ee5905f60038e",
   "status": "stable",
   "version": "1.2.0"
 }
