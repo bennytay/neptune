@@ -100,3 +100,22 @@ def test_parsing_refuses_footer_keys_out_of_order_or_not_evidence() -> None:
         parse_citations(text + '[E3] {"source": 1}\n')
     with pytest.raises(CitationError):
         parse_citations(text + "trailing prose\n")
+
+
+def test_the_world_time_window_is_rendered_on_its_clock() -> None:
+    # C1 gate (ADR 0006 §4): an agent must see that an answer is scoped to one clock's window.
+    packet = golden("q05")
+    assert packet.during is not None
+    line = f"World time: ticks [0, open) on clock {packet.during.domain_id}."
+    assert line in render_text(packet).split("\n")
+    assert "World time:" not in render_text(golden("q01"))
+
+
+def test_a_trailing_memory_snapshot_is_rendered_and_bounds_the_changes() -> None:
+    packet = golden("q02")  # memory and packet at 3; a supersession at 4
+    (entry,) = packet.superseded_since
+    trailing = dataclasses.replace(packet, as_of=entry.superseded_at)
+    lines = render_text(trailing).split("\n")
+    assert "Claims as Memory knew them at transaction 3 (it trails the Ledger's 4)." in lines
+    assert "Changed since transaction 3:" in lines
+    assert not any(line.startswith("Claims as Memory") for line in render_text(packet).split("\n"))

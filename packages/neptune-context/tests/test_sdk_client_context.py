@@ -325,6 +325,26 @@ def test_hydrate_refuses_bad_arguments_and_wrong_answers() -> None:
     assert _code(lambda: client.hydrate(other)) is ErrorCode.NOT_FOUND
     wrong = Client(StubEngine({}, {other: unresolvable(item.evidence)}))
     assert _code(lambda: wrong.hydrate(other)) is ErrorCode.INVALID_RESPONSE
+    # Same source, another locator: the answer is about other bytes (C1 gate review).
+    moved = dataclasses.replace(
+        unresolvable(item.evidence),
+        evidence_ref=dataclasses.replace(
+            unresolvable(item.evidence).evidence_ref, locator=({"kind": "whole"},)
+        ),
+    )
+    elsewhere = Client(StubEngine({}, {item.evidence: moved}))
+    assert _code(lambda: elsewhere.hydrate(item)) is ErrorCode.INVALID_RESPONSE
+
+
+def test_a_sync_client_refuses_an_engine_whose_hydrate_is_async() -> None:
+    class Half:
+        def query(self, query: Query) -> ContextPacket:
+            raise AssertionError("not called")
+
+        async def hydrate(self, evidence: object, *, as_of: int | None) -> object:
+            raise AssertionError("not called")
+
+    assert _code(lambda: Client(Half())) is ErrorCode.INVALID_ARGUMENT  # type: ignore[arg-type]
 
 
 # --- the stub -----------------------------------------------------------------------------------
@@ -351,7 +371,8 @@ def test_the_stub_refuses_two_packets_for_one_query_and_bad_directories(tmp_path
         StubEngine.from_directory(root)
     assert "broken.json is not a packet" in raised.value.message
     (root / "broken.json").unlink()
-    assert StubEngine.from_directory(root).query_ids == ()
+    # MVL-147: a stub that can answer nothing is refused, not served.
+    assert _code(lambda: StubEngine.from_directory(root)) is ErrorCode.INVALID_ARGUMENT
 
 
 def test_the_stub_loads_the_golden_directory() -> None:

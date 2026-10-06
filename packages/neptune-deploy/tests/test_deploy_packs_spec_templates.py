@@ -79,10 +79,18 @@ def test_a_spec_built_in_code_is_held_to_the_same_rules() -> None:
         PackSpec("configuration-lineage", 1, ARM, FROM_T0, configuration().id, "sometimes")
 
 
+SHIPPED = [
+    "configuration-lineage@1",
+    "configuration-traceability@1",
+    "event-timeline@1",
+    "incident-timeline@1",
+]
+
+
 def test_shipped_templates_load_against_their_lock() -> None:
     registry = builtin_registry()
     keys = [t.key for t in registry.templates()]
-    assert keys == ["configuration-lineage@1", "event-timeline@1"]
+    assert keys == SHIPPED
     lock = json.loads((TEMPLATES / "lock.json").read_text(encoding="utf-8"))
     assert {t.key: t.sha256 for t in registry.templates()} == lock
 
@@ -110,10 +118,7 @@ def test_a_changed_template_version_is_refused_and_a_new_version_is_not() -> Non
 def test_an_edited_shipped_template_fails_its_lock(tmp_path: Path) -> None:
     root = tmp_path / "templates"
     shutil.copytree(TEMPLATES, root)
-    assert [t.key for t in TemplateRegistry.from_directory(root).templates()] == [
-        "configuration-lineage@1",
-        "event-timeline@1",
-    ]
+    assert [t.key for t in TemplateRegistry.from_directory(root).templates()] == SHIPPED
     edited = _template()
     edited["description"] += " Edited in place."
     (root / "configuration-lineage@1.json").write_text(json.dumps(edited), encoding="utf-8")
@@ -189,6 +194,6 @@ def test_malformed_templates_are_refused(path: list[Any], value: Any, pointer: s
 
 
 def test_an_unknown_template_names_the_registered_ones() -> None:
-    with pytest.raises(PackError, match=r"configuration-lineage@1, event-timeline@1") as caught:
-        builtin_registry().get("incident-timeline", 1)
+    with pytest.raises(PackError, match=", ".join(SHIPPED)) as caught:
+        builtin_registry().get("incident-timeline", 2)
     assert caught.value.code == "template_unknown"

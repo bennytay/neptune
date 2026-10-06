@@ -47,6 +47,7 @@ header).
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
 | [0037](0037-configuration-snapshots-and-additive-schema-versions.md) | Configuration snapshots, the config adapter, and schema versions that add without rewriting | Accepted |
 | [0038](0038-layout-preserving-pdf-and-markdown-adapters.md) | Layout-preserving PDF and Markdown adapters: pypdf, markdown-it-py, declared order and exact spans | Accepted |
+| [0039](0039-robot-descriptions-urdf-xacro-and-declared-parameters.md) | Robot descriptions: URDF and Xacro as hardware, frames and declared parameters | Accepted |
 | [0040](0040-software-identity-declared-per-file-bound-later.md) | Software identity: read as each file declares it, bound to runs later | Accepted |
 | [0041](0041-standalone-image-ingestion-as-declared-with-region-citations.md) | Standalone image ingestion: containers read as declared, no pixel decoded, regions cited | Accepted |
 | [0042](0042-tabular-adapter-csv-json-parquet-as-cited-cells.md) | The tabular adapter: CSV, JSON and Parquet as tables of cited cells | Accepted |
@@ -76,3 +77,4 @@ header).
 | [0067](0067-connector-sources-uri-dispatch-carried-revisions-and-a-job-spool.md) | Connector Sources: URI dispatch, revisions carried by token, and a job spool | Accepted |
 | [0068](0068-payload-decoding-and-frame-alignment-run-trees-links-and-comparable-references.md) | Payload decoding and frame alignment: declared definitions into columns, run trees, links and comparable references | Accepted |
 | [0069](0069-salvage-by-chunk-declared-extents-and-loss-accounting.md) | Salvage by chunk: a lost chunk, declared extents, and an exact account of what was lost | Accepted |
+| [0070](0070-bounded-crash-safe-package-io-atomic-writes-and-a-streaming-reader.md) | Bounded, crash-safe package I/O: atomic writes and a streaming reader | Accepted |

@@ -278,7 +278,7 @@ def test_a_large_json_table_maps_in_linear_time() -> None:
     large = IngestPackage(
         id=base.id,
         manifest=base.manifest,
-        receipt=base.receipt,
+        receipt_document=base.receipt_document,
         records=(*keep, *rows),
         series={},
         blobs={},

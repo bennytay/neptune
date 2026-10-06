@@ -1,0 +1,760 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [8 0 R 10 0 R 12 0 R 14 0 R 16 0 R 18 0 R 20 0 R 22 0 R 24 0 R] /Count 9 /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R /F4 7 0 R >> >> >>
+endobj
+3 0 obj
+<< /CreationDate (D:19700101000000Z) /Creator (neptune-deploy packs) /Keywords (snapshot:sha256:955a17676db84c74d009794d0f8fbbb295de11cec72abcc6f96b504a6d4d33de incident-timeline@1) /ModDate (D:19700101000000Z) /Producer (neptune-deploy packs 2) /Subject (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe) /Title (Incident reconstruction: record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Oblique /Encoding /WinAnsiEncoding >>
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 7887 >>
+stream
+BT /F1 18 Tf 1 0 0 1 50 768.6 Tm (Incident reconstruction) Tj ET
+BT /F3 9 Tf 1 0 0 1 50 756.9 Tm (Neptune evidence pack) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 742.5 Tm (Pack:      pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 732.1 Tm (Template:  incident-timeline v1) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 721.7 Tm (    \(sha256:75a3744df6c388e3c93d2663197307ad8b94a0ffc20aed0f91cdd4950d560284\)) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 711.3 Tm (Subject:   event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 700.9 Tm (Interval:  [1789394400000000000, 1789398000000000000\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 690.5 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 680.1 Tm (Snapshot:  snapshot:sha256:955a17676db84c74d009794d0f8fbbb295de11cec72abcc6f96b504a6d4d33de) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 669.7 Tm (Memory:    graph-schema 1, Ledger head tx 5, generation) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 659.3 Tm (    sha256:26982e7cc660cb2b8fdc9461ede70ee069fea13f16a04559e5a77db52596ca13, vocabulary 9) Tj ET
+BT /F2 8 Tf 1 0 0 1 50 648.9 Tm (Inference: excluded \(2 inferred claims left out\)) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 635.8 Tm (One incident's timeline on the clock the pack interval chooses: the incident, the other records of it, events,) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 626.7 Tm (    interventions and diagnostics involving its machines, at its site or in its zone, and the statements of the) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 617.6 Tm (    documents that report it, each citing its evidence \(Memory ADR 0013\). An entry on another clock is placed only) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 608.5 Tm (    through a clock mapping Memory states, and names it; with none it is listed as not placed, never guessed. Records) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 599.4 Tm (    of one event that state different times are a conflict: every time is shown with its difference, none is chosen.) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 590.3 Tm (    Co-occurrence is listed apart and is never cause.) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 581.2 Tm (Every statement cites the claim ids it rests on. The claims index lists them; the appendices say how to resolve each) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 572.1 Tm (    evidence ref and record through the Ledger.) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 547.2 Tm (1. Records of this incident) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 538.1 Tm (Which other records Memory states are the same incident \(same_as\), and which it cannot decide \(same_as_candidate:) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 529 Tm (    every reading, none chosen\).) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 515.6 Tm (In scope:) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 505.2 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 - the pack) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 494.8 Tm (    subject) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 484.4 Tm (NOT COVERED - the snapshot holds no current claim of same_as, same_as_candidate about the nodes in) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 474 Tm (    scope within the interval.) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 449.1 Tm (2. Reconstruction on the chosen clock) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 440 Tm (Each placement on the pack clock in onset order: the event's stated kind, severity, description, machines, place and) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 430.9 Tm (    the record it rests on. A placement through a clock mapping names the mapping records. Records of one event are) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 421.8 Tm (    compared as one event.) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 408.4 Tm (In scope:) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 398 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 387.6 Tm (    claim:sha256:3970ed3cf7c3a4faf612eb39c8a80e40817b689cd9200c0fdab9cff6719d4853,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 377.2 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 366.8 Tm (    claim:sha256:dde86520c8e0b056ac3265ca450435ea655fcaa14989a9df56b0570e34425407) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 356.4 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/0 -) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 346 Tm (    via claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 335.6 Tm (    claim:sha256:e521488a22cdf82157f33185da3af789029c75e8fe94ab2c8ff07e457b16b05f) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 325.2 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/1 -) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 314.8 Tm (    via claim:sha256:85911531522d52a7cbfadc980b0e29bcc163d9ef1c80716d1620d47c417d40e1,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 304.4 Tm (    claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 294 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/2 -) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 283.6 Tm (    via claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 273.2 Tm (    claim:sha256:f42f5375a290ba43d010fa96c9837eddf02f8c593d3f186623640209d3eafecd) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 262.8 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/3 -) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 252.4 Tm (    via claim:sha256:421c929b6e15a5753f300047dcf7deb877eaf4c47d608d15a3e64285078e30f4,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 242 Tm (    claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 231.6 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/4 -) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 221.2 Tm (    via claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 210.8 Tm (    claim:sha256:fb5505993a1670dcba22097ad2cfb3dad91eb325d288394886a07a78d4d65f64) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 200.4 Tm ([KNOWN] event) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 190 Tm (    record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/0) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 179.6 Tm (valid [1789396080000000000, 1789396080000000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 169.2 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 158.8 Tm (- evidenced_by: record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 148.4 Tm (    [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 139.3 Tm (cites claim:sha256:e521488a22cdf82157f33185da3af789029c75e8fe94ab2c8ff07e457b16b05f) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 128.9 Tm (- has_description: "Cell restarted after the break; PALLET_C3 started from the HMI" [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 119.8 Tm (cites claim:sha256:34e764af3218fe07cbe8e9408b5eadc99bb2c57a8c8f934463f106061c9be0c0) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 107.4 Tm ([KNOWN] event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 97 Tm (valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 86.6 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 76.2 Tm (- at_site: site site-code:PLANT-2 [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 67.1 Tm (cites claim:sha256:dde86520c8e0b056ac3265ca450435ea655fcaa14989a9df56b0570e34425407) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 56.7 Tm (- event_kind: "incident" [stated]) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 1 of 9) Tj ET
+
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 7496 >>
+stream
+BT /F4 7 Tf 1 0 0 1 69.2 782.9 Tm (cites claim:sha256:193721c937cedcecc85b2483dceac6d5f7da2b2a232ad1ee9bdd0eb3cb911ce3) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 772.5 Tm (- evidenced_by: record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 762.1 Tm (    [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 753 Tm (cites claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 742.6 Tm (- has_description: "During the pick at P1 the gripper fingers struck the locating edge of infeed) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 732.2 Tm (    fixture PF-3. Collision detection stopped the arm and the operator pressed the E-stop at OP-2.) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 721.8 Tm (    The part fell onto the floor guard. Nobody was inside the cell." [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 712.7 Tm (cites claim:sha256:ba254fc1bac05fe8b5306b1b61be45cb675a4419f7acac87415c1bff74b6a0b9) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 702.3 Tm (- in_zone: zone zone-code:CELL-3 [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 693.2 Tm (cites claim:sha256:3970ed3cf7c3a4faf612eb39c8a80e40817b689cd9200c0fdab9cff6719d4853) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 682.8 Tm (- involves: machine asset-tag:ARM-3A [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 673.7 Tm (cites claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 663.3 Tm (- stated_severity: "Property damage, no injury" [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 654.2 Tm (cites claim:sha256:f8f7db7f9e1f367bbf9cab98288e14bce328b175befb9c798d24c853718feb2a) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 641.8 Tm ([KNOWN] event) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 631.4 Tm (    record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/1) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 621 Tm (valid [1789396358000000000, 1789396358000000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 610.6 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 600.2 Tm (- evidenced_by: record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 589.8 Tm (    [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 580.7 Tm (cites claim:sha256:85911531522d52a7cbfadc980b0e29bcc163d9ef1c80716d1620d47c417d40e1) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 570.3 Tm (- has_description: "Collision detection on joint 5 at pick P1; protective stop" [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 561.2 Tm (cites claim:sha256:c7848a1b700aa9ff268904b61d3b0eb855a725117aa4b04bf806cd253af5fb1a) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 548.8 Tm ([KNOWN] event) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 538.4 Tm (    record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/2) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 528 Tm (valid [1789396361000000000, 1789396361000000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 517.6 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 507.2 Tm (- evidenced_by: record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 496.8 Tm (    [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 487.7 Tm (cites claim:sha256:f42f5375a290ba43d010fa96c9837eddf02f8c593d3f186623640209d3eafecd) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 477.3 Tm (- has_description: "Operator presses the E-stop at OP-2" [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 468.2 Tm (cites claim:sha256:d48901355f02f7fdb4d548188536db3f37704daaab706a33f9f4c3c0b0533a1c) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 455.8 Tm ([KNOWN] event) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 445.4 Tm (    record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/3) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 435 Tm (valid [1789396410000000000, 1789396410000000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 424.6 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 414.2 Tm (- evidenced_by: record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 403.8 Tm (    [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 394.7 Tm (cites claim:sha256:421c929b6e15a5753f300047dcf7deb877eaf4c47d608d15a3e64285078e30f4) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 384.3 Tm (- has_description: "Cell supervisor notified; cell locked out" [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 375.2 Tm (cites claim:sha256:74663942f9698a46f03935ebbdf291f1f2724678b16e98a3da816d3ae9a28e5a) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 362.8 Tm ([KNOWN] event) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 352.4 Tm (    record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/4) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 342 Tm (valid [1789397520000000000, 1789397520000000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 331.6 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 321.2 Tm (- evidenced_by: record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 310.8 Tm (    [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 301.7 Tm (cites claim:sha256:fb5505993a1670dcba22097ad2cfb3dad91eb325d288394886a07a78d4d65f64) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 291.3 Tm (- has_description: "PF-3 locating edge found bent; part 7731-B dropped" [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 69.2 282.2 Tm (cites claim:sha256:7b329d903f6ec0592718cfdd16e356d86f1d883de32d853de10d4b9f72abd302) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 255.3 Tm (3. Configuration of the machines) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 238.4 Tm (involved) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 229.3 Tm (The configuration chain of each machine the incident involves: decided, ambiguous or unknown spans, on their own) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 220.2 Tm (    clocks.) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 206.8 Tm (In scope:) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 196.4 Tm (machine asset-tag:ARM-3A - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 186 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 175.6 Tm (On other clocks \(never compared with the pack interval\):) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 165.2 Tm ([KNOWN] machine asset-tag:ARM-3A) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 154.8 Tm (valid [1772123400000000000, 1773171000000000000\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 144.4 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 134 Tm (- has_configuration: configuration cfg:cfg-c3-1.4 [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 124.9 Tm (cites claim:sha256:7e90fd00cf552197c5f3167967fd6bc066af6a6ee4784ce14e0def4014a2178b) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 112.5 Tm ([UNKNOWN - stated as not known; the cited claim names the record leaving it open] machine) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 102.1 Tm (    asset-tag:ARM-3A) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 91.7 Tm (valid [1773171000000000000, 1787057700000000000\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 81.3 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 70.9 Tm (- configuration_unknown: record) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 60.5 Tm (    rec:sha256:1edfbeaa4818e8773ee06a088e8f4bad464716ac405de6fa8e907fecdfb1a291 [stated] \(unknown) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 2 of 9) Tj ET
+
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 13 0 R >>
+endobj
+13 0 obj
+<< /Length 7223 >>
+stream
+BT /F2 8 Tf 1 0 0 1 69.2 781.6 Tm (    reading\)) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 772.5 Tm (cites claim:sha256:fa7d8a46fe52aaace2491c7a75b4612136407eec673223e9497b1e0b4ffc9457) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 762.1 Tm (- configuration_unknown: record) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 751.7 Tm (    rec:sha256:cf0ff9b4c29e901cab9100bf2127dcf522569217235aee2172495ab59c20a44f [stated] \(unknown) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 741.3 Tm (    reading\)) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 732.2 Tm (cites claim:sha256:54f3f0fbc3fd78c80887f62140cb845e1fb8615e3639440192279b876a0449d3) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 719.8 Tm ([KNOWN] machine asset-tag:ARM-3A) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 709.4 Tm (valid [1787057700000000000, 1789057200000000000\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 699 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 688.6 Tm (- has_configuration: configuration cfg:cfg-c3-1.5 [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 679.5 Tm (cites claim:sha256:792ec98f356be97b64a334cc52a767e19271db6f2291d233d3892e3f657b9be7) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 667.1 Tm ([UNKNOWN - stated as not known; the cited claim names the record leaving it open] machine) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 656.7 Tm (    asset-tag:ARM-3A) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 646.3 Tm (valid [1789057200000000000, open\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 635.9 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 625.5 Tm (- configuration_unknown: record) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 615.1 Tm (    rec:sha256:e987ea4c6e44d868ca6e5c379698d30370df8543cf7af81bb4c6594f92e4b395 [stated] \(unknown) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 604.7 Tm (    reading\)) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 595.6 Tm (cites claim:sha256:28a44a916613695062e47fe36ddb37f6a1692f3b83033300d0299bb6c3785767) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 585.2 Tm (- configuration_unknown: record) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 574.8 Tm (    rec:sha256:ec48abcf445fd73cf96bb11308219faaa723017c6eb94f30108c1d9432be9091 [stated] \(unknown) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 564.4 Tm (    reading\)) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 555.3 Tm (cites claim:sha256:eb1a1e7f64da1dcc45d1af04b3f1a5d2b592d5c007d42dd18600f2946ac77a2b) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 528.4 Tm (4. Configuration changes) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 519.3 Tm (Each decided change on the involved machines' chains.) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 505.9 Tm (In scope:) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 495.5 Tm (configuration cfg:cfg-c3-1.4 - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 485.1 Tm (    claim:sha256:7e90fd00cf552197c5f3167967fd6bc066af6a6ee4784ce14e0def4014a2178b,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 474.7 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 464.3 Tm (configuration cfg:cfg-c3-1.5 - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 453.9 Tm (    claim:sha256:792ec98f356be97b64a334cc52a767e19271db6f2291d233d3892e3f657b9be7,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 443.5 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 433.1 Tm (NOT COVERED - the snapshot holds no current claim of succeeds about the nodes in scope within the) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 422.7 Tm (    interval.) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 397.8 Tm (5. Runs of the machines involved) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 388.7 Tm (The runs the involved machines recorded, with the configuration bound to each, on the run's own clock.) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 375.3 Tm (In scope:) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 364.9 Tm (run record:rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 354.5 Tm (    claim:sha256:7da7b19c2e924f87cf549b458d08a63c660ea921c3de10bd220c840e6958207f,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 344.1 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 333.7 Tm (run record:rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93 - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 323.3 Tm (    claim:sha256:62a5b611cb4b79db304fd777529ef988ee11ef2419d0b906676fcbb090650dbb,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 312.9 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 302.5 Tm (On other clocks \(never compared with the pack interval\):) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 292.1 Tm ([KNOWN] run record:rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 281.7 Tm (valid [1789410576700000000, 1789410885700000000\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 271.3 Tm (    rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 260.9 Tm (- configuration_active_during: configuration cfg:cfg-c3-1.5 [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 251.8 Tm (cites claim:sha256:c9768e325d65e4ab3ab9de155f04f83d8b0616b4328c3adca220cd95d2741fe8) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 239.4 Tm ([KNOWN] run record:rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 229 Tm (valid [1788976895600000000, 1788977204600000000\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 218.6 Tm (    rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 208.2 Tm (- configuration_active_during: configuration cfg:cfg-c3-1.5 [stated]) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 199.1 Tm (cites claim:sha256:55c3156dc047ebd3cfa3bd107f93fc1e46dcb801f53da5e3440e6d30984df71c) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 172.2 Tm (6. Clocks and mappings) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 163.1 Tm (The clocks the involved machines record on, and every mapping Memory states from them \(its parameters as stated,) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 154 Tm (    never applied here\). A clock no mapping relates to the pack clock is why an entry is not placed.) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 140.6 Tm (In scope:) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 130.2 Tm (clock rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 119.8 Tm (    claim:sha256:74dc39dbd00af611017b7ab3ea5ff7f30d26a102d32508178dc67baad5d1c54e,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 109.4 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 99 Tm (clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 88.6 Tm (    claim:sha256:5002e33d4e2f8341d43777152a162b5b023bc73ca1e9ebbaf70bcb327fd66b4c,) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 78.2 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 67.8 Tm (clock rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 57.4 Tm (    claim:sha256:54bf7048b78c22d28cdce3e01b4bb8e5409408febb4835c8bf8185e5743c7314,) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 3 of 9) Tj ET
+
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 15 0 R >>
+endobj
+15 0 obj
+<< /Length 8149 >>
+stream
+BT /F2 8 Tf 1 0 0 1 59.6 781.6 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 771.2 Tm (machine asset-tag:ARM-3A - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 760.8 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 750.4 Tm (On other clocks \(never compared with the pack interval\):) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 740 Tm ([KNOWN] machine asset-tag:ARM-3A) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 729.6 Tm (valid [1789410480000000000, 1789410789000000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 719.2 Tm (    rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 708.8 Tm (- has_clock: clock rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 698.4 Tm (    [observed]) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 689.3 Tm (cites claim:sha256:74dc39dbd00af611017b7ab3ea5ff7f30d26a102d32508178dc67baad5d1c54e) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 676.9 Tm ([KNOWN] machine asset-tag:ARM-3A) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 666.5 Tm (valid [1789410576700000000, 1789410885700000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 656.1 Tm (    rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 645.7 Tm (- has_clock: clock rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 635.3 Tm (    [observed]) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 626.2 Tm (cites claim:sha256:5002e33d4e2f8341d43777152a162b5b023bc73ca1e9ebbaf70bcb327fd66b4c) Tj ET
+BT /F3 8 Tf 1 0 0 1 59.6 613.8 Tm ([KNOWN] machine asset-tag:ARM-3A) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 603.4 Tm (valid [1788976895600000000, 1788977204600000001\) ticks on) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 593 Tm (    rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 582.6 Tm (- has_clock: clock rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e) Tj ET
+BT /F2 8 Tf 1 0 0 1 69.2 572.2 Tm (    [observed]) Tj ET
+BT /F4 7 Tf 1 0 0 1 78.8 563.1 Tm (cites claim:sha256:54bf7048b78c22d28cdce3e01b4bb8e5409408febb4835c8bf8185e5743c7314) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 552 Tm (Left out: 2 inferred claims \(inference excluded\).) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 527.1 Tm (7. Co-occurrence \(never cause\)) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 518 Tm (Pairs of events from different sources whose onsets fall within the configured window on one clock. Co-occurrence is) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 508.9 Tm (    not causation.) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 495.5 Tm (In scope:) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 485.1 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 - via) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 474.7 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 464.3 Tm (NOT COVERED - the snapshot holds no current claim of co_occurs_within about the nodes in scope within) Tj ET
+BT /F3 8 Tf 1 0 0 1 50 453.9 Tm (    the interval.) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 427 Tm (Claims index) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 417.9 Tm (Every claim the pack cites, as the snapshot holds it \(the JSON pack holds each in full\).) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 408.8 Tm (claim:sha256:193721c937cedcecc85b2483dceac6d5f7da2b2a232ad1ee9bdd0eb3cb911ce3) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 398.4 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 event_kind) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 388 Tm (    "incident") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 378.9 Tm (stated; valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 369.8 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 360.7 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 351.6 Tm (claim:sha256:28a44a916613695062e47fe36ddb37f6a1692f3b83033300d0299bb6c3785767) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 341.2 Tm (machine asset-tag:ARM-3A configuration_unknown record) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 330.8 Tm (    rec:sha256:e987ea4c6e44d868ca6e5c379698d30370df8543cf7af81bb4c6594f92e4b395) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 321.7 Tm (stated; valid [1789057200000000000, open\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 312.6 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2; recorded at Ledger tx 2 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 303.5 Tm (    1 evidence refs; records rec:sha256:e987ea4c6e44d868ca6e5c379698d30370df8543cf7af81bb4c6594f92e4b395) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 294.4 Tm (claim:sha256:34e764af3218fe07cbe8e9408b5eadc99bb2c57a8c8f934463f106061c9be0c0) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 284 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/0) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 273.6 Tm (    has_description "Cell restarted after the break; PALLET_C3 started from the HMI") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 264.5 Tm (stated; valid [1789396080000000000, 1789396080000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 255.4 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 246.3 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 237.2 Tm (claim:sha256:3970ed3cf7c3a4faf612eb39c8a80e40817b689cd9200c0fdab9cff6719d4853) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 226.8 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 in_zone zone) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 216.4 Tm (    zone-code:CELL-3) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 207.3 Tm (stated; valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 198.2 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 189.1 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 180 Tm (claim:sha256:421c929b6e15a5753f300047dcf7deb877eaf4c47d608d15a3e64285078e30f4) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 169.6 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/3) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 159.2 Tm (    evidenced_by record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 150.1 Tm (stated; valid [1789396410000000000, 1789396410000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 141 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 131.9 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 122.8 Tm (claim:sha256:5002e33d4e2f8341d43777152a162b5b023bc73ca1e9ebbaf70bcb327fd66b4c) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 112.4 Tm (machine asset-tag:ARM-3A has_clock clock) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 102 Tm (    rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 92.9 Tm (observed; valid [1789410576700000000, 1789410885700000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 83.8 Tm (    rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e; recorded at Ledger tx 3 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 74.7 Tm (    1 evidence refs; records rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 65.6 Tm (claim:sha256:54bf7048b78c22d28cdce3e01b4bb8e5409408febb4835c8bf8185e5743c7314) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 4 of 9) Tj ET
+
+endstream
+endobj
+16 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 17 0 R >>
+endobj
+17 0 obj
+<< /Length 9968 >>
+stream
+BT /F2 8 Tf 1 0 0 1 59.6 781.6 Tm (machine asset-tag:ARM-3A has_clock clock) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 771.2 Tm (    rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 762.1 Tm (observed; valid [1788976895600000000, 1788977204600000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 753 Tm (    rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e; recorded at Ledger tx 3 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 743.9 Tm (    1 evidence refs; records rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 734.8 Tm (claim:sha256:54f3f0fbc3fd78c80887f62140cb845e1fb8615e3639440192279b876a0449d3) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 724.4 Tm (machine asset-tag:ARM-3A configuration_unknown record) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 714 Tm (    rec:sha256:cf0ff9b4c29e901cab9100bf2127dcf522569217235aee2172495ab59c20a44f) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 704.9 Tm (stated; valid [1773171000000000000, 1787057700000000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 695.8 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2; recorded at Ledger tx 2 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 686.7 Tm (    1 evidence refs; records rec:sha256:cf0ff9b4c29e901cab9100bf2127dcf522569217235aee2172495ab59c20a44f) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 677.6 Tm (claim:sha256:55c3156dc047ebd3cfa3bd107f93fc1e46dcb801f53da5e3440e6d30984df71c) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 667.2 Tm (run record:rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 656.8 Tm (    configuration_active_during configuration cfg:cfg-c3-1.5) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 647.7 Tm (stated; valid [1788976895600000000, 1788977204600000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 638.6 Tm (    rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e; recorded at Ledger tx 3 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 629.5 Tm (    1 evidence refs; records rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 620.4 Tm (    rec:sha256:d0afd33258a7e623032df753e5902a172f71ba5c9b08277fc79681fd966fe1e2) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 611.3 Tm (claim:sha256:62a5b611cb4b79db304fd777529ef988ee11ef2419d0b906676fcbb090650dbb) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 600.9 Tm (run record:rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93 recorded_by) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 590.5 Tm (    machine asset-tag:ARM-3A) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 581.4 Tm (stated; valid [1788976895600000000, 1788977204600000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 572.3 Tm (    rec:sha256:eb356a64d164b501f402ca2b5715ec6eed74023c53be5123c0d051b0d9f8a08e; recorded at Ledger tx 3 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 563.2 Tm (    2 evidence refs; records rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 554.1 Tm (claim:sha256:74663942f9698a46f03935ebbdf291f1f2724678b16e98a3da816d3ae9a28e5a) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 543.7 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/3) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 533.3 Tm (    has_description "Cell supervisor notified; cell locked out") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 524.2 Tm (stated; valid [1789396410000000000, 1789396410000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 515.1 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 506 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 496.9 Tm (claim:sha256:74dc39dbd00af611017b7ab3ea5ff7f30d26a102d32508178dc67baad5d1c54e) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 486.5 Tm (machine asset-tag:ARM-3A has_clock clock) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 476.1 Tm (    rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 467 Tm (observed; valid [1789410480000000000, 1789410789000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 457.9 Tm (    rec:sha256:1a297c4c8c50f7bfb0fe5b10789c1ed1be5990d93239238e4239b850121b5c0f; recorded at Ledger tx 3 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 448.8 Tm (    1 evidence refs; records rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 439.7 Tm (claim:sha256:792ec98f356be97b64a334cc52a767e19271db6f2291d233d3892e3f657b9be7) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 429.3 Tm (machine asset-tag:ARM-3A has_configuration configuration cfg:cfg-c3-1.5) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 420.2 Tm (stated; valid [1787057700000000000, 1789057200000000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 411.1 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2; recorded at Ledger tx 2 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 402 Tm (    2 evidence refs; records rec:sha256:89c8afc8c8e8eaffa09e7ed054f7888aef9f7c07215c9b80db4acad76de3b8cc,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 392.9 Tm (    rec:sha256:e74d4feee8b1e8cd13986cb3c1d8c31e3c7e2f93404b34e8f3b3e9c0afd5fa75) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 383.8 Tm (claim:sha256:7b329d903f6ec0592718cfdd16e356d86f1d883de32d853de10d4b9f72abd302) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 373.4 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/4) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 363 Tm (    has_description "PF-3 locating edge found bent; part 7731-B dropped") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 353.9 Tm (stated; valid [1789397520000000000, 1789397520000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 344.8 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 335.7 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 326.6 Tm (claim:sha256:7da7b19c2e924f87cf549b458d08a63c660ea921c3de10bd220c840e6958207f) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 316.2 Tm (run record:rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb recorded_by) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 305.8 Tm (    machine asset-tag:ARM-3A) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 296.7 Tm (stated; valid [1789410576700000000, 1789410885700000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 287.6 Tm (    rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e; recorded at Ledger tx 3 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 278.5 Tm (    2 evidence refs; records rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 269.4 Tm (claim:sha256:7e90fd00cf552197c5f3167967fd6bc066af6a6ee4784ce14e0def4014a2178b) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 259 Tm (machine asset-tag:ARM-3A has_configuration configuration cfg:cfg-c3-1.4) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 249.9 Tm (stated; valid [1772123400000000000, 1773171000000000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 240.8 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2; recorded at Ledger tx 2 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 231.7 Tm (    1 evidence refs; records rec:sha256:8d948cbb15493c4495c645ed62ada6f628994e20ada0a4c7d8f0b18d0b9b0d16) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 222.6 Tm (claim:sha256:85911531522d52a7cbfadc980b0e29bcc163d9ef1c80716d1620d47c417d40e1) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 212.2 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/1) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 201.8 Tm (    evidenced_by record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 192.7 Tm (stated; valid [1789396358000000000, 1789396358000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 183.6 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 174.5 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 165.4 Tm (claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 155 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 involves) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 144.6 Tm (    machine asset-tag:ARM-3A) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 135.5 Tm (stated; valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 126.4 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 117.3 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 108.2 Tm (claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 97.8 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 evidenced_by) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 87.4 Tm (    record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 78.3 Tm (stated; valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 69.2 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 60.1 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 5 of 9) Tj ET
+
+endstream
+endobj
+18 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 19 0 R >>
+endobj
+19 0 obj
+<< /Length 9689 >>
+stream
+BT /F3 7 Tf 1 0 0 1 50 782.9 Tm (claim:sha256:ba254fc1bac05fe8b5306b1b61be45cb675a4419f7acac87415c1bff74b6a0b9) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 772.5 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 762.1 Tm (    has_description "During the pick at P1 the gripper fingers struck the locating edge of infeed) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 751.7 Tm (    fixture PF-3. Collision detection stopped the arm and the operator pressed the E-stop at OP-2.) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 741.3 Tm (    The part fell onto the floor guard. Nobody was inside the cell.") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 732.2 Tm (stated; valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 723.1 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 714 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 704.9 Tm (claim:sha256:c7848a1b700aa9ff268904b61d3b0eb855a725117aa4b04bf806cd253af5fb1a) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 694.5 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/1) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 684.1 Tm (    has_description "Collision detection on joint 5 at pick P1; protective stop") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 675 Tm (stated; valid [1789396358000000000, 1789396358000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 665.9 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 656.8 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 647.7 Tm (claim:sha256:c9768e325d65e4ab3ab9de155f04f83d8b0616b4328c3adca220cd95d2741fe8) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 637.3 Tm (run record:rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 626.9 Tm (    configuration_active_during configuration cfg:cfg-c3-1.5) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 617.8 Tm (stated; valid [1789410576700000000, 1789410885700000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 608.7 Tm (    rec:sha256:e7535614127fb5c070e0a11cef5c1a5cc1eb040d715170a095e7d0ea1454401e; recorded at Ledger tx 3 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 599.6 Tm (    1 evidence refs; records rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 590.5 Tm (    rec:sha256:123ddd28321e877366ee3a926eff04c76bccd1596c624fb26e2f7126ae197b90) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 581.4 Tm (claim:sha256:d48901355f02f7fdb4d548188536db3f37704daaab706a33f9f4c3c0b0533a1c) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 571 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/2) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 560.6 Tm (    has_description "Operator presses the E-stop at OP-2") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 551.5 Tm (stated; valid [1789396361000000000, 1789396361000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 542.4 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 533.3 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 524.2 Tm (claim:sha256:dde86520c8e0b056ac3265ca450435ea655fcaa14989a9df56b0570e34425407) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 513.8 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14 at_site site) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 503.4 Tm (    site-code:PLANT-2) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 494.3 Tm (stated; valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 485.2 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 476.1 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 467 Tm (claim:sha256:e521488a22cdf82157f33185da3af789029c75e8fe94ab2c8ff07e457b16b05f) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 456.6 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/0) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 446.2 Tm (    evidenced_by record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 437.1 Tm (stated; valid [1789396080000000000, 1789396080000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 428 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 418.9 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 409.8 Tm (claim:sha256:eb1a1e7f64da1dcc45d1af04b3f1a5d2b592d5c007d42dd18600f2946ac77a2b) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 399.4 Tm (machine asset-tag:ARM-3A configuration_unknown record) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 389 Tm (    rec:sha256:ec48abcf445fd73cf96bb11308219faaa723017c6eb94f30108c1d9432be9091) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 379.9 Tm (stated; valid [1789057200000000000, open\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 370.8 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2; recorded at Ledger tx 2 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 361.7 Tm (    1 evidence refs; records rec:sha256:ec48abcf445fd73cf96bb11308219faaa723017c6eb94f30108c1d9432be9091) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 352.6 Tm (claim:sha256:f42f5375a290ba43d010fa96c9837eddf02f8c593d3f186623640209d3eafecd) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 342.2 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/2) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 331.8 Tm (    evidenced_by record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 322.7 Tm (stated; valid [1789396361000000000, 1789396361000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 313.6 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 304.5 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 295.4 Tm (claim:sha256:f8f7db7f9e1f367bbf9cab98288e14bce328b175befb9c798d24c853718feb2a) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 285 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 274.6 Tm (    stated_severity "Property damage, no injury") Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 265.5 Tm (stated; valid [1789396320000000000, 1789396320000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 256.4 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 247.3 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 238.2 Tm (claim:sha256:fa7d8a46fe52aaace2491c7a75b4612136407eec673223e9497b1e0b4ffc9457) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 227.8 Tm (machine asset-tag:ARM-3A configuration_unknown record) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 217.4 Tm (    rec:sha256:1edfbeaa4818e8773ee06a088e8f4bad464716ac405de6fa8e907fecdfb1a291) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 208.3 Tm (stated; valid [1773171000000000000, 1787057700000000000\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 199.2 Tm (    rec:sha256:3c66443acb144517a1c805cdb5cd1649c33d69364a19e8cbfcc6ac87bf108cc2; recorded at Ledger tx 2 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 190.1 Tm (    1 evidence refs; records rec:sha256:1edfbeaa4818e8773ee06a088e8f4bad464716ac405de6fa8e907fecdfb1a291) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 181 Tm (claim:sha256:fb5505993a1670dcba22097ad2cfb3dad91eb325d288394886a07a78d4d65f64) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 170.6 Tm (event record:rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14/timeline/4) Tj ET
+BT /F2 8 Tf 1 0 0 1 59.6 160.2 Tm (    evidenced_by record rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 151.1 Tm (stated; valid [1789397520000000000, 1789397520000000001\) ticks on) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 142 Tm (    rec:sha256:0fd804b59f80db99ff7275d65b5365b1438d07bbb26721b4bd65d2bb2f8ed416; recorded at Ledger tx 4 \(current\);) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 132.9 Tm (    1 evidence refs; records rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 106 Tm (Appendix A - evidence references) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 96.9 Tm (Each evidence ref the cited claims rest on, and how to resolve it through the Ledger's catalog API at the snapshot's) Tj ET
+BT /F4 7 Tf 1 0 0 1 50 87.8 Tm (    head.) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 78.7 Tm (E1. {"locator":[{"index":0,"kind":"page"}],"source":"sha256:5e9fde08afd857fc9696313d71432ff87f2d126a2d5b44a2508806cdf) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 69.6 Tm (    391a9d7"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 60.5 Tm (cited by claim:sha256:7e90fd00cf552197c5f3167967fd6bc066af6a6ee4784ce14e0def4014a2178b) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 6 of 9) Tj ET
+
+endstream
+endobj
+20 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 21 0 R >>
+endobj
+21 0 obj
+<< /Length 10338 >>
+stream
+BT /F2 7 Tf 1 0 0 1 59.6 782.9 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"index":0,"kind":"page"}],"source":"sha256) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 773.8 Tm (    :5e9fde08afd857fc9696313d71432ff87f2d126a2d5b44a2508806cdf391a9d7"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 764.7 Tm (E2. {"locator":[{"index":0,"kind":"page"}],"source":"sha256:bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e1) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 755.6 Tm (    9c97908"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 746.5 Tm (cited by claim:sha256:193721c937cedcecc85b2483dceac6d5f7da2b2a232ad1ee9bdd0eb3cb911ce3,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 737.4 Tm (    claim:sha256:34e764af3218fe07cbe8e9408b5eadc99bb2c57a8c8f934463f106061c9be0c0,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 728.3 Tm (    claim:sha256:3970ed3cf7c3a4faf612eb39c8a80e40817b689cd9200c0fdab9cff6719d4853,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 719.2 Tm (    claim:sha256:421c929b6e15a5753f300047dcf7deb877eaf4c47d608d15a3e64285078e30f4,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 710.1 Tm (    claim:sha256:74663942f9698a46f03935ebbdf291f1f2724678b16e98a3da816d3ae9a28e5a,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 701 Tm (    claim:sha256:7b329d903f6ec0592718cfdd16e356d86f1d883de32d853de10d4b9f72abd302,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 691.9 Tm (    claim:sha256:85911531522d52a7cbfadc980b0e29bcc163d9ef1c80716d1620d47c417d40e1,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 682.8 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 673.7 Tm (    claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 664.6 Tm (    claim:sha256:c7848a1b700aa9ff268904b61d3b0eb855a725117aa4b04bf806cd253af5fb1a,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 655.5 Tm (    claim:sha256:d48901355f02f7fdb4d548188536db3f37704daaab706a33f9f4c3c0b0533a1c,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 646.4 Tm (    claim:sha256:dde86520c8e0b056ac3265ca450435ea655fcaa14989a9df56b0570e34425407,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 637.3 Tm (    claim:sha256:e521488a22cdf82157f33185da3af789029c75e8fe94ab2c8ff07e457b16b05f,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 628.2 Tm (    claim:sha256:f42f5375a290ba43d010fa96c9837eddf02f8c593d3f186623640209d3eafecd,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 619.1 Tm (    claim:sha256:f8f7db7f9e1f367bbf9cab98288e14bce328b175befb9c798d24c853718feb2a,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 610 Tm (    claim:sha256:fb5505993a1670dcba22097ad2cfb3dad91eb325d288394886a07a78d4d65f64) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 600.9 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"index":0,"kind":"page"}],"source":"sha256) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 591.8 Tm (    :bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e19c97908"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 582.7 Tm (E3. {"locator":[{"index":1,"kind":"page"}],"source":"sha256:bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e1) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 573.6 Tm (    9c97908"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 564.5 Tm (cited by claim:sha256:ba254fc1bac05fe8b5306b1b61be45cb675a4419f7acac87415c1bff74b6a0b9) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 555.4 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"index":1,"kind":"page"}],"source":"sha256) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 546.3 Tm (    :bfc3c2e8e1d23ee47f2b4c476e6164bf879da8732d3936978b2dbf7e19c97908"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 537.2 Tm (E4. {"locator":[{"kind":"json_pointer","pointer":"/config_revision"}],"source":"sha256:57ea0f32041ae257fcb6bfed1c7c5a) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 528.1 Tm (    6738203f6290e7c0beccf3180a2245fb25"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 519 Tm (cited by claim:sha256:55c3156dc047ebd3cfa3bd107f93fc1e46dcb801f53da5e3440e6d30984df71c,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 509.9 Tm (    claim:sha256:c9768e325d65e4ab3ab9de155f04f83d8b0616b4328c3adca220cd95d2741fe8) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 500.8 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"json_pointer","pointer":"/config_r) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 491.7 Tm (    evision"}],"source":"sha256:57ea0f32041ae257fcb6bfed1c7c5a6738203f6290e7c0beccf3180a2245fb25"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 482.6 Tm (E5. {"locator":[{"kind":"json_pointer","pointer":"/rosbag2_bagfile_information"}],"source":"sha256:13b72327894552ab66) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 473.5 Tm (    dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 464.4 Tm (cited by claim:sha256:54bf7048b78c22d28cdce3e01b4bb8e5409408febb4835c8bf8185e5743c7314) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 455.3 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"json_pointer","pointer":"/rosbag2_) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 446.2 Tm (    bagfile_information"}],"source":"sha256:13b72327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 437.1 Tm (E6. {"locator":[{"kind":"json_pointer","pointer":"/rosbag2_bagfile_information"}],"source":"sha256:dc69a522a2f10db3e2) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 428 Tm (    82bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 418.9 Tm (cited by claim:sha256:5002e33d4e2f8341d43777152a162b5b023bc73ca1e9ebbaf70bcb327fd66b4c,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 409.8 Tm (    claim:sha256:74dc39dbd00af611017b7ab3ea5ff7f30d26a102d32508178dc67baad5d1c54e) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 400.7 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"json_pointer","pointer":"/rosbag2_) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 391.6 Tm (    bagfile_information"}],"source":"sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 382.5 Tm (E7. {"locator":[{"kind":"json_pointer","pointer":"/rosbag2_bagfile_information/starting_time"}],"source":"sha256:13b7) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 373.4 Tm (    2327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 364.3 Tm (cited by claim:sha256:62a5b611cb4b79db304fd777529ef988ee11ef2419d0b906676fcbb090650dbb) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 355.2 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"json_pointer","pointer":"/rosbag2_) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 346.1 Tm (    bagfile_information/starting_time"}],"source":"sha256:13b72327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 337 Tm (    c178c49"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 327.9 Tm (E8. {"locator":[{"kind":"json_pointer","pointer":"/rosbag2_bagfile_information/starting_time"}],"source":"sha256:dc69) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 318.8 Tm (    a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 309.7 Tm (cited by claim:sha256:7da7b19c2e924f87cf549b458d08a63c660ea921c3de10bd220c840e6958207f) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 300.6 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"json_pointer","pointer":"/rosbag2_) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 291.5 Tm (    bagfile_information/starting_time"}],"source":"sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e1) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 282.4 Tm (    6006c12"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 273.3 Tm (E9. {"locator":[{"kind":"json_pointer","pointer":"/runs/1"}],"source":"sha256:1279658641566e0b752c487a4ff6ca85f689599) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 264.2 Tm (    6d94ed6fb9134572011382dba"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 255.1 Tm (cited by claim:sha256:62a5b611cb4b79db304fd777529ef988ee11ef2419d0b906676fcbb090650dbb) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 246 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"json_pointer","pointer":"/runs/1"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 236.9 Tm (    ],"source":"sha256:1279658641566e0b752c487a4ff6ca85f6895996d94ed6fb9134572011382dba"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 227.8 Tm (E10. {"locator":[{"kind":"json_pointer","pointer":"/runs/2"}],"source":"sha256:1279658641566e0b752c487a4ff6ca85f68959) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 218.7 Tm (    96d94ed6fb9134572011382dba"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 209.6 Tm (cited by claim:sha256:7da7b19c2e924f87cf549b458d08a63c660ea921c3de10bd220c840e6958207f) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 200.5 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"json_pointer","pointer":"/runs/2"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 191.4 Tm (    ],"source":"sha256:1279658641566e0b752c487a4ff6ca85f6895996d94ed6fb9134572011382dba"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 182.3 Tm (E11. {"locator":[{"kind":"row","row":1}],"source":"sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24ef) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 173.2 Tm (    dcfb3"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 164.1 Tm (cited by claim:sha256:fa7d8a46fe52aaace2491c7a75b4612136407eec673223e9497b1e0b4ffc9457) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 155 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"row","row":1}],"source":"sha256:f4) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 145.9 Tm (    e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 136.8 Tm (E12. {"locator":[{"kind":"row","row":1}],"source":"sha256:fdca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 127.7 Tm (    1ef16"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 118.6 Tm (cited by claim:sha256:54f3f0fbc3fd78c80887f62140cb845e1fb8615e3639440192279b876a0449d3) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 109.5 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"row","row":1}],"source":"sha256:fd) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 100.4 Tm (    ca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f1ef16"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 91.3 Tm (E13. {"locator":[{"kind":"row","row":2}],"source":"sha256:fdca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 82.2 Tm (    1ef16"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 73.1 Tm (cited by claim:sha256:792ec98f356be97b64a334cc52a767e19271db6f2291d233d3892e3f657b9be7) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 64 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"row","row":2}],"source":"sha256:fd) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 7 of 9) Tj ET
+
+endstream
+endobj
+22 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 23 0 R >>
+endobj
+23 0 obj
+<< /Length 9414 >>
+stream
+BT /F2 7 Tf 1 0 0 1 59.6 782.9 Tm (    ca333962781db7f725a857dc6647b73e192666d2e9b505a2151e0502f1ef16"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 773.8 Tm (E14. {"locator":[{"kind":"row","row":3}],"source":"sha256:30be864d249a145a23a78fc8b38686e09a3ca1d3c8b4c9f08c08feb847a) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 764.7 Tm (    3f2be"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 755.6 Tm (cited by claim:sha256:792ec98f356be97b64a334cc52a767e19271db6f2291d233d3892e3f657b9be7) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 746.5 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"row","row":3}],"source":"sha256:30) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 737.4 Tm (    be864d249a145a23a78fc8b38686e09a3ca1d3c8b4c9f08c08feb847a3f2be"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 728.3 Tm (E15. {"locator":[{"kind":"row","row":6}],"source":"sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24ef) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 719.2 Tm (    dcfb3"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 710.1 Tm (cited by claim:sha256:eb1a1e7f64da1dcc45d1af04b3f1a5d2b592d5c007d42dd18600f2946ac77a2b) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 701 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"row","row":6}],"source":"sha256:f4) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 691.9 Tm (    e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3"}}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 682.8 Tm (E16. {"locator":[{"kind":"row","row":7}],"source":"sha256:f4e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24ef) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 673.7 Tm (    dcfb3"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 664.6 Tm (cited by claim:sha256:28a44a916613695062e47fe36ddb37f6a1692f3b83033300d0299bb6c3785767) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 655.5 Tm (Ledger catalog-api 1.6.0 resolve: {"as_of":5,"evidence_ref":{"locator":[{"kind":"row","row":7}],"source":"sha256:f4) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 646.4 Tm (    e37e7d88632fff34f908769d4470480060cfb0e59942e6a24f95a24efdcfb3"}}) Tj ET
+BT /F1 13 Tf 1 0 0 1 50 619.5 Tm (Appendix B - records) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 610.4 Tm (R1. rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 601.3 Tm (cited by claim:sha256:5002e33d4e2f8341d43777152a162b5b023bc73ca1e9ebbaf70bcb327fd66b4c,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 592.2 Tm (    claim:sha256:74dc39dbd00af611017b7ab3ea5ff7f30d26a102d32508178dc67baad5d1c54e,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 583.1 Tm (    claim:sha256:7da7b19c2e924f87cf549b458d08a63c660ea921c3de10bd220c840e6958207f,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 574 Tm (    claim:sha256:c9768e325d65e4ab3ab9de155f04f83d8b0616b4328c3adca220cd95d2741fe8) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 564.9 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 555.8 Tm (    {"as_of":5,"record_id":"rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 546.7 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 537.6 Tm (    {"as_of":5,"record_id":"rec:sha256:0573b8eb2f79453532a08126a34d064205827e2df34d1530342d4f4f12ff39bb"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 528.5 Tm (R2. rec:sha256:123ddd28321e877366ee3a926eff04c76bccd1596c624fb26e2f7126ae197b90) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 519.4 Tm (cited by claim:sha256:c9768e325d65e4ab3ab9de155f04f83d8b0616b4328c3adca220cd95d2741fe8) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 510.3 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 501.2 Tm (    {"as_of":5,"record_id":"rec:sha256:123ddd28321e877366ee3a926eff04c76bccd1596c624fb26e2f7126ae197b90"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 492.1 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 483 Tm (    {"as_of":5,"record_id":"rec:sha256:123ddd28321e877366ee3a926eff04c76bccd1596c624fb26e2f7126ae197b90"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 473.9 Tm (R3. rec:sha256:1edfbeaa4818e8773ee06a088e8f4bad464716ac405de6fa8e907fecdfb1a291) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 464.8 Tm (cited by claim:sha256:fa7d8a46fe52aaace2491c7a75b4612136407eec673223e9497b1e0b4ffc9457) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 455.7 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 446.6 Tm (    {"as_of":5,"record_id":"rec:sha256:1edfbeaa4818e8773ee06a088e8f4bad464716ac405de6fa8e907fecdfb1a291"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 437.5 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 428.4 Tm (    {"as_of":5,"record_id":"rec:sha256:1edfbeaa4818e8773ee06a088e8f4bad464716ac405de6fa8e907fecdfb1a291"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 419.3 Tm (R4. rec:sha256:89c8afc8c8e8eaffa09e7ed054f7888aef9f7c07215c9b80db4acad76de3b8cc) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 410.2 Tm (cited by claim:sha256:792ec98f356be97b64a334cc52a767e19271db6f2291d233d3892e3f657b9be7) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 401.1 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 392 Tm (    {"as_of":5,"record_id":"rec:sha256:89c8afc8c8e8eaffa09e7ed054f7888aef9f7c07215c9b80db4acad76de3b8cc"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 382.9 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 373.8 Tm (    {"as_of":5,"record_id":"rec:sha256:89c8afc8c8e8eaffa09e7ed054f7888aef9f7c07215c9b80db4acad76de3b8cc"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 364.7 Tm (R5. rec:sha256:8d948cbb15493c4495c645ed62ada6f628994e20ada0a4c7d8f0b18d0b9b0d16) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 355.6 Tm (cited by claim:sha256:7e90fd00cf552197c5f3167967fd6bc066af6a6ee4784ce14e0def4014a2178b) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 346.5 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 337.4 Tm (    {"as_of":5,"record_id":"rec:sha256:8d948cbb15493c4495c645ed62ada6f628994e20ada0a4c7d8f0b18d0b9b0d16"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 328.3 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 319.2 Tm (    {"as_of":5,"record_id":"rec:sha256:8d948cbb15493c4495c645ed62ada6f628994e20ada0a4c7d8f0b18d0b9b0d16"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 310.1 Tm (R6. rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 301 Tm (cited by claim:sha256:54bf7048b78c22d28cdce3e01b4bb8e5409408febb4835c8bf8185e5743c7314,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 291.9 Tm (    claim:sha256:55c3156dc047ebd3cfa3bd107f93fc1e46dcb801f53da5e3440e6d30984df71c,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 282.8 Tm (    claim:sha256:62a5b611cb4b79db304fd777529ef988ee11ef2419d0b906676fcbb090650dbb) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 273.7 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 264.6 Tm (    {"as_of":5,"record_id":"rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 255.5 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 246.4 Tm (    {"as_of":5,"record_id":"rec:sha256:b32f5af00eda27e4cdc6686b87cf19c87ca5a2799afd882df79bbd0005bb8a93"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 237.3 Tm (R7. rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 228.2 Tm (cited by claim:sha256:193721c937cedcecc85b2483dceac6d5f7da2b2a232ad1ee9bdd0eb3cb911ce3,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 219.1 Tm (    claim:sha256:34e764af3218fe07cbe8e9408b5eadc99bb2c57a8c8f934463f106061c9be0c0,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 210 Tm (    claim:sha256:3970ed3cf7c3a4faf612eb39c8a80e40817b689cd9200c0fdab9cff6719d4853,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 200.9 Tm (    claim:sha256:421c929b6e15a5753f300047dcf7deb877eaf4c47d608d15a3e64285078e30f4,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 191.8 Tm (    claim:sha256:74663942f9698a46f03935ebbdf291f1f2724678b16e98a3da816d3ae9a28e5a,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 182.7 Tm (    claim:sha256:7b329d903f6ec0592718cfdd16e356d86f1d883de32d853de10d4b9f72abd302,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 173.6 Tm (    claim:sha256:85911531522d52a7cbfadc980b0e29bcc163d9ef1c80716d1620d47c417d40e1,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 164.5 Tm (    claim:sha256:86f293e1fe519c2e8f372d5e4606b607b648da54e3482ad3f11d7b97e0e32b77,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 155.4 Tm (    claim:sha256:b3d4e1fea86e7396a3e39e2e498e570d5049a163ace841cd7a9e28a791dd8f92,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 146.3 Tm (    claim:sha256:ba254fc1bac05fe8b5306b1b61be45cb675a4419f7acac87415c1bff74b6a0b9,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 137.2 Tm (    claim:sha256:c7848a1b700aa9ff268904b61d3b0eb855a725117aa4b04bf806cd253af5fb1a,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 128.1 Tm (    claim:sha256:d48901355f02f7fdb4d548188536db3f37704daaab706a33f9f4c3c0b0533a1c,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 119 Tm (    claim:sha256:dde86520c8e0b056ac3265ca450435ea655fcaa14989a9df56b0570e34425407,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 109.9 Tm (    claim:sha256:e521488a22cdf82157f33185da3af789029c75e8fe94ab2c8ff07e457b16b05f,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 100.8 Tm (    claim:sha256:f42f5375a290ba43d010fa96c9837eddf02f8c593d3f186623640209d3eafecd,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 91.7 Tm (    claim:sha256:f8f7db7f9e1f367bbf9cab98288e14bce328b175befb9c798d24c853718feb2a,) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 82.6 Tm (    claim:sha256:fb5505993a1670dcba22097ad2cfb3dad91eb325d288394886a07a78d4d65f64) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 73.5 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 64.4 Tm (    {"as_of":5,"record_id":"rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 8 of 9) Tj ET
+
+endstream
+endobj
+24 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 25 0 R >>
+endobj
+25 0 obj
+<< /Length 3851 >>
+stream
+BT /F2 7 Tf 1 0 0 1 59.6 782.9 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 773.8 Tm (    {"as_of":5,"record_id":"rec:sha256:c82df9cc3d8a3a5963d028fbc6906eca4450da73211dcb1cf2d55022f9664a14"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 764.7 Tm (R8. rec:sha256:cf0ff9b4c29e901cab9100bf2127dcf522569217235aee2172495ab59c20a44f) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 755.6 Tm (cited by claim:sha256:54f3f0fbc3fd78c80887f62140cb845e1fb8615e3639440192279b876a0449d3) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 746.5 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 737.4 Tm (    {"as_of":5,"record_id":"rec:sha256:cf0ff9b4c29e901cab9100bf2127dcf522569217235aee2172495ab59c20a44f"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 728.3 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 719.2 Tm (    {"as_of":5,"record_id":"rec:sha256:cf0ff9b4c29e901cab9100bf2127dcf522569217235aee2172495ab59c20a44f"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 710.1 Tm (R9. rec:sha256:d0afd33258a7e623032df753e5902a172f71ba5c9b08277fc79681fd966fe1e2) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 701 Tm (cited by claim:sha256:55c3156dc047ebd3cfa3bd107f93fc1e46dcb801f53da5e3440e6d30984df71c) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 691.9 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 682.8 Tm (    {"as_of":5,"record_id":"rec:sha256:d0afd33258a7e623032df753e5902a172f71ba5c9b08277fc79681fd966fe1e2"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 673.7 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 664.6 Tm (    {"as_of":5,"record_id":"rec:sha256:d0afd33258a7e623032df753e5902a172f71ba5c9b08277fc79681fd966fe1e2"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 655.5 Tm (R10. rec:sha256:e74d4feee8b1e8cd13986cb3c1d8c31e3c7e2f93404b34e8f3b3e9c0afd5fa75) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 646.4 Tm (cited by claim:sha256:792ec98f356be97b64a334cc52a767e19271db6f2291d233d3892e3f657b9be7) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 637.3 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 628.2 Tm (    {"as_of":5,"record_id":"rec:sha256:e74d4feee8b1e8cd13986cb3c1d8c31e3c7e2f93404b34e8f3b3e9c0afd5fa75"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 619.1 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 610 Tm (    {"as_of":5,"record_id":"rec:sha256:e74d4feee8b1e8cd13986cb3c1d8c31e3c7e2f93404b34e8f3b3e9c0afd5fa75"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 600.9 Tm (R11. rec:sha256:e987ea4c6e44d868ca6e5c379698d30370df8543cf7af81bb4c6594f92e4b395) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 591.8 Tm (cited by claim:sha256:28a44a916613695062e47fe36ddb37f6a1692f3b83033300d0299bb6c3785767) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 582.7 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 573.6 Tm (    {"as_of":5,"record_id":"rec:sha256:e987ea4c6e44d868ca6e5c379698d30370df8543cf7af81bb4c6594f92e4b395"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 564.5 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 555.4 Tm (    {"as_of":5,"record_id":"rec:sha256:e987ea4c6e44d868ca6e5c379698d30370df8543cf7af81bb4c6594f92e4b395"}) Tj ET
+BT /F3 7 Tf 1 0 0 1 50 546.3 Tm (R12. rec:sha256:ec48abcf445fd73cf96bb11308219faaa723017c6eb94f30108c1d9432be9091) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 537.2 Tm (cited by claim:sha256:eb1a1e7f64da1dcc45d1af04b3f1a5d2b592d5c007d42dd18600f2946ac77a2b) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 528.1 Tm (Ledger catalog-api 1.6.0 threads_of:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 519 Tm (    {"as_of":5,"record_id":"rec:sha256:ec48abcf445fd73cf96bb11308219faaa723017c6eb94f30108c1d9432be9091"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 509.9 Tm (Ledger catalog-api 1.6.0 lineage:) Tj ET
+BT /F2 7 Tf 1 0 0 1 59.6 500.8 Tm (    {"as_of":5,"record_id":"rec:sha256:ec48abcf445fd73cf96bb11308219faaa723017c6eb94f30108c1d9432be9091"}) Tj ET
+BT /F2 7 Tf 1 0 0 1 50 30 Tm (pack:sha256:4695c35a60704c667343c0bd292769ceda721b562db2503cf703b6996349d0fe  -  page 9 of 9) Tj ET
+
+endstream
+endobj
+xref
+0 26
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000270 00000 n 
+0000000739 00000 n 
+0000000841 00000 n 
+0000000936 00000 n 
+0000001036 00000 n 
+0000001139 00000 n 
+0000001202 00000 n 
+0000009141 00000 n 
+0000009206 00000 n 
+0000016755 00000 n 
+0000016820 00000 n 
+0000024096 00000 n 
+0000024161 00000 n 
+0000032363 00000 n 
+0000032428 00000 n 
+0000042449 00000 n 
+0000042514 00000 n 
+0000052256 00000 n 
+0000052321 00000 n 
+0000062713 00000 n 
+0000062778 00000 n 
+0000072245 00000 n 
+0000072310 00000 n 
+trailer
+<< /Size 26 /Root 1 0 R /Info 3 0 R /ID [<4695C35A60704C667343C0BD292769CE> <4695C35A60704C667343C0BD292769CE>] >>
+startxref
+76214
+%%EOF

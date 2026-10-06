@@ -1,0 +1,33 @@
+{
+  "category": "mesh",
+  "crs": {
+    "knowledge": "not_covered"
+  },
+  "frame": {
+    "knowledge": "not_covered"
+  },
+  "id": "rec:sha256:4356cf7d9c298511e3fc23e7f1171c08ccc5e4375bea990cf76f574bfe5d7dbc",
+  "kind": "spatial_artifact",
+  "name": {
+    "knowledge": "known",
+    "value": "body"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 145,
+          "offset": 0
+        }
+      ],
+      "source": "sha256:589540e2bb28fa42777d647f58ec1b7a7ec50538f137b9ceef008c71dd5219cd"
+    },
+    "transform": "rec:sha256:2db8afc06bc9c458d31eecb94ec3f570b22f95746a338d39de72b5fcbeacbe1a"
+  },
+  "schema_version": 1,
+  "unit": {
+    "knowledge": "not_covered"
+  }
+}

@@ -11,7 +11,8 @@ A spec is JSON (``neptune-deploy.pack-spec/1``)::
       "inference": "exclude"
     }
 
-``subject`` is a site, a deployment or a machine (a graph-schema node). ``interval`` is on one
+``subject`` is a site, a deployment, a machine or an event (a graph-schema node; an incident is
+an ``event`` node, Memory ADR 0013). ``interval`` is on one
 clock; claims on another clock are never compared with it. ``snapshot`` is the id of the frozen
 graph document the pack reads (``snapshot.snapshot_id``). ``inference`` is ``exclude`` (the
 default) or ``include``; included inferred content is marked wherever it appears.
@@ -26,7 +27,7 @@ from neptune_deploy.packs.errors import PackError
 from neptune_deploy.packs.snapshot import SNAPSHOT_PREFIX, Interval, Node, Stamp, read_interval
 
 SPEC_SCHEMA: Final = "neptune-deploy.pack-spec/1"
-SUBJECT_TYPES: Final = ("deployment", "machine", "site")
+SUBJECT_TYPES: Final = ("deployment", "event", "machine", "site")
 INFERENCE_POLICIES: Final = ("exclude", "include")
 MAX_SPEC_BYTES: Final = 1024 * 1024
 

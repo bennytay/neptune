@@ -393,7 +393,7 @@ def test_a_delimiter_only_cell_is_unknown_with_its_part_finding() -> None:
     assert not any(isinstance(e.related, Known) and e.related.value == () for e in events)
 
 
-def test_a_write_that_fails_partway_leaves_out_empty_and_no_spill(
+def test_a_write_that_fails_partway_leaves_no_out_and_no_spill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import neptune_deploy.lifecycle as lifecycle
@@ -412,7 +412,10 @@ def test_a_write_that_fails_partway_leaves_out_empty_and_no_spill(
     out = tmp_path / "out"
     with pytest.raises(RuntimeError, match="disk gone"):
         map_package(base_root, mappings, out, scratch=scratch)
-    assert out.is_dir() and not any(out.iterdir())  # no partial package
+    # No package and no partial one beside it: the write renames a whole package into place
+    # (root ADR 0070).
+    assert not out.exists()
+    assert not (tmp_path / ".out.partial").exists()
     assert not any(scratch.iterdir())  # no leftover spill directory
     monkeypatch.undo()
     # The same output path then takes a whole package.

@@ -13,10 +13,21 @@ from neptune_memory.schema.interval import ledger_tx
 
 from context_packet_goldens import PACKETS, QUERIES
 from neptune.identity.canonical_json import dumps
+from neptune.model.ids import RecordId
 from neptune.model.knowledge import Known, NotCovered
 from neptune.model.provenance import evidence_ref_from_json
+from neptune_context.answer import domain_id
 from neptune_context.packets.codec import decode
-from neptune_context.packets.model import ContextPacket
+from neptune_context.packets.model import (
+    BudgetUse,
+    ClaimItem,
+    ContextPacket,
+    During,
+    Limit,
+    Limits,
+    SeriesWindowItem,
+    measure,
+)
 from neptune_context.query import Query, loads, query_id
 from neptune_context.sdk import ErrorCode, SdkError, StubEngine
 
@@ -50,15 +61,49 @@ def golden_stub() -> StubEngine:
 
 
 def answering(query: Query, like: str = "q01") -> ContextPacket:
-    """A valid packet that answers ``query``: a golden packet re-addressed to it."""
+    """A valid packet that answers ``query`` (``answer_problems`` finds nothing): a golden
+    packet re-addressed to it, with the query's budget and window, kept items cut to fit."""
     packet = golden_packet(like)
     as_of = query.as_of if isinstance(query.as_of, int) else packet.as_of
+    b = query.budget
+    limits = Limits(b.items, b.tokens, b.bytes, b.latency_ms)
+    during = (
+        None
+        if query.during is None
+        else During(RecordId(domain_id(query.during.clock)), query.during.start, query.during.end)
+    )
+    candidates = [
+        i
+        for i in packet.items
+        if (query.include_inferred or not i.is_inferred)
+        and (
+            during is None
+            or not isinstance(i, ClaimItem | SeriesWindowItem)
+            or (i.claim.valid.domain_id if isinstance(i, ClaimItem) else i.clock)
+            == during.domain_id
+        )
+    ]
+    items, exhausted = candidates[: b.items], [Limit.ITEMS] if len(candidates) > b.items else []
+    for limit, bound, index in ((Limit.BYTES, b.bytes, 0), (Limit.TOKENS, b.tokens, 1)):
+        while bound is not None and items and measure(items)[index] > bound:
+            items.pop()
+            exhausted.append(limit)
+    dropped = len(candidates) - len(items)
+    claims = {i.claim.id for i in items if isinstance(i, ClaimItem)}
     return dataclasses.replace(
         packet,
         query_id=query_id(query),
         as_of=ledger_tx(max(as_of, packet.as_of)),
         head=ledger_tx(max(as_of, packet.head)),
+        during=during,
         inference_included=query.include_inferred,
+        budget=BudgetUse.measured(
+            limits, items, dropped=dropped, exhausted=tuple(sorted(set(exhausted)))
+        ),
+        items=tuple(items),
+        superseded_since=tuple(s for s in packet.superseded_since if s.claim in claims),
+        findings=tuple(f for f in packet.findings if {f.claim, *f.others} & claims),
+        gaps=(),
     )
 
 

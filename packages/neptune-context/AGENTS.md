@@ -45,14 +45,17 @@ versions: [ADR 0001](docs/adr/0001-place-in-the-programme-and-contract-pins.md).
 5. **Deterministic.** Same query + pinned versions + snapshot (`as_of`) give a byte-identical packet.
    Anything model-generated lives under a `derived` boundary and is labelled `inferred`.
 6. **Pins are declared** in `neptune_context/pins.py`, `docs/contracts.md` and `contracts/lock.toml`;
-   bump them only with the code that adapts. The upstream contract suites run from here against stubs
+   bump them only with the code that adapts. Upstream vocabularies Context publishes come from the
+   pinned snapshot `pinned.json`, never from Memory's or the Ledger's live code (ADR 0006 §9). The upstream contract suites run from here against stubs
    (`tests/test_catalog_contract_context.py`, `tests/test_graph_contract_context.py`).
 
 Repo map (`src/neptune_context/`; subpackages are skeletons until their issues land):
 `query/` (language, parse, plan), `retrieve/` (channels, fusion), `packets/` (the `query-packet`
 contract's types), `render/` (packet to JSON, Markdown, prompt block), `sdk/` (Python API),
 `mcp/` (agent tool server), `explain/` (why an item is in a packet), `eval/` (quality and latency
-budgets); `pins.py` (contract versions).
+budgets); `contract.py` (the `query-packet` owner module), `answer.py` (does a packet answer its query,
+ADR 0006); `engine.py` (`LocalEngine`, the SDK engine seam over Memory and the Ledger, ADR 0007);
+`pins.py` (contract versions), `pinned.py` (upstream vocabularies at those versions).
 
 Model policy: Opus for `query/`, `retrieve/` fusion, ADRs and gates; Sonnet for renderers, SDK
 plumbing, the MCP server and docs.
