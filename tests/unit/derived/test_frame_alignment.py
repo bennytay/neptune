@@ -169,7 +169,9 @@ def test_a_declared_graph_is_linked_by_name_never_joined(
         ("imu", LinkRule.SAME_NAME),
     }
     (tree,) = found.trees
-    calibration = {x.left.frame_graph_id for x in found.links} - {tree.id}
+    # A link's sides are sorted by id, so either may be the calibration's.
+    sides = {ref.frame_graph_id for x in found.links for ref in (x.left, x.right)}
+    calibration = sides - {tree.id}
     assert len(calibration) == 1
     # The calibration's frames and the run's frames stay two groups: links join no group.
     assert len(found.groups) == 2
@@ -191,7 +193,12 @@ def test_the_imu_is_comparable_with_a_camera_through_the_tree_and_the_calibratio
     assert [s.kind for s in answer.path] == [StepKind.EDGE, StepKind.EDGE]
     assert not answer.inferred
     assert Caveat.TRANSLATION_UNIT_UNKNOWN in answer.caveats
-    calibration = next(x.left.frame_graph_id for x in found.links if x.left.frame_id == "cam0")
+    calibration = next(
+        ref.frame_graph_id
+        for x in found.links
+        for ref in (x.left, x.right)
+        if ref.frame_id == "cam0" and ref.frame_graph_id != tree.id
+    )
     kalibr_cam0 = FrameRef("cam0", calibration)
     strict = index.compare(FrameAt(FrameRef("imu", tree.id)), FrameAt(kalibr_cam0))
     assert isinstance(strict, NotComparable) and strict.reason is Reason.DISCONNECTED
