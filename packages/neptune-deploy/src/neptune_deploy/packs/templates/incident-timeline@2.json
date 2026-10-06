@@ -1,0 +1,118 @@
+{
+  "schema": "neptune-deploy.pack-template/1",
+  "id": "incident-timeline",
+  "version": 2,
+  "title": "Incident reconstruction",
+  "description": "One incident's timeline on the clock the pack interval chooses: the incident, the other records of it, events, interventions and diagnostics involving its machines, at its site or in its zone, and the statements of the documents that report it, each citing its evidence (Memory ADR 0013). An entry on another clock is placed only through a clock mapping Memory states, and names it; with none it is listed as not placed, never guessed. Records of one event that state different times are a conflict: every time is shown with its difference, none is chosen. Co-occurrence is listed apart and is never cause.",
+  "subject_types": ["event"],
+  "sections": [
+    {
+      "id": "records-of-the-incident",
+      "title": "Records of this incident",
+      "description": "Which other records Memory states are the same incident (same_as), and which it cannot decide (same_as_candidate: every reading, none chosen).",
+      "kind": "claims",
+      "about": [
+        [],
+        [{"predicate": "same_as", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "in"}],
+        [{"predicate": "same_as_candidate", "direction": "out"}],
+        [{"predicate": "same_as_candidate", "direction": "in"}]
+      ],
+      "predicates": {"same_as": "known", "same_as_candidate": "ambiguous"}
+    },
+    {
+      "id": "reconstruction",
+      "title": "Reconstruction on the chosen clock",
+      "description": "Each placement on the pack clock in onset order: the event's stated kind, severity, description, machines, place and the record it rests on. A placement through a clock mapping names the mapping records. Records of one event are compared as one event.",
+      "kind": "timeline",
+      "same_event": ["same_as"],
+      "about": [
+        [],
+        [{"predicate": "same_as", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "in"}],
+        [{"predicate": "same_as_candidate", "direction": "out"}],
+        [{"predicate": "same_as_candidate", "direction": "in"}],
+        [{"predicate": "evidenced_by", "direction": "shared"}],
+        [{"predicate": "same_as", "direction": "out"}, {"predicate": "evidenced_by", "direction": "shared"}],
+        [{"predicate": "same_as", "direction": "in"}, {"predicate": "evidenced_by", "direction": "shared"}],
+        [{"predicate": "same_as_candidate", "direction": "out"}, {"predicate": "evidenced_by", "direction": "shared"}],
+        [{"predicate": "same_as_candidate", "direction": "in"}, {"predicate": "evidenced_by", "direction": "shared"}],
+        [{"predicate": "involves", "direction": "out"}, {"predicate": "involves", "direction": "in"}],
+        [{"predicate": "involves", "direction": "out"}, {"predicate": "involves_candidate", "direction": "in"}],
+        [{"predicate": "at_site", "direction": "out"}, {"predicate": "at_site", "direction": "in"}],
+        [{"predicate": "in_zone", "direction": "out"}, {"predicate": "in_zone", "direction": "in"}]
+      ],
+      "predicates": {
+        "event_kind": "known",
+        "declared_kind": "known",
+        "stated_severity": "known",
+        "has_description": "known",
+        "involves": "known",
+        "involves_candidate": "ambiguous",
+        "at_site": "known",
+        "at_site_candidate": "ambiguous",
+        "in_zone": "known",
+        "in_zone_candidate": "ambiguous",
+        "evidenced_by": "known"
+      }
+    },
+    {
+      "id": "configuration-in-force",
+      "title": "Configuration of the machines involved",
+      "description": "The configuration chain of each machine the incident involves: decided, ambiguous or unknown spans, on their own clocks.",
+      "kind": "states",
+      "about": [
+        [{"predicate": "involves", "direction": "out"}],
+        [{"predicate": "involves_candidate", "direction": "out"}]
+      ],
+      "predicates": {"has_configuration": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "configuration-changes",
+      "title": "Configuration changes",
+      "description": "Each change of configuration of a machine the incident involves, attributed to that machine only: a decided span ending at the instant a decided span of another configuration begins, on one clock (graph-schema 2 rule 12). A boundary that an ambiguous or unknown span meets is shown as such, every reading with it, and no change is read across it. A change is the machine's own: configuration nodes are shared by every machine naming them, so nothing here is read from succeeds or from another machine.",
+      "kind": "changes",
+      "graph_schema_majors": [2],
+      "about": [
+        [{"predicate": "involves", "direction": "out"}],
+        [{"predicate": "involves_candidate", "direction": "out"}]
+      ],
+      "predicates": {"has_configuration": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "runs",
+      "title": "Runs of the machines involved",
+      "description": "The runs the involved machines recorded, with the configuration bound to each, on the run's own clock.",
+      "kind": "states",
+      "about": [
+        [{"predicate": "involves", "direction": "out"}, {"predicate": "recorded_by", "direction": "in"}],
+        [{"predicate": "involves_candidate", "direction": "out"}, {"predicate": "recorded_by", "direction": "in"}]
+      ],
+      "predicates": {"configuration_active_during": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "clocks",
+      "title": "Clocks and mappings",
+      "description": "The clocks the involved machines record on, and every mapping Memory states from them (its parameters as stated, never applied here). A clock no mapping relates to the pack clock is why an entry is not placed.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "involves", "direction": "out"}],
+        [{"predicate": "involves", "direction": "out"}, {"predicate": "has_clock", "direction": "out"}],
+        [{"predicate": "involves_candidate", "direction": "out"}],
+        [{"predicate": "involves_candidate", "direction": "out"}, {"predicate": "has_clock", "direction": "out"}]
+      ],
+      "predicates": {"has_clock": "known", "maps_to": "known", "clock_map": "known"}
+    },
+    {
+      "id": "co-occurrence",
+      "title": "Co-occurrence (never cause)",
+      "description": "Pairs of events from different sources whose onsets fall within the configured window on one clock. Co-occurrence is not causation.",
+      "kind": "claims",
+      "about": [
+        [],
+        [{"predicate": "involves", "direction": "out"}, {"predicate": "involves", "direction": "in"}]
+      ],
+      "predicates": {"co_occurs_within": "known"}
+    }
+  ]
+}

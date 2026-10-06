@@ -1,0 +1,79 @@
+{
+  "schema": "neptune-deploy.pack-template/1",
+  "id": "configuration-lineage",
+  "version": 2,
+  "title": "Configuration lineage",
+  "description": "Which configuration each machine and run was in over the interval, each machine's own configuration changes, and what was authorised, as Memory's configuration lineage states it (Memory ADR 0010, 0019). Ambiguous and unknown spans are shown as such, never filled.",
+  "subject_types": ["deployment", "machine", "site"],
+  "sections": [
+    {
+      "id": "configuration-in-force",
+      "title": "Configuration in force",
+      "description": "The configuration chain of the subject and of the machines located at it: each span decided, ambiguous (every candidate) or unknown (the record that leaves it open).",
+      "kind": "states",
+      "about": [
+        [],
+        [{"predicate": "located_at", "direction": "in"}],
+        [{"predicate": "deployed_at", "direction": "out"}, {"predicate": "located_at", "direction": "in"}]
+      ],
+      "predicates": {"has_configuration": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "configuration-changes",
+      "title": "Configuration changes",
+      "description": "Each change of the configuration of the subject and of the machines located at it, attributed to that one machine: a decided span ending at the instant a decided span of another configuration begins, on one clock (graph-schema 2 rule 12). A boundary that an ambiguous or unknown span meets is shown as such, every reading with it, and no change is read across it. A change is the machine's own: configuration nodes are shared by every machine naming them, so nothing here is read from succeeds or from another machine.",
+      "kind": "changes",
+      "graph_schema_majors": [2],
+      "about": [
+        [],
+        [{"predicate": "located_at", "direction": "in"}],
+        [{"predicate": "deployed_at", "direction": "out"}, {"predicate": "located_at", "direction": "in"}]
+      ],
+      "predicates": {"has_configuration": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "authorisation",
+      "title": "Authorised configurations",
+      "description": "Configurations an authorisation envelope approves at the site, over the envelope's stated window.",
+      "kind": "claims",
+      "about": [
+        [],
+        [{"predicate": "located_at", "direction": "out"}],
+        [{"predicate": "deployed_at", "direction": "out"}]
+      ],
+      "predicates": {"authorised_configuration": "known"}
+    },
+    {
+      "id": "run-configuration",
+      "title": "Configuration during runs",
+      "description": "The configuration each run recorded by these machines ran with, over the bound window, on the run's own clock.",
+      "kind": "states",
+      "about": [
+        [{"predicate": "recorded_by", "direction": "in"}],
+        [{"predicate": "located_at", "direction": "in"}, {"predicate": "recorded_by", "direction": "in"}],
+        [
+          {"predicate": "deployed_at", "direction": "out"},
+          {"predicate": "located_at", "direction": "in"},
+          {"predicate": "recorded_by", "direction": "in"}
+        ]
+      ],
+      "predicates": {"configuration_active_during": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "authorisation-gaps",
+      "title": "Runs outside any authorisation",
+      "description": "Parts of a run's window that no authorisation envelope in the Ledger covers for the configuration it ran with: a fact about the envelopes, not a judgement of the run.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "recorded_by", "direction": "in"}],
+        [{"predicate": "located_at", "direction": "in"}, {"predicate": "recorded_by", "direction": "in"}],
+        [
+          {"predicate": "deployed_at", "direction": "out"},
+          {"predicate": "located_at", "direction": "in"},
+          {"predicate": "recorded_by", "direction": "in"}
+        ]
+      ],
+      "predicates": {"not_covered_by_authorisation": "known"}
+    }
+  ]
+}
