@@ -395,10 +395,12 @@ def test_q1_cell_there_is_no_authorisation_record_and_the_configuration_is_state
         "5.4.2",
         "5.6.0",
     )
-    # The inspection after the near miss is an INSP work order no rule reads: no record, but its
-    # row is named, so it is not lost.
+    # The inspection after the near miss is an INSP work order: a maintenance event since
+    # cmms_generic 2 (ADR 0016 §5), stating the near miss it followed.
+    inspection = _named(package, "maintenance_event", "WO-26-0709")
+    assert [r.value.value for r in inspection.related.value] == ["INC-C3-0004"]
     cmms = [f for f in _findings(package, "row_unmatched") if f.subject.source in _sources(CELL)]
-    assert any(f.details["count"] == 1 for f in cmms)
+    assert not cmms
 
 
 def _sources(name: str) -> set[Any]:

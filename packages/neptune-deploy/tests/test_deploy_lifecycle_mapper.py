@@ -244,9 +244,11 @@ def test_malformed_rows_are_findings_never_dropped_or_merged() -> None:
     (late,) = _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0315")
     assert isinstance(late.performed, Unknown)
     assert codes["value_unreadable"][0].details["rows"] == [6]
-    # A work order type the mapping does not name, and a column it does not map.
+    # A ticket type the mapping does not name, and a column it does not map. The INSP work order
+    # (row 5) is a maintenance event since cmms_generic 2 (ADR 0016 §5).
     rows = sorted(r for f in codes["row_unmatched"] for r in f.details["rows"])
-    assert rows == [2, 5]  # the Jira task (array index 2) and the INSP work order (row 5)
+    assert rows == [2]  # the Jira task (array index 2)
+    assert _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0314")
     columns = sorted(c for f in codes["column_unmapped"] for c in f.details["columns"])
     assert columns == ["/fields/customfield_10040", "Downtime h"]
 
