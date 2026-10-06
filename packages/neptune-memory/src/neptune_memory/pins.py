@@ -16,8 +16,10 @@ from neptune_memory.schema import GRAPH_SCHEMA_VERSION as _GRAPH_SCHEMA_VERSION
 # owns it; this re-export is what Memory declares it was written against.
 COMPILER_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
 
-# Ledger catalog API: pending until MVL-85 lands the API; pinned in the PR that adopts it.
-CATALOG_API_VERSION: Final[str] = "pending: pinned when MVL-85 (Ledger catalog API) lands"
+# Ledger catalog API (contracts/catalog-api/): the version whose ``threads_of`` answers Memory
+# reads thread membership from (ADR 0018). Mirrors ``[neptune-memory] catalog-api`` in
+# contracts/lock.toml.
+CATALOG_API_VERSION: Final[str] = "1.7.0"
 
 # Graph schema Memory itself publishes (contracts/graph-schema/, ADR 0006): the registry major,
 # and the full release its graph documents name (ADR 0019 §3).

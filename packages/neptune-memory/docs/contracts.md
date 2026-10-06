@@ -35,13 +35,16 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     1. The harness's compiler stage compiles the corpus into one package, registered at tx 1.
     2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
        `servicenow_csv` presets into a lifecycle package, registered at tx 2.
-    3. Both are exported as the records the Ledger catalogs, plus the compiler's `derived/clock_mapping` fits.
-    4. The deterministic consolidators run, with `memory.time_estimates` alongside
+    3. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers both and
+       answers `threads_of` for every record ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)).
+    4. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
+       `derived/clock_mapping` fits.
+    5. The deterministic consolidators run, with `memory.time_estimates` alongside
        ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
 
     Copy the file byte for byte; do not edit it.
   - Regenerate it from the repository root with
-    `uv run --all-packages python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
+    `uv run --all-packages --all-groups python packages/neptune-memory/tests/fixtures/acceptance_corpus_snapshot.py`.
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
     makes it stale.
@@ -62,14 +65,24 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
       `stated_severity`, `has_description` and `evidenced_by`.
     - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
       drop them with `include_inferred=False`. One is the cell PC's ≈ −96.7 s on 2026-09-14.
+    - Configuration chains from all 16 `maintenance_event`s and 5 `change_record`s, `stated`, each citing its
+      records. There are 11 `has_configuration` spans, on the machine id each system states:
+      - `cmms.asset:ARM-3A` is on `firmware:5.6.0`; WO-26-0911 is among the eight work orders that span cites.
+      - `servicenow.ci:ARM-3A` goes from `5.6.0` to `TCP z=145.5 mm`, via `servicenow.u_after`.
+    - Two `succeeds`: AMR-07's `firmware:4.3.1` after `firmware:4.2.0` (CMMS), and ARM-3A's ServiceNow
+      `TCP z=145.5 mm` after `5.6.0`.
+    - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
+      The 13th run states no first instant (`untimeable_window`).
   - What it lacks:
     - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
       incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
       inferred mapping.
-    - No configuration lineage and no `authorisation_undecided`. Deploy's 5 `change_record`, 15
-      `maintenance_event` (WO-26-0911 among them) and 2 `authorisation_envelope` records are in the Ledger
-      export. Memory places them on Ledger thread nodes, which it reads today only from the `ledger_thread`
-      stand-in (ADR 0003 §1); no real Ledger export carries those. 
+    - No answer yet to "what changed since the last good run".
+      - There is no `snapshot_binding`, so no `configuration_active_during` and no `authorisation_undecided`.
+      - Runs are `recorded_by` `manifest:ARM-3A`. The chains are on `cmms.asset:ARM-3A` and
+        `servicenow.ci:ARM-3A`, and the register declares `asset:ARM-3A`. These are four nodes until an
+        `identity_link` or an operator assertion joins them, and the corpus has neither.
+    - No `authorised_configuration`: no envelope places a configuration on its site.
     - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
 
     This file is regenerated as those land, never edited.
@@ -92,6 +105,11 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   `calibration`, `hardware_configuration`, `hardware_component`, `frame_transform`, `frame_binding`,
   `maintenance_event` and `requalification_record` the same way
   ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md) §1).
-- Ledger catalog API: `CATALOG_API_VERSION = "pending: pinned when MVL-85 (Ledger catalog API) lands"`.
-  Until then Memory codes against the `LedgerReader` Protocol in `neptune_memory/ledger.py` and tests
-  against `StubLedger`.
+- Ledger catalog API: `CATALOG_API_VERSION = "1.7.0"` (`contracts/catalog-api/v1.7.0/`, locked in
+  `contracts/lock.toml`). Memory reads thread membership from the catalog's `threads_of` answers (`ThreadsOf`,
+  `Membership`, `UnresolvedMembership`, `ThreadKey`), parsed from the published wire form by
+  `neptune_memory.ledger.threads_of_from_json` without the bookkeeping `api_version`, `as_of` and `findings`;
+  it imports no Ledger code ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)). It reads through
+  the `LedgerReader` Protocol in `neptune_memory/ledger.py`; the `memory` CLI's Ledger export carries the
+  answers under `threads`. The `ledger_thread` stand-in (ADR 0003 §1) stays for the archetype goldens and
+  unit tests; a reader that answers no thread queries is read through it alone.
