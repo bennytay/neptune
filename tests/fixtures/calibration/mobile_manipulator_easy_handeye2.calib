@@ -1,0 +1,20 @@
+parameters:
+  name: amr_arm_base_camera_eob
+  calibration_type: eye_on_base
+  robot_base_frame: arm_base_link
+  robot_effector_frame: arm_tool0
+  tracking_base_frame: base_camera_link
+  tracking_marker_frame: aruco_marker_frame
+  freehand_robot_movement: false
+  move_group_namespace: /
+  move_group: manipulator
+transform:
+  translation:
+    x: 0.4127718
+    y: -0.0391044
+    z: 0.6832209
+  rotation:
+    x: 0.6108776854961109
+    y: -0.5936698633694598
+    z: 0.10324693275990607
+    w: 0.5135412520581701

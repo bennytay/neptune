@@ -1,9 +1,11 @@
 """Calibrations, extrinsics and the file's frame graph, with the checks the file allows itself
 (ADR 0055 §3 to §6).
 
-One ``Calibration`` per calibrated subject, its parameters as declared. Kalibr's extrinsics are
-``FrameTransform``s in one ``FrameGraph`` for the file; a transform whose frames or numbers the
-file does not give stays a parameter and costs a finding. Checks here are about what the file says
+One ``Calibration`` per calibrated subject, its parameters as declared. Kalibr's extrinsics and a
+hand-eye result's transform (ADR 0073) are ``FrameTransform``s in one ``FrameGraph`` for the file;
+a transform whose frames or numbers the file does not give stays a parameter and costs a finding.
+An OpenCV file's ``calibration_time`` is the calibration's ``performed`` time, on a
+``TimestampDomain`` of its own (ADR 0073 §3). Checks here are about what the file says
 of itself (a matrix with fewer numbers than it declares, a frame joined to the rest twice, a
 camera with no extrinsic). Whether two transforms agree, or which calibration a run used, is
 computed from several records and belongs to ``validate/`` and ``derived/``.
@@ -22,8 +24,11 @@ from neptune.adapters.calibration._formats import (
     Entry,
     Recognised,
 )
+from neptune.adapters.calibration._handeye import Declared, HandEye
+from neptune.adapters.calibration._handeye import read as read_hand_eye
 from neptune.adapters.calibration._items import Item, Kind
 from neptune.adapters.calibration._params import Flattener, Gaps, single_number
+from neptune.adapters.calibration._time import Civil, read_time
 from neptune.adapters.contract import AdapterConfig
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id
@@ -33,19 +38,26 @@ from neptune.model.frames import (
     FrameRef,
     HomogeneousMatrix,
     MatrixLayout,
+    Pose,
+    Quaternion,
     TransformDirection,
+    Translation,
 )
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.knowledge import AssertionKind, Known, Unknown
-from neptune.model.machine import Calibration
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotApplicable, Unknown
+from neptune.model.machine import Calibration, CalibrationParameter
 from neptune.model.provenance import ByteRange, EvidenceRef, Locator, Provenance
-from neptune.model.reference import FrameGraph, FrameTransform
+from neptune.model.reference import FrameGraph, FrameTransform, TimestampDomain
+from neptune.model.time import ClockRole, Epoch, Timescale, Timestamp
+from neptune.model.units import Unit, unit_from_json
 
 _CAMERA: Final = re.compile(r"cam([0-9]+)")
 OPENCV_EXTRINSICS: Final = ("CameraExtrinsicMat", "R", "T")
 _LISTED: Final = 8  # names a finding lists before it says "and n more"
-EvidenceOut = Calibration | FrameGraph | FrameTransform
+EvidenceOut = Calibration | FrameGraph | FrameTransform | TimestampDomain
+# tf2_ros's static_transform_publisher takes "an x/y/z offset in meters": MoveIt's args state it.
+_METRE: Final = unit_from_json("m")
 
 
 @dataclass
@@ -71,9 +83,9 @@ class Emitter:
 
     # --- helpers ------------------------------------------------------------------------------
 
-    def cite(self, where: Locator) -> Provenance:
+    def cite(self, where: Locator, kind: AssertionKind = AssertionKind.OBSERVED) -> Provenance:
         evidence = EvidenceRef(self.source, (where,))
-        return Provenance(evidence, self.transform.id, AssertionKind.OBSERVED)
+        return Provenance(evidence, self.transform.id, kind)
 
     def _id(self, kind: str, where: Locator) -> RecordId | None:
         """The tier-2 id of a record of ``kind`` at ``where``; ``None`` if one is already there."""
@@ -129,20 +141,30 @@ class Emitter:
         calibration_id = self._id(Calibration.kind, item.where)
         if calibration_id is None:
             return
-        transforms, consumed = self._kalibr_extrinsics(entry, names, calibration_id)
+        hand_eye = entry.hand_eye
+        if hand_eye is None:
+            transforms, consumed = self._kalibr_extrinsics(entry, names, calibration_id)
+        else:
+            transforms, consumed = self._hand_eye(hand_eye, calibration_id)
+        launch = hand_eye is not None and hand_eye.launch
         flat = Flattener(self.cite, self.max_array)
-        parameters = flat.run(item, consumed)
+        parameters = flat.run(item, consumed) if not launch else ()
+        if hand_eye is not None and launch and not transforms:
+            parameters = self._launch_args(hand_eye)
         if fmt in (CalibrationFormat.OPENCV_YAML, CalibrationFormat.OPENCV_XML):
             self._opencv_extrinsics(item, calibration_id)
         self._gaps(flat.gaps, item, calibration_id)
         for transform in transforms:
             self.out.records.append(transform)
         self.transforms.extend(transforms)
-        subject = (
-            Known(entry.subject, self.cite(entry.subject_where))
+        kind = AssertionKind.STATED if entry.stated else AssertionKind.OBSERVED
+        subject: Knowledge[str] = (
+            Known(entry.subject, self.cite(entry.subject_where, kind))
             if entry.subject is not None and entry.subject_where is not None
             else Unknown()
         )
+        if launch and transforms:  # MoveIt names the camera's frame only in its args
+            subject = Known(transforms[0].child.frame_id, transforms[0].provenance)
         if not parameters and not transforms:
             self.finding(
                 "not_calibration",
@@ -158,7 +180,7 @@ class Emitter:
             machine=Unknown(),
             hardware_revision=Unknown(),
             subject=subject,
-            performed=Unknown(),
+            performed=self._performed(entry.performed, calibration_id),
             valid_from=Unknown(),
             valid_until=Unknown(),
             parameters=parameters,
@@ -166,6 +188,105 @@ class Emitter:
         )
         self.out.records.append(calibration)
         self.calibrations.append((calibration, entry))
+
+    # --- When it was calibrated (ADR 0073 §3) -------------------------------------------------
+
+    def _performed(self, item: Item | None, calibration_id: RecordId) -> Knowledge[Timestamp]:
+        """The time an OpenCV file states, on its own clock; ``Unknown`` where it states none."""
+        if item is None:
+            return Unknown()
+        cited = self.cite(item.where, AssertionKind.STATED)
+        text = item.text if item.kind is Kind.SCALAR else None
+        civil = read_time(text.strip()) if text is not None else "it is not text"
+        if not isinstance(civil, Civil):
+            self.finding(
+                "time_not_read",
+                FindingCategory.UNSUPPORTED,
+                Severity.WARNING,
+                item.where,
+                f"{item.name} is not read as a time: {civil}; performed is Unknown and the text"
+                " stays a parameter",
+                {"key": item.name},
+                [calibration_id],
+            )
+            return Unknown(cited)
+        domain_id = self._id(TimestampDomain.kind, item.where)
+        if domain_id is None:  # pragma: no cover - one time per calibration entry
+            return Unknown(cited)
+        self.out.records.append(
+            TimestampDomain(
+                id=domain_id,
+                provenance=cited,
+                field=item.name,
+                scope=(),
+                role=Known(ClockRole.DOCUMENT),
+                resolution=Known(civil.resolution),
+                epoch=Known(Epoch.UNIX),
+                timescale=Known(Timescale.POSIX) if civil.instant else Unknown(),
+                declared_monotonic=Unknown(),
+            )
+        )
+        return Known(Timestamp(civil.ticks, domain_id), cited)
+
+    # --- Hand-eye results (ADR 0073 §1, §2) ---------------------------------------------------
+
+    def _hand_eye(
+        self, hand_eye: HandEye, calibration_id: RecordId
+    ) -> tuple[list[FrameTransform], set[str]]:
+        """The result's transform: the robot frame its mode names is the parent, the camera's
+        frame the child; tf's meaning, the child's pose in the parent, is ``child_to_parent``."""
+        where = hand_eye.transform.where
+        declared = read_hand_eye(hand_eye)
+        if not isinstance(declared, Declared):
+            frame = declared.reason == "frame"
+            self.finding(
+                "frame_unresolved" if frame else "extrinsic_not_read",
+                FindingCategory.MISSING if frame else FindingCategory.UNREPRESENTABLE,
+                Severity.WARNING,
+                where,
+                f"the hand-eye transform is not emitted: {declared.message}; its values stay"
+                " parameters",
+                {"key": hand_eye.key or "args"},
+                [calibration_id],
+            )
+            return [], set()
+        record = self._id(FrameTransform.kind, where)
+        if record is None:  # pragma: no cover - one transform per hand-eye entry
+            return [], set()
+        cited = self.cite(where)
+        unit: Knowledge[Unit] = Known(_METRE, cited) if hand_eye.launch else Unknown()
+        transform = FrameTransform(
+            id=record,
+            provenance=cited,
+            parent=FrameRef(declared.parent, self.graph),
+            child=FrameRef(declared.child, self.graph),
+            direction=Known(TransformDirection.CHILD_TO_PARENT, cited),
+            value=Pose(
+                Translation(declared.translation, unit),
+                Quaternion(declared.rotation, Known(declared.order, cited), Unknown()),
+            ),
+            validity=STATIC,
+        )
+        if not declared.unit:
+            self.finding(
+                "quaternion_not_unit",
+                FindingCategory.INCONSISTENT,
+                Severity.WARNING,
+                where,
+                f"the hand-eye rotation's quaternion has norm {declared.norm!r}, not 1: it is"
+                " kept as declared, never normalised",
+                {"norm": repr(declared.norm)},
+                sorted((record, calibration_id)),
+            )
+        return [transform], ({hand_eye.key} if hand_eye.key else set())
+
+    def _launch_args(self, hand_eye: HandEye) -> tuple[CalibrationParameter, ...]:
+        """MoveIt's args as written, where they are no transform: the evidence stays citable."""
+        args = hand_eye.transform.attribute("args")
+        if not args:
+            return ()
+        cited = self.cite(hand_eye.transform.where)
+        return (CalibrationParameter("node/args", Known(args, cited), NotApplicable()),)
 
     # --- Kalibr extrinsics --------------------------------------------------------------------
 

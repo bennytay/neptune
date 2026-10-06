@@ -4,7 +4,8 @@ A format is claimed only where its required keys are all there, never from a nam
 word: a ``camera_matrix`` alone is in a hundred file kinds. ROS ``camera_info`` and OpenCV's
 FileStorage both write ``camera_matrix``; OpenCV's marks itself (a ``%YAML:1.0`` header, an
 ``opencv-matrix`` tag or ``type_id``), so a document that carries the mark is OpenCV's and one
-that does not is ROS's. Nothing is guessed from the values.
+that does not is ROS's. Nothing is guessed from the values. Hand-eye results (ADR 0073) are
+told by the keys their tools write (``_handeye``).
 """
 
 import re
@@ -12,6 +13,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from neptune.adapters.calibration._handeye import (
+    TRACKING,
+    HandEye,
+    easy_handeye,
+    easy_handeye2,
+    moveit_launch,
+)
 from neptune.adapters.calibration._items import Item, Kind
 from neptune.model.provenance import Locator
 
@@ -22,6 +30,9 @@ class CalibrationFormat(StrEnum):
     KALIBR = "kalibr"  # camchain, camchain-imucam and imu YAML
     OPENCV_YAML = "opencv_yaml"  # cv::FileStorage YAML
     OPENCV_XML = "opencv_xml"  # cv::FileStorage XML
+    EASY_HANDEYE = "easy_handeye"  # ROS easy_handeye's result YAML (flat, or parameters from 0.3)
+    EASY_HANDEYE2 = "easy_handeye2"  # ROS 2 easy_handeye2's .calib (the message as YAML)
+    MOVEIT_HANDEYE = "moveit_handeye"  # MoveIt Calibration's saved camera pose launch file
 
 
 # ROS camera_info (camera_calibration_parsers): camera_matrix{rows, cols, data} and one of these.
@@ -53,6 +64,10 @@ OPENCV_KEYS: Final = frozenset(
         "M2",
     )
 )
+# Where an OpenCV file states what it calibrated and when (ADR 0073 §3): the names OpenCV's own
+# samples write (``calibration_Time`` in the tutorial's older output) and ROS's ``camera_name``.
+OPENCV_SUBJECT: Final = "camera_name"
+OPENCV_TIMES: Final = ("calibration_time", "calibration_Time")
 # Kalibr's extrinsics, with the frame the key names besides the entry's own (its documented
 # meaning: ``T_cam_imu`` maps IMU coordinates into the camera's).
 KALIBR_IMU_FRAME: Final = "T_cam_imu"
@@ -67,6 +82,9 @@ class Entry:
     subject: str | None  # a declared name, or None
     subject_where: Locator | None = None  # where the name is written
     camera: bool = False  # a Kalibr camera entry: it may declare extrinsics
+    stated: bool = False  # the subject is an authored statement (OpenCV's camera_name)
+    performed: Item | None = None  # the scalar stating when it was calibrated
+    hand_eye: HandEye | None = None  # a hand-eye result's declaration
 
 
 @dataclass(frozen=True)
@@ -92,6 +110,22 @@ def recognise(root: Item, *, opencv: bool = False, xml: bool = False) -> Recogni
     ``%YAML:1.0`` line OpenCV writes, or (``xml``) the root element is ``opencv_storage``."""
     if root.kind is not Kind.MAPPING:
         return None
+    if xml:
+        launch = moveit_launch(root)
+        if launch is not None:
+            return Recognised(
+                CalibrationFormat.MOVEIT_HANDEYE, (Entry(root, None, hand_eye=launch),)
+            )
+    for fmt, match in (
+        (CalibrationFormat.EASY_HANDEYE, easy_handeye),
+        (CalibrationFormat.EASY_HANDEYE2, easy_handeye2),
+    ):
+        found = None if xml else match(root)
+        if found is not None:
+            tracking = found.holder.child(TRACKING)
+            subject = _text(tracking) or None
+            where = tracking.where if tracking is not None and subject is not None else None
+            return Recognised(fmt, (Entry(root, subject, where, hand_eye=found),))
     entries: list[Entry] = []
     for child in root.children:
         if child.kind is not Kind.MAPPING:
@@ -110,7 +144,12 @@ def recognise(root: Item, *, opencv: bool = False, xml: bool = False) -> Recogni
     if opencv or any(child.is_matrix for child in root.children):
         if names & OPENCV_KEYS:
             fmt = CalibrationFormat.OPENCV_XML if xml else CalibrationFormat.OPENCV_YAML
-            return Recognised(fmt, (Entry(root, None),))
+            named = root.child(OPENCV_SUBJECT)
+            subject = _text(named) or None
+            where = named.where if named is not None and subject is not None else None
+            when = next((t for t in map(root.child, OPENCV_TIMES) if t is not None), None)
+            entry = Entry(root, subject, where, stated=True, performed=when)
+            return Recognised(fmt, (entry,))
         return None
     if _has_matrix(root.child("camera_matrix")) and any(k in names for k in ROS_COMPANIONS):
         named = root.child("camera_name")
@@ -136,6 +175,8 @@ HINT: Final = re.compile(
             *(rf"\b{re.escape(key)}\b" for key in KALIBR_IMU_KEYS),
             *(rf"\b{re.escape(key)}\b" for key in ROS_COMPANIONS),
             *(rf"\b{re.escape(key)}\b" for key in ROS_MESSAGE_KEYS),
+            r"\btracking_base_frame\b",
+            r"\bstatic_transform_publisher\b",
         ]
     )
 )

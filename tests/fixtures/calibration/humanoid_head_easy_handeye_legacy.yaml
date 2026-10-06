@@ -1,0 +1,11 @@
+eye_on_hand: false
+robot_base_frame: torso_link
+tracking_base_frame: head_camera_link
+transformation:
+  qw: 0.2503800040544415
+  qx: 0.0
+  qy: 0.5808885842268646
+  qz: -0.7745181123024862
+  x: 0.0614
+  y: 0.0027
+  z: 0.4418

@@ -224,6 +224,8 @@ For sources that describe machines (manifests, robot descriptions, flight logs, 
   direction `Ambiguous` unless the format says which way they map. The `calibration` adapter (ADR 0055) is the
   worked example: ROS `camera_info`, Kalibr and OpenCV `FileStorage`, claimed by required keys at `VERIFIED`.
   An extrinsic whose frames the file does not name stays a parameter with a `frame_unresolved` finding.
+  Hand-eye results (easy_handeye, easy_handeye2, MoveIt Calibration) are a `Pose` transform from the robot
+  frame to the camera's, and a time the file states is `performed` on its own `TimestampDomain` (ADR 0073).
 
 ## Configuration (ADR 0037)
 
