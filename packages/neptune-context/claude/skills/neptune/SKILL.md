@@ -49,6 +49,13 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
   The `Items:` footer maps `I6` to the item id (and a claim's id); the `Evidence:` footer maps
   `E6` to the exact source. **Every fact you repeat must keep its keys**, for example
   "ARM-3A ran configuration cfg-c3-1.5 [I6][E6]". Never state anything the answer does not hold.
+- `neptune_why` answers an indented outline, root claim first: `Corroborated by`, `Conflicts with
+  (resolver finding ...)` and `Alternative reading` lines, each citing its claim and sources. Say
+  "Memory holds this, and these sources agree or conflict", never a cause: Neptune states
+  relations, not reasons. `neptune_diff` answers lines grouped by predicate: `Opened`, `Closed`,
+  `Superseded` (with `Narrowed to` or `Replaced by` beneath) and `Between`, which held only
+  between the two points. A line that names a claim without a citation says it is not carried
+  in the answer: ask again with a larger `max_items` or call `neptune_why` on it.
 - A sentence that opens with `INFERRED (model ..., confidence ...)` is an inference, not
   evidence. Say so ("Neptune infers ...").
 - **What changed** comes first when Memory superseded a fact after the answer's snapshot. Say
