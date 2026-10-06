@@ -288,3 +288,29 @@ def test_an_acceptance_corpus_generator_runs_the_platform_lock_test(path: str) -
 def test_the_corpus_inputs_exist() -> None:
     root = Path(__file__).parents[2]
     assert all((root / path).is_file() for path in ci_plan.CORPUS_INPUTS)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "packages/neptune-deploy/src/neptune_deploy/lifecycle/mapper.py",
+        "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/cmms_generic.json",
+        "packages/neptune-deploy/src/neptune_deploy/__main__.py",
+        "packages/neptune-deploy/pyproject.toml",
+    ],
+)
+def test_a_deploy_stage_input_runs_the_platform_tests_that_map_the_corpus(path: str) -> None:
+    members = {**MEMBERS, "neptune-deploy": frozenset()}
+    packages = ci_plan.plan([path], members).packages
+    assert "neptune-platform" in packages and "neptune-deploy" in packages
+
+
+def test_other_deploy_code_does_not_run_the_platform() -> None:
+    members = {**MEMBERS, "neptune-deploy": frozenset()}
+    path = "packages/neptune-deploy/src/neptune_deploy/packs/render.py"
+    assert "neptune-platform" not in ci_plan.plan([path], members).packages
+
+
+def test_the_deploy_stage_inputs_exist() -> None:
+    root = Path(__file__).parents[2]
+    assert all((root / path).exists() for path in ci_plan.DEPLOY_STAGE_INPUTS)

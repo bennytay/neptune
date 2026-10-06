@@ -18,6 +18,9 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
 * ``scripts/contracts.py`` is plumbing: every job runs it;
 * the acceptance corpus's imported generators (``CORPUS_INPUTS``) also run ``neptune-platform``,
   whose lock test fails when their bytes change (platform ADR 0007 section 3);
+* the code the harness's deploy stage runs (``DEPLOY_STAGE_INPUTS``: Deploy's lifecycle mapper,
+  its presets and templates, and its command line) also runs ``neptune-platform``, whose tests map
+  the acceptance corpus with it (platform ADR 0008);
 * the template smoke runs when ``packages/_template/**`` or ``scripts/new-package.sh`` changed.
 
 Writes ``compiler``, ``packages`` (a JSON list) and ``template`` to ``$GITHUB_OUTPUT`` when set, and
@@ -57,6 +60,13 @@ CORPUS_INPUTS = frozenset(
         "tests/fixtures/rosbag2/make_rosbag2.py",
         "tests/fixtures/pdf/make_pdfs.py",
     }
+)
+# What the harness's deploy stage runs (``python -m neptune_deploy map``, platform ADR 0008): a change
+# here can turn the deploy stage red, so the platform's tests that map the corpus must run on it.
+DEPLOY_STAGE_INPUTS = (
+    "packages/neptune-deploy/src/neptune_deploy/lifecycle/",
+    "packages/neptune-deploy/src/neptune_deploy/__main__.py",
+    "packages/neptune-deploy/pyproject.toml",
 )
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
@@ -142,6 +152,7 @@ def plan(
         or any(MEMBER_DIRS.get(p.split("/", 1)[0] + "/") == name for p in changed)
         or (compiler and not core and name == HARNESS_MEMBER)
         or (name == HARNESS_MEMBER and any(p in CORPUS_INPUTS for p in changed))
+        or (name == HARNESS_MEMBER and any(p.startswith(DEPLOY_STAGE_INPUTS) for p in changed))
     }
     projects = {_normalise(name): name for name in members}
     grew = True

@@ -111,6 +111,37 @@ def test_the_code_the_real_stages_run_is_inside_the_pull_request_paths() -> None
     assert not _covered("packages/neptune-ledger/tests/test_ledger_registration.py")
 
 
+def test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platform_job() -> None:
+    """The deploy stage runs ``python -m neptune_deploy map`` with the corpus's declared presets and
+    templates (platform ADR 0008): a change to any of them runs the harness, and the required
+    check's plan runs this package's job, whose tests map the corpus."""
+    import importlib.util
+    import json
+    import sys
+
+    from harness import acceptance
+
+    lifecycle = "packages/neptune-deploy/src/neptune_deploy/lifecycle"
+    watched = [
+        f"{lifecycle}/mapper.py",
+        f"{lifecycle}/presets/cmms_generic.json",
+        "packages/neptune-deploy/src/neptune_deploy/__main__.py",
+        "packages/neptune-deploy/pyproject.toml",
+        *json.loads(acceptance.DEPLOY.read_text(encoding="utf-8"))["templates"],
+    ]
+    spec = importlib.util.spec_from_file_location(
+        "workflow_ci_plan", REPO / ".github" / "scripts" / "ci_plan.py"
+    )
+    assert spec is not None and spec.loader is not None
+    ci_plan = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = ci_plan
+    spec.loader.exec_module(ci_plan)
+    for path in watched:
+        assert _covered(path), path
+        assert path.startswith(ci_plan.DEPLOY_STAGE_INPUTS), path
+    assert not _covered("packages/neptune-deploy/src/neptune_deploy/packs/render.py")
+
+
 def test_every_contracts_owner_tests_are_inside_the_pull_request_paths() -> None:
     registry = contracts.registry()
     checked = 0
