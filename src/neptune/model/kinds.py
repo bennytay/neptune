@@ -86,12 +86,6 @@ from neptune.model.reference import (
     timestamp_domain_from_json,
 )
 from neptune.model.run import Run, Stream, run_from_json, stream_from_json
-from neptune.model.status import (
-    SafetyState,
-    StatusReport,
-    safety_state_from_json,
-    status_report_from_json,
-)
 from neptune.model.source import (
     SourceAbsence,
     SourceArtifact,
@@ -99,6 +93,12 @@ from neptune.model.source import (
     source_absence_from_json,
     source_artifact_from_json,
     source_revision_from_json,
+)
+from neptune.model.status import (
+    SafetyState,
+    StatusReport,
+    safety_state_from_json,
+    status_report_from_json,
 )
 from neptune.model.task import (
     Requirement,
