@@ -20,8 +20,11 @@ had no configuration, and "what changed since the last good run" could not come 
 
 ## Decision
 
-1. **The node.** A bound `configuration_snapshot` that no thread answers (no stand-in cites its anchor, and the
-   catalog says it opens none) names `thread:<thread id>`. The thread id is that of the anchored `configuration`
+1. **The node.** A bound `configuration_snapshot` that no thread answers names `thread:<thread id>`. That
+   requires all three: no stand-in cites its anchor, the catalog answers `found` with no configuration thread, and
+   the anchor's source is a content id (the Ledger anchors nothing else, Ledger ADR 0003 §1.2). A reader that
+   answers no thread queries keeps ADR 0010's rule unchanged (`configuration.unthreaded_id`, ADR 0018 §2.3), and
+   so does a snapshot cited by an external object ref. The thread id is that of the anchored `configuration`
    thread its record-level evidence keys, by the Ledger's published rule (Ledger ADR 0003 §1.3):
    `"sha256:" + hex(sha256(canonical JSON of {"key": anchor, "kind": "configuration"}))`
    (`threads.anchored_node`). This is the node ADR 0018 §2.1 gives a catalog-answered anchored configuration

@@ -17,9 +17,9 @@ import pytest
 
 from memory_calibration_records import calibration
 from memory_catalog_threads import anchored, answers, catalog, package_id, subject, thread_id
-from memory_configuration_records import binding, hardware, run
+from memory_configuration_records import binding, hardware, run, run_thread
 from memory_identity_records import civil_domain
-from neptune.model.ids import LogicalId
+from neptune.model.ids import ExternalObjectRef, LogicalId
 from neptune.model.run import run_from_json
 from neptune.model.time import Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
@@ -210,6 +210,33 @@ def test_a_pin_naming_a_record_of_another_kind_stays_unknown() -> None:
     _unknown_citing(result, pin)
     (finding,) = [f for f in result.findings if f.code == "configuration.dangling_binding"]
     assert finding.details["held_as"] == "hardware_configuration"
+
+
+def test_a_snapshot_cited_by_an_external_object_names_no_node() -> None:
+    """The Ledger anchors a thread only on a content id (Ledger ADR 0003 §1.2): a snapshot whose
+    evidence is an object store's ref could never open one, so no node is computed for it."""
+    records, pin, snapshot = _manipulator()
+    external = ExternalObjectRef("fake_store", "cell-c3/params.yaml", "etag-1").to_json()
+    evidence = {**snapshot["provenance"]["evidence"], "source": external}  # type: ignore[index]
+    moved = {**snapshot, "provenance": {**snapshot["provenance"], "evidence": evidence}}  # type: ignore[dict-item]
+    swapped = [moved if r is snapshot else r for r in records]
+    result = consolidate(catalog({package_id("manipulator_cell"): swapped}))
+    _unknown_citing(result, pin)
+    (finding,) = [f for f in result.findings if f.code == "configuration.unthreaded_id"]
+    assert set(finding.records) == {pin["id"], snapshot["id"]}
+
+
+def test_a_ledger_answering_no_thread_queries_keeps_the_stand_in_rule() -> None:
+    """With no catalog answer, whether the Ledger holds the snapshot is not covered: ADR 0010's
+    rule applies unchanged (ADR 0018 §2.3), so a run named by a stand-in thread stays unknown."""
+    records, pin, snapshot = _manipulator()
+    shift = by_id(records)[pin["run"]]
+    stand_in = run_thread(None, str(shift["provenance"]["evidence"]["source"]))  # type: ignore[index]
+    stand_in["evidence"] = [shift["provenance"]["evidence"]]  # type: ignore[index]
+    result = consolidate(StubLedger({package_id("manipulator_cell"): (1, [*records, stand_in])}))
+    _unknown_citing(result, pin)
+    (finding,) = [f for f in result.findings if f.code == "configuration.unthreaded_id"]
+    assert set(finding.records) == {pin["id"], snapshot["id"]}
 
 
 def test_two_pins_naming_different_documents_for_one_run_are_candidates() -> None:

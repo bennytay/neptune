@@ -980,14 +980,17 @@ def _snapshot_configurations(
     A snapshot's node is its anchored configuration thread's (ADR 0010 §1). The Ledger's thread
     table has no row for a ``configuration_snapshot`` (Ledger ADR 0003 §2), so for one no thread
     cites, the node is the anchored configuration thread its record-level evidence keys by the
-    Ledger's published rule (ADR 0022): the configuration the document's bytes declare. Only when
-    the Ledger holds the snapshot: an ``unknown_record`` answer leaves it unresolved.
+    Ledger's published rule (ADR 0022 §1), and only where that thread could exist: the catalog
+    answers that it holds the snapshot (``found``), and its evidence source is a content id. An
+    ``unknown_record`` answer is ``uncatalogued_record``; a reader answering no thread queries, or
+    a source that is not a content id, keeps ADR 0010's rule (``unthreaded_id``).
     Transitional: delete the ``CONFIGURATION_SNAPSHOT`` branch once the Ledger threads snapshots
     (ADR 0022, Consequences).
     """
     configurations = view.anchored(NodeType.CONFIGURATION, snapshot.anchor, snapshot.record)
     if not configurations and snapshot.kind == CONFIGURATION_SNAPSHOT:
-        if view.catalog.holds(snapshot.record) is False:
+        held = view.catalog.holds(snapshot.record)
+        if held is False:
             view.findings.append(
                 _finding(
                     "uncatalogued_record",
@@ -998,9 +1001,10 @@ def _snapshot_configurations(
                 )
             )
             return ()
-        node = anchored_node(NodeType.CONFIGURATION, snapshot.anchor)
-        view.unthreaded_anchors.add(node)
-        return (node,)
+        if held is True and isinstance(snapshot.anchor.source, str):  # a content id
+            node = anchored_node(NodeType.CONFIGURATION, snapshot.anchor)
+            view.unthreaded_anchors.add(node)
+            return (node,)
     if len(configurations) != 1:
         view.findings.append(
             _finding(
