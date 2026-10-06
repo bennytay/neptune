@@ -10,10 +10,12 @@ consumes nothing, and an entry in `contracts/packages.toml`.
 
 ## Publishes
 
-`query-packet` **1.0.0, stable** (`contracts/query-packet/v1.0.0/`), consumed by Deploy and Learn. Fixed by
+`query-packet` **1.1.0, stable** (`contracts/query-packet/v1.1.0/`), consumed by Deploy and Learn. Fixed by
 [ADR 0002](adr/0002-query-language.md) (query), [ADR 0003](adr/0003-the-context-packet.md) (packet) and
 [ADR 0006](adr/0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) (publication, answer checks, C1 gate
-amendments).
+amendments). 1.1.0 is the additive pin bump of [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md):
+the subject-kind and predicate enums and the embedded Memory definitions follow graph-schema 1.6.0, and the
+packet reader refuses values beyond that pin.
 
 - **Owner module** `neptune_context.contract`.
   - `contract_schema()` is the registry export. It embeds both halves' schemas verbatim, each as its own
@@ -54,8 +56,8 @@ and this file in step.
 
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
-| `catalog-api` | `neptune-ledger` | `CATALOG_API_VERSION = "1.6.0"` | `neptune_ledger.api.CATALOG_API_VERSION`; read through `neptune_ledger.api.CatalogApi` | Ledger ADR 0004; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md) |
-| `graph-schema` | `neptune-memory` | `GRAPH_SCHEMA_VERSION = "1.0.0"` | `neptune_memory.schema.GRAPH_SCHEMA_VERSION` (registry major 1); read through `neptune_memory.schema.reader.MemoryReader` | Memory ADR 0006; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md) |
+| `catalog-api` | `neptune-ledger` | `CATALOG_API_VERSION = "1.7.0"` | `neptune_ledger.api.CATALOG_API_VERSION`; read through `neptune_ledger.api.CatalogApi` (`query(spec)` with frame windows and budgets, Ledger ADR 0016) | Ledger ADR 0004, 0016; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md) |
+| `graph-schema` | `neptune-memory` | `GRAPH_SCHEMA_VERSION = "1.6.0"` | `neptune_memory.schema.GRAPH_SCHEMA_VERSION` (registry major 1); read through `neptune_memory.schema.reader.MemoryReader` | Memory ADR 0006; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md) |
 
 The vocabularies and definitions Context publishes from these contracts (subject kinds, predicate names, the
 Memory definitions the packet schema embeds) come from `src/neptune_context/pinned.json`, a snapshot of the
