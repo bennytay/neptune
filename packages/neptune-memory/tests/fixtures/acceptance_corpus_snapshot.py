@@ -4,32 +4,35 @@
 writes for the acceptance corpus. Nothing in it is hand-written:
 
 1. ``harness.acceptance`` generates the corpus (versioned and locked by Platform).
-2. The compiler's SDK ingests it, as the harness's compiler stage does, into one package, and reads
-   the package back verified.
-3. Deploy's lifecycle mapper (``python -m neptune_deploy map``, a subprocess: Memory never imports
-   Deploy) maps that package's tables with the presets in ``DEPLOY_PRESETS`` into a second package
-   of lifecycle records: change records, maintenance events, authorisation envelopes, incidents.
-   ``deploy_map`` is the one call to swap for the harness's Deploy stage when it lands.
-4. A real Ledger catalog (``neptune_ledger``'s ``PostgresCatalog`` on a throwaway PostgreSQL 16
-   from the ``pgserver`` wheel, as the Ledger's own tests run it) registers the compiler's package
-   at transaction 1 and Deploy's at 2. Its ``threads_of`` answer for every record id goes into the
+2. The harness's own ``compiler`` and ``deploy`` stages run over it (``harness.run.run_stage`` with
+   ``harness.stages.STAGES``; Platform ADR 0008), exactly as ``python -m harness`` runs them. The
+   compiler stage writes package ``<case>`` and checks it; the deploy stage maps it with the
+   presets and templates the corpus declares (``harness/acceptance/deploy.json``) into package
+   ``<case>.deploy`` of lifecycle records: change records, maintenance events, authorisation
+   envelopes, incidents. Both must run real and ok, or nothing is written. Memory chooses no
+   preset: a Deploy mapping joins the snapshot when the corpus declares it.
+3. A real Ledger catalog (``neptune_ledger``'s ``PostgresCatalog`` on a throwaway PostgreSQL 16
+   from the ``pgserver`` wheel, as the Ledger's own tests run it) registers ``<case>`` at
+   transaction 1 and ``<case>.deploy`` at 2, the order the harness's ledger stage registers them.
+   The harness's ledger stage registers and verifies but keeps no catalog to ask, so this one is
+   Memory's own. Its ``threads_of`` answer for every record id goes into the
    export (catalog-api 1.7.0, without the bookkeeping ``api_version``, ``as_of`` and ``findings``:
    ADR 0018 §1). Memory reads thread membership only from these; it imports no Ledger code.
-5. Both packages become a Ledger export (``neptune_memory.ledger.LedgerExport``, the ``memory``
+4. Both packages become a Ledger export (``neptune_memory.ledger.LedgerExport``, the ``memory``
    CLI's input; ADR 0016 §4). Each holds its id, ``schema_version`` and the lines of every
    ``records/<kind>.jsonl`` its manifest lists, in file order: what the Ledger catalogs. The
    compiler package also contributes its ``derived/clock_mapping`` lines (the compiler's estimated
    clock fits, ``assertion_kind: inferred``, root ADR 0060), which the catalog does not expose
    yet (``threads_of`` answers ``unknown_record`` for them); no other ``derived/`` table is read.
-6. ``memory rebuild --snapshot 2 --with-estimates`` consolidates it with the deterministic
+5. ``memory rebuild --snapshot 2 --with-estimates`` consolidates it with the deterministic
    consolidators and ``memory.time_estimates`` (ADR 0017) and writes the graph document with the
    codec; that file is copied byte for byte. Estimates become ``inferred`` claims only.
 
-Deterministic: the corpus, the compiler, Deploy and Memory read no clock, randomness or network, and
-no transform records a host-bound library version (compiler #139 dropped expat), so the same code
-gives the same bytes on any host. What the bytes still depend on is pinned by the repository: the
-corpus version, adapter versions, the libraries ``uv.lock`` pins and the Python minor version
-``.python-version`` pins, all of which transform records name.
+Deterministic: the corpus, the harness, the compiler, Deploy and Memory read no clock, randomness or
+network, and no transform records a host-bound library version (compiler #139 dropped expat), so
+the same code gives the same bytes on any host. What the bytes still depend on is pinned by the
+repository: the corpus version, adapter versions, the libraries ``uv.lock`` pins and the Python
+minor version ``.python-version`` pins, all of which transform records name.
 ``acceptance_corpus.environment.json`` records them, so a failing regeneration says which moved.
 ``tests/test_acceptance_snapshot_memory.py`` regenerates and compares, byte for byte.
 
@@ -48,14 +51,12 @@ import argparse
 import importlib
 import io
 import json
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from neptune.identity import canonical_json
-from neptune.sdk import Neptune
 from neptune.sdk.result import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport, ThreadsOf, threads_of_from_json
@@ -73,19 +74,23 @@ TENANT: Final = "acceptance"
 COMPILED_AT: Final = 1  # the compiler's package: the first registration in a fresh catalog
 MAPPED_AT: Final = 2  # Deploy's lifecycle package, registered after it
 HEAD: Final = MAPPED_AT
-# Deploy's shipped mappings for the corpus's CMMS, ServiceNow, zone-register and ticket exports.
-# Deploy's arm-cell incident template joins as a --template once Deploy ships it.
-DEPLOY_PRESETS: Final = ("cmms_generic", "jira_json", "register_zone", "servicenow_csv")
+# The harness stages that make the packages, in order: the compiler's, then Deploy's mapping of it.
+HARNESS_STAGES: Final = ("compiler", "deploy")
 # The derived/ table read beside records/: the compiler's estimated clock mappings (inferred).
 DERIVED_KINDS: Final = ("clock_mapping",)
 
 
-def acceptance() -> Any:
-    """``harness.acceptance``, Platform's corpus module (the repository root is not on the path of
-    a package's tests; it is imported, never edited)."""
+def harness(module: str) -> Any:
+    """``harness.<module>``, Platform's (the repository root is not on the path of a package's
+    tests; it is imported, never edited)."""
     if str(REPO) not in sys.path:
         sys.path.insert(0, str(REPO))
-    return importlib.import_module("harness.acceptance")
+    return importlib.import_module(f"harness.{module}")
+
+
+def acceptance() -> Any:
+    """``harness.acceptance``, Platform's corpus module."""
+    return harness("acceptance")
 
 
 def corpus_label() -> str:
@@ -114,15 +119,25 @@ def exported(root: Path, registered_at: int, derived: tuple[str, ...] = ()) -> E
     return ExportedPackage(str(package.id), package.manifest.version, registered_at, tuple(records))
 
 
-def deploy_map(package: Path, out: Path) -> Path:
-    """Deploy's lifecycle package for ``package``: its CLI, in a subprocess (the harness's Deploy
-    stage replaces this call)."""
-    argv = [sys.executable, "-m", "neptune_deploy", "map", str(package), "--out", str(out)]
-    argv += [arg for name in DEPLOY_PRESETS for arg in ("--preset", name)]
-    done = subprocess.run(argv, capture_output=True, text=True, check=False)
-    if done.returncode != 0:
-        raise RuntimeError(f"neptune_deploy map exited {done.returncode}: {done.stderr[-2000:]}")
-    return out
+def harness_packages(work: Path) -> tuple[Path, Path]:
+    """The acceptance corpus's packages, ``<case>`` and ``<case>.deploy``, as the harness's
+    compiler and deploy stages write them under ``work``. A stage that runs as a stub, or reports
+    a problem, stops the snapshot: it is never made from goldens or from a partial mapping."""
+    corpus, stages, run = harness("corpus"), harness("stages"), harness("run")
+    _, cases = corpus.select(into=work / "corpus")
+    if len(cases) != 1:
+        raise RuntimeError(f"the acceptance corpus is {len(cases)} cases, not one")
+    ctx = stages.Context(registry=harness("contracts").registry(), work=work, cases=cases)
+    by_id = {stage.id: stage for stage in stages.STAGES}
+    for name in HARNESS_STAGES:
+        entry = run.run_stage(by_id[name], ctx, services_up=False, upstream_ok=True)
+        if entry["mode"] != "real" or entry["status"] != "ok":
+            why = "; ".join(entry["problems"]) or entry["reason"]
+            raise RuntimeError(
+                f"the harness's {name} stage ran {entry['mode']}, {entry['status']}: {why}"
+            )
+    (case,) = cases
+    return ctx.package_root(case.id), ctx.deploy_root(case.id)
 
 
 # The bookkeeping fields of a catalog answer: when and by which version it was answered (the
@@ -181,22 +196,17 @@ def catalog_threads(work: Path, roots: tuple[Path, ...], record_ids: list[str]) 
 
 
 def ledger_export(work: Path) -> LedgerExport:
-    """The acceptance corpus compiled, then mapped by Deploy: a two-package Ledger export, with
-    the Ledger catalog's thread membership of every record."""
-    corpus = acceptance()
-    root = corpus.materialise(work / "corpus" / f"{corpus.NAME}-{corpus.VERSION}")
-    result = Neptune(work / "workspace").ingest(root, work / "package")
-    if not result.committed or result.destination is None:
-        raise RuntimeError(f"the compiler did not commit the acceptance corpus: {result.state}")
-    lifecycle = deploy_map(result.destination, work / "lifecycle")
+    """The harness's two packages of the acceptance corpus (compiled, then mapped by Deploy) as a
+    Ledger export, with the Ledger catalog's thread membership of every record."""
+    compiled, lifecycle = harness_packages(work)
     packages = (
-        exported(result.destination, COMPILED_AT, DERIVED_KINDS),
+        exported(compiled, COMPILED_AT, DERIVED_KINDS),
         exported(lifecycle, MAPPED_AT),
     )
     ids = sorted(
         {str(r["id"]) for p in packages for r in p.records if isinstance(r.get("id"), str)}
     )
-    threads = catalog_threads(work, (result.destination, lifecycle), ids)
+    threads = catalog_threads(work, (compiled, lifecycle), ids)
     from neptune_ledger.api import CATALOG_API_VERSION
 
     return LedgerExport(

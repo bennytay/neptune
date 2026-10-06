@@ -31,15 +31,16 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
     (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
-    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 1.0.0. The pipeline:
-    1. The SDK compiles the corpus into one package, registered at tx 1.
-    2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
-       `servicenow_csv` presets into a lifecycle package, registered at tx 2.
-    3. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers both and
-       answers `threads_of` for every record ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)).
-    4. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
+    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
+       Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
+       Both stages must run real and ok. Memory picks no preset.
+    2. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers them at
+       tx 1 and tx 2 and answers `threads_of` for every record ([ADR 0018](adr/0018-thread-membership-from-the-catalog-api.md)).
+       The harness's ledger stage keeps no catalog to ask, so this one is the generator's own.
+    3. Both are exported as the records the Ledger catalogs, with those answers, plus the compiler's
        `derived/clock_mapping` fits.
-    5. The deterministic consolidators run, with `memory.time_estimates` alongside
+    4. The deterministic consolidators run, with `memory.time_estimates` alongside
        ([ADR 0017](adr/0017-estimated-clock-mappings-in-a-tenant-graph.md)).
 
     Copy the file byte for byte; do not edit it.
