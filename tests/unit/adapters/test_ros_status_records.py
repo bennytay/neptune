@@ -62,7 +62,7 @@ def test_msg_constants_are_kept_on_their_type_as_integers_and_booleans() -> None
     text = (
         "byte OK=0\nint8 UNKNOWN=-1\nuint8 NORMAL = 1\nint32 CODE=5 # a comment\n"
         "bool ENABLED=True\nstring LABEL=hello # kept verbatim, not a number\n"
-        "float64 PI=3.14\nint32 HEX=0x10\nuint8 level\n"
+        "float64 PI=3.14\nfloat64 TWO=2\nstring<=8 CODE=3\nint32 HEX=0x10\nuint8 level\n"
     )
     root = parse_definition(text.encode(), "ros2msg", "pkg/msg/Thing").root_type
     assert root.constants == (

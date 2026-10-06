@@ -103,6 +103,16 @@ _TYPE: Final = re.compile(
 _CONSTANT: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]*\s*=")
 _INTEGER: Final = re.compile(r"[+-]?[0-9]{1,20}")
 _BOOLEANS: Final = {"true": True, "false": False}
+_INTEGER_WIRES: Final = frozenset(
+    {"int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"}
+)
+# The .msg type names a kept constant may have: ROS 1's and ROS 2's integers (byte, char) and bool.
+_CONSTANT_TYPES: Final = frozenset(
+    name
+    for table in (_ROS1, _ROS2)
+    for name, wire in table.items()
+    if wire == "bool" or wire in _INTEGER_WIRES
+)
 _DIGITS: Final = 12  # a length beyond 10**12 is not one any payload holds
 
 
@@ -268,8 +278,8 @@ def _msg_constant(token: str, rest: str, limits: Limits) -> ConstantDef | None:
     """A ``.msg`` constant's name and integer or boolean value; ``None`` for any other."""
     name, _, value = rest.partition("=")
     name = name.strip()
-    if token in ("string", "wstring") or not _NAME.fullmatch(name):
-        return None
+    if token not in _CONSTANT_TYPES or not _NAME.fullmatch(name):
+        return None  # only an integer or boolean constant names a value a field may hold
     found = constant_value(_uncommented(value), token == "bool")
     return ConstantDef(_cap(name, limits, "constant name"), found) if found is not None else None
 
@@ -500,7 +510,10 @@ class _Idl:
         if at < 2:
             raise DefinitionError("malformed", "a const has a type and a name")
         name, kind = words[at - 1], " ".join(words[: at - 1])
-        value = constant_value("".join(words[at + 1 :]), kind == "boolean")
+        wire = _IDL.get(kind)
+        if wire is None or (wire != "bool" and wire not in _INTEGER_WIRES):
+            return  # only an integer or boolean constant names a value a field may hold
+        value = constant_value("".join(words[at + 1 :]), wire == "bool")
         if value is None or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             return
         self.fields += 1
