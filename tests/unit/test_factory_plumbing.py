@@ -308,10 +308,12 @@ def test_make_lint_gives_harness_to_the_platform_not_the_compiler(tmp_path: Path
     status, calls = _make(tmp_path, "lint")
     assert status == 0
     harness = str((tmp_path / "ws").resolve() / "harness")
+    docsite = str((tmp_path / "ws").resolve() / "docsite")  # the docs site (platform ADR 0012)
     by_dir = {c.split(" ", 1)[0].rsplit("/", 1)[-1]: c for c in calls if " format " in c}
-    assert by_dir["neptune-platform"].endswith(f"ruff format --check . {harness}")
-    assert "--extend-exclude harness" in by_dir["ws"] and harness not in by_dir["ws"]
-    assert not by_dir["alpha"].endswith("harness")
+    assert by_dir["neptune-platform"].endswith(f"ruff format --check . {harness} {docsite}")
+    for name, path in (("harness", harness), ("docsite", docsite)):
+        assert f"--extend-exclude {name}" in by_dir["ws"] and path not in by_dir["ws"]
+    assert not by_dir["alpha"].endswith(("harness", "docsite"))
 
 
 def _contracts_calls(calls: list[str]) -> list[str]:
