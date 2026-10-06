@@ -322,6 +322,10 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
 - A packet answer is cited sentences (`render.agent.render_answer`):
   - a header with the snapshot, the clock and the inference policy;
   - **What changed** first;
+  - a **why outline** and **what-changed lines** when the packet has trails ([ADR 0011](adr/0011-agent-renderer-trails-why-outlines-and-diff-change-lines.md)):
+    each node or change is a sentence naming its claim and citing its evidence, a conflict names the resolver
+    finding, a repeat and every cap or gap says so, and a diff says `held only between the two points` for a
+    version that opened and closed inside the window;
   - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`;
   - quantities by declared unit, findings and gaps;
   - an `Items:` footer (item and claim ids) and the `Evidence:` footer.
