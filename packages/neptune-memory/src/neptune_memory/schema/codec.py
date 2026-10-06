@@ -10,10 +10,11 @@ version and the resolver configuration that produced it (its *generation*, ADR 0
 
 from __future__ import annotations
 
+import itertools
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Final, NoReturn, TypeVar
 
 from neptune.identity.ids import config_hash
 from neptune.model.frames import TransformDirection, frame_ref_from_json
@@ -464,3 +465,104 @@ def _check_consistent(document: GraphDocument) -> None:
     foreign = [f.id for f in findings if f.provenance.config_hash != document.generation]
     if foreign:
         raise ValueError(f"findings from another generation: {foreign[:3]}")
+
+
+_GRAPH_KEYS: Final = frozenset(
+    {"claims", "findings", "generation", "graph_schema_version", "head", "kind", "resolver_config"}
+)
+# What decoding hostile JSON may raise: the compiler's readers raise more than ValueError.
+_UNREADABLE: Final = (ValueError, TypeError, KeyError, AttributeError)
+_T = TypeVar("_T")
+# The canonical sort key of a claim or a finding (a claim's last two parts are always empty).
+_Order = tuple[int, str, str, tuple[str, ...]]
+
+
+def _decode_all(
+    data: Mapping[str, JsonValue],
+    name: str,
+    decode: Callable[[JsonValue], _T],
+    order: Callable[[_T], _Order],
+    key: str,
+    problems: list[str],
+) -> None:
+    """Decode every item of the list ``name``: one problem per item that does not decode, and one
+    per decoded neighbour pair out of ``order``."""
+    items = data.get(name, [])
+    if not isinstance(items, list | tuple):
+        problems.append(f"{name} must be an array")
+        return
+    decoded: list[tuple[int, _T]] = []
+    for index, item in enumerate(items):
+        try:
+            decoded.append((index, decode(item)))
+        except _UNREADABLE as exc:
+            problems.append(f"{name}[{index}]: {exc}")
+    problems.extend(
+        f"{name}[{i}] is out of order: {name} are ordered by {key}"
+        for (_, a), (i, b) in itertools.pairwise(decoded)
+        if order(a) > order(b)
+    )
+
+
+def graph_problems(data: JsonValue) -> tuple[str, ...]:
+    """Every reason ``data`` is not a graph document, one line each; empty when it is one.
+
+    ``graph_from_json`` stops at the first problem. This reads on past it, so a consumer checking a
+    document it did not write sees at once every claim or finding whose id does not match its
+    content, every list out of canonical order and a wrong ``generation``. When nothing else is
+    wrong, the document's consistency (unique ids, no dangling reference, builds, head) is
+    ``graph_from_json``'s own last word. Empty exactly when ``graph_from_json`` accepts ``data``.
+    """
+    if not isinstance(data, Mapping):
+        return (f"the document must be a JSON object, got {type(data).__name__}",)
+    problems: list[str] = []
+    version = data.get("graph_schema_version")
+    # A 2.x document names its release; a 1.x one, read as written, does not (ADR 0019 §3).
+    keys = _GRAPH_KEYS | ({"graph_schema"} if version == GRAPH_SCHEMA_VERSION else set())
+    missing = sorted(keys - data.keys())
+    extra = sorted(data.keys() - keys - {"builds"})
+    if missing or extra:
+        problems.append(f"graph document: missing keys {missing}, unexpected keys {extra}")
+    if "kind" in data and data["kind"] != GRAPH_DOCUMENT_KIND:
+        problems.append(f"kind is {data['kind']!r}, not {GRAPH_DOCUMENT_KIND!r}")
+    if "graph_schema_version" in data and (
+        isinstance(version, bool) or version not in (_MAJOR_1, GRAPH_SCHEMA_VERSION)
+    ):
+        problems.append(f"graph_schema_version {version!r} is not supported")
+    release = data.get("graph_schema")
+    if version == GRAPH_SCHEMA_VERSION and "graph_schema" in data:
+        if not isinstance(release, str) or _RELEASE.fullmatch(release) is None:
+            problems.append(f"graph_schema {release!r} is not a version")
+        elif int(release.split(".")[0]) != GRAPH_SCHEMA_VERSION:
+            problems.append(f"graph_schema {release!r} is not a {GRAPH_SCHEMA_VERSION}.x release")
+    _decode_all(
+        data,
+        "claims",
+        claim_from_json,
+        lambda c: (c.recorded_at, c.id, "", ()),
+        "(recorded_at, id)",
+        problems,
+    )
+    _decode_all(
+        data,
+        "findings",
+        finding_from_json,
+        lambda f: (f.recorded_at, f.claim, f.code, f.others),
+        "(recorded_at, claim, code, others)",
+        problems,
+    )
+    config, given = data.get("resolver_config"), data.get("generation")
+    if "resolver_config" in data and not isinstance(config, Mapping):
+        problems.append("resolver_config must be a JSON object")
+    elif isinstance(config, Mapping) and "generation" in data:
+        expected = config_hash(dict(config))
+        if given != expected:
+            problems.append(
+                f"generation {given!r} does not match the resolver configuration ({expected})"
+            )
+    if not problems:
+        try:
+            graph_from_json(data)
+        except _UNREADABLE as exc:
+            problems.append(str(exc))
+    return tuple(problems)

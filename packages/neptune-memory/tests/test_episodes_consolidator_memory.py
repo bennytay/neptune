@@ -108,7 +108,7 @@ def _warehouse() -> tuple[dict[str, list[Record]], RecordId, dict[str, RecordId]
         missions.append(record)
         records[value] = rid
         if task is not None:
-            manifest.append(declaration(value, job(value), task=task))
+            manifest.append(declaration(value, rid, task=task))
     # Another robot on the same shift: AMR-07's tickets never reach its mission.
     other, records["J-2001"] = run(
         "missions/J-2001.mcap",
@@ -118,7 +118,7 @@ def _warehouse() -> tuple[dict[str, list[Record]], RecordId, dict[str, RecordId]
         logical_id=job("J-2001"),
     )
     missions.append(other)
-    manifest.append(declaration("J-2001", job("J-2001"), task=TOTE))
+    manifest.append(declaration("J-2001", records["J-2001"], task=TOTE))
     assist, records["INT-1187"] = intervention(
         "INT-1187",
         machines=[AMR07],
@@ -226,7 +226,7 @@ def _cell(
     ``action`` (offsets from T, on the console clock)."""
     boot_record, boot = domain("cell-3 arm boot", civil=False)
     console_record, console = domain("cell console", civil=True)
-    cycle, _ = run(
+    cycle, cycle_id = run(
         "cell-3/cycle-0412.bag",
         first=at(5 * SECOND, boot),
         last=at(65 * SECOND, boot),
@@ -238,7 +238,7 @@ def _cell(
         console_record,
         cycle,
         mapping("cell-3 ptp", boot, console, anchor=(0, EPOCH_NS), bound=bound),
-        declaration("cycle 0412", CYCLE, task=BIN_PICK),
+        declaration("cycle 0412", cycle_id, task=BIN_PICK),
     ]
     held = None
     if with_intervention:

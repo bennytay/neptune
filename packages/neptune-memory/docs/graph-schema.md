@@ -178,8 +178,9 @@ edge (`parent`, `child`), in the `representation` both declare, with the transfo
 - **Identity** (consolidator version 3) may join `event` nodes an assertion names (guarantee 11). A consumer that
   assumed `same_as` joins only thread nodes follows it for events too.
 - Shapes are otherwise unchanged. 1.x documents stay valid against their own published schemas, and
-  `schema.codec.graph_from_json` still reads one as written, labelled major 1 and never relabelled. A consumer
-  moves its lock to 2.0.0 when it reads `has_configuration` for changes; until then it is a major behind.
+  `schema.codec.graph_from_json` still reads one as written, labelled major 1 and never relabelled. As the
+  registry requires, the PR publishing 2.0.0 raises every in-repo consumer's lock to it (Context, Deploy), with
+  their contract tests passing at 2.0.0.
 
 ## Reading: `MemoryReader`
 
