@@ -31,8 +31,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json`. It is graph-schema **1.9.0**
     (`graph_schema_version: 1`, with `builds`), head 2, written by Memory's codec. It is what
-    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 1.0.0. The pipeline:
-    1. The SDK compiles the corpus into one package, registered at tx 1.
+    `memory rebuild --with-estimates` makes of the MVL-181 acceptance corpus 2.0.0. The pipeline:
+    1. The harness's compiler stage compiles the corpus into one package, registered at tx 1.
     2. `python -m neptune_deploy map` maps that package with the `cmms_generic`, `jira_json`, `register_zone` and
        `servicenow_csv` presets into a lifecycle package, registered at tx 2.
     3. A real Ledger catalog (`PostgresCatalog` on a throwaway PostgreSQL from `pgserver`) registers both and
@@ -48,55 +48,52 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
     `--check` compares instead of writing, and `--export FILE` also keeps the Ledger export for
     `memory rebuild`. `tests/test_acceptance_snapshot_memory.py` fails when a corpus, compiler or Memory change
     makes it stale.
-  - Record ids in it depend on the libraries the compiler's transforms record. The calibration adapter records
-    the expat bundled with CPython, so a different 3.12 patch release gives other finding record ids.
-    `acceptance_corpus.environment.json` lists those libraries. The committed files are made under the Python CI
-    installs, and CI requires a byte-identical regeneration. The byte check skips only on a local host whose
-    `expat` or `python` alone differ. It still checks the same facts with every record id masked. Any
-    other change fails: the corpus, an adapter or its version, or a library `uv.lock` pins. Cite corpus evidence
-    by source path and locator, not by record id.
+  - A regeneration is byte-identical on any host, in CI and locally. Record ids depend only on what the
+    repository pins: the corpus, adapter versions, the libraries in `uv.lock` and the Python minor version in
+    `.python-version`. `acceptance_corpus.environment.json` lists them, so a stale snapshot's test failure names
+    what moved. Cite corpus evidence by source path and locator, not by record id: a version bump renames record
+    ids.
   - Check a copy without importing `neptune_memory`: `memory verify FILE`. It exits 0 with a summary line. It
     exits 1 with one line per problem: a claim or finding id that does not match its content, a list out of
     canonical order, a wrong `generation`, a dangling reference. It exits 2 when the file is unreadable.
   - What it holds today:
-    - 12 runs from both sites, with `evidenced_by` and `has_member`.
-    - 67 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
+    - 12 runs from both sites, with `evidenced_by` and `has_member`, and from each run's `run_declaration` a
+      stated `recorded_by` machine and `at_site` site (the manifest declares no task).
+    - 97 `integrity_finding` claims on runs and streams. One is the `error` on LEG-01's truncated patrol of
       2026-09-14.
     - One event: Deploy's `incident_record` for the near-miss INC-C3-0004. Its claims are `event_kind`,
       `stated_severity`, `has_description` and `evidenced_by`.
     - 36 `maps_to` and 36 `clock_map` claims. These are the compiler's estimated fits, all `inferred`, and readers
       drop them with `include_inferred=False`. One is the cell PC's ≈ −96.7 s on 2026-09-14.
-    - Configuration chains from Deploy's lifecycle records, all `stated` and each citing its work orders:
-      - All 15 `maintenance_event`s are on chains, as `has_configuration` on the machine id the CMMS states.
-        `cmms.asset:ARM-3A` is on `firmware:5.6.0` from WO-26-0310 on, and WO-26-0911 is among the seven
-        work orders that span cites; its firmware did not change. AMR-05, AMR-06 and LEG-01 have one span each.
-      - One `succeeds`: AMR-07's `firmware:4.3.1` succeeds `firmware:4.2.0` at WO-26-0414.
-      - The 5 `change_record`s state no configuration (`NotCovered` in Deploy's mapping). So each gives
-        `configuration_unknown` on its `servicenow.ci:*` machine, plus a `chain_gap`.
+    - Configuration chains from all 16 `maintenance_event`s and 5 `change_record`s, `stated`, each citing its
+      records. There are 11 `has_configuration` spans, on the machine id each system states:
+      - `cmms.asset:ARM-3A` is on `firmware:5.6.0`; WO-26-0911 is among the eight work orders that span cites.
+      - `servicenow.ci:ARM-3A` goes from `5.6.0` to `TCP z=145.5 mm`, via `servicenow.u_after`.
+    - Two `succeeds`: AMR-07's `firmware:4.3.1` after `firmware:4.2.0` (CMMS), and ARM-3A's ServiceNow
+      `TCP z=145.5 mm` after `5.6.0`.
     - `configuration_unknown(run → run record)`, `observed`, on 12 runs: no binding names their configuration.
-      The 13th run states no first instant, so it is not placed (`untimeable_window`).
+      The 13th run states no first instant (`untimeable_window`).
   - What it lacks:
     - No event for INC-C3-0011, and no `co_occurs_within`. The arm-cell incident is a PDF, and Deploy's
       incident template for it has not shipped. Bag e-stops are MVL-204. No event is ever aligned through an
       inferred mapping.
     - No answer yet to "what changed since the last good run".
-      - Runs name no machine, so no run meets a chain (MVL-205).
-      - There is no `snapshot_binding`, so there is no `configuration_active_during` and no
-        `authorisation_undecided`.
-      - Each chain is keyed by the namespace that declares it. `cmms.asset:ARM-3A`, `servicenow.ci:ARM-3A` and
-        the register's `asset:ARM-3A` are three nodes until an `identity_link` or an operator assertion joins
-        them; the corpus has neither.
-    - No `authorised_configuration`. Both envelopes name no configuration (`envelope_unplaced`), and their
-      `valid_from` and `valid_until` are on two different clocks (`untimeable_window`).
+      - There is no `snapshot_binding`, so no `configuration_active_during` and no `authorisation_undecided`.
+      - Runs are `recorded_by` `manifest:ARM-3A`. The chains are on `cmms.asset:ARM-3A` and
+        `servicenow.ci:ARM-3A`, and the register declares `asset:ARM-3A`. These are four nodes until an
+        `identity_link` or an operator assertion joins them, and the corpus has neither.
+    - No `authorised_configuration`: no envelope places a configuration on its site.
     - No calibration `drift` (MVL-207, then #129) and no `same_as` for events.
 
     This file is regenerated as those land, never edited.
 ## Consumes
 
-- Compiler package schema: `SCHEMA_VERSION = 7` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
+- Compiler package schema: `SCHEMA_VERSION = 9` (`neptune.model.record`; 2 to 5 add kinds only, root ADRs 0037,
   0050, 0051 and 0062; 6 adds a kind and lifecycle list states, root ADR 0061; 7 adds the task kinds, root ADR
-  0063). Alignment records (MVL-82, package-schema 3.0.0), human assertions (MVL-183, package-schema 5.0.0, the
-  `neptune.assertions` file of root ADR 0062) and task records (MVL-33, package-schema 7.0.0) are consumed through
+  0063; 8 adds the robot-description kinds, root ADR 0039; 9 adds `run_declaration`, root ADR 0072, read
+  by the run consolidator with the compiler's reader, ADR 0020). Alignment records (MVL-82, package-schema 3.0.0),
+  human assertions (MVL-183, package-schema 5.0.0, the `neptune.assertions` file of root ADR 0062) and task
+  records (MVL-33, package-schema 7.0.0) are consumed through
   the Ledger. The identity consolidator reads `identity_link`, `assertion` and `timestamp_domain` with the
   compiler's own strict readers (ADR 0008 §1). The configuration lineage consolidator reads
   `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record`, `authorisation_envelope`

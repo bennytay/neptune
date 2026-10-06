@@ -128,6 +128,7 @@ from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
 from neptune.manifest import LoadedManifest, ManifestError
+from neptune.manifest.records import ManifestRecords, declared_records
 from neptune.model import references
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, ExternalObjectRef, RecordId
@@ -2482,12 +2483,15 @@ class IngestJob:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
             assembled = self._assemble_runs()
+            stated = self._declare() if self._declared is not None else None
             # A degraded run records its runtime transform even with no findings, so the receipt
             # always names the guarantees it could not give; a sound run adds a transform only to
             # carry a finding, keeping its lineage unchanged (ADR 0030).
             cited = {finding.transform for finding in self._findings.values()}
             if self._declared is not None:  # a package made under a manifest names it
                 cited.add(self._declared.loaded.transform.id)
+            if stated is not None:  # and its records name their transforms
+                cited.update(record.provenance.transform for record in stated.records)
             if self._lost_guarantees:
                 cited.add(self.transform.id)
             if self._plugins.loaded:  # which plugins could change this package (ADR 0058 §5)
@@ -2521,7 +2525,12 @@ class IngestJob:
                 derived = {**(derived or {}), **frames_found.tables()}
             if (
                 self._grouping is not None
-                and (bindings := self._bind_snapshots(self._grouping, assembled)) is not None
+                and (
+                    bindings := self._bind_snapshots(
+                        self._grouping, [*assembled, *(stated.bindings if stated else ())]
+                    )
+                )
+                is not None
             ):
                 cited.add(bindings.transform.id)
                 derived = {**(derived or {}), **bindings.tables()}
@@ -2532,6 +2541,7 @@ class IngestJob:
                 *self._findings.values(),
                 *(declared_found.records if declared_found is not None else ()),
                 *assembled,
+                *(stated.records if stated is not None else ()),
                 *bound,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
@@ -2697,12 +2707,27 @@ class IngestJob:
         )
         return assembly.records
 
+    def _declare(self) -> ManifestRecords:
+        """The manifest's machines, sites, run declarations and snapshot pins as stated records
+        (ADR 0072), over the runs and snapshots ``_assemble_runs`` kept and the scan's layout.
+        Reads records only: no source byte is read and no adapter called."""
+        assert self._declared is not None
+        self._check_cancel()
+        loaded = self._declared.loaded
+        found = declared_records(loaded, self._binding_inputs, self._layout)
+        for transform in found.transforms:  # the declarations' names the adapters it read
+            self._producers[transform.id] = transform
+        for finding in found.findings:
+            self._record(finding, self._producers[finding.transform])
+        return found
+
     def _bind_snapshots(self, grouping: Grouping, assembled: Sequence[object]) -> Bindings | None:
         """Bind each admitted run to the configuration, software, hardware and calibration
         snapshots evidence relates it to (ADR 0064), over the assembled grouping and run
         assemblies. Reads what ``_assemble_runs`` kept in its one pass over the committed records:
         runs, snapshots and canonical bindings, and the declared rows of the sources that hold a
-        run. A package with no run gets no binding: no table, no transform, no finding."""
+        run; ``assembled`` adds the run assemblies and the manifest's pins. A package with no run
+        gets no binding: no table, no transform, no finding."""
         self._check_cancel()
         found = bind_snapshots(
             [*self._binding_inputs, *assembled], self._statements, self._layout, grouping
@@ -2855,21 +2880,23 @@ class IngestJob:
         with self._enter(Phase.VALIDATE):
             self._check_cancel()
             assert self._staged is not None
-            try:
-                package = read_package(self._staged.path)
-                report = validate_package(package)
-                receipt, identity = package.manifest.receipt, package.id
-                if report.findings:  # amend verifies the whole before it moves anything
-                    self._staged = amend(self._staged, package, report.records())
-                    manifest = package_manifest_from_json(
-                        canonical_json.loads((self._staged.path / MANIFEST).read_bytes())
-                    )
-                    receipt, identity = manifest.receipt, self._staged.id
+            try:  # read, validated and amended as streams, spilling to scratch (ADR 0070)
+                with scratch_space(self.workspace.scratch, ingest_root=self._local_root) as spill:
+                    package = read_package(self._staged.path, scratch=spill)
+                    report = validate_package(package, spill=spill)
+                    receipt, identity = package.manifest.receipt, package.id
+                    if report.findings:  # amend verifies the whole before it moves anything
+                        self._staged = amend(self._staged, package, report.records(), spill=spill)
+                        manifest = package_manifest_from_json(
+                            canonical_json.loads((self._staged.path / MANIFEST).read_bytes())
+                        )
+                        receipt, identity = manifest.receipt, self._staged.id
             except (PackageError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the assembled package does not verify: {exc}") from exc
             added = report.records()
+            counted = dict(package.manifest.tables)  # the package's files may have moved by now
             summary: dict[str, JsonValue] = {
-                "findings": len(package.receipt.findings) + len(report.findings),
+                "findings": counted.get("ingest_finding", 0) + len(report.findings),
                 "package": identity,
                 "records": len(package.records) + len(added),
                 "series": len(package.series),

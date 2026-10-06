@@ -16,7 +16,14 @@ from typing import Final
 from neptune.identity import canonical_json
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune_deploy.packs import text as t
-from neptune_deploy.packs.compile import PACK_PREFIX, Entry, EvidencePack, Section, Statement
+from neptune_deploy.packs.compile import (
+    COMPILER_VERSION,
+    PACK_PREFIX,
+    Entry,
+    EvidencePack,
+    Section,
+    Statement,
+)
 from neptune_deploy.packs.pdf import PAGE_HEIGHT, PAGE_WIDTH, PlacedLine, write_pdf
 from neptune_deploy.packs.snapshot import Claim
 
@@ -36,11 +43,34 @@ STATE_CAPTIONS: Final[Mapping[str, str]] = {
     "unknown": "UNKNOWN - stated as not known; the cited claim names the record leaving it open",
     "conflict": "CONFLICT - these statements disagree; none is chosen",
 }
+TIME_CONFLICT: Final = (
+    "CONFLICT - this event is placed at different times on the pack clock; every time is shown,"
+    " none is chosen"
+)
 
 
 def render_json(pack: EvidencePack) -> bytes:
     """The pack as canonical JSON bytes."""
     return canonical_json.dumps(pack.to_json())
+
+
+def render_claims(pack: EvidencePack) -> bytes:
+    """The pack's claim set for external tools: a graph-schema ``ClaimsResult`` (canonical JSON)
+    as of the snapshot's head, so current versions only (a superseded version the pack cites, from
+    a resolver finding, stays in ``pack.json``). ``claims`` are those on the pack clock,
+    ``other_clocks`` those on any other (never compared with it, as Memory's own ``claims`` query
+    returns them), and ``findings`` the resolver findings the pack lists, each exactly as the
+    snapshot holds it."""
+    clock = pack.spec.clock
+    current = [c for c in pack.claims if c.current]
+    noted = {note.id for section in pack.sections for note in section.findings}
+    document: JsonObject = {
+        "as_of": pack.snapshot.head,
+        "claims": [c.raw for c in current if c.valid.clock == clock],
+        "findings": [f.raw for f in pack.snapshot.current_findings if f.id in noted],
+        "other_clocks": [c.raw for c in current if c.valid.clock != clock],
+    }
+    return canonical_json.dumps(document)
 
 
 class _Layout:
@@ -99,6 +129,8 @@ def _inferred_mark(statement: Statement) -> str:
 
 def _entry(out: _Layout, entry: Entry, indent: int) -> None:
     caption = STATE_CAPTIONS.get(entry.knowledge, entry.knowledge.upper())
+    if entry.differences:
+        caption = TIME_CONFLICT
     out.line(f"[{caption}] {entry.node.node_type} {entry.node.node_id}", font="F3", indent=indent)
     out.line(f"valid {t.interval(entry.valid)}", indent=indent + 2)
     for statement in entry.statements:
@@ -113,6 +145,25 @@ def _entry(out: _Layout, entry: Entry, indent: int) -> None:
     if entry.placement_records:
         out.line(
             "placed through (cited by this placement only): " + ", ".join(entry.placement_records),
+            size=SMALL,
+            indent=indent + 2,
+        )
+    if entry.identity:
+        out.line(
+            "same event as "
+            + ", ".join(f"{n.node_type} {n.node_id}" for n in entry.identity)
+            + " (by "
+            + ", ".join(entry.identity_claims)
+            + ")",
+            size=SMALL,
+            indent=indent + 2,
+        )
+    for difference in entry.differences:
+        ticks = difference.start_difference_ticks
+        out.line(
+            f"other placement: {difference.node.node_type} {difference.node.node_id} valid"
+            f" {t.interval(difference.valid)}, starting {ticks:+d} ticks from this one",
+            font="F3",
             size=SMALL,
             indent=indent + 2,
         )
@@ -171,7 +222,15 @@ def _section(out: _Layout, number: int, section: Section, mark: Callable[[str], 
             )
     for entry in section.entries:
         _entry(out, entry, 0)
-    if section.other_clocks:
+    if section.other_clocks and section.template.kind == "timeline":
+        out.line(
+            "NOT PLACED - Memory states no placement of these on the pack clock; each is listed"
+            " on its own clock and never compared:",
+            font="F3",
+        )
+        for entry in section.other_clocks:
+            _entry(out, entry, 2)
+    elif section.other_clocks:
         out.line("On other clocks (never compared with the pack interval):", font="F3")
         for entry in section.other_clocks:
             _entry(out, entry, 2)
@@ -183,6 +242,11 @@ def _section(out: _Layout, number: int, section: Section, mark: Callable[[str], 
     left = []
     if section.outside_interval:
         left.append(f"{section.outside_interval} claims on this clock outside the interval")
+    if section.other_clock_restated:
+        left.append(
+            f"{section.other_clock_restated} claims on other clocks that a placement on the pack"
+            " clock restates (other_clock_restated)"
+        )
     if section.excluded_inferred:
         left.append(f"{len(section.excluded_inferred)} inferred claims (inference excluded)")
     if left:
@@ -278,6 +342,12 @@ def _header(out: _Layout, pack: EvidencePack) -> None:
     )
     for key, value in rows:
         out.line(f"{key + ':':<10} {value}")
+    for unread in pack.snapshot.unread:
+        out.line(
+            f"Not read: {unread.key_path} ({unread.occurrences} at {unread.pointer}), a key of"
+            f" graph-schema {pack.snapshot.declared_schema_version} this compiler does not read;"
+            " its content is not shown"
+        )
     out.space(4)
     out.line(pack.template.description, font="F4", size=SMALL)
     out.line(
@@ -309,7 +379,7 @@ def render_pdf(pack: EvidencePack) -> bytes:
         "Subject": pack.id,
         "Keywords": f"{pack.snapshot.id} {pack.template.id}@{pack.template.version}",
         "Creator": "neptune-deploy packs",
-        "Producer": "neptune-deploy packs 1",
+        "Producer": f"neptune-deploy packs {COMPILER_VERSION}",
         "CreationDate": FIXED_DATE,
         "ModDate": FIXED_DATE,
     }

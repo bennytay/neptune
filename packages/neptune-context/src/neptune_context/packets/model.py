@@ -66,6 +66,13 @@ from neptune.model.provenance import EvidenceRef
 from neptune.model.time import INT64_MAX, INT64_MIN, Timestamp
 from neptune_context.packets.findings import PacketError
 from neptune_context.packets.findings import PacketFindingCode as Code
+from neptune_context.packets.trails import (
+    MAX_TRAILS,
+    TRAIL_KINDS,
+    Trail,
+    WhyTrail,
+    trail_index,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -935,8 +942,8 @@ class BudgetUse:
 
 @dataclass(frozen=True)
 class Superseded:
-    """A claim in the packet that has changed since ``as_of``: the transaction that superseded
-    it (``as_of < superseded_at <= head``) and the claim versions that did, by id."""
+    """A claim in the packet that has changed since the snapshot it was read at: the transaction
+    that superseded it (``memory.as_of < superseded_at <= head``) and the versions that did."""
 
     claim: ClaimId
     superseded_at: LedgerTx
@@ -1035,10 +1042,12 @@ class ContextPacket:
     - ``memory`` / ``ledger``: the snapshots read; Memory's ``as_of`` may trail the packet's.
     - ``produced_by``: the engine; ``inference_included``: whether inferred items may appear.
     - ``budget``: limits, use and truncation; ``items``: by fused score, then id.
-    - ``superseded_since``: claim items changed in ``(as_of, head]``, by claim id.
+    - ``superseded_since``: claim items changed in ``(memory.as_of, head]``, by claim id.
     - ``findings``: Memory resolver findings active at the snapshot (conflicts, clock
       mismatches) that name a claim item, in resolver order.
     - ``gaps``: what the packet does not answer, and why.
+    - ``trails``: the structure of each ``explain`` clause answered (ADR 0010), by clause; a
+      member of the JSON only when there is one, so a packet without trails keeps its bytes.
     """
 
     query_id: str
@@ -1054,11 +1063,13 @@ class ContextPacket:
     superseded_since: tuple[Superseded, ...] = ()
     findings: tuple[ResolutionFinding, ...] = ()
     gaps: tuple[Gap, ...] = ()
+    trails: tuple[Trail, ...] = ()
 
     def __post_init__(self) -> None:
         self._check_header()
         self._check_items()
         self._check_sections()
+        self._check_trails()
 
     def _check_header(self) -> None:
         if not isinstance(self.query_id, str) or not _QUERY_ID.fullmatch(self.query_id):
@@ -1104,11 +1115,22 @@ class ContextPacket:
             if isinstance(item, ClaimItem) and item.claim.recorded_at > self.memory.as_of:
                 raise _fail(Code.NOT_AS_OF, f"{item.claim.id} was recorded after the snapshot")
         claims = self.claim_ids
+        inferred = frozenset(
+            i.claim.id for i in self.items if isinstance(i, ClaimItem) and i.is_inferred
+        )
         for item in self.items:
             missing = sorted(set(item.claim_refs()) - claims)
             if missing:
                 raise _fail(
                     Code.DANGLING_REFERENCE, f"{item.id} names claims not carried: {missing}"
+                )
+            resting = sorted(set(item.claim_refs()) & inferred)
+            if resting and not item.is_inferred:
+                # A scene or configuration is no stronger than the claims it rests on: one that
+                # names an inferred claim is inferred itself, so it renders INFERRED.
+                raise _fail(
+                    Code.ASSERTION_MISMATCH,
+                    f"{item.id} is {item.assertion_kind} but rests on inferred claims: {resting}",
                 )
         size, tokens = measure(self.items)
         if (self.budget.items, self.budget.bytes, self.budget.tokens) != (
@@ -1132,8 +1154,10 @@ class ContextPacket:
         for entry in self.superseded_since:
             if entry.claim not in claims:
                 raise _fail(Code.DANGLING_REFERENCE, f"{entry.claim} is not a claim item")
-            if not self.as_of < entry.superseded_at <= self.head:
-                raise _fail(Code.NOT_AS_OF, "superseded_at is in (as_of, head]")
+            # The claims are as Memory knew them at its snapshot, which may trail as_of: every
+            # supersession Memory has made since then, up to head, is listed (C1 gate, ADR 0006).
+            if not self.memory.as_of < entry.superseded_at <= self.head:
+                raise _fail(Code.NOT_AS_OF, "superseded_at is in (memory_snapshot.as_of, head]")
         if not isinstance(self.findings, tuple) or not all(
             isinstance(f, ResolutionFinding) for f in self.findings
         ):
@@ -1152,6 +1176,54 @@ class ContextPacket:
         if not isinstance(self.gaps, tuple) or not all(isinstance(g, Gap) for g in self.gaps):
             raise _fail(Code.SHAPE, "gaps must be a tuple of Gaps")
         _sorted_unique([g.sort_key() for g in self.gaps], "gaps")
+        if self.inference_included and any(g.code is GapCode.INFERRED_WITHHELD for g in self.gaps):
+            raise _fail(
+                Code.INFERENCE_EXCLUDED,
+                "an inferred_withheld gap says inference was excluded; this packet includes it",
+            )
+
+    def _check_trails(self) -> None:
+        trails = self.trails
+        if not isinstance(trails, tuple) or not all(isinstance(t, TRAIL_KINDS) for t in trails):
+            raise _fail(Code.SHAPE, "trails must be a tuple of WhyTrails and DiffTrails")
+        if len(trails) > MAX_TRAILS:
+            raise _fail(Code.BAD_VALUE, f"at most {MAX_TRAILS} trails")
+        _sorted_unique([trail_index(t.at) for t in trails], "trails (by explain clause)")
+        carried = {i.claim.id: i.claim for i in self.items if isinstance(i, ClaimItem)}
+        for trail in trails:
+            if isinstance(trail, WhyTrail):
+                for step in trail.steps:
+                    if step.is_inferred and not self.inference_included:
+                        raise _fail(
+                            Code.INFERENCE_EXCLUDED,
+                            f"{trail.at} names inferred {step.claim}; the packet excludes"
+                            " inference",
+                        )
+                    claim = carried.get(step.claim)
+                    if claim is not None and (
+                        step.assertion_kind != claim.assertion_kind
+                        or step.evidence != claim.provenance.evidence
+                    ):
+                        raise _fail(
+                            Code.ASSERTION_MISMATCH,
+                            f"{trail.at}: a step must repeat its claim's assertion kind and"
+                            f" evidence ({step.claim})",
+                        )
+                continue
+            nodes = set(trail.nodes)
+            for change in trail.changes:
+                for claim_id in (*change.before, *change.after):
+                    claim = carried.get(claim_id)
+                    if claim is None:
+                        continue
+                    if claim.predicate != change.predicate or not (
+                        {claim.subject, claim.object} & nodes
+                    ):
+                        raise _fail(
+                            Code.BAD_VALUE,
+                            f"{trail.at}: {claim_id} is not a {change.predicate} claim about"
+                            " the diff's nodes",
+                        )
 
     @property
     def claim_ids(self) -> frozenset[ClaimId]:
@@ -1173,8 +1245,9 @@ class ContextPacket:
         return out
 
     def content_json(self) -> JsonObject:
-        """Everything but ``id``: the input the packet id is derived from."""
-        return {
+        """Everything but ``id``: the input the packet id is derived from. ``trails`` is written
+        only when there is one (ADR 0010), so every packet without trails keeps its bytes."""
+        out: dict[str, JsonValue] = {
             "findings": [f.to_json() for f in self.findings],
             "gaps": [g.to_json() for g in self.gaps],
             "header": self.header_json(),
@@ -1183,6 +1256,9 @@ class ContextPacket:
             "packet_version": PACKET_VERSION,
             "superseded_since": [s.to_json() for s in self.superseded_since],
         }
+        if self.trails:
+            out["trails"] = [t.to_json() for t in self.trails]
+        return out
 
     @cached_property
     def id(self) -> str:

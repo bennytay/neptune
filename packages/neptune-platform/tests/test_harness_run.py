@@ -18,7 +18,11 @@ FIXTURES: Final = REPO / "tests" / "fixtures" / "model"
 WORKED: Final = "worked-examples"
 
 
-def test_today_the_compiler_and_the_ledger_are_real_and_the_rest_are_stubs(
+def _stage(report: dict[str, Any], stage: str) -> dict[str, Any]:
+    return next(entry for entry in report["stages"] if entry["stage"] == stage)
+
+
+def test_today_the_compiler_deploy_and_ledger_are_real_and_the_rest_are_stubs(
     tmp_path: Path,
 ) -> None:
     report, code = run(tmp_path / "run", owner_tests=False, corpus_name=WORKED)
@@ -26,27 +30,31 @@ def test_today_the_compiler_and_the_ledger_are_real_and_the_rest_are_stubs(
     modes = {stage["stage"]: (stage["mode"], stage["status"]) for stage in report["stages"]}
     assert modes == {
         "compiler": ("real", "ok"),
+        "deploy": ("real", "ok"),
         "ledger": ("real", "ok"),
         "memory": ("stub", "ok"),
         "context": ("stub", "ok"),
     }
     assert [stage["stage"] for stage in report["stages"]] == [
         "compiler",
+        "deploy",
         "ledger",
         "memory",
         "context",
     ]
+    # The worked examples declare no Deploy mapping: nothing is mapped, and nothing is owed.
+    assert all(not row["declared"] for row in _stage(report, "deploy")["output"]["cases"])
     catalog = contracts.registry().latest("catalog-api", stable=True)
     assert catalog is not None
-    assert report["stages"][1]["contract_version"] == ".".join(map(str, catalog.version))
+    assert _stage(report, "ledger")["contract_version"] == ".".join(map(str, catalog.version))
     assert report["smoke"]["ok"] is True
-    assert report["smoke"]["packet_source"].startswith("canned: query-packet")
+    assert report["smoke"]["packet_source"].startswith("golden query-packet packet.q01-")
     assert report["corpus"] == {"name": "worked-examples", "cases": list(corpus.EXAMPLE_NAMES)}
 
 
 def test_the_ledger_stage_registers_and_verifies_every_compiled_package(tmp_path: Path) -> None:
     report, _ = run(tmp_path / "run", owner_tests=False, corpus_name=WORKED)
-    ledger = report["stages"][1]["output"]
+    ledger = _stage(report, "ledger")["output"]
     locked = contracts.registry().lock()["neptune-ledger"]["package-schema"]
     assert ledger["locked_package_schema"] == locked and ledger["tenant"] == "harness"
     rows = ledger["cases"]
@@ -86,8 +94,9 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
     }
     ids = {case["package"] for case in cases}
     assert len(ids) == 4  # four robots, four packages
+    # query-packet 1.0.0 is published (MVL-111): the smoke query reads its first golden packet.
     packet = report["smoke"]["packet"]
-    assert {item["package"] for item in packet["evidence"]} == ids
+    assert (packet["kind"], packet["packet_version"]) == ("context_packet", 1)
 
 
 def test_two_runs_give_byte_identical_reports_with_no_path_in_them(tmp_path: Path) -> None:
@@ -186,7 +195,7 @@ def test_a_compiler_that_breaks_package_schema_turns_the_harness_red(
     monkeypatch.setattr(package.PackageManifest, "to_json", renamed)
     report, code = run(tmp_path / "run", owner_tests=False, corpus_name=WORKED)
     assert code == 1 and report["ok"] is False
-    compiler, ledger = report["stages"][0], report["stages"][1]
+    compiler, deploy = _stage(report, "compiler"), _stage(report, "deploy")
     assert compiler["mode"] == "real" and compiler["status"] == "failed"
     assert all(case["state"] == "error" for case in compiler["output"]["cases"])
-    assert ledger["status"] == "skipped"
+    assert deploy["status"] == _stage(report, "ledger")["status"] == "skipped"

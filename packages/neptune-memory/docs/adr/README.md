@@ -25,3 +25,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0016](0016-memory-snapshots-rebuild-cli-and-build-withdrawal.md) | Memory snapshots, the rebuild CLI and build withdrawal | Accepted |
 | [0017](0017-estimated-clock-mappings-in-a-tenant-graph.md) | Estimated clock mappings in a tenant graph | Accepted |
 | [0018](0018-thread-membership-from-the-catalog-api.md) | Thread membership from the catalog API | Accepted |
+| [0020](0020-runs-read-the-compilers-run-declaration.md) | The run consolidator reads the compiler's run_declaration | Accepted |

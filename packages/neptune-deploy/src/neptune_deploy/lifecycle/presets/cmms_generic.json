@@ -1,15 +1,15 @@
 {
   "schema": "neptune-deploy.lifecycle-mapping/1",
   "id": "cmms.generic",
-  "version": "1",
-  "description": "A generic CMMS work-order export, one row per work order. WO Type PM (preventive) and CM (corrective) are maintenance; other types are findings. Copy and edit the column names for your CMMS; declare the zone its times are written in.",
+  "version": "2",
+  "description": "A generic CMMS work-order export, one row per work order. WO Type PM (preventive), CM (corrective) and INSP (inspection) are maintenance events: an inspection is maintenance work whose actions are the checks it states (EN 13306); other types are findings. Copy and edit the column names for your CMMS; declare the zone its times are written in.",
   "zone": "unstated",
   "rules": [
     {
       "id": "work_order",
       "kind": "maintenance_event",
       "requires": ["WO Number", "WO Type"],
-      "where": {"column": "WO Type", "in": ["PM", "CM"]},
+      "where": {"column": "WO Type", "in": ["PM", "CM", "INSP"]},
       "ignore": ["Technician"],
       "fields": {
         "identifiers": [{"column": "WO Number", "namespace": "cmms.work_order"}],

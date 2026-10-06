@@ -1,0 +1,25 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "cmms.downtime",
+  "version": "1",
+  "description": "A CMMS downtime log, one stop per row: when the machine stopped and restarted, the stop type and the reason, as entered (often by hand at an HMI terminal, after the fact). Each row is an intervention: Stop Type is its mode, verbatim, never ranked or read as a cause. Times are wall-clock text on the log's own clock; the export states no zone, so none is declared, and a time of day without a date is never completed (ADR 0016). Copy and edit the column names for your CMMS.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "downtime",
+      "kind": "intervention",
+      "requires": ["Downtime ID", "Stopped"],
+      "ignore": ["Location", "Reported By"],
+      "fields": {
+        "identifiers": [{"column": "Downtime ID", "namespace": "cmms.downtime"}],
+        "machines": [{"column": "Asset ID", "namespace": "cmms.asset"}],
+        "site": {"column": "Site", "namespace": "cmms.site"},
+        "related": [{"column": "Related", "namespace": "cmms.reference", "split": ";"}],
+        "mode": {"column": "Stop Type"},
+        "reason": {"column": "Reason"},
+        "start": {"column": "Stopped", "format": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"], "required": true},
+        "end": {"column": "Restarted", "format": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"], "required": true}
+      }
+    }
+  ]
+}

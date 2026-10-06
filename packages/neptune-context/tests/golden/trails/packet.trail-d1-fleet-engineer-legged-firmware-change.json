@@ -1,0 +1,367 @@
+{
+  "findings": [],
+  "gaps": [],
+  "header": {
+    "as_of": 4,
+    "budget": {
+      "dropped": 0,
+      "exhausted": [],
+      "limits": {
+        "items": 10
+      },
+      "tokenizer": "neptune-context.utf8-bytes-div-4/1",
+      "used": {
+        "bytes": 4952,
+        "items": 4,
+        "tokens": 1238
+      }
+    },
+    "head": 4,
+    "inference_included": false,
+    "ledger_snapshot": {
+      "catalog_api_version": "1.7.0"
+    },
+    "memory_snapshot": {
+      "as_of": 4,
+      "generation": "sha256:55046005b88d4272d3336afa642515762ce72b12776ce767beece177155ea1c9",
+      "graph_schema_version": 1
+    },
+    "produced_by": {
+      "config_hash": "sha256:00942ee9ca1cd0d6f4b9335773b91877c593d07fce55f116d44f943e6aa4bc87",
+      "engine_id": "neptune-context.local",
+      "engine_version": "1"
+    },
+    "query_id": "query:sha256:f3be163445acb9d96657fa8e71771893f389fc58dec16b26b46e542262ea8384"
+  },
+  "id": "packet:sha256:9836aada9908d5c639faf4c30f6ea9f40c87049c1aa1fce4c9497b84c9bc7ecb",
+  "items": [
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/firmware"
+          }
+        ],
+        "source": "sha256:8134e43db487b3fecc2256bbf46553bea2351ef65c704e9b86e8a8e03c290747"
+      },
+      "id": "item:sha256:7025b53959c4cf2a1c8e3ede33203e54af8d21e506a21394419cfbb0f5001924",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/firmware"
+              }
+            ],
+            "source": "sha256:8134e43db487b3fecc2256bbf46553bea2351ef65c704e9b86e8a8e03c290747"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:d44be43b84653e4bccd70de5e1e69de0a25b968a48283f83f0a26a3a22316cba",
+          "producer_id": "fixture.configuration",
+          "producer_version": "2"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 1,
+            "score": 0.5
+          }
+        ],
+        "score": 0.01639344262295082
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    },
+    {
+      "assertion_kind": "stated",
+      "claim": {
+        "assertion_kind": "stated",
+        "confidence": {
+          "knowledge": "not_applicable"
+        },
+        "id": "claim:sha256:f6746940655a3ae48745c07c840e7083c06c2eefdad361e4aee323ccd6e79e12",
+        "object": {
+          "kind": "node",
+          "node_id": "cfg:leg-9-fw-3.1.4",
+          "node_type": "configuration"
+        },
+        "predicate": "has_configuration",
+        "provenance": {
+          "config_hash": "sha256:d44be43b84653e4bccd70de5e1e69de0a25b968a48283f83f0a26a3a22316cba",
+          "consolidator_id": "fixture.configuration",
+          "consolidator_version": "2",
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/firmware"
+                }
+              ],
+              "source": "sha256:8134e43db487b3fecc2256bbf46553bea2351ef65c704e9b86e8a8e03c290747"
+            },
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 1
+                }
+              ],
+              "source": "sha256:65c2154e966c66d60bdfcb568d12903027fa033b7662102ff93a7e59f02757a7"
+            }
+          ],
+          "records": []
+        },
+        "recorded_at": 3,
+        "subject": {
+          "kind": "node",
+          "node_id": "asset-tag:LEG-9",
+          "node_type": "machine"
+        },
+        "superseded_at": "open",
+        "supersedes": [],
+        "valid": {
+          "end": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1777593600000000000
+          },
+          "start": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1767225600000000000
+          }
+        }
+      },
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "item:sha256:8aa0cce3bd9bac161ed7f1493a631de59eb8f20192801a3475c81b5e59b9a048",
+      "kind": "claim",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/firmware"
+              }
+            ],
+            "source": "sha256:8134e43db487b3fecc2256bbf46553bea2351ef65c704e9b86e8a8e03c290747"
+          },
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 1
+              }
+            ],
+            "source": "sha256:65c2154e966c66d60bdfcb568d12903027fa033b7662102ff93a7e59f02757a7"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:d44be43b84653e4bccd70de5e1e69de0a25b968a48283f83f0a26a3a22316cba",
+          "producer_id": "fixture.configuration",
+          "producer_version": "2"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "graph",
+            "rank": 1,
+            "score": 1.0
+          }
+        ],
+        "score": 0.01639344262295082
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "claim": {
+        "assertion_kind": "stated",
+        "confidence": {
+          "knowledge": "not_applicable"
+        },
+        "id": "claim:sha256:ac2704a7f80af185c90c24d860f348c3a788d024cfbf95c7f0b042bbf511e63f",
+        "object": {
+          "kind": "node",
+          "node_id": "cfg:leg-9-fw-3.2.0",
+          "node_type": "configuration"
+        },
+        "predicate": "has_configuration",
+        "provenance": {
+          "config_hash": "sha256:d44be43b84653e4bccd70de5e1e69de0a25b968a48283f83f0a26a3a22316cba",
+          "consolidator_id": "fixture.configuration",
+          "consolidator_version": "2",
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "row",
+                  "row": 1
+                }
+              ],
+              "source": "sha256:65c2154e966c66d60bdfcb568d12903027fa033b7662102ff93a7e59f02757a7"
+            }
+          ],
+          "records": []
+        },
+        "recorded_at": 3,
+        "subject": {
+          "kind": "node",
+          "node_id": "asset-tag:LEG-9",
+          "node_type": "machine"
+        },
+        "superseded_at": "open",
+        "supersedes": [],
+        "valid": {
+          "end": "open",
+          "start": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1777593600000000000
+          }
+        }
+      },
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "item:sha256:8b2290731830ebd74e655e0ae202eed4b3385622015f5cd37f04c049be0d26d1",
+      "kind": "claim",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 1
+              }
+            ],
+            "source": "sha256:65c2154e966c66d60bdfcb568d12903027fa033b7662102ff93a7e59f02757a7"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:d44be43b84653e4bccd70de5e1e69de0a25b968a48283f83f0a26a3a22316cba",
+          "producer_id": "fixture.configuration",
+          "producer_version": "2"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "graph",
+            "rank": 2,
+            "score": 1.0
+          }
+        ],
+        "score": 0.016129032258064516
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "row",
+            "row": 1
+          }
+        ],
+        "source": "sha256:65c2154e966c66d60bdfcb568d12903027fa033b7662102ff93a7e59f02757a7"
+      },
+      "id": "item:sha256:d1d355a70d2c639502515e7d234c2402cc2fa97b2d51b29affe282aaa3430851",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 1
+              }
+            ],
+            "source": "sha256:65c2154e966c66d60bdfcb568d12903027fa033b7662102ff93a7e59f02757a7"
+          }
+        ],
+        "records": [],
+        "transform": {
+          "config_hash": "sha256:d44be43b84653e4bccd70de5e1e69de0a25b968a48283f83f0a26a3a22316cba",
+          "producer_id": "fixture.configuration",
+          "producer_version": "2"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 2,
+            "score": 0.5
+          }
+        ],
+        "score": 0.016129032258064516
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    }
+  ],
+  "kind": "context_packet",
+  "packet_version": 1,
+  "superseded_since": [],
+  "trails": [
+    {
+      "after": {
+        "clock": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+        "ticks": 1780272000000000000
+      },
+      "at": "/explain/0",
+      "before": {
+        "clock": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+        "ticks": 1775001600000000000
+      },
+      "changes": [
+        {
+          "after": [
+            "claim:sha256:ac2704a7f80af185c90c24d860f348c3a788d024cfbf95c7f0b042bbf511e63f"
+          ],
+          "before": [
+            "claim:sha256:f6746940655a3ae48745c07c840e7083c06c2eefdad361e4aee323ccd6e79e12"
+          ],
+          "change": "superseded",
+          "predicate": "has_configuration"
+        }
+      ],
+      "kind": "diff",
+      "nodes": [
+        {
+          "kind": "node",
+          "node_id": "asset-tag:LEG-9",
+          "node_type": "machine"
+        }
+      ],
+      "subject": {
+        "kind": "node",
+        "node_id": "asset-tag:LEG-9",
+        "node_type": "machine"
+      }
+    }
+  ]
+}

@@ -19,6 +19,7 @@ from neptune.model.knowledge import Ambiguous, Known, Unknown
 from neptune.model.provenance import EvidenceRef
 from neptune.model.references import named
 from neptune.model.versions import version_to_json
+from neptune.store.spill import SpillSpace
 from neptune.validate import pending
 from neptune.validate.engine import (
     Context,
@@ -252,11 +253,17 @@ def _value_key(value: Any) -> str:
 
 
 def _id_groups(context: Context) -> dict[tuple[str, str, str], list[Any]]:
+    """Records of the identified kinds by stated logical id, read once for both rules that use
+    them (``context.memo``)."""
+    found = context.memo.get("id_groups")
+    if found is not None:
+        return found  # type: ignore[no-any-return]
     groups: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for kind, (where, _) in sorted(_IDENTIFIED.items()):
         for record in context.records(kind):
             for logical in _logical_ids(record, where):
                 groups[kind, logical.namespace, logical.value].append(record)
+    context.memo["id_groups"] = groups
     return groups
 
 
@@ -325,6 +332,7 @@ _TARGET_KINDS: Final = {
     ("frame_binding", "transform"): "frame_transform",
     ("hardware_component", "configuration"): "hardware_configuration",
     ("stream", "clocks"): "timestamp_domain",
+    ("run_declaration", "run"): "run",
     ("stream", "run"): "run",
     ("structured_record", "table"): "structured_table",
     ("video", "clock"): "timestamp_domain",
@@ -345,17 +353,52 @@ def references_checked(context: Context) -> Iterator[tuple[Any, str, str]]:
             yield finding, field, target
 
 
+def _unresolved(context: Context) -> set[tuple[str, str, str]]:
+    """``(kind, field, target)`` of every reference ``references_checked`` reads that names no
+    record of the package, or one of another kind than the model states.
+
+    A join, not a lookup: every record id (with its kind) and every reference go through one
+    sorter keyed by the id named, which spills to ``context.spill`` (ADR 0070), so no index of the
+    package is held. An id's records come before the references to it; the last record read of an
+    id is the one a reference resolves to.
+    """
+    unresolved: set[tuple[str, str, str]] = set()
+    with SpillSpace(context.spill) as space:
+        joined = space.sorter("references")
+        for position, record in enumerate(context.package.records):  # one pass of the tables
+            identifier = getattr(record, "id", None)
+            if isinstance(identifier, str):
+                joined.add((identifier, 0, position), record.kind.encode())
+            if record.kind == "ingest_finding" and record.transform in context.own:
+                continue  # what ``references_checked`` reads: never this rule's own findings
+            for field, target in named(record):
+                joined.add((target, 1, record.kind, field), b"")
+        current: str | int | None = None
+        held: str | None = None
+        for key, payload in joined:
+            if key[0] != current:
+                current, held = key[0], None
+            if key[1] == 0:
+                held = payload.decode()
+                continue
+            kind, field = str(key[2]), str(key[3])
+            want = _TARGET_KINDS.get((kind, field))
+            if held is None or (want is not None and held != want):
+                unresolved.add((kind, field, str(key[0])))
+    return unresolved
+
+
 def dangling_reference(context: Context) -> Iterator[Draft]:
     """A record names another record (a run, a clock, a table, a snapshot, a frame graph) the
     package does not hold, or one of another kind than the model states; a finding's
     ``records`` name one it does not hold. Version 3: every reference the model types, not a
     hand list (ADR 0069); references marked external (another package's) are not checked."""
+    dangling = _unresolved(context)
     missing: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
-    for record, field, target in references_checked(context):
-        held = context.by_id.get(target)
-        want = _TARGET_KINDS.get((record.kind, field))
-        if held is None or (want is not None and held.kind != want):
-            missing[record.kind, field, target].append(record)
+    if dangling:  # a second pass picks up the records that name them, in the order read
+        for record, field, target in references_checked(context):
+            if (record.kind, field, target) in dangling:
+                missing[record.kind, field, target].append(record)
 
     def where(record: Any) -> Any:
         subject = getattr(record, "subject", None)  # a finding has a subject, no provenance

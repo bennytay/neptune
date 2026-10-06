@@ -2,8 +2,9 @@
 
 ``scripts/contracts.py bump package-schema <version>`` runs this file and stores its output under
 ``v<version>/golden/``. It packages the compiler's worked examples (a drone, a manipulator, a
-mobile robot, a quadruped and two deployments; ``tests/fixtures/model/``) and the assertion
-adapter's three golden packages (``tests/golden/assertion/``, ADR 0062) with
+mobile robot, a quadruped and two deployments; ``tests/fixtures/model/``), the assertion
+adapter's three golden packages (``tests/golden/assertion/``, ADR 0062) and the manifest's three
+(``tests/golden/manifest/``, ADR 0072: run declarations, machines, sites and pins) with
 ``neptune.store.package_files`` and keeps, per package, the manifest, the receipt and the first
 line of every non-empty record table. Nothing is hand-written, and the same compiler gives the
 same bytes.
@@ -37,6 +38,10 @@ PACKAGES: Final = {
     **{
         f"assertion_{name}": TESTS / "golden" / "assertion" / name
         for name in ("cell_baseline", "fleet_identity", "retraction")
+    },
+    **{
+        f"manifest_{name}": TESTS / "golden" / "manifest" / name
+        for name in ("aerial_survey", "amr_fleet", "manipulator_cell")
     },
 }
 DOCUMENTS: Final = {MANIFEST: "#/$defs/PackageManifest", RECEIPT: "#/$defs/IngestReceipt"}

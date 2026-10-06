@@ -16,7 +16,6 @@ import pytest
 from memory_identity_records import CLOCK, Record, at, ledger
 from memory_run_records import (
     assembly,
-    by_record,
     declaration,
     domain,
     mapping,
@@ -80,6 +79,9 @@ def _good() -> Record:
     return run("good.mcap", first=at(0), last=at(9), machine=AMR)[0]
 
 
+GOOD = run("good.mcap", first=at(0), last=at(9), machine=AMR)[1]
+
+
 # --- malformed input ----------------------------------------------------------------------------
 
 
@@ -103,12 +105,14 @@ def _without(record: Record, key: str) -> Record:
         ("source_revision", {**revision("x.mcap")[0], "content_id": "md5:abc"}),
         ("clock_mapping", {**mapping("m", CLOCK, OTHER, anchor=(0, 0)), "rate": "0"}),
         ("site", {**site("register", LogicalId("site", "WH-1")), "identifiers": "WH-1"}),
-        ("run_declaration", {**declaration("d", AMR), "extra": 1}),
-        ("run_declaration", _without(declaration("d", AMR), "site")),
-        ("run_declaration", {**declaration("d", AMR), "evidence": []}),
-        ("run_declaration", {**declaration("d", AMR), "machine": {"knowledge": "maybe"}}),
-        ("run_declaration", {**declaration("d", AMR), "run": {"namespace": "Bad", "value": "x"}}),
-        ("run_declaration", {**declaration("d", AMR), "id": 7}),
+        ("run_declaration", {**declaration("d", GOOD), "extra": 1}),
+        ("run_declaration", _without(declaration("d", GOOD), "site")),
+        ("run_declaration", _without(declaration("d", GOOD), "provenance")),
+        ("run_declaration", {**declaration("d", GOOD), "schema_version": 8}),
+        ("run_declaration", {**declaration("d", GOOD), "machine": {"knowledge": "maybe"}}),
+        ("run_declaration", {**declaration("d", GOOD), "run": "manifest:cell3-pick-0412"}),
+        ("run_declaration", {**declaration("d", GOOD), "id": 7}),
+        ("run_declaration", declaration("d", GOOD, machine=LogicalId("asset-tag", "AMR-04 "))),
     ],
 )
 def test_a_malformed_record_is_a_finding_and_the_rest_still_consolidates(
@@ -161,8 +165,10 @@ def test_dangling_assembly_and_declaration_are_findings() -> None:
             "log": [
                 _good(),
                 assembly("x", absent, [("absent.mcap", REC)])[0],
-                declaration("d", by_record(absent), site=LogicalId("site", "WH-1")),
-                declaration("e", LogicalId("manifest", "never-recorded")),
+                declaration("d", absent, site=LogicalId("site", "WH-1")),
+                # Its run is the id of a record that is not a run (a clock): never guessed into
+                # a run by its run name or anything else.
+                declaration("e", OTHER, logical_id=LogicalId("manifest", "good"), machine=AMR),
             ]
         }
     )
@@ -358,9 +364,7 @@ def _fleet() -> dict[str, list[Record]]:
         "b": [boot_record, boot_run, mapping("sync", boot, clock, anchor=(0, 0))],
         "c": [
             site("register", LogicalId("site", "WH-1")),
-            declaration(
-                "d", by_record(boot_id), site=LogicalId("site", "WH-2"), task=LogicalId("task", "t")
-            ),
+            declaration("d", boot_id, site=LogicalId("site", "WH-2"), task=LogicalId("task", "t")),
         ],
     }
 
@@ -459,7 +463,7 @@ def test_a_deeply_nested_declaration_is_one_finding_not_a_crash() -> None:
     nested: object = "x"
     for _ in range(5000):
         nested = {"value": nested}
-    bad = {**declaration("d", AMR), "machine": {"knowledge": "known", "value": nested}}
+    bad = {**declaration("d", GOOD), "machine": {"knowledge": "known", "value": nested}}
     result = consolidate({"log": [_good(), bad]})
     assert codes(result) == ["runs.malformed_record"]
     assert of(result, "recorded_by")

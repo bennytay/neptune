@@ -4,8 +4,8 @@
 writes for the acceptance corpus. Nothing in it is hand-written:
 
 1. ``harness.acceptance`` generates the corpus (versioned and locked by Platform).
-2. The compiler's SDK ingests it, as the harness's compiler stage does, into one package, and reads
-   the package back verified.
+2. The harness's own ``compiler`` stage (``harness.stages``) ingests it into one package and checks
+   it; the package is read back verified (``neptune.store.package.read_package``).
 3. Deploy's lifecycle mapper (``python -m neptune_deploy map``, a subprocess: Memory never imports
    Deploy) maps that package's tables with the presets in ``DEPLOY_PRESETS`` into a second package
    of lifecycle records: change records, maintenance events, authorisation envelopes, incidents.
@@ -25,14 +25,13 @@ writes for the acceptance corpus. Nothing in it is hand-written:
    consolidators and ``memory.time_estimates`` (ADR 0017) and writes the graph document with the
    codec; that file is copied byte for byte. Estimates become ``inferred`` claims only.
 
-Deterministic: the corpus, the compiler, Deploy and Memory read no clock, randomness or network. The
-bytes also depend on the library versions the compiler's adapters record in their transform records
-(provenance): the calibration adapter records the expat that Python is built with, so another
-CPython patch release changes transform and finding record ids, and every claim citing them.
-``acceptance_corpus.environment.json`` records those libraries. Where they match, a regeneration is
-byte-identical. Elsewhere, where only ``expat`` or ``python`` differ, it states the same facts under
-other record ids. ``tests/test_acceptance_snapshot_memory.py`` checks both. The committed files are
-made under the Python CI installs (``uv python install`` from ``.python-version``).
+Deterministic: the corpus, the compiler, Deploy and Memory read no clock, randomness or network, and
+no transform records a host-bound library version (compiler #139 dropped expat), so the same code
+gives the same bytes on any host. What the bytes still depend on is pinned by the repository: the
+corpus version, adapter versions, the libraries ``uv.lock`` pins and the Python minor version
+``.python-version`` pins, all of which transform records name.
+``acceptance_corpus.environment.json`` records them, so a failing regeneration says which moved.
+``tests/test_acceptance_snapshot_memory.py`` regenerates and compares, byte for byte.
 
 From the repository root, with ``G=packages/neptune-memory/tests/fixtures/<this file>``::
 
@@ -56,8 +55,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from neptune.identity import canonical_json
-from neptune.sdk import Neptune
-from neptune.sdk.result import read_package
+from neptune.store.package import read_package
 from neptune_memory.cli import OK, main
 from neptune_memory.ledger import ExportedPackage, LedgerExport, ThreadsOf, threads_of_from_json
 
@@ -81,12 +79,17 @@ DEPLOY_PRESETS: Final = ("cmms_generic", "jira_json", "register_zone", "servicen
 DERIVED_KINDS: Final = ("clock_mapping",)
 
 
-def acceptance() -> Any:
-    """``harness.acceptance``, Platform's corpus module (the repository root is not on the path of
-    a package's tests; it is imported, never edited)."""
+def harness(module: str) -> Any:
+    """``harness.<module>``, Platform's (the repository root is not on the path of a package's
+    tests; it is imported, never edited)."""
     if str(REPO) not in sys.path:
         sys.path.insert(0, str(REPO))
-    return importlib.import_module("harness.acceptance")
+    return importlib.import_module(f"harness.{module}")
+
+
+def acceptance() -> Any:
+    """``harness.acceptance``, Platform's corpus module."""
+    return harness("acceptance")
 
 
 def corpus_label() -> str:
@@ -124,6 +127,26 @@ def deploy_map(package: Path, out: Path) -> Path:
     if done.returncode != 0:
         raise RuntimeError(f"neptune_deploy map exited {done.returncode}: {done.stderr[-2000:]}")
     return out
+
+
+def compile_corpus(work: Path) -> Path:
+    """The acceptance corpus's package, as the harness's ``compiler`` stage writes and checks it
+    (members never run ingestion themselves). A stage that runs as a stub, or reports a problem,
+    stops the snapshot: it is never made from goldens."""
+    corpus, stages, run = harness("corpus"), harness("stages"), harness("run")
+    _, cases = corpus.select(into=work / "corpus")
+    if len(cases) != 1:
+        raise RuntimeError(f"the acceptance corpus is {len(cases)} cases, not one")
+    ctx = stages.Context(registry=harness("contracts").registry(), work=work, cases=cases)
+    (compiler,) = [stage for stage in stages.STAGES if stage.id == "compiler"]
+    entry = run.run_stage(compiler, ctx, services_up=False, upstream_ok=True)
+    if entry["mode"] != "real" or entry["status"] != "ok":
+        why = "; ".join(entry["problems"]) or entry["reason"]
+        raise RuntimeError(
+            f"the harness's compiler stage ran {entry['mode']}, {entry['status']}: {why}"
+        )
+    (case,) = cases
+    return Path(ctx.package_root(case.id))
 
 
 # The bookkeeping fields of a catalog answer: when and by which version it was answered (the
@@ -184,22 +207,15 @@ def catalog_threads(work: Path, roots: tuple[Path, ...], record_ids: list[str]) 
 def ledger_export(work: Path) -> LedgerExport:
     """The acceptance corpus compiled, then mapped by Deploy: a two-package Ledger export, with
     the Ledger catalog's thread membership of every record."""
-    corpus = acceptance()
-    root = corpus.materialise(work / "corpus" / f"{corpus.NAME}-{corpus.VERSION}")
-    result = Neptune(work / "workspace").ingest(root, work / "package")
-    if not result.committed or result.destination is None:
-        raise RuntimeError(f"the compiler did not commit the acceptance corpus: {result.state}")
-    lifecycle = deploy_map(result.destination, work / "lifecycle")
-    packages = (
-        exported(result.destination, COMPILED_AT, DERIVED_KINDS),
-        exported(lifecycle, MAPPED_AT),
-    )
+    from neptune_ledger.api import CATALOG_API_VERSION
+
+    compiled = compile_corpus(work)
+    lifecycle = deploy_map(compiled, work / "lifecycle")
+    packages = (exported(compiled, COMPILED_AT, DERIVED_KINDS), exported(lifecycle, MAPPED_AT))
     ids = sorted(
         {str(r["id"]) for p in packages for r in p.records if isinstance(r.get("id"), str)}
     )
-    threads = catalog_threads(work, (result.destination, lifecycle), ids)
-    from neptune_ledger.api import CATALOG_API_VERSION
-
+    threads = catalog_threads(work, (compiled, lifecycle), ids)
     return LedgerExport(
         HEAD,
         CATALOG_API_VERSION,

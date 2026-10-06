@@ -1,0 +1,540 @@
+{
+  "absent": [],
+  "ambiguous": [],
+  "clocks": [
+    {
+      "field": "publish_time",
+      "id": "rec:sha256:227ff456474e34b5ba68a6bdeecd01fe80c663f2bf4e541223b87c5bf50ba271",
+      "scope": [
+        "/amr_02/odom"
+      ]
+    },
+    {
+      "field": "log_time",
+      "id": "rec:sha256:4c3606276ecf24317bf27a7bf7a8c2e710759650045d084290071fc115c27c91",
+      "scope": []
+    },
+    {
+      "field": "publish_time",
+      "id": "rec:sha256:9d6014507b337b70e0a6bd50d842a8fc758904ea16066c48c8a59db0f0a6223f",
+      "scope": [
+        "/amr_01/odom"
+      ]
+    },
+    {
+      "field": "log_time",
+      "id": "rec:sha256:dec79cd59cfac64b05766d942ccb3971e5fe8e86d7c7c92f32f9fbde48c2fbfb",
+      "scope": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "rec:sha256:21b5b2f93ab28ff56bb6e5f137186ce1382f1c13999ca914049e2ca3134cde38",
+      "identifiers": [
+        {
+          "namespace": "manifest",
+          "value": "AMR-01"
+        }
+      ],
+      "record_kind": "machine"
+    },
+    {
+      "id": "rec:sha256:5735285b4035f7d511c9516fefb748cd4b37f7e3f759ecd34aaeab241acaf565",
+      "identifiers": [
+        {
+          "namespace": "manifest",
+          "value": "DC-7"
+        }
+      ],
+      "record_kind": "site"
+    },
+    {
+      "id": "rec:sha256:9ae76039a68e987e49aea93f09bfc2f9429e3f9abf54a818fd2e964439f38a6f",
+      "identifiers": [
+        {
+          "namespace": "manifest",
+          "value": "AMR-02"
+        }
+      ],
+      "record_kind": "machine"
+    }
+  ],
+  "findings": [
+    {
+      "category": "missing",
+      "code": "neptune.bindings.no_software_identity",
+      "id": "rec:sha256:13dbe26de8b3d9a9a962aec8ca516994f7e2f130b65b9e3f6e63ea0a1ce567ac",
+      "message": "the run has no software identity: no software, build, firmware or checkpoint record is bound to it",
+      "severity": "warning"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.bindings.no_software_identity",
+      "id": "rec:sha256:3c5d58c58eb533dff8756c3ab2b60ce41f0916df32f8edb4d52f1cefbfe47ccc",
+      "message": "the run has no software identity: no software, build, firmware or checkpoint record is bound to it",
+      "severity": "warning"
+    },
+    {
+      "category": "ambiguous",
+      "code": "neptune.grouping.contested",
+      "id": "rec:sha256:5121ab64f37cd2d3337615299a11f6d7102a92973d4ea23d24b445f43aa2c974",
+      "message": "files support 3 session readings (declared, session_directory); none was chosen",
+      "severity": "warning"
+    },
+    {
+      "category": "inconsistent",
+      "code": "neptune.grouping.declared_contradicts_layout",
+      "id": "rec:sha256:2bb5384d11cff0f6d0a2d8e9229e2abaa1a90694465d78ad38598a8efaba2479",
+      "message": "a declared session holds part of 1 reading(s) of the layout; both are offered, contested, and neither is chosen",
+      "severity": "warning"
+    },
+    {
+      "category": "inconsistent",
+      "code": "neptune.grouping.declared_contradicts_layout",
+      "id": "rec:sha256:5c794bcd2fb4b8b7093df368c971a2e4f47bf2499514f1d79e22e658d1b877ba",
+      "message": "a declared session holds part of 1 reading(s) of the layout; both are offered, contested, and neither is chosen",
+      "severity": "warning"
+    },
+    {
+      "category": "ambiguous",
+      "code": "neptune.bindings.shared_snapshot",
+      "id": "rec:sha256:169aa3d17f05e76dee8b94ec33e9d388db35342575883b9649ce36ca72f5e76d",
+      "message": "the configuration_snapshot file is as near to 2 recordings in 'fleet/run_001', so it is no one run's own: no run binds it by nearness",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.bindings.snapshot_unresolved",
+      "id": "rec:sha256:14cca1729bd9c3e0d44f0375f977e723ff4f9ac1a0ec6ab0d4716df38d7e1ca0",
+      "message": "no calibration record is bound to the run: the binding is unresolved",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.bindings.snapshot_unresolved",
+      "id": "rec:sha256:4872d54e7624a7e26b42861f8092bfccfed92602a5e90033fcbf2b190eee7801",
+      "message": "no hardware_configuration record is bound to the run: the binding is unresolved",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.bindings.snapshot_unresolved",
+      "id": "rec:sha256:5c9e67816ba9e2e50059f2b75a5e36f7288d3a37c5c7f6d6d25b2747882731a5",
+      "message": "no calibration record is bound to the run: the binding is unresolved",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.bindings.snapshot_unresolved",
+      "id": "rec:sha256:c5a4807127d999636ea23a8e84c3699a9cf2252e0ea244113fa209a414dfcacd",
+      "message": "no hardware_configuration record is bound to the run: the binding is unresolved",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.clocks.latency_unbounded",
+      "id": "rec:sha256:5eae99aba1ee925940120789f571889f2c86fb5fad46b38aeeb51f267d34affd",
+      "message": "1 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.clocks.latency_unbounded",
+      "id": "rec:sha256:e4a13cb83f65eee9496539ad5a4a7bf574afd1fce0ae5239a2d32500a55b6a8a",
+      "message": "1 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.clocks.single_instant",
+      "id": "rec:sha256:5d077d36061ac03054fcf2b9e7780db37e1582ec93a5b8a8833ff7c29b5ba665",
+      "message": "every anchor is one instant of the source clock: the offset holds there only and the rate is unknown",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.clocks.single_instant",
+      "id": "rec:sha256:b84a4f8def799b6ee3cf8e7c66c11bd1b54a61fd344a9519375c6f1bc1613df9",
+      "message": "every anchor is one instant of the source clock: the offset holds there only and the rate is unknown",
+      "severity": "info"
+    },
+    {
+      "category": "missing",
+      "code": "neptune.clocks.unsynchronised",
+      "id": "rec:sha256:1951862e8bb0d0012a17e41904481b431fb5dd7907fbf301abc72a0ff2c79bb1",
+      "message": "the package's clocks form 2 groups that no clock mapping joins; times in different groups cannot be compared",
+      "severity": "info"
+    }
+  ],
+  "id": "rec:sha256:f660931bfc1776d0ab0e7a690c9ef71f2515bdf8244113bdcec2a3d669dada5c",
+  "kind": "ingest_receipt",
+  "records": {
+    "assertion": 0,
+    "asset": 0,
+    "authorisation_envelope": 0,
+    "calibration": 0,
+    "change_record": 0,
+    "civil_time_zone": 0,
+    "clock_mapping": 0,
+    "commissioning_baseline": 0,
+    "configuration_snapshot": 2,
+    "configuration_value": 36,
+    "description_expansion": 0,
+    "description_extension": 0,
+    "document_block": 0,
+    "document_record": 0,
+    "frame": 0,
+    "frame_binding": 0,
+    "frame_graph": 0,
+    "frame_transform": 0,
+    "hardware_component": 0,
+    "hardware_configuration": 0,
+    "hardware_specification": 0,
+    "identity_link": 0,
+    "image": 0,
+    "incident_record": 0,
+    "ingest_finding": 15,
+    "intervention": 0,
+    "machine": 2,
+    "maintenance_event": 0,
+    "requalification_record": 0,
+    "requirement": 0,
+    "risk_assessment": 0,
+    "run": 2,
+    "run_assembly": 0,
+    "run_declaration": 2,
+    "site": 1,
+    "snapshot_binding": 2,
+    "software_configuration": 0,
+    "sop_section": 0,
+    "source_absence": 0,
+    "source_artifact": 4,
+    "source_revision": 4,
+    "spatial_artifact": 0,
+    "stream": 2,
+    "structured_record": 0,
+    "structured_table": 0,
+    "task_brief": 0,
+    "timestamp_domain": 4,
+    "transform_record": 8,
+    "video": 0,
+    "work_order": 0
+  },
+  "runs": [
+    {
+      "first": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 8,
+                "offset": 346
+              }
+            ],
+            "source": "sha256:c9701b1920de9a1bbceacf23e4135a40f9d27e8b4ddfa5ca91a8fcc3b1f831bc"
+          },
+          "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+        },
+        "value": {
+          "domain_id": "rec:sha256:dec79cd59cfac64b05766d942ccb3971e5fe8e86d7c7c92f32f9fbde48c2fbfb",
+          "ticks": 1000000000
+        }
+      },
+      "id": "rec:sha256:3dfc2d57cf0a66e8eb96db8df78b483080994800c7b26d8584aef4b25514cf59",
+      "last": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 8,
+                "offset": 354
+              }
+            ],
+            "source": "sha256:c9701b1920de9a1bbceacf23e4135a40f9d27e8b4ddfa5ca91a8fcc3b1f831bc"
+          },
+          "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+        },
+        "value": {
+          "domain_id": "rec:sha256:dec79cd59cfac64b05766d942ccb3971e5fe8e86d7c7c92f32f9fbde48c2fbfb",
+          "ticks": 1000000000
+        }
+      },
+      "logical_id": {
+        "knowledge": "unknown"
+      },
+      "machine": {
+        "knowledge": "unknown"
+      },
+      "streams": 1
+    },
+    {
+      "first": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 8,
+                "offset": 346
+              }
+            ],
+            "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+          },
+          "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+        },
+        "value": {
+          "domain_id": "rec:sha256:4c3606276ecf24317bf27a7bf7a8c2e710759650045d084290071fc115c27c91",
+          "ticks": 1000000000
+        }
+      },
+      "id": "rec:sha256:4c19b6723225a0359dd147dc46f111ffa9293d70a6a3abf00324c28586c54ec8",
+      "last": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 8,
+                "offset": 354
+              }
+            ],
+            "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+          },
+          "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+        },
+        "value": {
+          "domain_id": "rec:sha256:4c3606276ecf24317bf27a7bf7a8c2e710759650045d084290071fc115c27c91",
+          "ticks": 1000000000
+        }
+      },
+      "logical_id": {
+        "knowledge": "unknown"
+      },
+      "machine": {
+        "knowledge": "unknown"
+      },
+      "streams": 1
+    }
+  ],
+  "schema_version": 9,
+  "sources": [
+    {
+      "content_id": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e",
+      "location": {
+        "kind": "local",
+        "path": "fleet/run_001/amr_01/drive.mcap"
+      },
+      "read_by": [
+        "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+      ],
+      "size": 413
+    },
+    {
+      "content_id": "sha256:c9701b1920de9a1bbceacf23e4135a40f9d27e8b4ddfa5ca91a8fcc3b1f831bc",
+      "location": {
+        "kind": "local",
+        "path": "fleet/run_001/amr_02/drive.mcap"
+      },
+      "read_by": [
+        "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+      ],
+      "size": 413
+    },
+    {
+      "content_id": "sha256:db1543b15b2c0d415fab7636b9b45733fc06b707f56b413c67c520525061398c",
+      "location": {
+        "kind": "local",
+        "path": "fleet/run_001/fleet.yaml"
+      },
+      "read_by": [
+        "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+      ],
+      "size": 36
+    },
+    {
+      "content_id": "sha256:c12ebb1202058aa3cfd50d59fee0f8ab8f1d0eab3dce9cd9c4b517c15356ecb7",
+      "location": {
+        "kind": "local",
+        "path": "neptune.yaml"
+      },
+      "read_by": [
+        "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+        "rec:sha256:8856e251e3ef339046830982fac19a8b08d8e710eb91250c4ed26af46d4771e0",
+        "rec:sha256:a22aaf800b22bce849997101e7e3875b5e2f91d925f00fa4c7483bb900f01a4e"
+      ],
+      "size": 458
+    }
+  ],
+  "streams": [
+    {
+      "clocks": [
+        "rec:sha256:4c3606276ecf24317bf27a7bf7a8c2e710759650045d084290071fc115c27c91",
+        "rec:sha256:9d6014507b337b70e0a6bd50d842a8fc758904ea16066c48c8a59db0f0a6223f"
+      ],
+      "first": {
+        "knowledge": "unknown"
+      },
+      "id": "rec:sha256:1046b62422195442fe24477da40af5683023822c1f24eefe465b3e96a60159a7",
+      "last": {
+        "knowledge": "unknown"
+      },
+      "message_count": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 10,
+                "offset": 366
+              }
+            ],
+            "source": "sha256:b23505b6d38d307f81bfae6be16dd5eebb3e11335b52eee4378eedd9c4b7685e"
+          },
+          "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+        },
+        "value": 1
+      },
+      "run": "rec:sha256:4c19b6723225a0359dd147dc46f111ffa9293d70a6a3abf00324c28586c54ec8",
+      "topic": {
+        "knowledge": "known",
+        "value": "/amr_01/odom"
+      }
+    },
+    {
+      "clocks": [
+        "rec:sha256:dec79cd59cfac64b05766d942ccb3971e5fe8e86d7c7c92f32f9fbde48c2fbfb",
+        "rec:sha256:227ff456474e34b5ba68a6bdeecd01fe80c663f2bf4e541223b87c5bf50ba271"
+      ],
+      "first": {
+        "knowledge": "unknown"
+      },
+      "id": "rec:sha256:62faa806559c6fa8f2403ade4e2108242de9df99d315f33299be9e1f57670f1f",
+      "last": {
+        "knowledge": "unknown"
+      },
+      "message_count": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 10,
+                "offset": 366
+              }
+            ],
+            "source": "sha256:c9701b1920de9a1bbceacf23e4135a40f9d27e8b4ddfa5ca91a8fcc3b1f831bc"
+          },
+          "transform": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+        },
+        "value": 1
+      },
+      "run": "rec:sha256:3dfc2d57cf0a66e8eb96db8df78b483080994800c7b26d8584aef4b25514cf59",
+      "topic": {
+        "knowledge": "known",
+        "value": "/amr_02/odom"
+      }
+    }
+  ],
+  "transforms": [
+    {
+      "adapter_id": "mcap",
+      "adapter_version": "0.2.0",
+      "config_hash": "sha256:2a8c92ad6f7264023eab7109637ea3ff0c1f9350bc919160baac8a4c5ce2b710",
+      "id": "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c",
+      "libraries": {
+        "lz4": "4.4.5",
+        "zstandard": "0.25.0"
+      },
+      "upstream": []
+    },
+    {
+      "adapter_id": "neptune.bindings",
+      "adapter_version": "0.1.0",
+      "config_hash": "sha256:dbfdd73f0250888d3e9f966626216c926f6aa846c09f87a64c941c9e108ffe33",
+      "id": "rec:sha256:30b54c3632179fb3a89c85e9c04e1288a1d6a75823f1e5b1d4065dff3db99b0b",
+      "libraries": {},
+      "upstream": [
+        "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c",
+        "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+        "rec:sha256:a22aaf800b22bce849997101e7e3875b5e2f91d925f00fa4c7483bb900f01a4e",
+        "rec:sha256:d50bee4e5421f13051423ca640c89c0b3dcbbf24c4b708925873ab717166e41f"
+      ]
+    },
+    {
+      "adapter_id": "neptune.clocks",
+      "adapter_version": "0.1.0",
+      "config_hash": "sha256:8abe788c243bb1bb98da5c0a77af0dd76bbfe6800e803832f692529e7685f611",
+      "id": "rec:sha256:35b54c0acb0f995ce2f8c28a5e00469c250a965d76807a20f529e91077517fcf",
+      "libraries": {},
+      "upstream": [
+        "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+      ]
+    },
+    {
+      "adapter_id": "config",
+      "adapter_version": "0.1.0",
+      "config_hash": "sha256:cfb93799485076dd069ab0a49577f9388d97970340dbe595a2fc1e5becce0317",
+      "id": "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+      "libraries": {
+        "python": "3.12",
+        "pyyaml": "6.0.3"
+      },
+      "upstream": []
+    },
+    {
+      "adapter_id": "neptune.manifest",
+      "adapter_version": "0.2.0",
+      "config_hash": "sha256:4d461d39efd0d103595af696b0c1b5370079c8573675dca1827f89188858a75a",
+      "id": "rec:sha256:8856e251e3ef339046830982fac19a8b08d8e710eb91250c4ed26af46d4771e0",
+      "libraries": {},
+      "upstream": []
+    },
+    {
+      "adapter_id": "neptune.manifest",
+      "adapter_version": "0.2.0",
+      "config_hash": "sha256:4d461d39efd0d103595af696b0c1b5370079c8573675dca1827f89188858a75a",
+      "id": "rec:sha256:a22aaf800b22bce849997101e7e3875b5e2f91d925f00fa4c7483bb900f01a4e",
+      "libraries": {},
+      "upstream": [
+        "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c",
+        "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b"
+      ]
+    },
+    {
+      "adapter_id": "neptune.introspection",
+      "adapter_version": "0.1.0",
+      "config_hash": "sha256:c9bc334a3ccc9ee16d496be9a6b10c4fb1d0a994ea6f19ec135122607e445b94",
+      "id": "rec:sha256:a4c22d1acf45a9564589f640a21cca9830eb22c16d518328422a7193353490c4",
+      "libraries": {},
+      "upstream": [
+        "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c"
+      ]
+    },
+    {
+      "adapter_id": "neptune.grouping",
+      "adapter_version": "0.2.0",
+      "config_hash": "sha256:a0b2202fa0cc74cc5498ee6d8b41fa01471a0ed9758a4a5fe39450648c48d1cd",
+      "id": "rec:sha256:d50bee4e5421f13051423ca640c89c0b3dcbbf24c4b708925873ab717166e41f",
+      "libraries": {},
+      "upstream": [
+        "rec:sha256:020b1b8799e7103e7690d3e1a97222ec5ee10966dc4a405dc4469aa1de9d2f3c",
+        "rec:sha256:746e5f2c7c59ebc8f986a0ada8f8384e2651184df169867dc7118864e868e75b",
+        "rec:sha256:8856e251e3ef339046830982fac19a8b08d8e710eb91250c4ed26af46d4771e0"
+      ]
+    }
+  ]
+}

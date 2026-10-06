@@ -47,8 +47,10 @@ _BY_STATUS: Final = {
 def error_from_status(status: int, body: bytes) -> SdkError:
     """An ``SdkError`` for a non-200 answer: the status decides the code unless it is unspecific.
 
-    A 5xx is ``unavailable`` (retryable) unless the body names ``engine_error``; a body that is not
-    our error shape contributes no message beyond the status.
+    A status the table does not map (a plain 5xx, an unusual 4xx) takes the code its body names, so
+    a server's deterministic ``invalid_response`` or ``engine_error`` is not retried as an outage;
+    without one, a 5xx is ``unavailable`` (retryable) and anything else ``engine_error``. A body
+    that is not our error shape contributes no message beyond the status.
     """
     code = _BY_STATUS.get(status) or (
         ErrorCode.UNAVAILABLE if status >= 500 else ErrorCode.ENGINE_ERROR
@@ -60,7 +62,7 @@ def error_from_status(status: int, body: bytes) -> SdkError:
         named = ErrorCode(error["code"])
         if isinstance(error["message"], str):
             message = error["message"]
-        if status >= 500 and named is ErrorCode.ENGINE_ERROR:
+        if status not in _BY_STATUS:
             code = named
         if code is ErrorCode.QUERY_REFUSED:
             findings = tuple(

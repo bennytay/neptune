@@ -55,13 +55,19 @@ from neptune.model.lifecycle import (
 )
 from neptune.model.machine import (
     Calibration,
+    DescriptionExpansion,
+    DescriptionExtension,
     HardwareComponent,
     HardwareConfiguration,
+    HardwareSpecification,
     Machine,
     SoftwareConfiguration,
     calibration_from_json,
+    description_expansion_from_json,
+    description_extension_from_json,
     hardware_component_from_json,
     hardware_configuration_from_json,
+    hardware_specification_from_json,
     machine_from_json,
     software_configuration_from_json,
 )
@@ -79,7 +85,14 @@ from neptune.model.reference import (
     frame_transform_from_json,
     timestamp_domain_from_json,
 )
-from neptune.model.run import Run, Stream, run_from_json, stream_from_json
+from neptune.model.run import (
+    Run,
+    RunDeclaration,
+    Stream,
+    run_declaration_from_json,
+    run_from_json,
+    stream_from_json,
+)
 from neptune.model.source import (
     SourceAbsence,
     SourceArtifact,
@@ -137,6 +150,7 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (FrameTransform, frame_transform_from_json),
         (Run, run_from_json),
         (Stream, stream_from_json),
+        (RunDeclaration, run_declaration_from_json),
         (Machine, machine_from_json),
         (HardwareConfiguration, hardware_configuration_from_json),
         (HardwareComponent, hardware_component_from_json),
@@ -144,6 +158,9 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (Calibration, calibration_from_json),
         (ConfigurationSnapshot, configuration_snapshot_from_json),
         (ConfigurationValue, configuration_value_from_json),
+        (HardwareSpecification, hardware_specification_from_json),
+        (DescriptionExtension, description_extension_from_json),
+        (DescriptionExpansion, description_expansion_from_json),
         (Site, site_from_json),
         (Asset, asset_from_json),
         (SpatialArtifact, spatial_artifact_from_json),

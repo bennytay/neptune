@@ -1,0 +1,19 @@
+{
+  "adapter_id": "assertion",
+  "adapter_version": "0.1.0",
+  "config": {
+    "max_assertions": 100000,
+    "max_bytes": 16777216,
+    "max_depth": 64,
+    "max_path_ratio": 64,
+    "max_scalar_length": 1048576
+  },
+  "config_hash": "sha256:485d49f9383263822abe01915f2e164509f692819fde78391ba3bf1476b6d45f",
+  "id": "rec:sha256:59f0dd9ec0fe8b3ef534863f848176faaadd94f86bcc983eeb7f27ab51952eae",
+  "kind": "transform_record",
+  "libraries": {
+    "python": "3.12"
+  },
+  "schema_version": 1,
+  "upstream": []
+}

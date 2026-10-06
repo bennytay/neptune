@@ -14,9 +14,11 @@ at one head differ. A snapshot's id is therefore the sha256 of the document's ca
 ``snapshot:sha256:<hex>``.
 """
 
+import re
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import Final, Literal, TypeAlias
 
@@ -36,12 +38,27 @@ from neptune_deploy.packs._read import (
 from neptune_deploy.packs.errors import PackError
 
 GRAPH_SCHEMA_MAJOR: Final = 1
+GRAPH_SCHEMA_PIN: Final = "1.6.0"  # contracts/lock.toml; a test holds the two together
+KEY_UNREAD: Final = "snapshot_key_unread"
+_VERSION: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 SNAPSHOT_PREFIX: Final = "snapshot:"
 MAX_SNAPSHOT_BYTES: Final = 512 * 1024 * 1024
 ASSERTION_KINDS: Final = ("inferred", "observed", "stated")
-LITERAL_TYPES: Final = ("boolean", "instant", "integer", "quantity", "real", "text")
+# graph-schema 1.0.0's datatypes, plus clock_map (1.4.0, Memory ADR 0011) and delta (1.7.0, Memory
+# ADR 0014): a graph Memory builds with clock mappings or calibration drift holds them.
+LITERAL_TYPES: Final = (
+    "boolean",
+    "clock_map",
+    "delta",
+    "instant",
+    "integer",
+    "quantity",
+    "real",
+    "text",
+)
 
-_R: Final = Reader("snapshot_malformed")
+_UNREAD: Final[ContextVar[list[str] | None]] = ContextVar("snapshot_unread", default=None)
+_R: Final = Reader("snapshot_malformed", _UNREAD)
 
 
 @dataclass(frozen=True, order=True)
@@ -155,6 +172,24 @@ class ResolutionFinding:
 
 
 @dataclass(frozen=True)
+class UnreadKey:
+    """A key a newer minor adds that Deploy does not read (``snapshot_key_unread``, ADR 0015):
+    ``key_path`` has array indices as ``*``; ``pointer`` is the first place it occurs."""
+
+    key_path: str
+    pointer: str
+    occurrences: int
+
+    def to_json(self) -> JsonObject:
+        return {
+            "code": KEY_UNREAD,
+            "key_path": self.key_path,
+            "occurrences": self.occurrences,
+            "pointer": self.pointer,
+        }
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """A frozen graph document and what the compiler reads from it."""
 
@@ -165,6 +200,10 @@ class Snapshot:
     cardinality: Mapping[str, str]  # predicate -> "one" | "many", from the resolver's vocabulary
     claims: tuple[Claim, ...]  # every version, in document order
     findings: tuple[ResolutionFinding, ...]
+    # Keys the document holds that the pinned contract does not name, read only under a newer
+    # declared minor (ADR 0015); never rendered, and absent from every claim and finding read.
+    unread: tuple[UnreadKey, ...] = ()
+    declared_schema_version: str | None = None
 
     @cached_property
     def current(self) -> tuple[Claim, ...]:
@@ -199,6 +238,14 @@ class Snapshot:
         return {node: tuple(claims) for node, claims in index.items()}
 
     @cached_property
+    def by_predicate_object(self) -> Mapping[tuple[str, bytes], tuple[Claim, ...]]:
+        """Current claims by predicate and object (canonical bytes): who states the same thing."""
+        index: dict[tuple[str, bytes], list[Claim]] = defaultdict(list)
+        for claim in self.current:
+            index[(claim.predicate, claim.object_key)].append(claim)
+        return {key: tuple(claims) for key, claims in index.items()}
+
+    @cached_property
     def by_object(self) -> Mapping[Node, tuple[Claim, ...]]:
         index: dict[Node, list[Claim]] = defaultdict(list)
         for claim in self.current:
@@ -218,13 +265,82 @@ def snapshot_id(document: JsonValue) -> str:
         ) from exc
 
 
-def load_snapshot(data: bytes, *, max_bytes: int = MAX_SNAPSHOT_BYTES) -> Snapshot:
+def load_snapshot(
+    data: bytes, *, max_bytes: int = MAX_SNAPSHOT_BYTES, schema_version: str | None = None
+) -> Snapshot:
     """Read a graph document (graph-schema 1.x ``#/$defs/Graph``) from its bytes."""
-    return read_snapshot(parse_document(data, "snapshot_malformed", max_bytes))
+    return read_snapshot(
+        parse_document(data, "snapshot_malformed", max_bytes), schema_version=schema_version
+    )
 
 
-def read_snapshot(document: JsonValue) -> Snapshot:
-    """Read a parsed graph document; refuse anything outside the contract's shapes."""
+def tolerates_unknown_keys(schema_version: str | None) -> bool:
+    """Whether a declared graph-schema version is a newer minor of the pinned major (ADR 0015).
+    ``None`` is the pin: strict. A malformed declaration is refused."""
+    if schema_version is None:
+        return False
+    declared = _VERSION.fullmatch(schema_version)
+    if declared is None:
+        raise PackError(
+            "snapshot_unsupported",
+            f"graph-schema version {schema_version!r} is not MAJOR.MINOR.PATCH",
+        )
+    pin = _VERSION.fullmatch(GRAPH_SCHEMA_PIN)
+    assert pin is not None
+    major, minor = int(declared[1]), int(declared[2])
+    return major == int(pin[1]) and minor > int(pin[2])
+
+
+def _key_path(pointer: str) -> str:
+    """A pointer with its array indices as ``*`` (graph-schema has no all-digit object keys)."""
+    return "/".join("*" if part.isdigit() else part for part in pointer.split("/"))
+
+
+def _prune(value: JsonValue, pointer: str, drop: frozenset[str]) -> JsonValue:
+    if isinstance(value, Mapping):
+        return {
+            key: _prune(item, child(pointer, key), drop)
+            for key, item in value.items()
+            if child(pointer, key) not in drop
+        }
+    if isinstance(value, list):
+        return [_prune(item, child(pointer, i), drop) for i, item in enumerate(value)]
+    return value
+
+
+def read_snapshot(document: JsonValue, *, schema_version: str | None = None) -> Snapshot:
+    """Read a parsed graph document; refuse anything outside the contract's shapes.
+
+    ``schema_version`` is the graph-schema version the document's producer declares (the document
+    names only the major). Under a newer minor of the pinned major, an unknown key is not refused:
+    it is dropped from what is read and reported once per key path as ``snapshot_key_unread``
+    (ADR 0015). Under the pin, an older minor or another major it is refused, as before.
+    """
+    if not tolerates_unknown_keys(schema_version):
+        return _read(document, None)
+    sink: list[str] = []
+    token = _UNREAD.set(sink)
+    try:
+        snapshot = _read(document, None)
+    finally:
+        _UNREAD.reset(token)
+    if not sink:
+        return snapshot
+    # Read again without the unknown keys, so that nothing downstream (a claim's raw JSON, an
+    # object's canonical bytes) holds them; the id still names the document as it was.
+    pruned = _prune(document, "", frozenset(sink))
+    by_path: dict[str, list[str]] = {}
+    for pointer in sink:
+        by_path.setdefault(_key_path(pointer), []).append(pointer)
+    unread = tuple(
+        UnreadKey(path, pointers[0], len(pointers)) for path, pointers in sorted(by_path.items())
+    )
+    return replace(
+        _read(pruned, snapshot.id), unread=unread, declared_schema_version=schema_version
+    )
+
+
+def _read(document: JsonValue, sid: str | None) -> Snapshot:
     graph = _R.obj(
         document,
         "",
@@ -260,7 +376,7 @@ def read_snapshot(document: JsonValue) -> Snapshot:
         for i, item in enumerate(_R.array(graph["findings"], "/findings"))
     )
     return Snapshot(
-        id=snapshot_id(document),
+        id=snapshot_id(document) if sid is None else sid,
         head=head,
         generation=generation,
         vocabulary_version=vocabulary_version,
@@ -318,7 +434,7 @@ def read_interval(value: JsonValue, pointer: str, reader: Reader = _R) -> Interv
     return Interval(start, end)
 
 
-def _object(value: JsonValue, pointer: str) -> JsonObject:
+def _object(value: JsonValue, pointer: str, subject: Node) -> JsonObject:
     if not isinstance(value, Mapping):
         raise _R.fail("expected an object", pointer)
     kind = value.get("kind")
@@ -329,11 +445,172 @@ def _object(value: JsonValue, pointer: str) -> JsonObject:
         _R.string(ref["record_id"], child(pointer, "record_id"), RECORD_ID)
     elif kind == "literal":
         literal = _R.obj(value, pointer, ("datatype", "kind", "unit", "value"))
-        _R.choice(literal["datatype"], child(pointer, "datatype"), LITERAL_TYPES)
+        datatype = _R.choice(literal["datatype"], child(pointer, "datatype"), LITERAL_TYPES)
         _R.obj(literal["unit"], child(pointer, "unit"), ("knowledge",), ("candidates", "value"))
+        if datatype == "clock_map":
+            _not_applicable(literal["unit"], child(pointer, "unit"))
+            _clock_map(literal["value"], child(pointer, "value"), subject)
+        elif datatype == "delta":
+            _delta_unit(literal["unit"], child(pointer, "unit"))
+            _delta(literal["value"], child(pointer, "value"))
     else:
         raise _R.fail("an object is a node, a record or a literal", child(pointer, "kind"))
     return value
+
+
+def _member(value: Mapping[str, JsonValue], key: str, pointer: str) -> JsonValue:
+    if key not in value:
+        raise _R.fail(f"missing {key}", pointer)
+    return value[key]
+
+
+def _not_applicable(value: JsonValue, pointer: str) -> None:
+    state = _R.obj(value, pointer, ("knowledge",))
+    _R.choice(state["knowledge"], child(pointer, "knowledge"), ("not_applicable",))
+
+
+def _state(value: JsonValue, pointer: str, read: Callable[[JsonValue, str], None]) -> None:
+    """A clock map part's ``Knowledge`` state: ``known`` with a value, ``ambiguous`` with two or
+    more candidates, or a state with no value (graph-schema ``ClockMap``)."""
+    if not isinstance(value, Mapping):
+        raise _R.fail("expected an object", pointer)
+    state = _R.choice(
+        _member(value, "knowledge", pointer),
+        child(pointer, "knowledge"),
+        ("ambiguous", "known", "not_applicable", "not_covered", "unknown"),
+    )
+    if state == "known":
+        _R.obj(value, pointer, ("knowledge", "value"))
+        read(value["value"], child(pointer, "value"))
+    elif state == "ambiguous":
+        _R.obj(value, pointer, ("candidates", "knowledge"))
+        at = child(pointer, "candidates")
+        candidates = _R.array(value["candidates"], at)
+        if len(candidates) < 2:
+            raise _R.fail("an ambiguous state has at least two candidates", at)
+        for i, candidate in enumerate(candidates):
+            here = child(at, i)
+            _R.obj(candidate, here, ("value",))
+            assert isinstance(candidate, Mapping)
+            read(candidate["value"], child(here, "value"))
+    else:
+        _R.obj(value, pointer, ("knowledge",))
+
+
+def _clock_map(value: JsonValue, pointer: str, subject: Node) -> None:
+    """A ``ClockMap`` (graph-schema 1.4.0): the subject is the source clock, every anchor's source
+    instant is on it and its target instant on ``target``, as is the residual bound."""
+    if subject.node_type != "clock":
+        raise _R.fail("a clock map is stated about a clock node", pointer)
+    clock = _R.obj(
+        value, pointer, ("anchor", "chain", "method", "rate", "residual_bound", "target", "via")
+    )
+    target = _R.string(clock["target"], child(pointer, "target"), RECORD_ID)
+    _R.choice(clock["method"], child(pointer, "method"), ("co_sampled", "composed", "stated"))
+    for key in ("chain", "via"):
+        at = child(pointer, key)
+        for i, item in enumerate(_R.array(clock[key], at)):
+            _R.string(item, child(at, i), RECORD_ID)
+
+    def anchor(item: JsonValue, at: str) -> None:
+        pair = _R.obj(item, at, ("source", "target"))
+        source = _stamp(pair["source"], child(at, "source"))
+        onto = _stamp(pair["target"], child(at, "target"))
+        if source.domain != subject.node_id:
+            raise _R.fail("an anchor's source instant is on the mapped clock", child(at, "source"))
+        if onto.domain != target:
+            raise _R.fail("an anchor's target instant is on the target clock", child(at, "target"))
+
+    def fraction(item: JsonValue, at: str) -> None:
+        rate = _R.obj(item, at, ("denominator", "numerator"))
+        _R.integer(rate["denominator"], child(at, "denominator"), 1)
+        _R.integer(rate["numerator"], child(at, "numerator"), 1)
+
+    def bound(item: JsonValue, at: str) -> None:
+        duration = _stamp(item, at)
+        if duration.domain != target:
+            raise _R.fail("a residual bound counts ticks of the target clock", at)
+        if duration.ticks < 0:
+            raise _R.fail("a residual bound is not negative", child(at, "ticks"))
+
+    _state(clock["anchor"], child(pointer, "anchor"), anchor)
+    _state(clock["rate"], child(pointer, "rate"), fraction)
+    _state(clock["residual_bound"], child(pointer, "residual_bound"), bound)
+
+
+def _delta_unit(value: JsonValue, pointer: str) -> None:
+    unit = _R.obj(value, pointer, ("knowledge",), ("value",))
+    state = _R.choice(unit["knowledge"], child(pointer, "knowledge"), ("known", "not_applicable"))
+    if state == "known":
+        _R.obj(unit, pointer, ("knowledge", "value"))
+        _R.text(unit["value"], child(pointer, "value"))
+    else:
+        _R.obj(unit, pointer, ("knowledge",))
+
+
+# A delta's shapes (graph-schema 1.7.0 ``Delta``): quantity -> representation -> (component count,
+# or 0 for any, and the adjustments allowed; () for none).
+_DELTA_SHAPES: Final[Mapping[str, Mapping[str, tuple[int, tuple[str, ...]]]]] = {
+    "parameter": {"values": (0, ())},
+    "translation": {"homogeneous_matrix": (3, ()), "translation": (3, ())},
+    "rotation": {
+        "euler_angles": (3, ("wrapped",)),
+        "homogeneous_matrix": (9, ("none",)),
+        "quaternion": (4, ("later_negated", "none")),
+        "rotation_matrix": (9, ("none",)),
+        "rotation_vector": (3, ("none",)),
+    },
+}
+
+
+def _delta(value: JsonValue, pointer: str) -> None:
+    """A ``Delta``: later minus earlier between two calibration records, in a declared form."""
+    if not isinstance(value, Mapping):
+        raise _R.fail("expected an object", pointer)
+    quantity = _R.choice(
+        _member(value, "quantity", pointer), child(pointer, "quantity"), tuple(_DELTA_SHAPES)
+    )
+    shapes = _DELTA_SHAPES[quantity]
+    representation = _R.choice(
+        _member(value, "representation", pointer), child(pointer, "representation"), tuple(shapes)
+    )
+    count, adjustments = shapes[representation]
+    keys = ["earlier", "later", "quantity", "representation", "values"]
+    if quantity == "parameter":
+        keys.append("name")
+    else:
+        keys += ["child", "parent", "transform"]
+    if adjustments:
+        keys.append("adjustment")
+    delta = _R.obj(value, pointer, tuple(keys))
+    _R.string(delta["earlier"], child(pointer, "earlier"), RECORD_ID)
+    _R.string(delta["later"], child(pointer, "later"), RECORD_ID)
+    if quantity == "parameter":
+        _R.string(delta["name"], child(pointer, "name"))
+    else:
+        for key in ("child", "parent"):
+            frame = _R.obj(delta[key], child(pointer, key), ("frame_graph_id", "frame_id"))
+            _R.string(
+                frame["frame_graph_id"], child(child(pointer, key), "frame_graph_id"), RECORD_ID
+            )
+            _R.string(frame["frame_id"], child(child(pointer, key), "frame_id"))
+        at = child(pointer, "transform")
+        transform = _R.obj(delta["transform"], at, ("child", "direction", "parent"))
+        _R.string(transform["child"], child(at, "child"))
+        _R.string(transform["parent"], child(at, "parent"))
+        _R.choice(
+            transform["direction"], child(at, "direction"), ("child_to_parent", "parent_to_child")
+        )
+    if adjustments:
+        _R.choice(delta["adjustment"], child(pointer, "adjustment"), adjustments)
+    at = child(pointer, "values")
+    values = _R.array(delta["values"], at)
+    if not values or (count and len(values) != count) or len(values) > 100_000:
+        expected = f"exactly {count}" if count else "1 to 100000"
+        raise _R.fail(f"a {quantity} {representation} delta has {expected} values", at)
+    for i, item in enumerate(values):
+        if isinstance(item, bool) or not isinstance(item, int | float):
+            raise _R.fail("expected a number", child(at, i))
 
 
 def _evidence(value: JsonValue, pointer: str) -> JsonObject:
@@ -360,11 +637,18 @@ def _evidence(value: JsonValue, pointer: str) -> JsonObject:
     return ref
 
 
-def _tx_end(value: JsonValue, pointer: str) -> bool:
-    """Whether a ``superseded_at`` leaves the version current."""
+def _tx_end(value: JsonValue, pointer: str, recorded_at: int, head: int) -> bool:
+    """Whether a ``superseded_at`` leaves the version current. A version is superseded no earlier
+    than the transaction that recorded it (the resolver folds one transaction's assertions in
+    order, so both may be one) and no later than the graph's head."""
     if value == OPEN:
         return True
-    _R.integer(value, pointer, 0)
+    tx = _R.integer(value, pointer, 0)
+    if not recorded_at <= tx <= head:
+        raise _R.fail(
+            f"superseded at {tx}, before its recording at {recorded_at} or after the head {head}",
+            pointer,
+        )
     return False
 
 
@@ -416,15 +700,16 @@ def _claim(value: JsonValue, pointer: str, head: int) -> Claim:
         raise _R.fail(f"recorded at {recorded_at}, after the graph's head {head}", pointer)
     for i, item in enumerate(_R.array(claim["supersedes"], child(pointer, "supersedes"))):
         _R.string(item, child(child(pointer, "supersedes"), i), CLAIM_ID)
+    subject = _node(claim["subject"], child(pointer, "subject"))
     return Claim(
         id=_R.string(claim["id"], child(pointer, "id"), CLAIM_ID),
-        subject=_node(claim["subject"], child(pointer, "subject")),
+        subject=subject,
         predicate=_R.string(claim["predicate"], child(pointer, "predicate"), TOKEN),
-        object=_object(claim["object"], child(pointer, "object")),
+        object=_object(claim["object"], child(pointer, "object"), subject),
         valid=read_interval(claim["valid"], child(pointer, "valid")),
         assertion_kind=kind,
         recorded_at=recorded_at,
-        current=_tx_end(claim["superseded_at"], child(pointer, "superseded_at")),
+        current=_tx_end(claim["superseded_at"], child(pointer, "superseded_at"), recorded_at, head),
         evidence=evidence,
         records=records,
         raw=claim,
@@ -449,6 +734,8 @@ def _finding(value: JsonValue, pointer: str, head: int) -> ResolutionFinding:
             _R.string(item, child(child(pointer, "others"), i), CLAIM_ID)
             for i, item in enumerate(others)
         ),
-        current=_tx_end(finding["superseded_at"], child(pointer, "superseded_at")),
+        current=_tx_end(
+            finding["superseded_at"], child(pointer, "superseded_at"), recorded_at, head
+        ),
         raw=finding,
     )

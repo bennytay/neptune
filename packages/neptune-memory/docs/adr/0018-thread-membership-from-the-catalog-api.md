@@ -9,8 +9,8 @@
 The configuration lineage and calibration consolidators decide which node a record names. Today they
 learn which ids have nodes, and which node an anchored record belongs to, only from `ledger_thread`
 stand-in records (ADR 0003 §1, ADR 0010 §1). No real Ledger export contains those. On the acceptance
-corpus that means Deploy's lifecycle records (5 `change_record`, 15 `maintenance_event`,
-2 `authorisation_envelope`) are all `configuration.unthreaded_id`, and no run gets a node. So the graph
+corpus that means Deploy's lifecycle records (5 `change_record`, 16 `maintenance_event`,
+5 `authorisation_envelope` in corpus 2.0.0) are all `configuration.unthreaded_id`, and no run gets a node. So the graph
 cannot say "what changed since the last good run".
 
 Since catalog-api 1.7.0, the Ledger answers `threads_of(record_id)`: each thread the record belongs to,
@@ -20,7 +20,7 @@ The acceptance corpus was registered in a real catalog to check them:
 - **Lifecycle kinds join no thread.** The Ledger's thread table (Ledger ADR 0003 §2) has no row for
   `commissioning_baseline`, `maintenance_event`, `change_record`, `requalification_record` or
   `authorisation_envelope` (Ledger ADR 0010, Consequences). The catalog answers `found` with no
-  memberships for all 22 of the corpus's lifecycle records. A Memory that only accepts ids a Ledger
+  memberships for every one of the corpus's lifecycle records. A Memory that only accepts ids a Ledger
   thread declares can never place a lifecycle record, however faithfully it reads the catalog.
 - **Configuration and run threads are anchored.** A `HardwareConfiguration`, `SoftwareConfiguration` or
   `Calibration` opens a thread keyed by its record-level evidence. That key is not the configuration id a
@@ -117,10 +117,9 @@ The acceptance corpus was registered in a real catalog to check them:
 
 ## Consequences
 
-- On the acceptance corpus all 15 maintenance events land on machine chains. There is one `succeeds`
-  (AMR-07, firmware 4.2.0 → 4.3.1 at WO-26-0414). The change records become `configuration_unknown`
-  spans with `chain_gap`, because their mapped configuration is `NotCovered`. Every run with a stated
-  `first` gets `configuration_unknown(run → run record)`. What is still missing is in `docs/contracts.md`.
+- On the acceptance corpus (2.0.0) every maintenance event and change record lands on a machine chain:
+  11 `has_configuration` and 2 `succeeds`. Every run with a stated `first` gets
+  `configuration_unknown(run → run record)`. What is still missing is in `docs/contracts.md`.
 - If the Ledger ever threads lifecycle kinds (a superseding Ledger ADR 0003 row), §2.2 becomes redundant.
   Node ids and claims do not change, because both sources key `node_ref(type, id)`.
 - Memory's snapshot generator now needs `neptune-ledger` and `pgserver`. `make setup` installs both

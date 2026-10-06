@@ -857,6 +857,14 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "trails": {
+          "items": {
+            "$ref": "#/$defs/Trail"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
         }
       },
       "required": [
@@ -871,533 +879,171 @@
       ],
       "type": "object"
     },
-    "Delta": {
-      "anyOf": [
+    "DiffPoint": {
+      "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
-            "earlier": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "name": {
-              "type": "string"
-            },
-            "quantity": {
-              "const": "parameter"
-            },
-            "representation": {
-              "const": "values"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 100000,
-              "minItems": 1,
-              "type": "array"
+            "tx": {
+              "$ref": "#/$defs/LedgerTx"
             }
           },
           "required": [
-            "earlier",
-            "later",
-            "name",
-            "quantity",
-            "representation",
-            "values"
+            "tx"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
           "properties": {
-            "child": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "earlier": {
+            "clock": {
               "$ref": "#/$defs/RecordId"
             },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "parent": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "quantity": {
-              "const": "translation"
-            },
-            "representation": {
-              "const": "homogeneous_matrix"
-            },
-            "transform": {
-              "additionalProperties": false,
-              "properties": {
-                "child": {
-                  "type": "string"
-                },
-                "direction": {
-                  "enum": [
-                    "child_to_parent",
-                    "parent_to_child"
-                  ]
-                },
-                "parent": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "child",
-                "direction",
-                "parent"
-              ],
-              "type": "object"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
+            "ticks": {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
             }
           },
           "required": [
-            "child",
-            "earlier",
-            "later",
-            "parent",
-            "quantity",
-            "representation",
-            "transform",
-            "values"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "child": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "earlier": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "parent": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "quantity": {
-              "const": "translation"
-            },
-            "representation": {
-              "const": "translation"
-            },
-            "transform": {
-              "additionalProperties": false,
-              "properties": {
-                "child": {
-                  "type": "string"
-                },
-                "direction": {
-                  "enum": [
-                    "child_to_parent",
-                    "parent_to_child"
-                  ]
-                },
-                "parent": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "child",
-                "direction",
-                "parent"
-              ],
-              "type": "object"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            }
-          },
-          "required": [
-            "child",
-            "earlier",
-            "later",
-            "parent",
-            "quantity",
-            "representation",
-            "transform",
-            "values"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "adjustment": {
-              "enum": [
-                "wrapped"
-              ]
-            },
-            "child": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "earlier": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "parent": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "quantity": {
-              "const": "rotation"
-            },
-            "representation": {
-              "const": "euler_angles"
-            },
-            "transform": {
-              "additionalProperties": false,
-              "properties": {
-                "child": {
-                  "type": "string"
-                },
-                "direction": {
-                  "enum": [
-                    "child_to_parent",
-                    "parent_to_child"
-                  ]
-                },
-                "parent": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "child",
-                "direction",
-                "parent"
-              ],
-              "type": "object"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            }
-          },
-          "required": [
-            "adjustment",
-            "child",
-            "earlier",
-            "later",
-            "parent",
-            "quantity",
-            "representation",
-            "transform",
-            "values"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "adjustment": {
-              "enum": [
-                "none"
-              ]
-            },
-            "child": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "earlier": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "parent": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "quantity": {
-              "const": "rotation"
-            },
-            "representation": {
-              "const": "homogeneous_matrix"
-            },
-            "transform": {
-              "additionalProperties": false,
-              "properties": {
-                "child": {
-                  "type": "string"
-                },
-                "direction": {
-                  "enum": [
-                    "child_to_parent",
-                    "parent_to_child"
-                  ]
-                },
-                "parent": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "child",
-                "direction",
-                "parent"
-              ],
-              "type": "object"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 9,
-              "minItems": 9,
-              "type": "array"
-            }
-          },
-          "required": [
-            "adjustment",
-            "child",
-            "earlier",
-            "later",
-            "parent",
-            "quantity",
-            "representation",
-            "transform",
-            "values"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "adjustment": {
-              "enum": [
-                "later_negated",
-                "none"
-              ]
-            },
-            "child": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "earlier": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "parent": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "quantity": {
-              "const": "rotation"
-            },
-            "representation": {
-              "const": "quaternion"
-            },
-            "transform": {
-              "additionalProperties": false,
-              "properties": {
-                "child": {
-                  "type": "string"
-                },
-                "direction": {
-                  "enum": [
-                    "child_to_parent",
-                    "parent_to_child"
-                  ]
-                },
-                "parent": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "child",
-                "direction",
-                "parent"
-              ],
-              "type": "object"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 4,
-              "minItems": 4,
-              "type": "array"
-            }
-          },
-          "required": [
-            "adjustment",
-            "child",
-            "earlier",
-            "later",
-            "parent",
-            "quantity",
-            "representation",
-            "transform",
-            "values"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "adjustment": {
-              "enum": [
-                "none"
-              ]
-            },
-            "child": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "earlier": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "parent": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "quantity": {
-              "const": "rotation"
-            },
-            "representation": {
-              "const": "rotation_matrix"
-            },
-            "transform": {
-              "additionalProperties": false,
-              "properties": {
-                "child": {
-                  "type": "string"
-                },
-                "direction": {
-                  "enum": [
-                    "child_to_parent",
-                    "parent_to_child"
-                  ]
-                },
-                "parent": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "child",
-                "direction",
-                "parent"
-              ],
-              "type": "object"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 9,
-              "minItems": 9,
-              "type": "array"
-            }
-          },
-          "required": [
-            "adjustment",
-            "child",
-            "earlier",
-            "later",
-            "parent",
-            "quantity",
-            "representation",
-            "transform",
-            "values"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "adjustment": {
-              "enum": [
-                "none"
-              ]
-            },
-            "child": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "earlier": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "later": {
-              "$ref": "#/$defs/RecordId"
-            },
-            "parent": {
-              "$ref": "#/$defs/FrameRef"
-            },
-            "quantity": {
-              "const": "rotation"
-            },
-            "representation": {
-              "const": "rotation_vector"
-            },
-            "transform": {
-              "additionalProperties": false,
-              "properties": {
-                "child": {
-                  "type": "string"
-                },
-                "direction": {
-                  "enum": [
-                    "child_to_parent",
-                    "parent_to_child"
-                  ]
-                },
-                "parent": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "child",
-                "direction",
-                "parent"
-              ],
-              "type": "object"
-            },
-            "values": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            }
-          },
-          "required": [
-            "adjustment",
-            "child",
-            "earlier",
-            "later",
-            "parent",
-            "quantity",
-            "representation",
-            "transform",
-            "values"
+            "clock",
+            "ticks"
           ],
           "type": "object"
         }
+      ]
+    },
+    "DiffTrail": {
+      "additionalProperties": false,
+      "description": "what changed about a subject between two points (ADR 0010)",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/DiffPoint"
+        },
+        "at": {
+          "$ref": "#/$defs/TrailAt"
+        },
+        "before": {
+          "$ref": "#/$defs/DiffPoint"
+        },
+        "changes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "after": {
+                "items": {
+                  "$ref": "#/$defs/ClaimId"
+                },
+                "type": "array"
+              },
+              "before": {
+                "items": {
+                  "$ref": "#/$defs/ClaimId"
+                },
+                "maxItems": 1,
+                "type": "array"
+              },
+              "change": {
+                "enum": [
+                  "between",
+                  "closed",
+                  "opened",
+                  "superseded"
+                ]
+              },
+              "predicate": {
+                "enum": [
+                  "at_site",
+                  "at_site_candidate",
+                  "authorised_configuration",
+                  "clock_map",
+                  "co_occurs_within",
+                  "configuration_active_during",
+                  "configuration_candidate",
+                  "configuration_unknown",
+                  "continues",
+                  "continues_candidate",
+                  "declared_kind",
+                  "deployed_at",
+                  "ends_at",
+                  "ends_at_candidate",
+                  "episode_of",
+                  "event_kind",
+                  "evidenced_by",
+                  "executes_task",
+                  "executes_task_candidate",
+                  "governed_by",
+                  "has_calibration",
+                  "has_clock",
+                  "has_configuration",
+                  "has_description",
+                  "has_member",
+                  "has_name",
+                  "has_summary",
+                  "in_zone",
+                  "in_zone_candidate",
+                  "intervened",
+                  "intervened_candidate",
+                  "involves",
+                  "involves_candidate",
+                  "located_at",
+                  "maintenance_state",
+                  "maps_to",
+                  "member_of_fleet",
+                  "mounted_on",
+                  "not_covered_by_authorisation",
+                  "operated_by",
+                  "outcome",
+                  "part_of_programme",
+                  "rated_payload",
+                  "recorded_by",
+                  "recorded_by_candidate",
+                  "runs_model",
+                  "runs_software",
+                  "same_as",
+                  "same_as_candidate",
+                  "starts_at",
+                  "stated_severity",
+                  "succeeds",
+                  "zone_of"
+                ]
+              }
+            },
+            "required": [
+              "after",
+              "before",
+              "change",
+              "predicate"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "diff"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/NodeRef"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array"
+        },
+        "subject": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "after",
+        "at",
+        "before",
+        "changes",
+        "kind",
+        "nodes",
+        "subject"
       ],
-      "description": "later - earlier, component by component, between two calibration records, in their declared form and unit; never converted. A rotation states how later was read: a quaternion negated when the two point opposite ways, Euler angles wrapped into a half turn either side (neptune-memory ADR 0014)"
+      "type": "object"
     },
     "DocumentSpanItem": {
       "additionalProperties": false,
@@ -2985,6 +2631,20 @@
       "pattern": "^[a-z][a-z0-9_.\\-]*$",
       "type": "string"
     },
+    "Trail": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DiffTrail"
+        },
+        {
+          "$ref": "#/$defs/WhyTrail"
+        }
+      ]
+    },
+    "TrailAt": {
+      "pattern": "^/explain/(0|[1-9][0-9]?)$",
+      "type": "string"
+    },
     "TxEnd": {
       "anyOf": [
         {
@@ -3237,51 +2897,6 @@
             "value"
           ],
           "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "datatype": {
-              "const": "delta"
-            },
-            "kind": {
-              "const": "literal"
-            },
-            "unit": {
-              "anyOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "knowledge": {
-                      "const": "known"
-                    },
-                    "value": {
-                      "$ref": "#/$defs/Unit"
-                    }
-                  },
-                  "required": [
-                    "knowledge",
-                    "value"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "$ref": "#/$defs/NotApplicable"
-                }
-              ],
-              "description": "the unit both calibrations declare, as declared; not_applicable for a form without one (a quaternion, a rotation matrix)"
-            },
-            "value": {
-              "$ref": "#/$defs/Delta"
-            }
-          },
-          "required": [
-            "datatype",
-            "kind",
-            "unit",
-            "value"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -3316,6 +2931,86 @@
         "track"
       ],
       "type": "object"
+    },
+    "WhyTrail": {
+      "additionalProperties": false,
+      "description": "why memory holds one claim: a tree of claims and evidence (ADR 0010)",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/TrailAt"
+        },
+        "claim": {
+          "$ref": "#/$defs/ClaimId"
+        },
+        "kind": {
+          "const": "why"
+        },
+        "steps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "assertion_kind": {
+                "enum": [
+                  "inferred",
+                  "observed",
+                  "stated"
+                ]
+              },
+              "claim": {
+                "$ref": "#/$defs/ClaimId"
+              },
+              "depth": {
+                "maximum": 8,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "evidence": {
+                "items": {
+                  "$ref": "#/$defs/EvidenceRef"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "finding": {
+                "$ref": "#/$defs/FindingId"
+              },
+              "parent": {
+                "$ref": "#/$defs/ClaimId"
+              },
+              "relation": {
+                "enum": [
+                  "alternative",
+                  "conflicts",
+                  "corroborates",
+                  "root"
+                ]
+              },
+              "repeat": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "assertion_kind",
+              "claim",
+              "depth",
+              "evidence",
+              "relation",
+              "repeat"
+            ],
+            "type": "object"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "at",
+        "claim",
+        "kind",
+        "steps"
+      ],
+      "type": "object"
     }
   },
   "$id": "urn:neptune:schema:context-packet:1",
@@ -3325,6 +3020,6 @@
       "$ref": "#/$defs/ContextPacket"
     }
   ],
-  "description": "Neptune Context's context packet (neptune-context ADR 0003): a header, items, claims superseded since as_of, resolver findings and gaps. Claims, findings and the compiler types they reuse are copied from Memory's graph-schema export. Generated from neptune_context.packets; the Python reader in neptune_context.packets.codec is stricter (ids, budgets and cross-references are recomputed).",
+  "description": "Neptune Context's context packet (neptune-context ADR 0003): a header, items, claims superseded since as_of, resolver findings, gaps and, for explain clauses, trails (ADR 0010). Claims, findings and the compiler types they reuse are copied from Memory's graph-schema export. Generated from neptune_context.packets; the Python reader in neptune_context.packets.codec is stricter (ids, budgets and cross-references are recomputed).",
   "title": "Neptune Context packet, version 1"
 }

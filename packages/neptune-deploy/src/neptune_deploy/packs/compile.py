@@ -10,17 +10,20 @@ structure around claims and the explicit states that say why there are none:
 - ``unknown``: Memory states that nothing is stated (``*_unknown`` claims naming the record that
   leaves it open).
 - ``conflict``: claims that cannot all hold disagree (a ``one`` predicate with two objects, or a
-  timeline event placed at two times on the pack clock); every one is shown, none is chosen.
+  timeline event placed at two times on the pack clock, where an event is a node or the nodes a
+  section's ``same_event`` claims join, ADR 0014); every one is shown, none is chosen.
 - A section with no entries is ``not_covered`` with its reason (what was looked for, about which
   nodes, in which snapshot, and what was left out); a section the template does not hold for the
   subject's type is ``not_applicable``.
 
 Claims on a clock other than the pack interval's are never compared with it: they are listed
-under ``other_clocks``. Inferred claims are left out unless the spec includes them, and are then
-marked on every statement.
+under ``other_clocks`` (in a timeline, "not placed"), or counted as ``other_clock_restated`` when a
+pack-clock claim restates them. Inferred claims are left out unless the spec includes them, and
+are then marked on every statement.
 """
 
 import dataclasses
+import heapq
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -38,8 +41,9 @@ from neptune_deploy.packs.templates import Hop, SectionTemplate, Template, Templ
 
 PACK_SCHEMA: Final = "neptune-deploy.evidence-pack/1"
 COMPILER_ID: Final = "neptune-deploy.packs"
-COMPILER_VERSION: Final = "1"
+COMPILER_VERSION: Final = "3"
 PACK_PREFIX: Final = "pack:"
+_OPEN_END: Final = 2**64  # past every int64 tick: an open end in the overlap sweep
 
 
 @cache
@@ -74,12 +78,34 @@ class Statement:
 
 
 @dataclass(frozen=True)
+class Difference:
+    """Another placement of a conflicting event on the pack clock, and how far its start is from
+    this entry's start, in ticks of the pack clock (never converted to another unit)."""
+
+    node: Node
+    valid: Interval
+    start_difference_ticks: int
+
+    def to_json(self) -> JsonObject:
+        return {
+            "node": self.node.to_json(),
+            "start_difference_ticks": self.start_difference_ticks,
+            "valid": self.valid.to_json(),
+        }
+
+
+@dataclass(frozen=True)
 class Entry:
     node: Node
     valid: Interval
     knowledge: str  # known | ambiguous | unknown | conflict
     statements: tuple[Statement, ...]
     placement_records: tuple[str, ...] | None = None  # timeline sections only
+    # Timeline sections only: the other nodes the section's ``same_event`` claims make the same
+    # event as this one, the claims that do, and (for a conflict) every other placement of it.
+    identity: tuple[Node, ...] = ()
+    identity_claims: tuple[str, ...] = ()
+    differences: tuple[Difference, ...] = ()
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {
@@ -90,6 +116,13 @@ class Entry:
         }
         if self.placement_records is not None:
             out["placement_records"] = list(self.placement_records)
+        if self.identity:
+            out["same_event"] = {
+                "claims": list(self.identity_claims),
+                "nodes": [n.to_json() for n in self.identity],
+            }
+        if self.differences:
+            out["conflicts_with"] = [d.to_json() for d in self.differences]
         return out
 
     @property
@@ -131,6 +164,9 @@ class Section:
     outside_interval: int
     reason: JsonObject | None
     cited: frozenset[str] = frozenset()  # every claim its entries and scope cite
+    # Timeline sections: claims on another clock that a pack-clock claim of the same node,
+    # predicate and object restates (an event's own-clock twin of its placement).
+    other_clock_restated: int = 0
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {
@@ -138,6 +174,7 @@ class Section:
             "entries": [e.to_json() for e in self.entries],
             "excluded": {
                 "inferred": len(self.excluded_inferred),
+                "other_clock_restated": self.other_clock_restated,
                 "outside_interval": self.outside_interval,
             },
             "findings": [f.to_json() for f in self.findings],
@@ -151,6 +188,8 @@ class Section:
         }
         if self.reason is not None:
             out["reason"] = self.reason
+        if self.template.same_event:
+            out["same_event"] = list(self.template.same_event)
         return out
 
 
@@ -167,7 +206,14 @@ class EvidencePack:
     included_inferred: int
 
     def to_json(self) -> JsonObject:
-        return {
+        snapshot: dict[str, JsonValue] = {
+            "generation": self.snapshot.generation,
+            "graph_schema_version": 1,
+            "head": self.snapshot.head,
+            "id": self.snapshot.id,
+            "vocabulary_version": self.snapshot.vocabulary_version,
+        }
+        out: dict[str, JsonValue] = {
             "appendix": self.appendix.to_json(),
             "claims": [claim.raw for claim in self.claims],
             "compiler": {"id": COMPILER_ID, "version": COMPILER_VERSION},
@@ -179,13 +225,7 @@ class EvidencePack:
             },
             "schema": PACK_SCHEMA,
             "sections": [s.to_json() for s in self.sections],
-            "snapshot": {
-                "generation": self.snapshot.generation,
-                "graph_schema_version": 1,
-                "head": self.snapshot.head,
-                "id": self.snapshot.id,
-                "vocabulary_version": self.snapshot.vocabulary_version,
-            },
+            "snapshot": snapshot,
             "spec": self.spec.to_json(),
             "subject": self.spec.subject.to_json(),
             "template": {
@@ -196,6 +236,10 @@ class EvidencePack:
                 "version": self.template.version,
             },
         }
+        if self.snapshot.unread:  # only a snapshot of a newer minor has any (ADR 0015)
+            snapshot["declared_schema_version"] = str(self.snapshot.declared_schema_version)
+            out["findings"] = [u.to_json() for u in self.snapshot.unread]
+        return out
 
 
 def pack_id(spec: PackSpec, template: Template) -> str:
@@ -285,7 +329,6 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
     inside: list[Statement] = []
     beyond: list[Statement] = []  # on the pack clock, outside the interval
     other: list[Statement] = []
-    on_clock: set[Node] = set()  # nodes with a selected claim on the pack clock
     for node in sorted(scope):
         for claim in snapshot.by_subject.get(node, ()):
             role = template.predicates.get(claim.predicate)
@@ -295,19 +338,30 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
                 excluded.add(claim.id)
                 continue
             statement = Statement(claim, role)
-            if claim.valid.clock == spec.clock:
-                on_clock.add(node)
             if claim.valid.overlaps(spec.interval):
                 inside.append(statement)
             elif claim.valid.clock == spec.clock:
                 beyond.append(statement)
             else:
                 other.append(statement)
+    restated = 0
+    identity_claims: set[str] = set()
     if template.kind == "timeline":
-        entries = _timeline(inside, beyond, other, snapshot.cardinality)
-        other_entries = _grouped(
-            [s for s in other if s.claim.subject not in on_clock], snapshot.cardinality
-        )
+        identity = _identities(scope, snapshot, template.same_event, include, excluded)
+        entries = _timeline(inside, beyond, other, snapshot.cardinality, identity)
+        identity_claims.update(i for e in entries for i in e.identity_claims)
+        # A claim on another clock is "not placed" unless the same statement is on the pack clock
+        # (its placement's twin); a restated one is counted, never silently dropped.
+        twins = {
+            (s.claim.subject, s.claim.predicate, s.claim.object_key) for s in (*inside, *beyond)
+        }
+        unplaced = [
+            s
+            for s in other
+            if (s.claim.subject, s.claim.predicate, s.claim.object_key) not in twins
+        ]
+        restated = len(other) - len(unplaced)
+        other_entries = _grouped(unplaced, snapshot.cardinality)
     elif template.kind == "states":
         entries = _grouped(inside, snapshot.cardinality)
         other_entries = _grouped(other, snapshot.cardinality)
@@ -317,7 +371,7 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
     scope_nodes = tuple(ScopeNode(node, tuple(sorted(scope[node]))) for node in sorted(scope))
     shown = frozenset(i for e in (*entries, *other_entries) for i in e.claim_ids)
     outside = sum(1 for s in beyond if s.claim.id not in shown)
-    cited = shown | {i for s in scope_nodes for i in s.via}
+    cited = shown | identity_claims | {i for s in scope_nodes for i in s.via}
     findings = tuple(
         FindingNote(f.id, f.code, f.claim, f.others)
         for f in snapshot.current_findings
@@ -329,6 +383,7 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
         knowledge = "not_covered"
         reason = {
             "inferred_excluded": len(excluded),
+            "other_clock_restated": restated,
             "missing_from_vocabulary": sorted(
                 p for p in template.predicates if p not in snapshot.cardinality
             ),
@@ -348,6 +403,7 @@ def _section(template: SectionTemplate, spec: PackSpec, snapshot: Snapshot) -> S
         outside_interval=outside,
         reason=reason,
         cited=cited,
+        other_clock_restated=restated,
     )
 
 
@@ -360,13 +416,35 @@ def _scope(
 ) -> dict[Node, frozenset[str]]:
     """Every node a path reaches from ``subject``, with the claims it went through. Hops follow
     current claims whatever their valid time (the hop claims are cited, so their times show);
-    an excluded inferred claim is never followed."""
+    an excluded inferred claim is never followed. A ``shared`` hop goes from a node to every
+    other node stating the same object under the predicate (an event to the timeline entries
+    evidenced by the same record), citing both claims."""
     reached: dict[Node, frozenset[str]] = {}
+
+    def followed(claim: Claim) -> bool:
+        if claim.inferred and not include:
+            excluded.add(claim.id)
+            return False
+        return True
+
     for path in paths:
         frontier: dict[Node, frozenset[str]] = {subject: frozenset()}
         for hop in path:
             step: dict[Node, frozenset[str]] = {}
             for node, via in frontier.items():
+                if hop.direction == "shared":
+                    for claim in snapshot.by_subject.get(node, ()):
+                        if claim.predicate != hop.predicate or not followed(claim):
+                            continue
+                        key = (claim.predicate, claim.object_key)
+                        for other in snapshot.by_predicate_object.get(key, ()):
+                            if other.subject != node and followed(other):
+                                step[other.subject] = (
+                                    step.get(other.subject, frozenset())
+                                    | via
+                                    | {claim.id, other.id}
+                                )
+                    continue
                 index = snapshot.by_subject if hop.direction == "out" else snapshot.by_object
                 for claim in index.get(node, ()):
                     if claim.predicate != hop.predicate:
@@ -431,35 +509,108 @@ def _grouped(statements: Iterable[Statement], cardinality: Mapping[str, str]) ->
         for (node, valid), group in _slots(statements).items()
     ]
     entries.sort(key=lambda e: (e.node, e.valid.sort_key()))
-    by_node: dict[Node, list[int]] = defaultdict(list)
-    for index, entry in enumerate(entries):
-        by_node[entry.node].append(index)
-    conflicted: set[int] = set()
-    for indices in by_node.values():
-        for i, a in enumerate(indices):
-            for b in indices[i + 1 :]:
-                if _clash(entries[a], entries[b], cardinality):
-                    conflicted.update((a, b))
+    conflicted = _overlap_conflicts(entries, cardinality)
     return tuple(
         dataclasses.replace(e, knowledge="conflict") if i in conflicted else e
         for i, e in enumerate(entries)
     )
 
 
-def _clash(a: Entry, b: Entry, cardinality: Mapping[str, str]) -> bool:
-    if not a.valid.overlaps(b.valid):
-        return False
-    for left in a.statements:
-        if left.role != "known" or cardinality.get(left.claim.predicate) != "one":
-            continue
-        for right in b.statements:
-            if (
-                right.role == "known"
-                and right.claim.predicate == left.claim.predicate
-                and right.claim.object_key != left.claim.object_key
-            ):
-                return True
-    return False
+def _overlap_conflicts(entries: Sequence[Entry], cardinality: Mapping[str, str]) -> set[int]:
+    """The indices of entries whose interval overlaps another entry of the same node, on the same
+    clock, stating a different object of a ``one`` predicate (both are known statements).
+
+    A sweep per (node, predicate, clock) in start order: an interval stays active until a later
+    start reaches its end, and each entry is marked at most once, so the work is O(n log n) in
+    the statements rather than quadratic in a node's spans."""
+    lanes: dict[tuple[Node, str, str], list[tuple[int, int, bytes, int]]] = defaultdict(list)
+    for index, entry in enumerate(entries):
+        clock = entry.valid.clock
+        if clock is None:
+            continue  # bounds on two clocks overlap nothing
+        end = entry.valid.end
+        stop = _OPEN_END if isinstance(end, str) else end.ticks
+        for statement in entry.statements:
+            claim = statement.claim
+            if statement.role == "known" and cardinality.get(claim.predicate) == "one":
+                lanes[(entry.node, claim.predicate, clock)].append(
+                    (entry.valid.start.ticks, stop, claim.object_key, index)
+                )
+    conflicted: set[int] = set()
+    for lane in lanes.values():
+        lane.sort()
+        ending: list[tuple[int, int, bytes]] = []  # heap of (end, index, object)
+        active: dict[bytes, int] = defaultdict(int)  # object -> active intervals stating it
+        unmarked: dict[bytes, set[int]] = defaultdict(set)  # active, not yet in conflict
+        for start, stop, obj, index in lane:
+            while ending and ending[0][0] <= start:
+                _end, gone, gone_obj = heapq.heappop(ending)
+                active[gone_obj] -= 1
+                if not active[gone_obj]:
+                    del active[gone_obj]
+                waiting = unmarked.get(gone_obj)
+                if waiting is not None:
+                    waiting.discard(gone)
+                    if not waiting:
+                        del unmarked[gone_obj]
+            # Another object is active iff the active objects are not just this one; both
+            # checks and the marking below are amortised O(1) per statement.
+            if len(active) > (1 if obj in active else 0):
+                conflicted.add(index)
+                for other in [o for o in unmarked if o != obj]:
+                    conflicted.update(unmarked.pop(other))
+            elif stop > start:
+                unmarked[obj].add(index)
+            if stop > start:
+                heapq.heappush(ending, (stop, index, obj))
+                active[obj] += 1
+    return conflicted
+
+
+def _identities(
+    scope: Mapping[Node, frozenset[str]],
+    snapshot: Snapshot,
+    predicates: Sequence[str],
+    include: bool,
+    excluded: set[str],
+) -> dict[Node, tuple[frozenset[Node], frozenset[str]]]:
+    """For a timeline section's ``same_event`` predicates: each scope node joined to another by a
+    current claim of one of them (either way round), with the group of nodes the claims join and
+    the claims that join them. An inferred claim joins nothing unless the spec includes it."""
+    parent: dict[Node, Node] = {}
+
+    def root(node: Node) -> Node:
+        while parent.get(node, node) != node:
+            node = parent[node]
+        return node
+
+    links: list[Claim] = []
+    for node in sorted(scope):
+        for claim in snapshot.by_subject.get(node, ()):
+            target = claim.object_node
+            if claim.predicate not in predicates or target is None or target not in scope:
+                continue
+            if target == node:
+                continue
+            if claim.inferred and not include:
+                excluded.add(claim.id)
+                continue
+            links.append(claim)
+            a, b = sorted((root(node), root(target)))
+            if a != b:
+                parent[b] = a
+    groups: dict[Node, set[Node]] = defaultdict(set)
+    for member in {n for claim in links for n in (claim.subject, claim.object_node)}:
+        assert member is not None
+        groups[root(member)].add(member)
+    claims: dict[Node, set[str]] = defaultdict(set)
+    for claim in links:
+        claims[root(claim.subject)].add(claim.id)
+    return {
+        node: (frozenset(members), frozenset(claims[key]))
+        for key, members in groups.items()
+        for node in members
+    }
 
 
 def _timeline(
@@ -467,19 +618,34 @@ def _timeline(
     beyond: Sequence[Statement],
     other: Sequence[Statement],
     cardinality: Mapping[str, str],
+    identity: Mapping[Node, tuple[frozenset[Node], frozenset[str]]],
 ) -> tuple[Entry, ...]:
-    """``timeline`` sections: one entry per event placement on the pack clock, in time order. An
-    event placed at two times on that clock is a conflict, and every placement of it on that
-    clock is shown, inside the interval or not. Records that every claim of a placement cites
-    but not every claim of the event does are that placement's own (the clock mapping and target
-    clock it was placed through)."""
+    """``timeline`` sections: one entry per event placement on the pack clock, in time order.
+
+    An event is a node, or the group of nodes the section's ``same_event`` claims join (two
+    records of one incident). An event placed at two or more times on the pack clock is a
+    conflict: every placement of it on that clock is shown, inside the interval or not, each
+    with its difference from the others; none is chosen. Records that every claim of a
+    placement cites but not every claim of its node does are that placement's own (the clock
+    mapping and target clock it was placed through)."""
     slots = _slots(inside)
     elsewhere = _slots(beyond)
-    times: dict[Node, int] = defaultdict(int)
-    for node, _valid in (*slots, *elsewhere):
-        times[node] += 1
-    conflicted = {node for node, _valid in slots if times[node] > 1}
-    shown = {**slots, **{key: group for key, group in elsewhere.items() if key[0] in conflicted}}
+
+    def event_of(node: Node) -> frozenset[Node]:
+        return identity[node][0] if node in identity else frozenset((node,))
+
+    placements: dict[frozenset[Node], set[tuple[Node, Interval]]] = defaultdict(set)
+    for key in (*slots, *elsewhere):
+        placements[event_of(key[0])].add(key)
+    conflicted = {
+        event
+        for event, keys in placements.items()
+        if len({valid for _node, valid in keys}) > 1 and any(key in slots for key in keys)
+    }
+    shown = {
+        **slots,
+        **{key: group for key, group in elsewhere.items() if event_of(key[0]) in conflicted},
+    }
     shared: dict[Node, frozenset[str]] = {}
     for s in (*inside, *beyond, *other):
         records = frozenset(s.claim.records)
@@ -488,8 +654,26 @@ def _timeline(
     entries: list[Entry] = []
     for (node, valid), group in shown.items():
         own = frozenset.intersection(*(frozenset(s.claim.records) for s in group))
-        knowledge = "conflict" if node in conflicted else _knowledge(group, cardinality)
+        event = event_of(node)
+        differences: tuple[Difference, ...] = ()
+        knowledge = _knowledge(group, cardinality)
+        if event in conflicted:
+            knowledge = "conflict"
+            differences = tuple(
+                Difference(n, v, v.start.ticks - valid.start.ticks)
+                for n, v in sorted(placements[event], key=lambda k: (k[1].sort_key(), k[0]))
+                if (n, v) != (node, valid)
+            )
         entries.append(
-            Entry(node, valid, knowledge, _order(group), tuple(sorted(own - shared[node])))
+            Entry(
+                node,
+                valid,
+                knowledge,
+                _order(group),
+                tuple(sorted(own - shared[node])),
+                identity=tuple(sorted(event - {node})),
+                identity_claims=tuple(sorted(identity[node][1])) if node in identity else (),
+                differences=differences,
+            )
         )
     return tuple(sorted(entries, key=_entry_key))

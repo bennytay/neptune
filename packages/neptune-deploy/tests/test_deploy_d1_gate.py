@@ -62,8 +62,16 @@ def _generator() -> ModuleType:
     return module
 
 
+def _held(package: IngestPackage) -> IngestPackage:
+    """``package`` with its records and derived tables held, as the attacks below edit them by
+    identity and the mapper is checked to open no file: ``read_package`` reads them from disk on
+    every pass (root ADR 0070)."""
+    derived = {kind: tuple(lines) for kind, lines in package.derived.items()}
+    return replace(package, records=tuple(package.records), derived=derived)
+
+
 A: Final = _generator()
-BASES: Final = {name: read_package(A.PACKAGES / name) for name in (FLEET, CELL)}
+BASES: Final = {name: _held(read_package(A.PACKAGES / name)) for name in (FLEET, CELL)}
 
 
 def _declared(name: str) -> tuple[list[Any], list[Any]]:
@@ -387,10 +395,12 @@ def test_q1_cell_there_is_no_authorisation_record_and_the_configuration_is_state
         "5.4.2",
         "5.6.0",
     )
-    # The inspection after the near miss is an INSP work order no rule reads: no record, but its
-    # row is named, so it is not lost.
+    # The inspection after the near miss is an INSP work order: a maintenance event since
+    # cmms_generic 2 (ADR 0016 §5), stating the near miss it followed.
+    inspection = _named(package, "maintenance_event", "WO-26-0709")
+    assert [r.value.value for r in inspection.related.value] == ["INC-C3-0004"]
     cmms = [f for f in _findings(package, "row_unmatched") if f.subject.source in _sources(CELL)]
-    assert any(f.details["count"] == 1 for f in cmms)
+    assert not cmms
 
 
 def _sources(name: str) -> set[Any]:
@@ -861,7 +871,7 @@ def test_one_column_read_at_two_resolutions_is_two_clocks() -> None:
     minute = _named(package, "maintenance_event", "WO-26-0301").performed.value
     assert day.domain_id != minute.domain_id
     assert domains[day.domain_id].resolution == Known(Fraction(86400))
-    assert domains[minute.domain_id].resolution == Known(Fraction(1))
+    assert domains[minute.domain_id].resolution == Known(Fraction(60))  # to the minute (0016 §9)
     assert domains[day.domain_id].field == domains[minute.domain_id].field == "Completed"
     # Both cite the column's first cell; the step after it says how that clock reads.
     first = [

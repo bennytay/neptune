@@ -5,8 +5,12 @@ that ends with the citation keys of its evidence (``[E1]``, ``[E2]`` ...), the c
 since ``as_of``, the resolver findings, the gaps, and an ``Evidence:`` footer that maps each key to
 the evidence ref's canonical JSON. ``parse_citations`` reads the footer back (a line's citations
 are the run of keys that ends it). The property every
-renderer must keep: ``parse_citations(render(packet)) == packet.evidence_refs()``, and every key a
-line cites is in the footer. A renderer only formats what the packet holds; it adds no fact, no
+renderer must keep: ``parse_citations(render(packet))`` starts with ``packet.evidence_refs()`` (the
+items' refs, in order of first mention) and every key a line cites is in the footer. A renderer of
+a packet with why trails (ADR 0010) appends, after those, the refs only a why step names (a claim
+the packet cannot carry still cites its bytes): ``render.agent.answer_evidence_refs`` is that
+list, and ADR 0011 amends this clause for them. ``render_text`` below does not render trails, so
+for it the two lists are equal. A renderer only formats what the packet holds; it adds no fact, no
 score and no reading of its own, and it marks every inferred item as inferred.
 
 Every value taken from evidence is written as a JSON string literal, so text in a document span
@@ -122,6 +126,23 @@ def _summary(item: Item) -> str:
     return f"{item.record_kind} {item.record} configures {subject}; claims {list(item.claims)}"
 
 
+def _snapshot_lines(packet: ContextPacket) -> list[str]:
+    """What a reader needs to scope the answer: Memory's snapshot when it trails the Ledger's,
+    and the world-time window on its named clock (C1 gate, ADR 0006 §4)."""
+    lines = []
+    if packet.memory.as_of < packet.as_of:
+        lines.append(
+            f"Claims as Memory knew them at transaction {packet.memory.as_of}"
+            f" (it trails the Ledger's {packet.as_of})."
+        )
+    if packet.during is not None:
+        end = "open" if packet.during.end is None else str(packet.during.end)
+        lines.append(
+            f"World time: ticks [{packet.during.start}, {end}) on clock {packet.during.domain_id}."
+        )
+    return lines
+
+
 def render_text(packet: ContextPacket) -> str:
     """The packet as cited plain text. Deterministic: the same packet, the same text."""
     keys = {ref: index for index, ref in enumerate(packet.evidence_refs(), start=1)}
@@ -129,6 +150,7 @@ def render_text(packet: ContextPacket) -> str:
     lines = [
         f"Context packet {packet.id}",
         f"Query {packet.query_id}, as of transaction {packet.as_of} (head {packet.head}).",
+        *_snapshot_lines(packet),
         "Inferred items: "
         + ("included, each marked INFERRED." if packet.inference_included else "excluded."),
         f"Items: {budget.items} of {budget.items + budget.dropped} found"
@@ -145,7 +167,7 @@ def render_text(packet: ContextPacket) -> str:
             f"{number}. {item.kind} {item.id} ({_epistemics(item)}): {_summary(item)} {cites}"
         )
     if packet.superseded_since:
-        lines += ["", f"Changed since transaction {packet.as_of}:"]
+        lines += ["", f"Changed since transaction {packet.memory.as_of}:"]
         lines += [
             f"- {s.claim} superseded at transaction {s.superseded_at} by {', '.join(s.by)}"
             for s in packet.superseded_since

@@ -23,10 +23,10 @@ TESTS = Path(__file__).resolve().parent
 # Golden digests of the fixture packs. A change here changes what every pack of these inputs
 # says: explain it in the PR, and raise COMPILER_VERSION when a pack's content changes.
 GOLDEN = {
-    "configuration.json": "sha256:3a32c279f2d94700183cf6c0259b08e17825720039fe81106283cc5211e6c8bb",
-    "configuration.pdf": "sha256:825213f492f91678b682143310e68433973836acf934e273935cf43ed1ec6a70",
-    "events.json": "sha256:eca8664c582cc806c70c7554b81726c2465596b565e2acc43edc1a44de271294",
-    "events.pdf": "sha256:c1f3e6b807af71859dc558f02fb31f4e58806c774587aec0e86b572b694dfbde",
+    "configuration.json": "sha256:d252081bf3975109698c1523676c4189fc8a26cb2b093a7fa7be2e8cf28b677d",
+    "configuration.pdf": "sha256:5651a6fdb7ff177eb2dc999fcbfd5018f34ed3d699e81f8eb71e1287bd0204cf",
+    "events.json": "sha256:2bbf41a1234bc34665d8ae5c79f3f2e432d70f2cb3ee547bbb5a7891e83b6015",
+    "events.pdf": "sha256:75fb3e70a47dbd095b958852ae2adb5082b17d266e911bdf69faf7956e7dbbf6",
 }
 
 
@@ -148,7 +148,7 @@ def test_included_inference_is_marked_in_the_pdf() -> None:
 def test_event_text_outside_winansi_is_escaped_not_dropped() -> None:
     pdf = render_pdf(events_pack())
     assert b"Operator pressed the E-stop <U+2192> arm halted mid-pick" in pdf
-    assert b"CONFLICT - these statements disagree; none is chosen" in pdf
+    assert b"CONFLICT - this event is placed at different times on the pack clock" in pdf
     assert _shown("placed through (cited by this placement only)") in pdf
 
 
