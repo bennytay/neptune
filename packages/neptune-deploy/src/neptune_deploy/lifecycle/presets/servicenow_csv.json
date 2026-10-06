@@ -1,8 +1,8 @@
 {
   "schema": "neptune-deploy.lifecycle-mapping/1",
   "id": "ticketing.servicenow-csv",
-  "version": "1",
-  "description": "ServiceNow change_request table exported as CSV, one change per row; u_before and u_after are the common custom fields for the changed value. ServiceNow writes times in the exporting user's zone: declare it in a copy.",
+  "version": "2",
+  "description": "ServiceNow change_request table exported as CSV, one change per row; u_before and u_after are the common custom fields for the changed value. ServiceNow writes times in the exporting user's zone: declare it in a copy. u_after is also the configuration the change states resulted (configuration, an id under servicenow.u_after, as written); the change record kind has no prior-configuration field, so u_before is read only as the change item's before value.",
   "zone": "unstated",
   "rules": [
     {
@@ -14,6 +14,7 @@
         "identifiers": [{"column": "number", "namespace": "servicenow.change"}],
         "machines": [{"column": "cmdb_ci", "namespace": "servicenow.ci"}],
         "site": {"column": "u_site", "namespace": "servicenow.location"},
+        "configuration": {"column": "u_after", "namespace": "servicenow.u_after"},
         "changes": [
           {
             "category": {"column": "category"},

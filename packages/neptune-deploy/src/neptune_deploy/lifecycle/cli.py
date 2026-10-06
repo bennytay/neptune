@@ -9,11 +9,13 @@ from pathlib import Path
 from neptune.store.package import PackageError
 from neptune_deploy.lifecycle import (
     PRESETS,
+    TEMPLATE_PRESETS,
     MappingError,
     TemplateRegistry,
     load_mapping,
     map_package,
     preset,
+    template_preset,
 )
 from neptune_deploy.packs import cli as pack_cli
 
@@ -62,6 +64,14 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         help="a document template file, or a directory of them (repeatable)",
     )
+    mapper.add_argument(
+        "-T",
+        "--template-preset",
+        action="append",
+        default=[],
+        choices=TEMPLATE_PRESETS,
+        help="a shipped document template by name (repeatable)",
+    )
     mapper.add_argument("-o", "--out", type=Path, required=True, help="where to write the package")
     pack_cli.add_parser(commands)
     return parser
@@ -74,9 +84,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         mappings = [load_mapping(path) for path in args.mapping]
         mappings += [preset(name) for name in args.preset]
-        templates = TemplateRegistry.from_paths(args.template).templates()
+        registry = TemplateRegistry.from_paths(args.template)
+        for name in dict.fromkeys(args.template_preset):
+            shipped = template_preset(name)
+            known = registry.get(shipped.id, shipped.version)
+            if known is None or known.sha256 != shipped.sha256:
+                registry.add(shipped)  # a different file under the same id and version is refused
+        templates = registry.templates()
         if not mappings and not templates:
-            raise MappingError("name at least one --mapping, --preset or --template")
+            raise MappingError(
+                "name at least one --mapping, --preset, --template or --template-preset"
+            )
         package = map_package(args.package, mappings, args.out, templates)
     except (MappingError, PackageError, OSError) as exc:
         sys.stderr.write(f"neptune-deploy map: {exc}\n")
