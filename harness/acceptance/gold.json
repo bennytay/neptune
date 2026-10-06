@@ -1,7 +1,7 @@
 {
   "gold_format": 1,
   "corpus": "acceptance",
-  "corpus_version": "1.0.0",
+  "corpus_version": "2.0.0",
   "consumers": ["context-c4-benchmark", "deploy-d3-evidence-packs", "demo-v1"],
   "scoring": "Platform ADR 0007 section 6: a claim is supported when the answer gives, for at least one of its evidence items, a citation that harness.acceptance.resolve.supports accepts: one of the item's resolved record ids (for a message item only a row: the stream record with the row's seq; the stream alone never counts), or the item's path and an equal locator (row, page, pointer, topic and log_time, parameter, code), which is how a package without compiler base records (Deploy D3) scores against the base package of the same corpus version. An answer fails a question when it cites a must_not_cite item as support or asserts a trap's wrong reading.",
   "questions": [
@@ -96,6 +96,33 @@
         {"id": "Q6.C2", "knowledge": "known", "assertion": "stated", "text": "The fork was repaired under WO-26-0402 and AMR-07 was requalified under RQ-S007-0007 and returned to service.", "evidence": ["s007.WO-26-0402", "s007.RQ-S007-0007"]}
       ],
       "must_not_cite": []
+    },
+    {
+      "id": "Q7",
+      "question": "When did ARM-3A stop during INC-C3-0011, and do the CMMS and the controller log agree?",
+      "asked_as": ["when did the arm stop", "do the CMMS and syslog times of the stop agree"],
+      "tags": ["incident", "manipulator", "timeline", "conflict"],
+      "answer": "They disagree by 32 s. The controller's syslog (4182) records the protective stop at 14:32:38, the same time as the HMI timeline, and the PLC records the E-stop at 14:32:41. The CMMS downtime log (DT-26-0914-01) records the stop at 14:33:10. A. Novak stated on 2026-09-15 that the two are the same stop of INC-C3-0011. The controller keeps synchronised time per the site survey; the CMMS time is entered by hand.",
+      "claims": [
+        {"id": "Q7.C1", "knowledge": "known", "assertion": "stated", "text": "The controller's syslog records the protective stop at 14:32:38 and the PLC the E-stop at 14:32:41, as the HMI timeline does.", "evidence": ["syslog.pstop", "syslog.estop", "inc.timeline.collision", "inc.timeline.estop"]},
+        {"id": "Q7.C2", "knowledge": "known", "assertion": "stated", "text": "The CMMS downtime log records the stop (DT-26-0914-01) at 14:33:10.", "evidence": ["cmms.stop.DT-26-0914-01"]},
+        {"id": "Q7.C3", "knowledge": "known", "assertion": "stated", "text": "A. Novak stated on 2026-09-15 that DT-26-0914-01 and syslog 4182 are the same stop (INC-C3-0011).", "evidence": ["assert.same-stop"]},
+        {"id": "Q7.C4", "knowledge": "known", "assertion": "inferred", "text": "The two records of one stop are 32 s apart; the synchronised controller agrees with the HMI, so the hand-entered CMMS time is the outlier.", "evidence": ["syslog.pstop", "cmms.stop.DT-26-0914-01", "assert.same-stop", "survey.controller-sync"]}
+      ],
+      "must_not_cite": ["bulletin.injection"]
+    },
+    {
+      "id": "Q8",
+      "question": "Under which authorisation envelopes did ARM-3A and LEG-01 operate at PLANT-2 on 2026-09-14, and did ARM-3A's still hold?",
+      "asked_as": ["was the arm authorised to run", "which envelope covered LEG-01's patrol"],
+      "tags": ["authorisation", "manipulator", "legged"],
+      "answer": "ARM-3A ran in CELL-3 under ENV-P2-01 (valid 2026-03-01 to 2027-02-28), which depends on requalification after any tool change; the finger set change of WO-26-0911 has no requalification, so whether the envelope still held is not decided by any record. LEG-01 patrolled under ENV-P2-02 (AISLE-C3, 1.2 m/s) and ENV-P2-03 (PLC-ROOM, 1.0 m/s), valid 2026-05-12 to 2026-11-12.",
+      "claims": [
+        {"id": "Q8.C1", "knowledge": "known", "assertion": "stated", "text": "ARM-3A's envelope ENV-P2-01 covers CELL-3 from 2026-03-01 to 2027-02-28 and depends on requalification after any tool change.", "evidence": ["env.ENV-P2-01"]},
+        {"id": "Q8.C2", "knowledge": "known", "assertion": "stated", "text": "LEG-01 patrols under ENV-P2-02 (AISLE-C3, 1.2 m/s) and ENV-P2-03 (PLC-ROOM, 1.0 m/s), valid 2026-05-12 to 2026-11-12.", "evidence": ["env.ENV-P2-02", "env.ENV-P2-03"]},
+        {"id": "Q8.C3", "knowledge": "unknown", "assertion": "inferred", "text": "Whether ENV-P2-01 still held on 2026-09-14: the tool change of WO-26-0911 has no requalification, which the envelope depends on, and no record decides it.", "evidence": ["env.ENV-P2-01", "cmms.WO-26-0911", "requal.none-for-WO-26-0911"]}
+      ],
+      "must_not_cite": ["bulletin.injection"]
     }
   ],
   "traps": [
@@ -116,10 +143,10 @@
     "changes.none-for-tcp-151.5": {"select": {"kind": "no_table_row", "path": "sites/PLANT-2/changes/servicenow_changes.csv", "key": "TCP z=151.5 mm"}, "says": "No change record sets TCP z to 151.5 mm."},
     "requal.RQ-2026-006": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/requalification/requalification_tests.csv", "key": "RQ-2026-006"}, "says": "The 2026-08-18 finger change was requalified (TCP accuracy check, 50-cycle pick and place)."},
     "requal.none-for-WO-26-0911": {"select": {"kind": "no_table_row", "path": "sites/PLANT-2/cell3/requalification/requalification_tests.csv", "key": "WO-26-0911"}, "says": "No requalification names WO-26-0911."},
-    "cal.0818.error": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml", "pointer": "/reprojection_error_px", "equals": "0.44"}, "says": "CAL-ARM3A-0818 reprojection error 0.44 px."},
-    "cal.0818.z": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml", "pointer": "/translation/z", "equals": "0.0745"}, "says": "CAL-ARM3A-0818 camera z offset 0.0745 m."},
-    "cal.0911.error": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml", "pointer": "/reprojection_error_px", "equals": "1.86"}, "says": "CAL-ARM3A-0911 reprojection error 1.86 px, after the bracket refit, substitute board."},
-    "cal.0911.z": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml", "pointer": "/translation/z", "equals": "0.0702"}, "says": "CAL-ARM3A-0911 camera z offset 0.0702 m."},
+    "cal.0818.error": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/calibration/handeye_calibration_log.csv", "key": "CAL-ARM3A-0818"}, "says": "Calibration log: CAL-ARM3A-0818 reprojection error 0.44 px against 0.8 px (SOP-CELL-021 rev B)."},
+    "cal.0818.z": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml", "pointer": "/transformation/z", "equals": "0.0745"}, "says": "CAL-ARM3A-0818 (easy_handeye, eye on hand, tool0 to wrist_camera): camera z offset 0.0745 m."},
+    "cal.0911.error": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/calibration/handeye_calibration_log.csv", "key": "CAL-ARM3A-0911"}, "says": "Calibration log: CAL-ARM3A-0911 reprojection error 1.86 px against 2.0 px (SOP-CELL-021 rev C), after the bracket refit, substitute board."},
+    "cal.0911.z": {"select": {"kind": "config_value", "path": "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml", "pointer": "/transformation/z", "equals": "0.0702"}, "says": "CAL-ARM3A-0911 (easy_handeye, eye on hand, tool0 to wrist_camera): camera z offset 0.0702 m."},
     "vision.active-calibration": {"select": {"kind": "calibration", "path": "sites/PLANT-2/cell3/vision/wrist_camera_handeye.yml", "parameter": "reprojection_error", "equals": 1.86}, "says": "The vision PC's loaded hand-eye calibration (OpenCV export): CAL-ARM3A-0911, 1.86 px, substitute board."},
     "sop.B.limit": {"select": {"kind": "document_text", "path": "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_B.pdf", "contains": "reprojection error is at most 0.8 px", "page": 1}, "says": "SOP-CELL-021 rev B: accept only at most 0.8 px."},
     "sop.B.verification": {"select": {"kind": "document_text", "path": "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_B.pdf", "contains": "10-pick verification at P1", "page": 1}, "says": "SOP-CELL-021 rev B: after any wrist work, recalibrate and run the 10-pick verification."},
@@ -170,6 +197,14 @@
     "s007.inc0007.cause": {"select": {"kind": "document_text", "path": "sites/S-007/incidents/INC-0007.pdf", "contains": "40 mm further out than the site map", "page": 2}, "says": "INC-0007: the rack face was 40 mm further out than the site map."},
     "s007.inc0007.refresh": {"select": {"kind": "document_text", "path": "sites/S-007/incidents/INC-0007.pdf", "contains": "had not been refreshed after the rack was re-bolted", "page": 2}, "says": "INC-0007: the pick position had not been refreshed after the rack was re-bolted."},
     "s007.WO-26-0402": {"select": {"kind": "table_row", "path": "sites/S-007/cmms/work_orders.csv", "key": "WO-26-0402"}, "says": "WO-26-0402: AMR-07 left fork straightened after contact with the rack upright (INC-0007)."},
-    "s007.RQ-S007-0007": {"select": {"kind": "table_row", "path": "sites/S-007/requalification/requalification_tests.csv", "key": "RQ-S007-0007"}, "says": "RQ-S007-0007: AMR-07 requalified and returned to service on 2026-04-15."}
+    "s007.RQ-S007-0007": {"select": {"kind": "table_row", "path": "sites/S-007/requalification/requalification_tests.csv", "key": "RQ-S007-0007"}, "says": "RQ-S007-0007: AMR-07 requalified and returned to service on 2026-04-15."},
+    "cmms.stop.DT-26-0914-01": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cmms/downtime_log.csv", "key": "DT-26-0914-01"}, "says": "CMMS downtime log: ARM-3A protective stop at 2026-09-14 14:33:10 (collision at P1, E-stop at OP-2), entered by A. Novak; restart blank."},
+    "syslog.pstop": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv", "key": "4182"}, "says": "Syslog 4182: ARM-3A controller PSTOP at 2026-09-14 14:32:38, collision detection joint 5, 41.7 Nm > 35.0 Nm, pick P1."},
+    "syslog.estop": {"select": {"kind": "table_row", "path": "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv", "key": "4183"}, "says": "Syslog 4183: PLC-C3 ESTOP at 2026-09-14 14:32:41, OP-2.ES1 pressed."},
+    "assert.same-stop": {"select": {"kind": "assertion", "path": "sites/PLANT-2/cell3/incidents/INC-C3-0011.assertions.json", "id": {"namespace": "plant-2.review", "value": "ASR-C3-0011-01"}}, "says": "A. Novak (plant-2.staff), 2026-09-15 09:05 -04:00: DT-26-0914-01 and syslog 4182 are the same stop (same_identity, payload same_event, INC-C3-0011)."},
+    "survey.controller-sync": {"select": {"kind": "document_text", "path": "sites/PLANT-2/survey/site_survey_SS-PLANT2-2026-09.pdf", "contains": "NTP from PLC-C3\t+0.03 s\tSynchronised", "page": 1}, "says": "Survey 2026-09-02: the ARM-3A controller takes NTP from PLC-C3, +0.03 s, synchronised."},
+    "env.ENV-P2-01": {"select": {"kind": "table_row", "path": "sites/PLANT-2/authorisation/zone_register.csv", "key": "ENV-P2-01"}, "says": "ENV-P2-01: ARM-3A in CELL-3, PALLET_C3, 2000 mm/s, 8 kg, valid 2026-03-01 to 2027-02-28; depends on LC-3, PLC-C3 and requalification after any tool change."},
+    "env.ENV-P2-02": {"select": {"kind": "table_row", "path": "sites/PLANT-2/authorisation/zone_register.csv", "key": "ENV-P2-02"}, "says": "ENV-P2-02: LEG-01 in AISLE-C3 on PATROL-A at 1.2 m/s, valid 2026-05-12 to 2026-11-12."},
+    "env.ENV-P2-03": {"select": {"kind": "table_row", "path": "sites/PLANT-2/authorisation/zone_register.csv", "key": "ENV-P2-03"}, "says": "ENV-P2-03: LEG-01 in PLC-ROOM on PATROL-A at 1.0 m/s, valid 2026-05-12 to 2026-11-12."}
   }
 }

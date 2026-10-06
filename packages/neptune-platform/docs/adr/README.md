@@ -14,3 +14,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0005](0005-merge-without-a-queue.md) | Merge without a queue: no strict up-to-date rule, a freshness check, stop the line on a red main | Accepted |
 | [0006](0006-real-ledger-stage-on-embedded-postgres.md) | The real Ledger stage runs on an embedded PostgreSQL, not the compose stack | Accepted |
 | [0007](0007-acceptance-corpus-layout-versioning-and-gold-answers.md) | Acceptance corpus: generated in `harness/acceptance`, locked by version, gold answers cited by path and selector | Accepted |
+| [0008](0008-harness-deploy-stage-corpus-declared-mappings-and-the-assertion-selector.md) | Harness deploy stage: corpus-declared Deploy mappings between compiler and ledger, and the assertion selector | Accepted |
