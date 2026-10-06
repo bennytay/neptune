@@ -353,6 +353,403 @@ t_cam2gripper: !!opencv-matrix
 reprojection_error: 1.86
 """
 
+# --- PLANT-2, CELL-3: the hand-eye calibrations as easy_handeye writes them ---------------------
+
+
+class HandEye:
+    """One wrist camera hand-eye calibration of ARM-3A: what easy_handeye saved, and what the
+    vision team's log says about it."""
+
+    def __init__(
+        self,
+        ident: str,
+        performed: str,
+        reason: str,
+        xyz: tuple[float, float, float],
+        quaternion: tuple[float, float, float, float],
+        error_px: str,
+        board: str,
+        procedure: str,
+        limit_px: str,
+        work_order: str,
+    ) -> None:
+        self.ident, self.performed, self.reason = ident, performed, reason
+        self.xyz, self.quaternion = xyz, quaternion
+        self.error_px, self.board, self.procedure, self.limit_px = (
+            error_px,
+            board,
+            procedure,
+            limit_px,
+        )
+        self.work_order = work_order
+
+
+# The D1 cell's four calibrations (``make_archetypes.cell()``: the same ids, times, translations
+# and errors) and the storyline's fifth. Rotations are the camera's small tilt on its bracket; the
+# 2026-09-11 one is the OpenCV export's R_cam2gripper (vision/wrist_camera_handeye.yml) as a
+# quaternion. The z translation is the storyline's: 0.0745 m before the bracket refit, 0.0702 m
+# after (4.3 mm).
+HANDEYE: Final = (
+    HandEye(
+        "CAL-ARM3A-0226",
+        "2026-02-26T15:10:00-05:00",
+        "commissioning",
+        (0.032, -0.011, 0.071),
+        (0.0031, 0.0074, 0.0059, 0.999949),
+        "0.42",
+        "ChArUco 9x6, 30 mm",
+        "SOP-CELL-021 rev A",
+        "",
+        "",
+    ),
+    HandEye(
+        "CAL-ARM3A-0415",
+        "2026-04-15T10:05:00-04:00",
+        "scheduled recalibration",
+        (0.0321, -0.0108, 0.0712),
+        (0.003, 0.0076, 0.006, 0.999948),
+        "0.39",
+        "ChArUco 9x6, 30 mm",
+        "SOP-CELL-021 rev B",
+        "0.8",
+        "WO-26-0415",
+    ),
+    HandEye(
+        "CAL-ARM3A-0623",
+        "2026-06-23T17:30:00-04:00",
+        "after joint 4 drive replacement",
+        (0.0334, -0.0102, 0.0709),
+        (0.0032, 0.0079, 0.0061, 0.999945),
+        "0.47",
+        "ChArUco 9x6, 30 mm",
+        "SOP-CELL-021 rev B",
+        "0.8",
+        "WO-26-0623",
+    ),
+    HandEye(
+        "CAL-ARM3A-0818",
+        "2026-08-18T12:40:00-04:00",
+        "after gripper finger set change",
+        (0.0334, -0.0103, 0.0745),
+        (0.0031, 0.0078, 0.0061, 0.999946),
+        "0.44",
+        "ChArUco 9x6, 30 mm",
+        "SOP-CELL-021 rev B",
+        "0.8",
+        "WO-26-0391",
+    ),
+    HandEye(
+        "CAL-ARM3A-0911",
+        "2026-09-11T10:40:12-04:00",
+        "after wrist camera bracket refit (WO-26-0911)",
+        (0.0334, -0.0103, 0.0702),
+        (0.0032, 0.0078, 0.0061, 0.999946),
+        "1.86",
+        "ChArUco 7x5, 30 mm (substitute)",
+        "SOP-CELL-021 rev C",
+        "2.0",
+        "WO-26-0912",
+    ),
+)
+HANDEYE_NAMESPACE: Final = "/arm3a_wrist_camera_eye_on_hand/"
+
+
+def easy_handeye(calibration: HandEye) -> bytes:
+    """The file easy_handeye saves (``~/.ros/easy_handeye/<namespace>.yaml``), archived under the
+    calibration's id: ``yaml.dump(HandeyeCalibration.to_dict(c), default_flow_style=False)``, so
+    PyYAML's sorted block style, with ``parameters`` (``vars()`` of its
+    ``HandeyeCalibrationParameters``) and ``transformation`` (x, y, z in metres and the rotation
+    quaternion, effector to camera). It names no robot, time or error: the manifest declares the
+    machine, and the error is in the calibration log."""
+    (x, y, z), (qx, qy, qz, qw) = calibration.xyz, calibration.quaternion
+    return text(
+        "parameters:",
+        "  eye_on_hand: true",
+        "  freehand_robot_movement: false",
+        "  move_group: manipulator",
+        "  move_group_namespace: /",
+        f"  namespace: {HANDEYE_NAMESPACE}",
+        "  robot_base_frame: base_link",
+        "  robot_effector_frame: tool0",
+        "  tracking_base_frame: wrist_camera",
+        "  tracking_marker_frame: charuco_board",
+        "transformation:",
+        f"  qw: {qw!r}",
+        f"  qx: {qx!r}",
+        f"  qy: {qy!r}",
+        f"  qz: {qz!r}",
+        f"  x: {x!r}",
+        f"  y: {y!r}",
+        f"  z: {z!r}",
+    )
+
+
+def handeye_log() -> bytes:
+    """The vision team's hand-eye calibration log: what each easy_handeye result was accepted on.
+    Revision A of SOP-CELL-021 stated no limit, so that cell is blank."""
+    header = (
+        "Calibration ID",
+        "Robot",
+        "Camera",
+        "Performed",
+        "Reason",
+        "Board",
+        "Poses",
+        "Reprojection Error px",
+        "Acceptance Limit px",
+        "Result",
+        "Procedure",
+        "Work Order",
+        "Result File",
+    )
+    rows = [
+        (
+            c.ident,
+            "ARM-3A",
+            "WCAM-3A",
+            c.performed,
+            c.reason,
+            c.board,
+            "24",
+            c.error_px,
+            c.limit_px,
+            "PASS",
+            c.procedure,
+            c.work_order,
+            f"{c.ident}.yaml",
+        )
+        for c in HANDEYE
+    ]
+    return table(header, rows)
+
+
+def calibrations() -> dict[str, bytes]:
+    files = {f"{CELL}/calibration/{c.ident}.yaml": easy_handeye(c) for c in HANDEYE}
+    files[f"{CELL}/calibration/handeye_calibration_log.csv"] = handeye_log()
+    return files
+
+
+# --- PLANT-2: the stop of INC-C3-0011 in the CMMS and in syslog, and who joined them -----------
+
+# The CMMS's downtime log: the operator enters the stop at the HMI terminal, by hand, after the
+# fact. Its INC-C3-0011 stop says 14:33:10; the controller logged its protective stop at 14:32:38
+# (the incident report's HMI time and the bag's header stamp): the same stop, 32 s apart.
+CMMS_STOP: Final = "2026-09-14 14:33:10"
+SYSLOG_PSTOP: Final = "2026-09-14 14:32:38"
+DOWNTIME: Final = (
+    (
+        "Downtime ID",
+        "Asset ID",
+        "Site",
+        "Location",
+        "Stop Type",
+        "Stopped",
+        "Restarted",
+        "Reason",
+        "Reported By",
+        "Related",
+    ),
+    (
+        "DT-26-0709-01",
+        "ARM-3A",
+        "PLANT-2",
+        "CELL-3",
+        "Safety stop",
+        "2026-07-09 14:22:00",
+        "2026-07-09 14:40:00",
+        "Light curtain stop at the pallet gate (near miss)",
+        "A. Novak",
+        "INC-C3-0004",
+    ),
+    (
+        "DT-26-0910-01",
+        "ARM-3A",
+        "PLANT-2",
+        "CELL-3",
+        "Planned",
+        "2026-09-10 13:50:00",
+        "2026-09-10 16:20:00",
+        "Finger set change and wrist camera bracket refit",
+        "K. Patel",
+        "WO-26-0911",
+    ),
+    (
+        "DT-26-0914-01",
+        "ARM-3A",
+        "PLANT-2",
+        "CELL-3",
+        "Protective stop",
+        CMMS_STOP,
+        "",
+        "Collision at pick P1; E-stop at OP-2",
+        "A. Novak",
+        "INC-C3-0011; WO-26-0915",
+    ),
+)
+
+# The plant's syslog collector (LOG-P2), exported as CSV for the review: its sequence number, the
+# sender's own timestamp (local time, as the collector shows it), host, facility, severity, tag.
+# ARM-3A's controller and PLC-C3 keep synchronised time (the site survey); the cell PC does not
+# send syslog.
+SYSLOG_PSTOP_SEQ: Final = "4182"
+SYSLOG: Final = (
+    ("Seq", "Timestamp", "Host", "Facility", "Severity", "Tag", "Message"),
+    (
+        "4170",
+        "2026-09-14 14:28:00",
+        "ARM-3A",
+        "user",
+        "notice",
+        "PALLET_C3",
+        "program PALLET_C3 1.4.0 started from the HMI",
+    ),
+    (
+        SYSLOG_PSTOP_SEQ,
+        SYSLOG_PSTOP,
+        "ARM-3A",
+        "local0",
+        "err",
+        "SAFETY",
+        "PSTOP: collision detection joint 5, external torque 41.7 Nm > 35.0 Nm, pick P1",
+    ),
+    (
+        "4183",
+        "2026-09-14 14:32:41",
+        "PLC-C3",
+        "local0",
+        "crit",
+        "SAFETY",
+        "ESTOP: OP-2.ES1 pressed",
+    ),
+    (
+        "4186",
+        "2026-09-14 14:33:30",
+        "PLC-C3",
+        "local0",
+        "notice",
+        "SAFETY",
+        "cell 3 locked out (LOTO-C3-2)",
+    ),
+)
+
+# A person's statement that the CMMS stop and the syslog stop are one event (root ADR 0062's
+# ``neptune.assertions`` file, as the review console writes it): stated evidence, applied by
+# nobody but Memory.
+SAME_EVENT_ASSERTION: Final = {
+    "format": "neptune.assertions",
+    "version": 1,
+    "assertions": [
+        {
+            "id": {"namespace": "plant-2.review", "value": "ASR-C3-0011-01"},
+            "assertion_type": "same_identity",
+            "author": {"namespace": "plant-2.staff", "value": "a.novak"},
+            "authored_at": "2026-09-15T09:05:00-04:00",
+            "authored_zone": "America/New_York",
+            "scope": [
+                {"namespace": "plant-2.cmms.downtime", "value": "DT-26-0914-01"},
+                {"namespace": "plant-2.syslog.log-p2", "value": SYSLOG_PSTOP_SEQ},
+            ],
+            "payload": {"incident": "INC-C3-0011", "relation": "same_event"},
+            "rationale": (
+                "Same stop. I entered DT-26-0914-01 at the HMI terminal after the E-stop; it is"
+                " the protective stop the controller logged as syslog 4182. Both are INC-C3-0011."
+            ),
+            "ticket": {"namespace": "plant-2.cmms", "value": "WO-26-0915"},
+        }
+    ],
+}
+
+
+def assertions() -> bytes:
+    return bytes(A.as_json(SAME_EVENT_ASSERTION))
+
+
+# --- PLANT-2: authorisation envelopes, in the register S-007 keeps ------------------------------
+
+PLANT_ENVELOPES: Final = (
+    (
+        "Envelope ID",
+        "Site",
+        "Robots",
+        "Zone",
+        "Speed Limit",
+        "Speed Unit",
+        "Payload Max",
+        "Payload Unit",
+        "Missions",
+        "Supervision",
+        "Depends On",
+        "Valid From",
+        "Valid Until",
+        "Approved By",
+        "Approved On",
+    ),
+    (
+        "ENV-P2-01",
+        "PLANT-2",
+        "ARM-3A",
+        "CELL-3",
+        "2000",
+        "mm/s",
+        "8",
+        "kg",
+        "PALLET_C3 palletising",
+        "fenced cell, operator at OP-2",
+        "Light curtain LC-3; Safety PLC PLC-C3; Requalification after any tool change",
+        "2026-03-01",
+        "2027-02-28",
+        "Plant safety lead",
+        "2026-02-27",
+    ),
+    (
+        "ENV-P2-02",
+        "PLANT-2",
+        "LEG-01",
+        "AISLE-C3",
+        "1.2",
+        "m/s",
+        "5",
+        "kg",
+        "PATROL-A",
+        "remote, 1 operator : 1 robot",
+        "Plant Wi-Fi; Cell 3 aisle door interlock",
+        "2026-05-12",
+        "2026-11-12",
+        "Plant safety lead",
+        "2026-05-10",
+    ),
+    (
+        "ENV-P2-03",
+        "PLANT-2",
+        "LEG-01",
+        "PLC-ROOM",
+        "1.0",
+        "m/s",
+        "5",
+        "kg",
+        "PATROL-A",
+        "remote, 1 operator : 1 robot",
+        "Plant Wi-Fi; Cell 3 aisle door interlock",
+        "2026-05-12",
+        "2026-11-12",
+        "Plant safety lead",
+        "2026-05-10",
+    ),
+)
+
+
+def plant_records() -> dict[str, bytes]:
+    downtime_header, *downtime = DOWNTIME
+    syslog_header, *syslog = SYSLOG
+    envelope_header, *envelopes = PLANT_ENVELOPES
+    return {
+        f"{PLANT}/cmms/downtime_log.csv": table(downtime_header, downtime),
+        f"{CELL}/logs/syslog_LOG-P2_2026-09-14.csv": table(syslog_header, syslog),
+        f"{CELL}/incidents/INC-C3-0011.assertions.json": assertions(),
+        f"{PLANT}/authorisation/zone_register.csv": table(envelope_header, envelopes),
+    }
+
+
 PLANT_CMMS_ADDED: Final = (
     (
         "WO-26-0911",
@@ -544,15 +941,7 @@ def cell() -> dict[str, bytes]:
         else:
             files[f"{CELL}/{path}"] = data
     files[f"{PLANT}/cmms/work_orders.csv"] = plant_cmms()
-    files[f"{CELL}/calibration/CAL-ARM3A-0911.yaml"] = bytes(
-        A.calibration(
-            "CAL-ARM3A-0911",
-            "2026-09-11T10:40:00-04:00",
-            "after wrist camera bracket refit (WO-26-0911), substitute 7x5 board",
-            (0.0334, -0.0103, 0.0702),
-            1.86,
-        )
-    )
+    files.update(calibrations())  # the D1 cell's four, rewritten, and the storyline's fifth
     files[f"{CELL}/vision/wrist_camera_handeye.yml"] = HANDEYE_OPENCV.encode()
     files[f"{CELL}/config/cell_config.yaml"] = CELL_CONFIG.encode()
     files[f"{CELL}/documents/SOP-CELL-021_rev_B.pdf"] = sop_handeye("B")
@@ -907,6 +1296,7 @@ def plant() -> dict[str, bytes]:
         f"{PLANT}/maps/PLANT-2_zones.geojson": plant_zones(),
     }
     files.update(cell())
+    files.update(plant_records())
     files.update(legged())
     return files
 
@@ -1079,6 +1469,7 @@ def asset_register() -> bytes:
 MANIFEST: Final = """\
 # The hand-over folder for the INC-C3-0011 review (PLANT-2) and the S-007 fleet.
 # Read every CSV here with its first row as the header (root ADR 0042 section 2).
+# Each hand-eye calibration is declared as a session of ARM-3A: easy_handeye's file names no robot.
 neptune: 1
 machines:
   - {id: AMR-05, embodiment: mobile_base}
@@ -1095,6 +1486,11 @@ runs:
   - {name: cell3-2026-09-14, paths: [sites/PLANT-2/cell3/bags/pallet_2026-09-14], machine: ARM-3A, site: PLANT-2}
   - {name: leg01-2026-09-12, paths: [sites/PLANT-2/legged/runs/patrol_2026-09-12.mcap], machine: LEG-01, site: PLANT-2}
   - {name: leg01-2026-09-14, paths: [sites/PLANT-2/legged/runs/patrol_2026-09-14], machine: LEG-01, site: PLANT-2}
+  - {name: arm3a-handeye-2026-02-26, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0226.yaml], machine: ARM-3A, site: PLANT-2}
+  - {name: arm3a-handeye-2026-04-15, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0415.yaml], machine: ARM-3A, site: PLANT-2}
+  - {name: arm3a-handeye-2026-06-23, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0623.yaml], machine: ARM-3A, site: PLANT-2}
+  - {name: arm3a-handeye-2026-08-18, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml], machine: ARM-3A, site: PLANT-2}
+  - {name: arm3a-handeye-2026-09-11, paths: [sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml], machine: ARM-3A, site: PLANT-2}
   - {name: amr05-2026-03-03, paths: [sites/S-007/runs/amr-05_2026-03-03.mcap], machine: AMR-05, site: S-007}
   - {name: amr06-2026-03-03, paths: [sites/S-007/runs/amr-06_2026-03-03.mcap], machine: AMR-06, site: S-007}
   - {name: amr07-2026-04-02, paths: [sites/S-007/runs/amr-07_2026-04-02.mcap], machine: AMR-07, site: S-007}
