@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Final
 
 from neptune.model.record import SCHEMA_VERSION
+from neptune_memory.schema import GRAPH_SCHEMA_RELEASE as _GRAPH_SCHEMA_RELEASE
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION as _GRAPH_SCHEMA_VERSION
 
 # Compiler package schema: the ``schema_version`` stamped on every canonical record. The compiler
@@ -20,5 +21,7 @@ COMPILER_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
 # contracts/lock.toml.
 CATALOG_API_VERSION: Final[str] = "1.7.0"
 
-# Graph schema Memory itself publishes (contracts/graph-schema/, ADR 0006): the registry major.
+# Graph schema Memory itself publishes (contracts/graph-schema/, ADR 0006): the registry major,
+# and the full release its graph documents name (ADR 0019 §3).
 GRAPH_SCHEMA_VERSION: Final[int] = _GRAPH_SCHEMA_VERSION
+GRAPH_SCHEMA_RELEASE: Final[str] = _GRAPH_SCHEMA_RELEASE

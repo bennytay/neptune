@@ -6,9 +6,10 @@ come from the registry versions declared in ``pins.py``, never from the owners' 
 upstream release changes nothing Context publishes until Context bumps a pin, and that bump is a
 reviewed Context change that regenerates this snapshot and Context's own exports with it.
 
-``pinned.json`` is the snapshot: graph-schema's ``$defs`` and predicate names, and catalog-api's
-thread kinds, copied from ``contracts/<contract>/v<pin>/``. It ships inside the package so a
-reader never needs the repository's registry. Regenerate after a pin bump with
+``pinned.json`` is the snapshot: graph-schema's ``$defs``, predicate names and each predicate's
+domain (subject node types) and range (object node or value types), and catalog-api's thread
+kinds, copied from ``contracts/<contract>/v<pin>/``. It ships inside the package so a reader never
+needs the repository's registry. Regenerate after a pin bump with
 ``uv run python -m neptune_context.pinned contracts
 packages/neptune-context/src/neptune_context/pinned.json``; a test fails when it is stale.
 """
@@ -50,6 +51,10 @@ def build(contracts: Path) -> bytes:
         "graph-schema": {
             "defs": graph["$defs"],
             "predicates": sorted(p["name"] for p in vocabulary["predicates"]),
+            "signatures": {
+                p["name"]: {"domain": sorted(p["domain"]), "range": sorted(p["range"])}
+                for p in vocabulary["predicates"]
+            },
             "version": GRAPH_SCHEMA_VERSION,
         },
     }
@@ -72,6 +77,15 @@ def node_types() -> frozenset[str]:
 def predicates() -> frozenset[str]:
     """graph-schema's predicate names at the pin."""
     return frozenset(_snapshot()["graph-schema"]["predicates"])
+
+
+@functools.cache
+def signatures() -> dict[str, tuple[frozenset[str], frozenset[str]]]:
+    """graph-schema's predicate signatures at the pin: name -> (domain, range)."""
+    return {
+        name: (frozenset(sig["domain"]), frozenset(sig["range"]))
+        for name, sig in _snapshot()["graph-schema"]["signatures"].items()
+    }
 
 
 @functools.cache
@@ -100,13 +114,14 @@ def node_beyond_pin(node: NodeRef) -> str | None:
 
 
 def claim_beyond_pin(claim: Claim) -> str | None:
-    """Why ``claim`` uses a value newer than the pinned graph-schema, or ``None`` when it does not.
+    """Why ``claim`` is not in the pinned graph-schema, or ``None`` when it is.
 
     Memory may run ahead of Context's pin (a predicate, node type or value type added in a
-    minor release). The pinned packet schema does not describe such a value, so Context never
-    passes it through: the engine reports it as a gap and the packet reader refuses it
-    (ADR 0006 Consequences, ADR 0007 §6). Checks the predicate, the subject and, for an edge,
-    the object node type, and for a literal its value type.
+    minor release), and a document may hold a claim its own vocabulary forbids. The pinned packet
+    schema does not describe either, so Context never passes it through: the engine reports it
+    as a gap and the packet reader refuses it (ADR 0006 Consequences, ADR 0007 §6, ADR 0012 §9).
+    Checks the predicate, the subject and, for an edge, the object node type, and for a literal
+    its value type; then the predicate's pinned domain (subject type) and range (object type).
     """
     if claim.predicate not in predicates():
         return f"predicate {claim.predicate!r}"
@@ -116,11 +131,41 @@ def claim_beyond_pin(claim: Claim) -> str | None:
     obj = claim.object
     node_type = getattr(obj, "node_type", None)
     if node_type is not None:
-        return node_beyond_pin(obj)  # type: ignore[arg-type]
+        reason = node_beyond_pin(obj)  # type: ignore[arg-type]
+        return reason if reason is not None else _off_signature(claim)
     datatype = getattr(obj, "datatype", None)
     if datatype is not None and str(datatype) not in value_types():
         return f"value type {str(datatype)!r}"
+    return _off_signature(claim)
+
+
+def _off_signature(claim: Claim) -> str | None:
+    signature = signatures().get(claim.predicate)
+    if signature is None:  # a predicate the pin names without a signature: nothing to check
+        return None
+    domain, range_ = signature
+    subject = str(claim.subject.node_type)
+    if subject not in domain:
+        return f"predicate {claim.predicate!r} on a {subject!r} subject (domain {sorted(domain)})"
+    obj = claim.object
+    kind = getattr(obj, "node_type", None) or getattr(obj, "datatype", None) or "record"
+    if str(kind) not in range_:
+        return f"predicate {claim.predicate!r} with a {str(kind)!r} object (range {sorted(range_)})"
     return None
+
+
+def older_graph_notice(graph_schema_version: int) -> str | None:
+    """The one sentence a renderer states when the graph read is an older graph-schema major than
+    the pin (ADR 0012 §10), or ``None``. A 1.x document is read as written: its ``succeeds``
+    still marks a chain change, which 2.0.0 no longer means."""
+    pinned_major = int(GRAPH_SCHEMA_VERSION.split(".")[0])
+    if graph_schema_version >= pinned_major:
+        return None
+    return (
+        f"Graph read: graph-schema {graph_schema_version}.x, older than Context's pin"
+        f" {GRAPH_SCHEMA_VERSION}; predicates such as succeeds carry their"
+        f" {graph_schema_version}.x meaning."
+    )
 
 
 def finding_beyond_pin(finding: ResolutionFinding) -> str | None:

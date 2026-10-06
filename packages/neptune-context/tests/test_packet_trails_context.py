@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 
 Code = PacketFindingCode
 REF = X.ref(X.REGISTER, 1)
+BEYOND_PIN = "predicate_after_the_pin"  # in no released graph-schema
 
 
 def cid(n: int) -> str:
@@ -329,7 +330,7 @@ def test_a_tampered_why_trail_is_refused(edit: Any, code: Code | None) -> None:
 @pytest.mark.parametrize(
     "edit",
     [
-        lambda d: d["trails"][0]["changes"][0].__setitem__("predicate", "drift"),
+        lambda d: d["trails"][0]["changes"][0].__setitem__("predicate", BEYOND_PIN),
         lambda d: d["trails"][0]["changes"][0].__setitem__("change", "vanished"),
         lambda d: d["trails"][0]["before"].__setitem__("tx", "1"),
         lambda d: d["trails"][0].__setitem__("before", {"clock": X.UTC, "ticks": 1}),
@@ -346,7 +347,7 @@ def test_a_tampered_diff_trail_is_refused(edit: Any) -> None:
 def test_a_predicate_beyond_the_pin_is_refused_by_name() -> None:
     _, diff, *_ = packets()
     out = refused(
-        _mutate(diff, lambda d: d["trails"][0]["changes"][0].__setitem__("predicate", "drift"))
+        _mutate(diff, lambda d: d["trails"][0]["changes"][0].__setitem__("predicate", BEYOND_PIN))
     )
     assert "pinned graph-schema" in out.findings[0].message
 

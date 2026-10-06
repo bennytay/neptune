@@ -58,7 +58,6 @@ from neptune_memory.consolidate.snapshot import (
 )
 from neptune_memory.derived.clocks import CLOCKS_MODEL, EstimatedClocksConsolidator
 from neptune_memory.ledger import ledger_export_from_json
-from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.codec import graph_from_json, graph_problems
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.reader import AsOfBeyondHeadError
@@ -161,7 +160,8 @@ def _verify(path: Path, out: TextIO) -> int:
     if document is None:
         return REFUSED
     out.write(
-        f"{path}: ok: graph-schema {GRAPH_SCHEMA_VERSION} document, head {document.head}, "
+        f"{path}: ok: graph-schema {document.release or document.graph_schema_version} document,"
+        f" head {document.head}, "
         f"{len(document.resolution.claims)} claims, {len(document.resolution.findings)} "
         f"findings, {len(document.builds)} builds, generation {document.generation}\n"
     )

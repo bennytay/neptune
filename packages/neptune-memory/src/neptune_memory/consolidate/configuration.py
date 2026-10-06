@@ -4,11 +4,14 @@ Three things, each from declared records only, each cited:
 
 - **Machine chains.** Commissioning, maintenance, change and requalification records place a
   configuration on a machine at an instant on the record's own clock. Ordered per machine and clock,
-  they give ``has_configuration`` spans (each until the next placement, or open) and a ``succeeds``
-  claim at every decided change of configuration. Records that disagree on one instant, or a field
-  that is ``Ambiguous``, give ``configuration_candidate`` claims and a ``chain_overlap`` finding; a
-  record that leaves the configuration unknown gives ``configuration_unknown`` and a ``chain_gap``
-  finding. Nothing bridges a gap: no ``succeeds`` is claimed across one.
+  they give ``has_configuration`` spans, each until the next placement (or open), so a change is
+  where one machine's span of one configuration ends and its span of another begins: ``transitions``
+  reads it back (ADR 0019 §2). Configuration nodes are shared across machines, so no
+  configuration-to-configuration ``succeeds`` is claimed from a chain: it would read fleet-wide.
+  Records that disagree on one instant, or a field that is ``Ambiguous``, give
+  ``configuration_candidate`` claims and a ``chain_overlap`` finding; a record that leaves the
+  configuration unknown gives ``configuration_unknown`` and a ``chain_gap`` finding. Nothing bridges
+  a gap: no change is read across one.
 - **Runs.** ``configuration_active_during`` from each compiler ``SnapshotBinding``, over the bound
   part of the run on the run's clock. A run no binding names is ``configuration_unknown`` over the
   run, never the nearest configuration in time.
@@ -75,7 +78,6 @@ from neptune_memory.schema.predicates import (
     CONFIGURATION_CANDIDATE,
     CONFIGURATION_UNKNOWN,
     NOT_COVERED_BY_AUTHORISATION,
-    SUCCEEDS,
 )
 
 if TYPE_CHECKING:
@@ -449,8 +451,10 @@ def _cites(steps: Iterable[_Step]) -> tuple[list[EvidenceRef], list[RecordId]]:
 
 
 def _chain_drafts(view: _View, machine: NodeRef, spans: list[_Span]) -> list[ClaimDraft]:
+    """A chain's spans as claims about the machine. A decided span ends exactly where the next
+    span begins, so a change of configuration is two abutting ``has_configuration`` claims of
+    this machine (ADR 0019 §2), never a claim between two shared configuration nodes."""
     drafts: list[ClaimDraft] = []
-    previous: _Span | None = None
     for span in spans:
         evidence, records = _cites(span.steps)
         if span.state.kind == "decided":
@@ -467,20 +471,6 @@ def _chain_drafts(view: _View, machine: NodeRef, spans: list[_Span]) -> list[Cla
                     records,
                 )
             )
-            if previous is not None and previous.state.kind == "decided":
-                cited, cited_records = _cites([*previous.instants[-1], *span.instants[0]])
-                drafts.append(
-                    _draft(
-                        configuration,
-                        SUCCEEDS,
-                        previous.state.configurations[0],
-                        span.start,
-                        span.end,
-                        _STATED,
-                        cited,
-                        cited_records,
-                    )
-                )
         elif span.state.kind == "unknown":
             view.findings.append(
                 _finding(
@@ -520,7 +510,6 @@ def _chain_drafts(view: _View, machine: NodeRef, spans: list[_Span]) -> list[Cla
                         cited_records,
                     )
                 )
-        previous = span
     return drafts
 
 
@@ -1073,10 +1062,14 @@ def _bind(
 
 
 class ConfigurationLineageConsolidator:
-    """Machine chains, run configurations and authorisation coverage. Takes no configuration."""
+    """Machine chains, run configurations and authorisation coverage. Takes no configuration.
+
+    Version 2 (ADR 0019 §2) claims no ``succeeds`` from a machine's chain: a change is the
+    machine's own abutting ``has_configuration`` spans, read back by ``transitions``.
+    """
 
     consolidator_id: Final = CONFIGURATION_CONSOLIDATOR_ID
-    version: Final = "1"
+    version: Final = "2"
     model: Final[ModelRef | None] = None
 
     def consolidate(
@@ -1099,3 +1092,62 @@ class ConfigurationLineageConsolidator:
         drafts.extend(authorised)
         drafts.extend(_runs(view, found))
         return ConsolidatorOutput(tuple(drafts), tuple(view.findings))
+
+
+# --- Reading changes back -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Transition:
+    """One decided change on one machine's chain (ADR 0019 §2): ``before`` was in force until
+    ``at`` and ``after`` from ``at``, on one clock. ``claims`` are the two ``has_configuration``
+    claims it is read from, which cite the records on each side."""
+
+    machine: NodeRef
+    before: NodeRef
+    after: NodeRef
+    at: Timestamp
+    claims: tuple[Claim, Claim]
+
+
+def transitions(claims: Iterable[Claim], machine: NodeRef) -> tuple[Transition, ...]:
+    """The changes of configuration on ``machine``, from ``memory.configuration``'s
+    ``has_configuration`` claims about it. Pass the claims current at one ``as_of``.
+
+    A change is a span of one configuration whose end is exactly the start of a span of another
+    (one ``Timestamp``, so one clock). A span that ends where an unknown or candidate span begins,
+    or on another clock, meets no decided span: no change is read across a gap, a tie or two
+    clocks, as no ``succeeds`` was claimed across one (ADR 0010 §2). In time order per clock.
+    """
+    spans = [
+        c
+        for c in claims
+        if c.predicate == HAS_CONFIGURATION
+        and c.subject == machine
+        and c.provenance.consolidator_id == CONFIGURATION_CONSOLIDATOR_ID
+        and isinstance(c.object, NodeRef)
+    ]
+    starting: dict[Timestamp, list[Claim]] = {}
+    for claim in spans:
+        starting.setdefault(claim.valid_from, []).append(claim)
+    found: list[Transition] = []
+    for before in spans:
+        if not isinstance(before.valid_to, Timestamp):
+            continue
+        for after in starting.get(before.valid_to, ()):
+            if after.object != before.object:
+                found.append(
+                    Transition(
+                        machine,
+                        before.object,  # type: ignore[arg-type]
+                        after.object,  # type: ignore[arg-type]
+                        after.valid_from,
+                        (before, after),
+                    )
+                )
+    return tuple(
+        sorted(
+            found,
+            key=lambda t: (t.at.domain_id, t.at.ticks, t.before.node_id, t.after.node_id),
+        )
+    )

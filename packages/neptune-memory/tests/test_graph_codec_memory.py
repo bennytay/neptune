@@ -204,7 +204,12 @@ def test_malformed_findings_are_refused(changes: dict[str, Any]) -> None:
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("graph_schema_version", 2),
+        ("graph_schema_version", 1),
+        ("graph_schema", "1.9.0"),
+        ("graph_schema", "3.0.0"),
+        ("graph_schema", "2.0"),
+        ("graph_schema", "2.01.0"),
+        ("graph_schema", 2),
         ("generation", "sha256:" + "0" * 64),
         ("kind", "memory.other"),
         ("claims", "none"),

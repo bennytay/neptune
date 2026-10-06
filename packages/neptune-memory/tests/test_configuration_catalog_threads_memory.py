@@ -27,7 +27,10 @@ from neptune.model.ids import LogicalId
 from neptune.model.run import run_from_json
 from neptune.model.time import Epoch, Timescale, Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
-from neptune_memory.consolidate.configuration import ConfigurationLineageConsolidator
+from neptune_memory.consolidate.configuration import (
+    ConfigurationLineageConsolidator,
+    transitions,
+)
 from neptune_memory.consolidate.runs import run_node
 from neptune_memory.ledger import StubLedger
 from neptune_memory.schema.claim import LedgerRecordRef
@@ -107,10 +110,12 @@ def test_lifecycle_records_the_ledger_holds_in_no_thread_still_make_the_chain() 
         ("siteops.configuration:CFG-AMR07-r4", map_change, firmware),
         ("siteops.configuration:CFG-AMR07-r5", firmware, OPEN),
     ]
-    assert {(c.subject.node_id, c.object.node_id) for c in of(result, "succeeds")} == {  # type: ignore[union-attr]
-        ("siteops.configuration:CFG-AMR07-r4", "siteops.configuration:CFG-AMR07-r3"),
-        ("siteops.configuration:CFG-AMR07-r5", "siteops.configuration:CFG-AMR07-r4"),
-    }
+    # A change is the machine's own abutting spans, never a succeeds claim (ADR 0019 §2).
+    assert of(result, "succeeds") == []
+    assert [(t.before.node_id, t.after.node_id) for t in transitions(result.claims, AMR_NODE)] == [
+        ("siteops.configuration:CFG-AMR07-r3", "siteops.configuration:CFG-AMR07-r4"),
+        ("siteops.configuration:CFG-AMR07-r4", "siteops.configuration:CFG-AMR07-r5"),
+    ]
     (authorised,) = of(result, "authorised_configuration")
     assert authorised.subject == NodeRef(NodeType.SITE, "siteops.site:S-007")
     assert all(c.assertion_kind == "stated" for c in result.claims)
@@ -153,8 +158,9 @@ def test_manipulator_cell_chain_from_the_catalog() -> None:
         "plant.configuration:CELL3-CFG-A",
         "plant.configuration:CELL3-CFG-A.1",
     ]
-    (succession,) = of(result, "succeeds")
-    assert succession.object == NodeRef(NodeType.CONFIGURATION, "plant.configuration:CELL3-CFG-A")
+    (change,) = transitions(result.claims, ARM_NODE)
+    assert change.before == NodeRef(NodeType.CONFIGURATION, "plant.configuration:CELL3-CFG-A")
+    assert change.after == NodeRef(NodeType.CONFIGURATION, "plant.configuration:CELL3-CFG-A.1")
 
 
 # --- Runs and bindings --------------------------------------------------------------------------

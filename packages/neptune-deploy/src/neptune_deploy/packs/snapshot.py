@@ -2,11 +2,13 @@
 
 Deploy reads Memory only through ``contracts/graph-schema``: the ``#/$defs/Graph`` document
 (``kind: memory.graph``) with its claims, resolver findings, head and generation. It never imports
-Memory. The reader is strict about the shapes the compiler uses and keeps every claim's JSON
-exactly as read, so a pack re-exports claims byte for byte. Two things are deliberately open, so
-that a later minor release of the contract still reads: a node type is any token (graph-schema
-1.6.0 adds ``event``), and a locator step is any object with a ``kind``, as the Ledger's catalog
-reads it.
+Memory. It reads majors 1 and 2 (ADR 0018): a 2.x document names its release (``graph_schema``),
+and its optional ``builds`` are read and checked but never rendered; a 1.x document is read as
+ADR 0015 reads it. Any other major is refused. The reader is strict about the shapes the compiler
+uses and keeps every claim's JSON exactly as read, so a pack re-exports claims byte for byte. Two
+things are deliberately open, so that a later minor release of the contract still reads: a node
+type is any token (graph-schema 1.6.0 adds ``event``), and a locator step is any object with a
+``kind``, as the Ledger's catalog reads it.
 
 The contract names a graph by its ``head`` (the Ledger transaction it was resolved at) and its
 ``generation`` (the resolver configuration's hash); neither names the claim set, since two Ledgers
@@ -37,8 +39,15 @@ from neptune_deploy.packs._read import (
 )
 from neptune_deploy.packs.errors import PackError
 
-GRAPH_SCHEMA_MAJOR: Final = 1
-GRAPH_SCHEMA_PIN: Final = "1.6.0"  # contracts/lock.toml; a test holds the two together
+GRAPH_SCHEMA_PIN: Final = "2.0.0"  # contracts/lock.toml; a test holds the two together
+# The 1.x minor whose shapes a 1.x document is read against strictly (ADR 0015, ADR 0018 §2).
+GRAPH_SCHEMA_1X_PIN: Final = "1.6.0"
+GRAPH_SCHEMA_MAJORS: Final = (1, 2)  # the majors this reader reads; any other is refused
+# The predicates whose meaning a major changed, by that major, from the contract's migration notes:
+# 2.0.0 narrows ``succeeds`` to a statement about two configurations, no longer a change on a
+# machine's chain (Memory ADR 0019 §3). A template section naming one is not read from that major
+# on unless it declares the majors it reads (ADR 0018 §4).
+MEANING_CHANGED: Final[Mapping[int, frozenset[str]]] = {2: frozenset({"succeeds"})}
 KEY_UNREAD: Final = "snapshot_key_unread"
 _VERSION: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 SNAPSHOT_PREFIX: Final = "snapshot:"
@@ -204,6 +213,11 @@ class Snapshot:
     # declared minor (ADR 0015); never rendered, and absent from every claim and finding read.
     unread: tuple[UnreadKey, ...] = ()
     declared_schema_version: str | None = None
+    # The document's major, and for 2.x the release it names (``graph_schema``; None for 1.x,
+    # whose documents name no release). ``builds`` (2.x) are read and checked, never rendered.
+    major: int = 1
+    release: str | None = None
+    builds: tuple[JsonObject, ...] = ()
 
     @cached_property
     def current(self) -> tuple[Claim, ...]:
@@ -268,27 +282,32 @@ def snapshot_id(document: JsonValue) -> str:
 def load_snapshot(
     data: bytes, *, max_bytes: int = MAX_SNAPSHOT_BYTES, schema_version: str | None = None
 ) -> Snapshot:
-    """Read a graph document (graph-schema 1.x ``#/$defs/Graph``) from its bytes."""
+    """Read a graph document (graph-schema 1.x or 2.x ``#/$defs/Graph``) from its bytes."""
     return read_snapshot(
         parse_document(data, "snapshot_malformed", max_bytes), schema_version=schema_version
     )
 
 
+def _version(text: str, what: str) -> tuple[int, int, int]:
+    found = _VERSION.fullmatch(text)
+    if found is None:
+        raise PackError("snapshot_unsupported", f"{what} {text!r} is not MAJOR.MINOR.PATCH")
+    return int(found[1]), int(found[2]), int(found[3])
+
+
+def _newer_minor(version: str, pin: str) -> bool:
+    """Whether ``version`` is a newer minor of ``pin``'s major (ADR 0015 §2)."""
+    major, minor, _patch = _version(version, "graph-schema version")
+    pinned = _version(pin, "pin")
+    return major == pinned[0] and minor > pinned[1]
+
+
 def tolerates_unknown_keys(schema_version: str | None) -> bool:
-    """Whether a declared graph-schema version is a newer minor of the pinned major (ADR 0015).
-    ``None`` is the pin: strict. A malformed declaration is refused."""
+    """Whether a declared graph-schema version is a newer minor of the 1.x pin (ADR 0015), for a
+    1.x document. ``None`` is the 1.x pin: strict. A malformed declaration is refused."""
     if schema_version is None:
         return False
-    declared = _VERSION.fullmatch(schema_version)
-    if declared is None:
-        raise PackError(
-            "snapshot_unsupported",
-            f"graph-schema version {schema_version!r} is not MAJOR.MINOR.PATCH",
-        )
-    pin = _VERSION.fullmatch(GRAPH_SCHEMA_PIN)
-    assert pin is not None
-    major, minor = int(declared[1]), int(declared[2])
-    return major == int(pin[1]) and minor > int(pin[2])
+    return _newer_minor(schema_version, GRAPH_SCHEMA_1X_PIN)
 
 
 def _key_path(pointer: str) -> str:
@@ -308,20 +327,86 @@ def _prune(value: JsonValue, pointer: str, drop: frozenset[str]) -> JsonValue:
     return value
 
 
+def _major(document: JsonValue) -> int:
+    """The document's major, checked before anything else is read: a major this reader does not
+    read is ``snapshot_unsupported``, whatever else the document holds (ADR 0018 §2). A document
+    without the key is refused by the key check that follows."""
+    if not isinstance(document, Mapping) or "graph_schema_version" not in document:
+        return GRAPH_SCHEMA_MAJORS[0]
+    version = document["graph_schema_version"]
+    if type(version) is not int or version not in GRAPH_SCHEMA_MAJORS:
+        raise PackError(
+            "snapshot_unsupported",
+            f"graph_schema_version {version!r}: Deploy reads graph-schema"
+            f" {' and '.join(map(str, GRAPH_SCHEMA_MAJORS))}",
+            "/graph_schema_version",
+        )
+    return version
+
+
+def _release(document: JsonValue, major: int, declared: str | None) -> str:
+    """A 2.x document's ``graph_schema``: the release it was written to, of its own major. A
+    caller's declaration, if any, must name the same release (ADR 0018 §2)."""
+    assert isinstance(document, Mapping)
+    if "graph_schema" not in document:
+        raise _R.fail("missing graph_schema", "")
+    release = _R.string(document["graph_schema"], "/graph_schema")
+    if _VERSION.fullmatch(release) is None or _version(release, "graph_schema")[0] != major:
+        raise _R.fail(f"graph_schema {release!r} is not a {major}.x release", "/graph_schema")
+    if declared is not None and declared != release:
+        _version(declared, "graph-schema version")
+        raise PackError(
+            "snapshot_unsupported",
+            f"the snapshot names graph-schema {release}; the caller declares {declared}",
+            "/graph_schema",
+        )
+    return release
+
+
+def _major_1(document: JsonValue, declared: str | None) -> None:
+    """A major-1 document never names a release, and a caller may not declare it one of another
+    major (ADR 0018 §2): both are refused whatever else is declared."""
+    if isinstance(document, Mapping) and "graph_schema" in document:
+        raise _R.fail(
+            "a graph-schema 1 document names no graph_schema release (graph_schema_version is 1)",
+            "/graph_schema",
+        )
+    if declared is not None and _version(declared, "graph-schema version")[0] != 1:
+        raise PackError(
+            "snapshot_unsupported",
+            f"the snapshot is graph-schema 1; the caller declares {declared}",
+            "/graph_schema_version",
+        )
+
+
 def read_snapshot(document: JsonValue, *, schema_version: str | None = None) -> Snapshot:
     """Read a parsed graph document; refuse anything outside the contract's shapes.
 
-    ``schema_version`` is the graph-schema version the document's producer declares (the document
-    names only the major). Under a newer minor of the pinned major, an unknown key is not refused:
-    it is dropped from what is read and reported once per key path as ``snapshot_key_unread``
-    (ADR 0015). Under the pin, an older minor or another major it is refused, as before.
+    A 2.x document names its release (``graph_schema``); ``schema_version`` may be omitted, and if
+    given must name the same release. Under a release newer in minor than the 2.x pin, an unknown
+    key is dropped from what is read and reported once per key path as ``snapshot_key_unread``.
+
+    A 1.x document names only its major, so ``schema_version`` is the release its producer
+    declares (ADR 0015): under a newer minor than the 1.x pin, unknown keys are reported the same
+    way; under the 1.x pin or an older minor they are refused, as before. A declaration of another
+    major contradicts the document and is refused, as is a 1.x document naming a release.
     """
-    if not tolerates_unknown_keys(schema_version):
-        return _read(document, None)
+    major = _major(document)
+    if major == 2:
+        release: str | None = _release(document, major, schema_version)
+        assert release is not None
+        declared: str | None = release
+        tolerant = _newer_minor(release, GRAPH_SCHEMA_PIN)
+    else:
+        release, declared = None, schema_version
+        _major_1(document, schema_version)
+        tolerant = tolerates_unknown_keys(schema_version)
+    if not tolerant:
+        return _read(document, None, major, release)
     sink: list[str] = []
     token = _UNREAD.set(sink)
     try:
-        snapshot = _read(document, None)
+        snapshot = _read(document, None, major, release)
     finally:
         _UNREAD.reset(token)
     if not sink:
@@ -336,34 +421,16 @@ def read_snapshot(document: JsonValue, *, schema_version: str | None = None) -> 
         UnreadKey(path, pointers[0], len(pointers)) for path, pointers in sorted(by_path.items())
     )
     return replace(
-        _read(pruned, snapshot.id), unread=unread, declared_schema_version=schema_version
+        _read(pruned, snapshot.id, major, release), unread=unread, declared_schema_version=declared
     )
 
 
-def _read(document: JsonValue, sid: str | None) -> Snapshot:
-    graph = _R.obj(
-        document,
-        "",
-        (
-            "claims",
-            "findings",
-            "generation",
-            "graph_schema_version",
-            "head",
-            "kind",
-            "resolver_config",
-        ),
-    )
+def _read(document: JsonValue, sid: str | None, major: int, release: str | None) -> Snapshot:
+    required = ["claims", "findings", "generation", "graph_schema_version", "head", "kind"]
+    required += ["resolver_config", *(("graph_schema",) if major == 2 else ())]
+    graph = _R.obj(document, "", sorted(required), ("builds",) if major == 2 else ())
     if graph["kind"] != "memory.graph":
         raise _R.fail("kind is not memory.graph", "/kind")
-    version = graph["graph_schema_version"]
-    if type(version) is not int or version != GRAPH_SCHEMA_MAJOR:
-        raise PackError(
-            "snapshot_unsupported",
-            f"graph_schema_version {graph['graph_schema_version']!r}: Deploy reads graph-schema"
-            f" {GRAPH_SCHEMA_MAJOR}",
-            "/graph_schema_version",
-        )
     head = _R.integer(graph["head"], "/head", 0)
     generation = _R.string(graph["generation"], "/generation", SHA256)
     vocabulary_version, cardinality = _resolver(graph["resolver_config"])
@@ -375,6 +442,12 @@ def _read(document: JsonValue, sid: str | None) -> Snapshot:
         _finding(item, child("/findings", i), head)
         for i, item in enumerate(_R.array(graph["findings"], "/findings"))
     )
+    builds: tuple[JsonObject, ...] = ()
+    if major == 2 and "builds" in graph:
+        items = _R.array(graph["builds"], "/builds")
+        if not items:
+            raise _R.fail("an empty builds list is written as no builds key", "/builds")
+        builds = tuple(_build(item, child("/builds", i), head) for i, item in enumerate(items))
     return Snapshot(
         id=snapshot_id(document) if sid is None else sid,
         head=head,
@@ -383,7 +456,32 @@ def _read(document: JsonValue, sid: str | None) -> Snapshot:
         cardinality=cardinality,
         claims=claims,
         findings=findings,
+        major=major,
+        release=release,
+        builds=builds,
     )
+
+
+def _build(value: JsonValue, pointer: str, head: int) -> JsonObject:
+    """A ``Build`` (graph-schema 1.9.0, in 2.0.0): one consolidator run and every claim id it
+    emitted. Checked, kept as read, never rendered (ADR 0018 §2)."""
+    build = _R.obj(
+        value, pointer, ("claims", "config_hash", "consolidator_id", "recorded_at", "version")
+    )
+    at = child(pointer, "claims")
+    ids = [
+        _R.string(item, child(at, i), CLAIM_ID)
+        for i, item in enumerate(_R.array(build["claims"], at))
+    ]
+    if len(set(ids)) != len(ids):
+        raise _R.fail("a build's claim ids are unique", at)
+    _R.string(build["config_hash"], child(pointer, "config_hash"), SHA256)
+    _R.string(build["consolidator_id"], child(pointer, "consolidator_id"), TOKEN)
+    _R.text(build["version"], child(pointer, "version"))
+    recorded_at = _R.integer(build["recorded_at"], child(pointer, "recorded_at"), 0)
+    if recorded_at > head:
+        raise _R.fail(f"recorded at {recorded_at}, after the graph's head {head}", pointer)
+    return build
 
 
 def _resolver(value: JsonValue) -> tuple[int, Mapping[str, str]]:

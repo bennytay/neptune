@@ -65,7 +65,7 @@ def test_a_good_document_verifies_with_a_one_line_summary(path: Path) -> None:
     graph = graph_from_json(load(path))
     assert (status, err) == (OK, "")
     assert lines == [
-        f"{path}: ok: graph-schema 1 document, head {graph.head}, "
+        f"{path}: ok: graph-schema {graph.release or 1} document, head {graph.head}, "
         f"{len(graph.resolution.claims)} claims, {len(graph.resolution.findings)} findings, "
         f"{len(graph.builds)} builds, generation {graph.generation}"
     ]
@@ -148,8 +148,19 @@ def test_a_consistency_problem_is_the_codecs_own_line(tmp_path: Path) -> None:
 
 def test_a_wrong_graph_schema_version_is_a_line(tmp_path: Path) -> None:
     document = load(SNAPSHOT)
-    document["graph_schema_version"] = 2
-    assert bad(tmp_path, document) == ["graph_schema_version 2 is not supported"]
+    document["graph_schema"] = "1.9.0"
+    assert bad(tmp_path, document) == ["graph_schema '1.9.0' is not a 2.x release"]
+    # A 2.x document without its release, or labelled 1.x while naming one (ADR 0019 §3).
+    del document["graph_schema"]
+    assert bad(tmp_path, document) == [
+        "graph document: missing keys ['graph_schema'], unexpected keys []"
+    ]
+    document["graph_schema_version"] = 3
+    assert bad(tmp_path, document) == ["graph_schema_version 3 is not supported"]
+    document["graph_schema_version"], document["graph_schema"] = 1, "2.0.0"
+    assert bad(tmp_path, document) == [
+        "graph document: missing keys [], unexpected keys ['graph_schema']"
+    ]
 
 
 def test_a_document_that_is_not_an_object_is_one_line(tmp_path: Path) -> None:
