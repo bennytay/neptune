@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Neptune's 15-minute quickstart (README.md, "15-minute quickstart"), as one script.
+#
+# The lines between the markers are the README's quickstart block, verbatim: CI runs this file on
+# a clean runner (.github/workflows/harness.yml, job `quickstart`, 15-minute timeout) and
+# packages/neptune-platform/tests/test_quickstart_readme.py fails when the two differ.
+# Run it from a clone (or from an empty folder: it clones). Needs git and curl, not make: the
+# Makefile needs GNU make 3.82 or later, and macOS ships 3.81. With GNU make, `make setup` and
+# `make demo` run the same two uv commands.
+set -euo pipefail
+
+# --- quickstart ---
+command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"; }
+[ -f harness/acceptance/gold.json ] || { git clone https://github.com/bennytay/neptune.git && cd neptune; }
+uv sync --all-packages --all-groups
+uv run --all-packages --all-groups python -m harness.demo --out demo
+ls demo/*.pdf
+cp packages/neptune-context/claude/mcp.sample.json .mcp.json
+mkdir -p .claude/skills && cp -R packages/neptune-context/claude/skills/neptune .claude/skills/
+export NEPTUNE_MEMORY_GRAPH=demo/graph.json
+# --- end ---

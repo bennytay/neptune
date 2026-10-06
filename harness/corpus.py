@@ -29,12 +29,18 @@ DEFAULT_BUILD: Final = REPO / "harness" / ".run" / "corpus"
 class Case:
     """One case: ``id`` names it in the report, ``sources`` is the folder to ingest, ``gold`` the
     gold answers whose evidence the compiler stage resolves against the case's package, and
-    ``deploy`` the Deploy mappings the deploy stage runs over that package (none: none to run)."""
+    ``deploy`` the Deploy mappings the deploy stage runs over that package (none: none to run).
+    ``memory`` is Memory's consolidator declaration for the corpus (``--config``), ``snapshot`` the
+    graph Memory committed for it (the memory stage must rebuild it byte for byte), and
+    ``answers`` the pinned agent answers the context stage checks (Platform ADR 0011)."""
 
     id: str
     sources: Path
     gold: Path | None = None
     deploy: Path | None = None
+    memory: Path | None = None
+    snapshot: Path | None = None
+    answers: Path | None = None
 
 
 def _cases_in(root: Path) -> list[Case]:
@@ -55,5 +61,13 @@ def select(
         raise ValueError(f"unknown corpus {name!r}; choose one of {', '.join(NAMES)}")
     root = acceptance.materialise((into or DEFAULT_BUILD) / f"{ACCEPTANCE}-{acceptance.VERSION}")
     return f"{ACCEPTANCE} {acceptance.VERSION}", [
-        Case(f"{ACCEPTANCE}-{acceptance.VERSION}", root, acceptance.GOLD, acceptance.DEPLOY)
+        Case(
+            f"{ACCEPTANCE}-{acceptance.VERSION}",
+            root,
+            acceptance.GOLD,
+            acceptance.DEPLOY,
+            acceptance.MEMORY_CONFIG,
+            acceptance.MEMORY_SNAPSHOT,
+            acceptance.ANSWERS,
+        )
     ]

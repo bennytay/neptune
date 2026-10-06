@@ -1,8 +1,9 @@
 # The integration harness
 
 One command that checks the contracts, flows a corpus through compiler, deploy, ledger, memory and context,
-issues a smoke query and writes a report. Decision records: [ADR 0004](adr/0004-integration-harness.md) and, for
-the deploy stage, [ADR 0008](adr/0008-harness-deploy-stage-corpus-declared-mappings-and-the-assertion-selector.md).
+issues a smoke query and writes a report. Decision records: [ADR 0004](adr/0004-integration-harness.md), for
+the deploy stage [ADR 0008](adr/0008-harness-deploy-stage-corpus-declared-mappings-and-the-assertion-selector.md),
+and for the memory and context stages and `make demo` [ADR 0011](adr/0011-demo-v1-real-memory-and-context-stages-pinned-cited-answers-and-the-quickstart.md).
 Code: `harness/`.
 The default corpus is the versioned [acceptance corpus](acceptance-corpus.md) (ADR 0007).
 
@@ -19,7 +20,8 @@ uv run --all-packages python -m harness --compose                           # st
 
 No Docker is needed while every real stage runs in process: the compiler, Deploy's mapper (a subprocess of the
 harness's interpreter), and the ledger on an embedded PostgreSQL from the `pgserver` wheel
-([ADR 0006](adr/0006-real-ledger-stage-on-embedded-postgres.md)); memory and context are stubs. Exit 0 means: `check --all` passed, every stage is `ok`, and the smoke query returned a
+([ADR 0006](adr/0006-real-ledger-stage-on-embedded-postgres.md)), and memory and context over that ledger's catalog,
+which the run keeps until it ends (ADR 0011). Exit 0 means: `check --all` passed, every stage is `ok`, and the smoke query returned a
 packet. The summary line goes to stdout; the report
 is always written.
 
@@ -39,7 +41,7 @@ or an absolute path, so a changed byte means changed behaviour.
 | `contracts` | `check --all`: `ok`, `exit_code`, the tool's `notes`, `problems` (and `output_tail` when red) |
 | `corpus` | `name` (`acceptance <version>`, `worked-examples` or `custom`) and the case ids; for the acceptance corpus also `version`, `tree` (its id), `locked` and `problems` (a build that does not match `corpus.lock.json` makes the run red) |
 | `stages[]` | in order: `mode` **real** or **stub**, `reason` (what decided it), `contract` and `contract_version`, `needs_services`, `status` (`ok`, `failed` = the stage's own checks, `error` = it raised or needs services that are down, `skipped` = an upstream stage did not pass), `problems`, `output` |
-| `smoke` | `query`, `packet_source` (`golden ...` or `canned: ...`), `packet`, `ok` |
+| `smoke` | `query`, `packet_source` (Context's local engine over the memory stage's graph, or `golden ...`/`canned: ...` from a stub), `packet` (a real packet's id, `as_of` and counts), `ok` |
 
 The compiler's `output.cases[]` has, per case: `state`, the `package` and `receipt` ids, `sources`, `findings` by
 code (partial success: an unsupported or corrupt source is a finding, not a failure), and whether the package
@@ -90,6 +92,51 @@ the kinds it yields (`structured_record` counts event-table rows). A template ou
 `DEPLOY_STAGE_INPUTS`: `test_the_deploy_stages_code_and_declarations_run_the_harness_and_the_platform_job` fails
 until both cover it. A red deploy stage stops the run before the ledger; its report still names the mapped
 package and its counts.
+
+The memory's `output` has the graph's `claims` (and by `assertion_kinds`), `generation`, `graph_schema`, `head`,
+`sha256`, the `packages` it consolidated with the transaction each was registered at, `config` (the Memory
+declaration passed as `--config`), `verify` (`memory verify`), and for the acceptance corpus `snapshot`: whether
+the graph is Memory's committed `acceptance_corpus.graph.json.gz` byte for byte (`equal`; anything else is red).
+The graph is `work/memory/graph.json`.
+
+The context's `output` has `answers` (per gold question: the tools called, its `supported`, `co_cited` and `gaps`
+gold claims, how many claims and statements the answers cite, and whether its first cited source `hydrated`
+through the Ledger) and `stdio` (a spawned `python -m neptune_context.mcp` lists its tools and answers as in
+process). Every answer, call by call, is `work/context/answers.json`.
+
+## Demo v1: `make demo`
+
+```bash
+make demo        # = uv run --all-packages --all-groups python -m harness.demo --out demo; about 25 s
+make demo-pin    # rewrite harness/acceptance/answers.json from the answers; review and classify the diff
+```
+
+The acceptance corpus through every real stage (owner contract tests skipped), then Deploy's `pack` command over
+the graph just built. `demo/` (git-ignored) gets `incident-timeline-INC-C3-0011.pdf`,
+`configuration-traceability-ARM-3A.pdf`, `graph.json` (what `python -m neptune_context.mcp --memory` serves),
+`answers.md` and `answers.json` (each gold question's tool calls and the cited text they returned), the report and
+`demo.md`. Two runs in two directories give the same top-level bytes and `packs/`; `work/` is scratch (the
+compiler's workspace records where it ran). The README's quickstart is `scripts/quickstart.sh`, which calls the
+two `uv` commands directly (the Makefile needs GNU make 3.82+; macOS ships 3.81); CI runs it on a clean runner
+(`harness.yml`, job `quickstart`, 15 minutes).
+
+### The pinned answers
+
+`harness/acceptance/answers.json` lists, per gold question, the MCP tool calls an agent makes, exactly as the
+Claude Code skill prescribes (`neptune_entities`, a one-hop read of an incident, `neptune_compare_runs`, or a
+two-hop walk at 50 items and 20,000 tokens), asked of the server `.mcp.json` runs (no catalog). Calls hold no
+content-addressed id: `"$named:run:cell3-2026-09-09"` is the id an earlier `neptune_entities` answer lists
+for that name, `"$support:Q7.C3"` the first claim id an earlier answer cites for Q7.C3 and pins each gold claim
+in one class with a written reason: `supported` (the claim ids whose statements cite it, by Platform ADR 0007 §6's
+rule over each statement's evidence refs, a single cell only by its column, and the records its claims are
+about, and one of them carries the fact), `co_cited` (the claim
+ids citing it, none of which states it: they share a row, page or record while saying something else) or a gap
+(`in_graph`: whether any claim of the graph would cite it). Only `supported` counts as answered. When the graph
+moves (Memory regenerates its snapshot, an adapter or a Deploy mapping changes it), the context stage is red
+until `make demo-pin` is run in the same PR. Re-pinning never moves a claim between classes: a pin whose ids
+changed, a newly cited claim (pinned `co_cited`) and a claim no longer cited (a gap) all come back with an empty
+reason, which stays red until someone classifies it; a move between classes also edits `EXPECTED_CLASSES` in
+`test_harness_answers.py`.
 
 ## Add a stage
 

@@ -197,7 +197,57 @@ def test_ci_needs_no_docker_while_no_stage_that_needs_services_is_real() -> None
     assert real_and_needy == []  # when this fails, the workflow needs the compose stack
 
 
-@pytest.mark.parametrize("name", ["run.py", "stages.py", "publish.py"])
+@pytest.mark.parametrize("name", ["run.py", "stages.py", "publish.py", "consolidate.py", "demo.py"])
 def test_the_harness_reads_no_clock_and_no_randomness(name: str) -> None:
     text = (HARNESS / name).read_text(encoding="utf-8")
     assert not re.search(r"\b(datetime|time\.time|random|uuid)\b", text)
+
+
+def test_the_agent_stage_reads_no_clock_and_no_randomness() -> None:
+    # It names a timedelta (the MCP session's read timeout), never the time.
+    text = (HARNESS / "agent.py").read_text(encoding="utf-8")
+    assert not re.search(r"\b(now|today|utcnow|time\.time|monotonic|random|uuid)\b", text)
+
+
+def _job(name: str) -> str:
+    return WORKFLOW.split(f"\n  {name}:\n", 1)[1].split("\n  comment:", 1)[0]
+
+
+def test_the_quickstart_job_runs_the_readmes_script_on_a_clean_runner_in_15_minutes() -> None:
+    """Demo v1 (platform ADR 0011): the README's quickstart is what CI runs, as a new user would:
+    no setup-uv, no cache, only the checkout and the script, within the README's fifteen minutes."""
+    job = _job("quickstart")
+    assert "timeout-minutes: 15" in job
+    assert "run: bash scripts/quickstart.sh" in job
+    assert "setup-uv" not in job and "make setup" not in job  # the script installs everything
+    assert "permissions:\n      contents: read" in job and "secrets." not in job
+    assert (REPO / "scripts" / "quickstart.sh").stat().st_mode & 0o111  # executable
+
+
+def test_what_demo_v1_runs_is_inside_the_pull_request_paths() -> None:
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "workflow_ci_plan_agent", REPO / ".github" / "scripts" / "ci_plan.py"
+    )
+    assert spec is not None and spec.loader is not None
+    ci_plan = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = ci_plan
+    spec.loader.exec_module(ci_plan)
+    watched = [
+        "packages/neptune-memory/src/neptune_memory/cli/__init__.py",
+        "packages/neptune-memory/pyproject.toml",
+        "packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz",
+        "packages/neptune-memory/tests/fixtures/acceptance_corpus.memory_config.json",
+        "packages/neptune-context/src/neptune_context/mcp/server.py",
+        "packages/neptune-context/pyproject.toml",
+        "packages/neptune-context/claude/mcp.sample.json",
+        "packages/neptune-context/claude/skills/neptune/SKILL.md",
+    ]
+    for path in watched:
+        assert _covered(path), path
+        assert path.startswith(ci_plan.AGENT_STAGE_INPUTS), path
+    assert _covered("scripts/quickstart.sh") and _covered("Makefile")
+    assert not _covered("packages/neptune-memory/tests/test_cli_memory.py")
+    assert not _covered("packages/neptune-context/docs/sdk.md")

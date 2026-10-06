@@ -71,6 +71,7 @@ def run(
     corpus_root: Path | None = None,
     corpus_name: str = corpus.ACCEPTANCE,
     stages: Sequence[Stage] = STAGES,
+    pin_answers: bool = False,
 ) -> tuple[dict[str, Any], int]:
     """Run everything; returns (report, exit code) and writes the report files."""
     work = run_dir / "work"
@@ -83,14 +84,17 @@ def run(
     corpus_doc: Json = {"name": corpus_label, "cases": [case.id for case in cases]}
     if corpus_root is None and corpus_name == corpus.ACCEPTANCE:
         corpus_doc.update(acceptance.lock_status())
-    ctx = Context(registry=registry, work=work, cases=cases)
+    ctx = Context(registry=registry, work=work, cases=cases, pin_answers=pin_answers)
     up = not services.unreachable()  # only read when a real stage needs the services
     entries: list[Json] = []
     healthy = True
-    for stage in stages:
-        entry = run_stage(stage, ctx, services_up=up, upstream_ok=healthy)
-        entries.append(entry)
-        healthy = healthy and entry["status"] == "ok"
+    try:
+        for stage in stages:
+            entry = run_stage(stage, ctx, services_up=up, upstream_ok=healthy)
+            entries.append(entry)
+            healthy = healthy and entry["status"] == "ok"
+    finally:
+        ctx.close()  # the ledger's server, kept for memory and context
     smoke_source: Json = {}
     for entry in entries:
         if entry["stage"] == "context":
