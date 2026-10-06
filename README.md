@@ -21,19 +21,17 @@ MCP tools. Every answer is cited, and CI checks the citations by claim id, never
 - **Real:** compiler ingest · Deploy's lifecycle and event-log mapping · the Ledger's catalog (embedded
   PostgreSQL) · Memory's consolidation (byte-identical to its committed snapshot) · Context's local engine
   and MCP server · Deploy's evidence-pack PDFs. CI runs all of it.
-- **Answered today (6 of 40 gold claims supported)**, asked as the Claude Code skill asks (50 items, 20,000
-  tokens): what happened in INC-C3-0011 (the fingers struck PF-3, protective stop, E-stop at OP-2); the E-stop
-  in syslog at 14:32:41 and the CMMS's protective stop at 14:33:10; that the cell PC's log shows the alarms about
-  a minute and a half late; that ARM-3A's controller firmware stayed 5.6.0 and LEG-01's went to 3.2.0.
-- **Not answered yet:** *why* the incident happened and *what changed* since the last good run. The answers cite
-  the right rows for 18 more gold claims, but only through statements about something else (`co_cited`): the
-  runs' calibrations are opaque configuration threads, and WO-26-0911's work, CAL-ARM3A-0818/0911 and their
-  errors reach no statement. 16 more are gaps: facts Memory holds that the skill's budget cuts (the operator's
-  same-stop statement, the incident run's configuration), the bags' warnings and e-stops (the compiler emits
-  them as `status_report` records; Memory does not read those yet), SOP and survey text, the stale config
-  export's values, the envelope register, the cell PC's clock fits. Each is pinned with its reason in
-  `harness/acceptance/answers.json`. No spatial baseline (MVL-135), no LeRobot export, no hosted service;
-  pre-alpha APIs.
+- **Answered today (3 of 40 gold claims supported)**, asked as the Claude Code skill asks (50 items, 20,000
+  tokens): that ARM-3A's controller firmware stayed 5.6.0 and LEG-01's went to 3.2.0, and that the cell PC's log
+  shows the incident's alarms about a minute and a half late.
+- **Not answered yet:** *why* the incident happened and *what changed* since the last good run, and most of
+  *what happened*. Memory (graph-schema 2.2.0) now holds much of it: the incident and its stated cause, the
+  stops, WO-26-0911's actions, the runs' configurations. But at the skill's budget the answers reach 13 more
+  gold claims only through statements about something else (`co_cited`, e.g. "WO-26-0911's action involves
+  ARM-3A" without its description), and 24 are gaps: facts Memory holds that the budget cuts, the bags'
+  statuses (events that cite the bag by byte range, not by row), SOP and survey text, the stale config
+  export's values, the envelope register. Each is pinned with its reason in `harness/acceptance/answers.json`.
+  No spatial baseline (MVL-135), no LeRobot export, no hosted service; pre-alpha APIs.
 
 ## 15-minute quickstart
 
@@ -57,7 +55,7 @@ export NEPTUNE_MEMORY_GRAPH=demo/graph.json
    with each gold claim's class and reason.
 2. Run `claude` in the same folder and approve the `neptune` server (`.mcp.json`; the skill is
    `.claude/skills/neptune`). Ask: **"What happened in the arm-cell incident INC-C3-0011?"** and
-   **"When did ARM-3A stop?"** Each fact comes back as
+   **"What changed on ARM-3A since its last good run?"** Each fact comes back as
    `[I…][E…]` citations; `neptune_why` on a claim shows its evidence. In this path no Ledger catalog is
    attached, so `neptune_hydrate` (opening an `[E…]` source) answers `unavailable`; `make demo` hydrates
    through the Ledger and checks it.

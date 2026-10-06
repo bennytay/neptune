@@ -78,19 +78,14 @@ def test_the_gold_questions_are_answered_through_the_mcp_tools_as_pinned(demo_di
     assert len(context["stdio"]["tools"]) == 6
 
 
-def test_what_changed_since_the_last_good_run_names_no_calibration(demo_dir: Path) -> None:
-    """Q2.C3 is co-cited, not supported (ADR 0011 §4): at the skill's budget the answer cites a
-    run-configuration claim resting on the run sheet's calibration pin, but the configuration is an
-    opaque Ledger thread, and no statement names CAL-ARM3A-0818 or -0911 or WO-26-0911."""
-    graph = json.loads((demo_dir / "graph.json").read_bytes())
-    claims = {c["id"]: c for c in graph["claims"]}
+def test_what_changed_since_the_last_good_run_is_not_answered_yet(demo_dir: Path) -> None:
+    """At the skill's budget the Q2 answer names no calibration and no work order: Q2.C3 (the
+    calibration change) is a gap Memory holds but the answer cuts (ADR 0011 §4)."""
     pinned = json.loads(acceptance.ANSWERS.read_text(encoding="utf-8"))
     q2 = next(q for q in pinned["questions"] if q["id"] == "Q2")
-    ids = q2["co_cited"]["Q2.C3"]["claims"]
-    assert {claims[i]["predicate"] for i in ids} == {"configuration_active_during"}
+    assert q2["gaps"]["Q2.C3"]["in_graph"] is True
     transcript = json.loads((demo_dir / "answers.json").read_text(encoding="utf-8"))
     text = "".join(c["text"] for c in transcript["questions"][1]["calls"])
-    assert all(i in text for i in ids)
     assert "CAL-ARM3A" not in text and "WO-26-0911" not in text
 
 

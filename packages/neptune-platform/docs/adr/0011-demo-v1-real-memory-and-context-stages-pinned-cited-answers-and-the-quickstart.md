@@ -26,9 +26,9 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
   evidence refs, and `render.agent.parse_answer` reads them back.
 - **Gold answers cite evidence by path and selector, not record ids** (ADR 0007 §5): a claim id moves with
   every compiler or Memory change, a path and row do not.
-- **Not every gold claim is answerable today.** Memory does not read the compiler's `status_report` records
-  (the bags' diagnostics) yet, document text is not consolidated, the envelope register names no
-  configuration. A gate that hides that is worse than one
+- **Not every gold claim is answerable today.** Memory's status events cite the bags by byte range, not by
+  the /diagnostics row, document text is not consolidated, the envelope register names no configuration,
+  and the skill's budget cuts much of what Memory holds. A gate that hides that is worse than one
   that names it.
 - **A quickstart in a README rots** unless something runs it.
 
@@ -95,7 +95,7 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
      `test_harness_answers.py` (`EXPECTED_CLASSES`), so a move between classes edits two files and turns the
      test red until both agree.
    - A separate file, not a selector in `gold.json`: gold stays compiler-version-proof (ADR 0007); the pins
-     are graph-specific. Corpus 2.1.0: 6 of 40 gold claims `supported`, 18 `co_cited`, 16 gaps. "Why did
+     are graph-specific. Corpus 2.1.0 over graph-schema 2.2.0: 3 of 40 gold claims `supported`, 13 `co_cited`, 24 gaps. "Why did
      the arm-cell incident happen" and "what changed since the last good run" are not answered yet: the
      runs' calibrations are opaque configuration threads, and WO-26-0911's work and CAL-ARM3A-0818/0911
      reach no statement.
@@ -160,7 +160,7 @@ claim cited and checked in CI by structure, and a README quickstart a new user c
 - Memory regenerating its snapshot, or the compiler or Deploy moving it, now also moves the pins: that PR
   runs `make demo-pin` and writes the reasons it blanked. A gold claim losing citations is visible in
   review, not silent.
-- Gaps and co-cited claims name what is missing (Memory reading `status_report`, document text, the envelope
+- Gaps and co-cited claims name what is missing (status events citing their rows, document text, the envelope
   register, calibrations and work-order content that reach no statement); when one closes, a person moves
   it to `supported` (answers.json and `EXPECTED_CLASSES`) and the README's counts change with it.
 - Revisit when Context gains a lexical channel over document text (more gaps close), when the pins churn

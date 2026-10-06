@@ -73,6 +73,6 @@ def test_the_readme_status_counts_are_the_pinned_answers() -> None:
     status = README.split("## Status\n", 1)[1].split("\n## ", 1)[0]
     total = sum(count.values())
     assert f"({count['supported']} of {total} gold claims supported)" in status
-    assert f"for {count['co_cited']} more gold claims" in status
-    assert f"{count['gaps']} more are gaps" in status
+    assert f"reach {count['co_cited']} more\n  gold claims" in status
+    assert f"and {count['gaps']} are gaps" in status
     assert "neptune_hydrate" in README and "unavailable" in README
