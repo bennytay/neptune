@@ -7,8 +7,8 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
 
 * root plumbing (``pyproject.toml``, ``uv.lock``, ``Makefile``, ``.python-version``, ``.github/**``)
   runs every job;
-* a root directory owned by a member runs that member, not the compiler (``harness/**`` is
-  ``neptune-platform``'s: its tests live in the package and import ``harness``);
+* a root directory owned by a member runs that member, not the compiler (``harness/**`` and
+  ``docsite/**`` are ``neptune-platform``'s: their tests live in the package and import them);
 * the compiler runs when any other path outside ``packages/`` and ``contracts/`` changed, or a path
   under ``contracts/<id>/`` of a contract the compiler owns (so its owner check runs on the PR);
 * a member runs when ``packages/<name>/**`` or ``contracts/**`` changed, or when a workspace
@@ -61,7 +61,7 @@ PLUMBING_FILES = frozenset(
 ADAPTER_DIR = re.compile(r"^src/neptune/adapters/[^/]+/")
 HARNESS_MEMBER = "neptune-platform"
 # Root directories whose tests live in a member package: changing them runs that member only.
-MEMBER_DIRS = {"harness/": "neptune-platform"}
+MEMBER_DIRS = {"harness/": "neptune-platform", "docsite/": "neptune-platform"}
 # Files the acceptance corpus (harness/acceptance/generate.py) imports to write its bytes: a change
 # to one changes the corpus, so the platform's lock test must run on it (platform ADR 0007 §3).
 CORPUS_INPUTS = frozenset(

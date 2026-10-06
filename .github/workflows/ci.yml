@@ -3,6 +3,7 @@ name: ci
 # One job per workspace package, selected by .github/scripts/ci_plan.py from the PR's changed paths;
 # merge-queue groups and pushes to main run every job. `check` aggregates them and is the only
 # required status: a skipped package job counts as success, a failed or cancelled one fails it.
+# The `docs` job builds the documentation site on every event, unfiltered.
 on:
   pull_request:
   merge_group:
@@ -101,8 +102,24 @@ jobs:
       - name: Contracts check of the generated package
         run: make contracts-check PKG=ci-template-smoke
 
+  # The documentation site (packages/neptune-platform ADR 0012), on every event: any repository
+  # path can be a link target and every public module is a page, so no path filter is safe.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python from .python-version
+        run: uv python install
+      - name: Install workspace and dev tools
+        run: make setup
+      - name: Build the documentation site (strict, offline)
+        run: make docs
+
   check:
-    needs: [plan, neptune, package, template]
+    needs: [plan, neptune, package, template, docs]
     if: always()
     runs-on: ubuntu-latest
     steps:

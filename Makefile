@@ -22,7 +22,7 @@ SELECTED_MEMBERS := $(filter $(MEMBERS),$(SELECTED))
 # MEMBER_DIRS (<member>:<root dir>) are root directories whose tests live in a member: that member
 # lints them (`$$d`) and the compiler does not; .github/scripts/ci_plan.py routes them the same way.
 RUN := $(UV) run --all-packages --all-groups
-MEMBER_DIRS := neptune-platform:harness
+MEMBER_DIRS := neptune-platform:harness neptune-platform:docsite
 EACH = set -ef; for p in $(SELECTED); do d=""; \
   if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; \
     x="--extend-exclude packages/*$(foreach m,$(MEMBER_DIRS), --extend-exclude $(word 2,$(subst :, ,$(m))))"; \
@@ -98,3 +98,14 @@ demo: ## Demo v1: corpus -> compiler -> Deploy -> Ledger -> Memory -> cited MCP 
 
 demo-pin: ## Re-pin harness/acceptance/answers.json from a demo run (review the diff)
 > $(RUN) python -m harness.demo --out "$(DEMO_DIR)" --pin
+
+# The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
+# A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.
+.PHONY: docs
+DOCS_OUT ?= build/docs
+docs: ## Build the documentation site, warnings as errors (platform ADR 0012)
+> $(RUN) python -m docsite "$(DOCS_OUT)"
+
+ifeq ($(PKG),)
+check: docs
+endif

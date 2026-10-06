@@ -7,6 +7,9 @@ flowchart LR
     CORPUS["acceptance corpus<br/>harness/acceptance<br/>gold · pinned answers"]
     HARNESS["integration harness<br/>harness/<br/>every stage real"]
     DEMO["Demo v1<br/>make demo · quickstart"]
+    CORPUS["acceptance corpus<br/>harness/acceptance"]
+    HARNESS["integration harness<br/>harness/"]
+    SITE["documentation site<br/>docsite/"]
   end
   CON[("contracts/")]
   D1["Deploy D1 archetype generators"]
@@ -15,6 +18,7 @@ flowchart LR
   CTX["Context engine + MCP tools<br/>neptune_context.mcp"]
   PACKS["Deploy evidence packs<br/>python -m neptune_deploy pack"]
   CC["Claude Code<br/>.mcp.json · neptune skill"]
+  DOCS["every layer's docs/<br/>public Python surfaces"]
   CON -->|published interfaces| CORE
   CON -->|contracts check, stubs| HARNESS
   D1 -->|imported| CORPUS
@@ -29,6 +33,8 @@ flowchart LR
   DEMO -->|spec + graph| PACKS
   PACKS -->|incident timeline · traceability PDFs| DEMO
   DEMO -->|graph.json · sample config · skill| CC
+  DOCS -->|mirrored pages, API reference| SITE
+  CON -->|rendered JSON Schemas| SITE
 
   subgraph KEY[" "]
     K1["built"]
@@ -41,10 +47,10 @@ flowchart LR
   classDef partial fill:#c09a5b26,stroke:#c09a5b,stroke-width:2px
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
-  class K1,CORPUS,HARNESS,DEMO built
+  class K1,CORPUS,HARNESS,DEMO,SITE built
   class K2 partial
   class CORE,K3 todo
-  class CON,D1,DM,MEM,CTX,PACKS,CC ext
+  class CON,D1,DM,MEM,CTX,PACKS,CC,DOCS ext
   style P fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none
   linkStyle default stroke:#8b949e
