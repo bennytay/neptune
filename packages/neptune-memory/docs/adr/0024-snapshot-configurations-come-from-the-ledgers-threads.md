@@ -26,3 +26,7 @@ just as Ledger migration 0012 rebuilds such a catalog.
 ## Consequences
 
 Supersedes ADR 0022. Ledger thread membership is again the only source of configuration nodes.
+
+ADR 0018 §2.3's `configuration.uncatalogued_record` is for records that declare their own ids (lifecycle kinds).
+A bound snapshot is found by its anchored thread, so a snapshot the catalog answers `unknown_record` for has no
+thread and is `configuration.unthreaded_id`, as before ADR 0022.
