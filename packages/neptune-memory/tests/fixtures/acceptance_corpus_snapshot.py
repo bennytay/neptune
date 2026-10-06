@@ -19,7 +19,8 @@ also depend on the library versions the compiler's adapters record in their tran
 (provenance): the calibration adapter records the expat that Python is built with, so another
 CPython patch release changes transform and finding record ids, and every claim citing them.
 ``acceptance_corpus.environment.json`` records those libraries. Where they match, a regeneration is
-byte-identical; elsewhere it states the same facts under other record ids.
+byte-identical. Elsewhere, where only ``expat`` or ``python`` differ, it states the same facts under
+other record ids.
 ``tests/test_acceptance_snapshot_memory.py`` checks both. The committed files are made under the
 Python CI installs (``uv python install`` from ``.python-version``).
 

@@ -24,6 +24,7 @@ from neptune_memory.schema.codec import graph_from_json, graph_problems
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from neptune.model.jsonvalue import JsonValue
     from neptune_memory.schema.codec import GraphDocument
 
 MAX_FIXTURE_BYTES: Final = 512 * 1024
@@ -70,8 +71,10 @@ def regenerated(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes]
 
 
 def facts(data: bytes) -> list[bytes]:
-    """Each claim without what names Ledger records (its id and its record ids, so supersedes too):
-    subject, predicate, object, validity, assertion kind, consolidator and evidence."""
+    """Each claim without its own id and its provenance's record list: subject, predicate, object,
+    validity, assertion kind, consolidator and evidence. Record ids inside those parts stay (a run's
+    node id, a record object, a clock's domain id), so this is stricter than ignoring record ids.
+    It holds across the expat change, which only renames transform and finding records."""
     graph = graph_from_json(canonical_json.loads(data.rstrip(b"\n")))
     out = []
     for claim in graph.resolution.claims:
@@ -90,23 +93,155 @@ def test_a_regeneration_states_the_same_facts(regenerated: tuple[bytes, bytes]) 
     )
 
 
+# Libraries a transform records that come with the CPython build, not with uv.lock: a host may
+# differ in them alone and still run the code the snapshot was made with.
+# TODO: remove once the compiler moves library and runtime versions out of id-bearing content
+# (root non-negotiable 5); then every regeneration is byte-identical and nothing skips.
+HOST_BOUND: Final = frozenset({"expat", "python"})
+COMPARE: Final = "compare"
+SKIP: Final = "skip"
+FAIL: Final = "fail"
+
+
+def byte_check(here: JsonValue, recorded: JsonValue, *, ci: bool) -> tuple[str, str]:
+    """(``compare`` | ``skip`` | ``fail``, why) for a regeneration whose environment is ``here``
+    against the snapshot's ``recorded``. Skip only where the two differ in host-bound libraries
+    alone, and never in CI; any other difference (the corpus, an adapter or its version, a library
+    uv.lock pins) means the committed snapshot is stale."""
+    if here == recorded:
+        return COMPARE, "the same libraries"
+    if not isinstance(here, dict) or not isinstance(recorded, dict):
+        return FAIL, "an environment is not a JSON object"
+    if here.get("corpus") != recorded.get("corpus"):
+        return FAIL, f"the corpus changed: {here.get('corpus')} != {recorded.get('corpus')}"
+    mine, theirs = here.get("transforms"), recorded.get("transforms")
+    if not isinstance(mine, dict) or not isinstance(theirs, dict):
+        return FAIL, "an environment has no transforms object"
+    if mine.keys() != theirs.keys():
+        changed = sorted(mine.keys() ^ theirs.keys())
+        return FAIL, f"adapters or adapter versions changed: {changed}"
+    host: dict[str, object] = {}
+    for adapter in sorted(mine):
+        a, b = mine[adapter], theirs[adapter]
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return FAIL, f"{adapter}: libraries are not a JSON object"
+        for library in sorted(a.keys() | b.keys()):
+            if a.get(library) == b.get(library):
+                continue
+            if library not in HOST_BOUND:
+                return FAIL, f"{adapter}: {library} {b.get(library)} -> {a.get(library)}"
+            host[f"{adapter}: {library}"] = (a.get(library), b.get(library))
+    if ci:
+        return FAIL, f"CI must reproduce the snapshot byte for byte; host libraries differ: {host}"
+    return SKIP, f"host libraries differ from the snapshot's (here, snapshot): {host}"
+
+
 @pytest.mark.slow
 def test_a_regeneration_with_the_same_libraries_is_byte_identical(
     regenerated: tuple[bytes, bytes],
 ) -> None:
     graph, environment = regenerated
     recorded = generator().ENVIRONMENT.read_bytes()
-    if environment != recorded:
-        here = canonical_json.loads(environment.rstrip(b"\n"))
-        there = canonical_json.loads(recorded.rstrip(b"\n"))
-        assert isinstance(here, dict) and isinstance(there, dict)
-        assert here["corpus"] == there["corpus"], f"the corpus changed. {REGENERATE}"
-        mine, theirs = here["transforms"], there["transforms"]
-        assert isinstance(mine, dict) and isinstance(theirs, dict)
-        differ = {k: (mine.get(k), theirs.get(k)) for k in mine.keys() | theirs.keys()}
-        differ = {k: pair for k, pair in sorted(differ.items()) if pair[0] != pair[1]}
-        pytest.skip(f"libraries here differ from the snapshot's (here, snapshot): {differ}")
+    ci = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    verdict, why = byte_check(
+        canonical_json.loads(environment.rstrip(b"\n")),
+        canonical_json.loads(recorded.rstrip(b"\n")),
+        ci=ci,
+    )
+    if verdict == SKIP:
+        pytest.skip(why)
+    assert verdict == COMPARE, f"acceptance_corpus.environment.json is stale: {why}. {REGENERATE}"
     assert graph == committed(), f"acceptance_corpus.graph.json is stale. {REGENERATE}"
+
+
+def environment(**transforms: dict[str, str]) -> JsonValue:
+    """An environment document; ``calibration_0_1_0`` is the key ``calibration 0.1.0``."""
+    keys = {k: "{} {}".format(*k.split("_", 1)).replace("_", ".") for k in transforms}
+    return {
+        "corpus": "acceptance 1.0.0",
+        "transforms": {keys[k]: dict(v) for k, v in transforms.items()},
+    }
+
+
+BASE: Final = environment(
+    calibration_0_1_0={"expat": "expat_2.8.5", "python": "3.12", "pyyaml": "6.0.3"},
+    tabular_0_2_0={"pyarrow": "25.0.1"},
+)
+
+
+@pytest.mark.parametrize(
+    ("here", "ci", "verdict"),
+    [
+        (BASE, False, COMPARE),
+        (BASE, True, COMPARE),
+        # expat or python alone: a host difference; skipped locally, a failure in CI
+        (
+            environment(
+                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.12", "pyyaml": "6.0.3"},
+                tabular_0_2_0={"pyarrow": "25.0.1"},
+            ),
+            False,
+            SKIP,
+        ),
+        (
+            environment(
+                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.13", "pyyaml": "6.0.3"},
+                tabular_0_2_0={"pyarrow": "25.0.1"},
+            ),
+            True,
+            FAIL,
+        ),
+        # a uv.lock bump, alone or beside a host difference
+        (
+            environment(
+                calibration_0_1_0={"expat": "expat_2.8.5", "python": "3.12", "pyyaml": "6.0.3"},
+                tabular_0_2_0={"pyarrow": "26.0.0"},
+            ),
+            False,
+            FAIL,
+        ),
+        (
+            environment(
+                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.12", "pyyaml": "6.0.4"},
+                tabular_0_2_0={"pyarrow": "25.0.1"},
+            ),
+            False,
+            FAIL,
+        ),
+        # a library added or dropped, an adapter version bumped or an adapter added
+        (
+            environment(
+                calibration_0_1_0={"expat": "expat_2.8.5", "python": "3.12"},
+                tabular_0_2_0={"pyarrow": "25.0.1"},
+            ),
+            False,
+            FAIL,
+        ),
+        (
+            environment(
+                calibration_0_2_0={"expat": "expat_2.8.5", "python": "3.12", "pyyaml": "6.0.3"},
+                tabular_0_2_0={"pyarrow": "25.0.1"},
+            ),
+            False,
+            FAIL,
+        ),
+        (
+            environment(
+                calibration_0_1_0={"expat": "expat_2.8.3", "python": "3.12", "pyyaml": "6.0.3"},
+                tabular_0_2_0={"pyarrow": "25.0.1"},
+                text_0_1_0={},
+            ),
+            False,
+            FAIL,
+        ),
+        ({"corpus": "acceptance 1.1.0", "transforms": {}}, False, FAIL),
+        ([], False, FAIL),
+    ],
+)
+def test_the_byte_check_skips_only_for_host_libraries_outside_ci(
+    here: JsonValue, ci: bool, verdict: str
+) -> None:
+    assert byte_check(here, BASE, ci=ci)[0] == verdict
 
 
 def test_the_snapshot_decodes_with_the_codec_and_reencodes_to_its_bytes() -> None:

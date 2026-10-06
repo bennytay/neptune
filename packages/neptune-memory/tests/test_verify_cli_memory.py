@@ -11,7 +11,7 @@ import copy
 import io
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 import pytest
 
@@ -208,3 +208,27 @@ def test_graph_problems_is_empty_exactly_when_the_codec_accepts() -> None:
         with pytest.raises((ValueError, TypeError, KeyError)):
             graph_from_json(document)
     assert graph_problems(canonical_json.loads(canonical_json.dumps(good))) == ()
+
+
+@pytest.mark.parametrize("raised", [RecursionError, RuntimeError, IndexError, OverflowError])
+@pytest.mark.parametrize("where", ["graph_problems", "graph_from_json"])
+def test_a_decode_failure_is_a_usage_error_without_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raised: type[Exception], where: str
+) -> None:
+    """Whatever a decoder raises on hostile input (a resolver config nested past the recursion
+    limit after ``json.loads`` accepted it, say) is unreadable input: exit 2, one line, no trace."""
+    import neptune_memory.cli as cli
+
+    def fail(_: object) -> NoReturn:
+        raise raised("deep")
+
+    if where == "graph_problems":
+        monkeypatch.setattr(cli, "graph_problems", fail)
+    else:
+        monkeypatch.setattr(cli, "graph_problems", lambda _: ())
+        monkeypatch.setattr(cli, "graph_from_json", fail)
+    status, lines, err = verify(SNAPSHOT)
+    assert (status, lines) == (USAGE, [])
+    assert (
+        err == f"memory: invalid input: the graph document cannot be decoded ({raised.__name__})\n"
+    )

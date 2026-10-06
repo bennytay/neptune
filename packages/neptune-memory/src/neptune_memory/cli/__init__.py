@@ -99,15 +99,25 @@ def _ledger(path: Path) -> LedgerExport:
     return ledger_export_from_json(_strict_json(path, "Ledger export"))
 
 
+class UndecodableError(ValueError):
+    """A graph document the codec could not finish decoding (nested too deeply, or a reader
+    failing in a way no problem line describes): a usage error, never a traceback."""
+
+
 def _verify(path: Path, out: TextIO) -> int:
     """``memory verify``: one line per problem and ``REFUSED``, or a summary line and ``OK``."""
     data = _strict_json(path, "graph document")
-    problems = graph_problems(data)  # type: ignore[arg-type]  # any JSON value; it checks
+    try:
+        problems = graph_problems(data)  # type: ignore[arg-type]  # any JSON value; it checks
+        document = None if problems else graph_from_json(data)  # type: ignore[arg-type]
+    except Exception as exc:  # hostile input: whatever the decoder raises is unreadable input
+        raise UndecodableError(
+            f"the graph document cannot be decoded ({type(exc).__name__})"
+        ) from exc
     for problem in problems:
         out.write(f"{path}: {problem}\n")
-    if problems:
+    if document is None:
         return REFUSED
-    document = graph_from_json(data)  # type: ignore[arg-type]
     out.write(
         f"{path}: ok: graph-schema {GRAPH_SCHEMA_VERSION} document, head {document.head}, "
         f"{len(document.resolution.claims)} claims, {len(document.resolution.findings)} "
