@@ -216,7 +216,7 @@ def api_index() -> str:
 
 
 def readme_section(readme: str, heading: str) -> str | None:
-    """The body of the README's level-2 section whose heading starts with ``heading``."""
+    """The body of the README's first level-2 section whose heading contains ``heading``."""
     out: list[str] | None = None
     fence: str | None = None
     for line in readme.splitlines():
@@ -224,7 +224,7 @@ def readme_section(readme: str, heading: str) -> str | None:
         if fence is None and (h2 := _H2.match(line)):
             if out is not None:
                 break
-            if h2.group(1).strip().lower().startswith(heading):
+            if heading in h2.group(1).lower():
                 out = []
                 continue
         if match:

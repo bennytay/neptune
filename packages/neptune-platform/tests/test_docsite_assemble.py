@@ -27,7 +27,7 @@ def repo(tmp_path: Path) -> Path:
     _write(
         root,
         {
-            "README.md": "# R\n\n## Quickstart (15 minutes)\n\nRun [this](scripts/q.sh).\n\n"
+            "README.md": "# R\n\n## 15-minute quickstart\n\nRun [this](scripts/q.sh).\n\n"
             "```sh\n## not a heading\n```\n\n## License\n\nMIT\n",
             "scripts/q.sh": "echo\n",
             "docs/architecture.md": "# Architecture\n\n"

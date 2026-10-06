@@ -156,5 +156,5 @@ API_MODULES: Final = (
     ),
 )
 
-# The README section the quickstart page embeds, matched on its level-2 heading.
+# The README section the quickstart page embeds: the first level-2 heading containing this word.
 QUICKSTART_HEADING: Final = "quickstart"

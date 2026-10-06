@@ -48,8 +48,8 @@ founder reads first. Forces:
    section with its type, its properties and whether each is required, every other keyword verbatim,
    `$ref`s as cross-references, and the schema file attached for download), and one per API surface
    (`api/<module>`: a facade's `__all__`, imported names included; Memory's schema modules by what they
-   define). The quickstart page embeds the README's level-2 section whose heading starts with
-   "Quickstart", links rewritten; until the README has one it points at the README.
+   define). The quickstart page embeds the README's first level-2 section whose heading contains
+   "quickstart" (case-insensitive), links rewritten; until the README has one it points at the README.
 5. **Strict.** Sphinx runs with `-W --keep-going -n -E` from an empty output directory: every warning
    fails, every document cross-reference and heading anchor must resolve, and no cached page hides a
    warning. Two narrow exemptions, both about Python annotations in the API reference rather than links:
@@ -89,7 +89,7 @@ founder reads first. Forces:
 - A layer's new document joins its section automatically; a new section, API surface or concept page is a
   change to `docsite/sources.py` or `docsite/pages/`.
 - The site is published nowhere yet; `build/docs/html` opens from disk. Hosting is a later decision.
-- If the README's quickstart heading changes so it no longer starts with "Quickstart", the page falls back
+- If the README's quickstart heading changes so it no longer contains "quickstart", the page falls back
   to pointing at the README; `tests/test_docsite_assemble.py` pins both behaviours.
 - Sphinx's sources use Python 3.12 syntax, so the platform's mypy does not follow into `sphinx`
   (`follow_imports = "skip"`) while it targets 3.11.
