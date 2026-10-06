@@ -10,11 +10,11 @@ graph-schema = "1.0.0"
 [neptune-deploy]
 catalog-api = "1.6.0"
 graph-schema = "1.2.0"
-package-schema = "8.0.0"
+package-schema = "10.0.0"
 query-packet = "1.0.0"
 
 [neptune-ledger]
-package-schema = "8.0.0"
+package-schema = "10.0.0"
 
 [neptune-memory]
 catalog-api = "1.1.0"

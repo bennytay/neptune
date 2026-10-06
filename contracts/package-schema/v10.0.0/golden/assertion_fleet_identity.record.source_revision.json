@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:78a30d481ad3a7b2c60582834eaa9a92696d16b896e1b6e6980bf8278e77ab67",
+  "id": "rec:sha256:1b7334ad810f655d51bdb9c9293668a734d18f387c91c00591c520cb6dfc127a",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "ops/assertions/fleet_identity.json"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}
