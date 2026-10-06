@@ -1,5 +1,6 @@
-"""The acceptance-corpus snapshot (``tests/fixtures/acceptance_corpus.graph.json``) is what Memory's
-own pipeline makes of the MVL-181 corpus, and a graph document Memory's codec reads.
+"""The acceptance-corpus snapshot (``tests/fixtures/acceptance_corpus.graph.json.gz``) is what
+Memory's own pipeline makes of the MVL-181 corpus, gzipped deterministically, and a graph document
+Memory's codec reads.
 
 A regeneration is byte-identical on any host. ``acceptance_corpus.environment.json`` names the
 libraries the compiler's transforms record, so a failure says which one moved. Deploy and Context
@@ -13,16 +14,19 @@ import os
 import re
 import subprocess
 import sys
+import zlib
 from functools import cache
 from typing import TYPE_CHECKING, Final
 
 import pytest
 
 from neptune.identity import canonical_json
-from neptune_memory.cli import registrations
+from neptune.identity.ids import config_hash
+from neptune_memory.cli import MAX_GRAPH_BYTES, read_configs, registrations
 from neptune_memory.derived.clocks import CLOCKS_MODEL, ESTIMATES_CONSOLIDATOR_ID
 from neptune_memory.schema.codec import graph_from_json, graph_problems
 from neptune_memory.schema.reference import ReferenceReader
+from neptune_memory.store.gzipped import deterministic_gzip, gunzip
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -45,9 +49,14 @@ def generator() -> ModuleType:
     return module
 
 
-def committed() -> bytes:
+def committed_gz() -> bytes:
     data: bytes = generator().SNAPSHOT.read_bytes()
     return data
+
+
+def committed() -> bytes:
+    """The graph document: the committed file, decompressed."""
+    return gunzip(committed_gz(), MAX_GRAPH_BYTES)
 
 
 def document() -> GraphDocument:
@@ -61,16 +70,19 @@ REGENERATE: Final = (
 
 
 @pytest.fixture(scope="module")
-def regenerated(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes]:
-    """(graph, environment) regenerated in a fresh process (the compiler's sandbox forks, which a
-    threaded test process should not do) under another hash seed and time zone."""
+def regenerated(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes, bytes]:
+    """(gzipped graph, environment) regenerated in a fresh process (the compiler's sandbox forks,
+    which a threaded test process should not do) under another hash seed and time zone."""
     out = tmp_path_factory.mktemp("acceptance")
     env = {**os.environ, "PYTHONHASHSEED": "4242", "TZ": "Pacific/Chatham"}
-    script = [sys.executable, str(generator().__file__), "--out", str(out / "graph.json")]
+    script = [sys.executable, str(generator().__file__), "--out", str(out / "graph.json.gz")]
     script += ["--environment-out", str(out / "environment.json")]
+    script += ["--gzip-out", str(out / "gzip.json")]
     done = subprocess.run(script, env=env, capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stderr[-2000:]
-    return (out / "graph.json").read_bytes(), (out / "environment.json").read_bytes()
+    names = ("graph.json.gz", "environment.json", "gzip.json")
+    graph, environment, packaging = ((out / name).read_bytes() for name in names)
+    return graph, environment, packaging
 
 
 RECORD_ID: Final = re.compile(rb"rec:sha256:[0-9a-f]{64}")
@@ -90,9 +102,9 @@ def facts(data: bytes) -> list[bytes]:
 
 
 @pytest.mark.slow
-def test_a_regeneration_states_the_same_facts(regenerated: tuple[bytes, bytes]) -> None:
-    assert facts(regenerated[0]) == facts(committed()), (
-        f"acceptance_corpus.graph.json is stale (the corpus, the compiler or Memory changed). "
+def test_a_regeneration_states_the_same_facts(regenerated: tuple[bytes, bytes, bytes]) -> None:
+    assert facts(gunzip(regenerated[0], MAX_GRAPH_BYTES)) == facts(committed()), (
+        f"acceptance_corpus.graph.json.gz is stale (the corpus, the compiler or Memory changed). "
         f"{REGENERATE}"
     )
 
@@ -102,8 +114,9 @@ def differences(here: JsonValue, recorded: JsonValue) -> dict[str, object]:
     if not isinstance(here, dict) or not isinstance(recorded, dict):
         return {"environment": (here, recorded)}
     out: dict[str, object] = {}
-    if here.get("corpus") != recorded.get("corpus"):
-        out["corpus"] = (here.get("corpus"), recorded.get("corpus"))
+    for key in sorted((here.keys() | recorded.keys()) - {"transforms"}):
+        if here.get(key) != recorded.get(key):
+            out[key] = (here.get(key), recorded.get(key))
     mine, theirs = here.get("transforms"), recorded.get("transforms")
     if not isinstance(mine, dict) or not isinstance(theirs, dict):
         return {**out, "transforms": (mine, theirs)}
@@ -114,11 +127,13 @@ def differences(here: JsonValue, recorded: JsonValue) -> dict[str, object]:
 
 
 @pytest.mark.slow
-def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes]) -> None:
+def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes, bytes]) -> None:
     """On any host, in CI and locally: the compiler no longer records host-bound library versions
-    in id-bearing content, so a difference here is a stale snapshot (the corpus, an adapter or its
-    version, a library ``uv.lock`` pins, or the Python minor ``.python-version`` pins)."""
-    graph, environment = regenerated
+    in id-bearing content, so a difference in the document is a stale snapshot (the corpus, an
+    adapter or its version, a library ``uv.lock`` pins, or the Python minor ``.python-version``
+    pins). The ``.gz`` bytes are packaging: compared only under the ``zlib`` recorded beside
+    them."""
+    graph, environment, packaging = regenerated
     recorded = generator().ENVIRONMENT.read_bytes()
     if environment != recorded:
         changed = differences(
@@ -126,7 +141,34 @@ def test_a_regeneration_is_byte_identical(regenerated: tuple[bytes, bytes]) -> N
             canonical_json.loads(recorded.rstrip(b"\n")),
         )
         pytest.fail(f"the compiler's transforms changed (here, snapshot): {changed}. {REGENERATE}")
-    assert graph == committed(), f"acceptance_corpus.graph.json is stale. {REGENERATE}"
+    assert gunzip(graph, MAX_GRAPH_BYTES) == committed(), (
+        f"acceptance_corpus.graph.json.gz is stale. {REGENERATE}"
+    )
+    recorded = generator().GZIP.read_bytes()
+    if generator().same_zlib(recorded):
+        assert packaging == recorded
+        assert graph == committed_gz(), (
+            f"the same graph deflates to other gzip bytes under zlib {zlib.ZLIB_RUNTIME_VERSION}. "
+            f"{REGENERATE}"
+        )
+
+
+def test_check_reads_a_missing_or_corrupt_gz_as_a_difference_not_a_crash() -> None:
+    document = generator()._document
+    assert document(b"") is None
+    assert document(b"\x1f\x8bnot deflate") is None
+    assert document(committed_gz()[:100]) is None  # truncated
+    assert document(committed_gz()) == committed()
+
+
+def test_the_gzip_bytes_are_compared_only_under_the_recorded_zlib() -> None:
+    recorded = generator().GZIP.read_bytes()
+    document = canonical_json.loads(recorded.rstrip(b"\n"))
+    assert isinstance(document, dict) and sorted(document) == ["level", "zlib"]
+    assert document["level"] == 9
+    assert generator().same_zlib(generator().gzip_record())
+    other = canonical_json.dumps({"level": 9, "zlib": "0.0.0-other"}) + b"\n"
+    assert not generator().same_zlib(other)  # another zlib: the document alone decides
 
 
 def test_differences_name_each_changed_adapter_and_the_corpus() -> None:
@@ -163,8 +205,12 @@ def test_the_snapshot_decodes_with_the_codec_and_reencodes_to_its_bytes() -> Non
 
 def test_the_snapshot_is_built_by_memory_rebuild_with_estimates_and_nothing_else() -> None:
     graph = document()
-    registered = sorted(r.consolidator_id for r in registrations(with_estimates=True))
-    assert sorted(b.consolidator_id for b in graph.builds) == registered
+    configs = read_configs(generator().CONFIG)
+    registered = {
+        r.consolidator_id: config_hash(r.config)
+        for r in registrations(with_estimates=True, configs=configs)
+    }
+    assert {b.consolidator_id: str(b.config_hash) for b in graph.builds} == registered
     assert {c.provenance.consolidator_id for c in graph.resolution.claims} <= set(registered)
     assert graph.resolution.claims, "the corpus consolidates to no claim at all"
 
@@ -193,4 +239,12 @@ def test_inferred_claims_are_exactly_the_relayed_estimates_and_one_flag_drops_th
 
 
 def test_the_snapshot_stays_under_the_fixture_limit() -> None:
-    assert len(committed()) < MAX_FIXTURE_BYTES
+    assert len(committed_gz()) < MAX_FIXTURE_BYTES
+
+
+def test_the_snapshot_is_a_deterministic_gzip_of_its_graph() -> None:
+    """No file name, no time, no platform in the header: ``deterministic_gzip`` of the content."""
+    data = committed_gz()
+    assert data[:10] == bytes.fromhex("1f8b08000000000002ff")
+    if generator().same_zlib(generator().GZIP.read_bytes()):  # the bytes are zlib's packaging
+        assert deterministic_gzip(committed()) == data

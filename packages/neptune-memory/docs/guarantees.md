@@ -86,6 +86,12 @@ The two snapshot records at `snapshots/3.json` hold the same `snapshot.id`. The 
 head projection: each current version of `b`, followed back to its assertion, matches one of `a` with the
 same interval and object. A claim the incremental graph learned earlier keeps that earlier recording.
 
+The same holds with `--config FILE` (`consolidate` and `rebuild`): a JSON object of consolidator configs by
+consolidator id, e.g. the event tables and vendor kinds of `memory.events` (ADR 0013 §5). Each config is
+resolved by its consolidator's contract before it is hashed, so spellings of one config hash alike. The hash
+is in every claim's provenance and the `MemorySnapshot`. A changed config is new lineage, and an id that is
+not registered is a usage error.
+
 **Where it stops.**
 
 - **The input is fixed.** "The same snapshot" means the same packages and records. Changing a
