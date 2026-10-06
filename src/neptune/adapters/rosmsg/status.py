@@ -22,6 +22,7 @@ Three steps, kept apart:
 ``SAFETY_TYPES`` is part of the adapters' transform: a change to it is a new adapter version.
 """
 
+import json
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -70,6 +71,10 @@ DIAGNOSTIC_STATUS: Final = "diagnostic_msgs/DiagnosticStatus"
 KEY_VALUE: Final = "diagnostic_msgs/KeyValue"
 OK: Final = "OK"  # the constant DiagnosticStatus declares for a status with nothing to report
 DEFAULT_MAX_STATUS_RECORDS: Final = 8192
+# What the records one call writes may weigh at most, as the sandbox's reply encodes them (ASCII
+# JSON): a quarter of its reply limit (64 MiB), so status text never takes a chunk's rows with it.
+# A safety bound tied to the reply limit, not a knob: it is not part of the config.
+MAX_STATUS_RECORD_BYTES: Final = 16 << 20
 
 STATUS_OPTIONS: Final = (
     ConfigOption(
@@ -98,8 +103,10 @@ STATUS_FINDINGS: Final = (
     (
         "status_not_recorded",
         "status or safety-state items of one stream that one call does not write as records,"
-        " by reason: past max_status_records, a payload past a decoding limit or one that does"
-        " not read whole by its definition (limit or corrupt, warning)",
+        " by reason: past max_status_records or the records' byte budget (record_limit,"
+        " byte_limit; each later message counted whole and not read, past_limit), a payload"
+        " past a decoding limit or one that does not read whole by its definition (limit or"
+        " corrupt, warning)",
     ),
 )
 STATUS_CONVENTION: Final = (
@@ -431,13 +438,17 @@ class _Left:
 
 
 class StatusWriter:
-    """Records of one adapter call, bounded by ``max_status_records``."""
+    """Records of one adapter call, bounded by ``max_status_records`` and by ``max_bytes`` of
+    their encoded size. Once either is reached, later messages are counted, never decoded."""
 
-    def __init__(self, config: AdapterConfig) -> None:
+    def __init__(self, config: AdapterConfig, max_bytes: int = MAX_STATUS_RECORD_BYTES) -> None:
         self.transform: TransformRecord = config.transform
         self.limit = config.integer("max_status_records")
+        self.max_bytes = max_bytes
         self.nominal = config.flag("nominal_status_records")
         self.records: list[StatusReport | SafetyState] = []
+        self.bytes = 0
+        self.full = False
         self.left: dict[RecordId, _Left] = {}
 
     def leave(self, stream: RecordId, reason: str, sample: Sample, count: int = 1) -> None:
@@ -459,6 +470,11 @@ class StatusWriter:
     ) -> None:
         """One message's records: ``definition`` cites the stream's definition (its constants);
         ``payload`` is ``None`` where its bytes are not all at the row's place."""
+        if self.full or len(self.records) >= self.limit:
+            # counted whole, not decoded: nothing past the bound is written
+            self.full = True
+            self.leave(stream, "past_limit", sample)
+            return
         if payload is None:
             self.leave(stream, "not_local", sample)
             return
@@ -485,8 +501,10 @@ class StatusWriter:
                 placed = self._place(stream, sample, item.span)
                 if placed is not None:
                     provenance, times = placed
-                    self.records.append(
-                        _report(self.transform, provenance, stream, times, kind, item, stated)
+                    self._keep(
+                        _report(self.transform, provenance, stream, times, kind, item, stated),
+                        stream,
+                        sample,
                     )
             else:
                 assert isinstance(kind, SafetyType)
@@ -496,16 +514,32 @@ class StatusWriter:
                 placed = self._place(stream, sample, item.span)
                 if placed is not None:
                     provenance, times = placed
-                    self.records.append(
-                        _safety(self.transform, provenance, stream, times, kind, item, stated)
+                    self._keep(
+                        _safety(self.transform, provenance, stream, times, kind, item, stated),
+                        stream,
+                        sample,
                     )
+
+    def _keep(self, record: StatusReport | SafetyState, stream: RecordId, sample: Sample) -> None:
+        """Write ``record`` if it fits the byte budget; else count it, and write no more."""
+        size = len(json.dumps(record.to_json(), separators=(",", ":"), ensure_ascii=True))
+        if self.bytes + size > self.max_bytes:
+            self.full = True
+            self.leave(stream, "byte_limit", sample)
+            return
+        self.bytes += size
+        self.records.append(record)
 
     def _place(
         self, stream: RecordId, sample: Sample, span: tuple[int, int] | None
     ) -> tuple[Provenance, tuple[Knowledge[Timestamp], ...]] | None:
         """A record's provenance and times, or ``None`` past this call's limit."""
         if len(self.records) >= self.limit:
+            self.full = True
             self.leave(stream, "record_limit", sample)
+            return None
+        if self.full:  # an earlier item of this message did not fit the byte budget
+            self.leave(stream, "byte_limit", sample)
             return None
         message = EvidenceRef(sample.source, sample.steps)
         times = sample.times
@@ -530,6 +564,8 @@ class StatusWriter:
                 continue
             total = sum(left.counts.values())
             limit = set(left.counts) <= {
+                "byte_limit",
+                "past_limit",
                 "record_limit",
                 "array_limit",
                 "message_limit",
@@ -539,6 +575,7 @@ class StatusWriter:
             details: dict[str, JsonValue] = {
                 "counts": dict(sorted(left.counts.items())),
                 "max_status_records": self.limit,
+                "max_status_record_bytes": self.max_bytes,
             }
             found.append(
                 (
@@ -549,7 +586,8 @@ class StatusWriter:
                         FindingCategory.LIMIT if limit else FindingCategory.CORRUPT,
                         Severity.WARNING,
                         f"{total} status or safety-state message(s) or item(s) of this stream here"
-                        " are not records (past this call's max_status_records, or a payload"
+                        " are not records (past this call's max_status_records or record byte"
+                        " budget, or a payload"
                         " that does not read whole by its definition); their rows still cite"
                         " each message",
                         details,

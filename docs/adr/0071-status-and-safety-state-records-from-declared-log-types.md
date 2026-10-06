@@ -57,6 +57,9 @@ The forces:
      safety controllers, an autonomous vehicle, a mobile base, and every PX4 vehicle.
    - PX4 ULog logged messages by the ULog specification; ArduPilot `MSG` (a text `Message`) and
      `ERR` (integer `Subsys`, `ECode`) by their `FMT` labels and format characters.
+   - ULog has no message types apart from its topics: a ULog format name is the uORB topic name
+     (`actuator_armed`), so ULog selection is by a name. What makes the kill switch safe to select
+     is the shape check: the format must define a top-level `bool manual_lockdown`, else nothing.
    - A topic's name is never read: `/estop` of `std_msgs/Bool` gives nothing. A name-based proposal
      would be a derived table; none is built. A manifest binding of a topic to a safety field needs
      manifest stream bindings, which the manifest schema does not have yet: a follow-up.
@@ -86,10 +89,13 @@ The forces:
 6. **Volume.** A status at the level its definition names `OK`, and a safety state at the value its
    definition names normal (`FALSE`, `NORMAL`; a boolean's `false`), stays a row only; config
    `nominal_status_records` (default off) writes them too. A definition that names no normal
-   value has every sample written. A ROS adapter call writes at most `max_status_records` (8,192;
-   about 20 MB of reply); past it, and for a payload that does not read whole, a
-   `status_not_recorded` finding per stream and call counts what was left out by reason (limit or
-   corrupt, warning): the one place the records depend on the plan's cuts, and only past the
+   value has every sample written. A ROS adapter call writes at most `max_status_records` (8,192)
+   records, and at most 16 MiB of them as the sandbox's reply encodes them (ASCII JSON; a quarter
+   of its 64 MiB reply limit, so long status text never makes a chunk's reply fail and lose its
+   rows; a constant, not config). Past either bound later messages are counted, not decoded;
+   past it, and for a payload that does not read whole, a `status_not_recorded` finding per
+   stream and call counts what was left out by reason (`record_limit`, `byte_limit`,
+   `past_limit` per message; limit or corrupt, warning): the one place the records depend on the plan's cuts, and only past the
    bound. Flight logs plan status rows at a table row's weight, so a piece's records stay bounded
    without a cap.
 7. **New lineage.** `mcap`, `rosbag1` and `rosbag2` become 0.3.0, `flightlog` 0.2.0.

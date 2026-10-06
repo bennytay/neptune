@@ -272,13 +272,16 @@ def test_flight_log_records_cite_their_whole_message() -> None:
     for name in ("quad_killswitch.ulg", "boat_failsafe.bin"):
         output = ingest(name, nominal=True)
         found: list[StatusReport | SafetyState] = [*statuses(output), *safeties(output)]
-    for record in found:
-        (step,) = record.provenance.evidence.locator
-        cited = resolve(name, (step,))
-        if isinstance(record, StatusReport) and isinstance(record.message, Known):
-            assert record.message.value.encode() in cited
-        head = cited[:3]
-        assert head[:2] == b"\xa3\x95" or head[2] in b"LCD"  # a DataFlash record or a ULog L/C/D
+        assert found
+        for record in found:
+            (step,) = record.provenance.evidence.locator
+            cited = resolve(name, (step,))
+            if isinstance(record, StatusReport) and isinstance(record.message, Known):
+                assert record.message.value.encode() in cited
+            if name.endswith(".ulg"):
+                assert cited[2:3] in (b"L", b"C", b"D")  # a ULog logging or data message
+            else:
+                assert cited[:2] == b"\xa3\x95"  # a DataFlash record
 
 
 # --- Determinism ---------------------------------------------------------------------------------

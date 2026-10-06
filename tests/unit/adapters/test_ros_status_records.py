@@ -3,6 +3,7 @@ recognition by shape, whole-value decoding against hostile payloads, the record 
 and the adapters' findings for malformed, truncated and huge inputs."""
 
 import importlib.util
+import json
 import struct
 import sys
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any, Final
 
 import pytest
 
-from neptune.adapters.contract import configure
+from neptune.adapters.contract import AdapterConfig, configure
 from neptune.adapters.flightlog import FlightLogAdapter
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.mcap import McapAdapter
@@ -209,10 +210,14 @@ def _sample(payload: bytes) -> Sample:
     return Sample(content_id(payload), (ByteRange(0, len(payload)),), 0, (Unknown(),), ("place",))
 
 
-def _writer(**values: Any) -> StatusWriter:
+def _config(**values: Any) -> AdapterConfig:
     from neptune.adapters.mcap import DESCRIPTOR
 
-    return StatusWriter(configure(DESCRIPTOR, values))
+    return configure(DESCRIPTOR, values)
+
+
+def _writer(**values: Any) -> StatusWriter:
+    return StatusWriter(_config(**values))
 
 
 def test_ok_statuses_are_rows_only_unless_the_config_asks() -> None:
@@ -261,6 +266,57 @@ def test_a_call_writes_at_most_max_status_records_and_says_so() -> None:
     assert (stream, place) == (STREAM, ("place",))
     assert report.code == "status_not_recorded" and report.details["counts"] == {"record_limit": 1}
     assert report.category.value == "limit"
+
+
+def _size(record: StatusReport | SafetyState) -> int:
+    return len(json.dumps(record.to_json(), separators=(",", ":"), ensure_ascii=True))
+
+
+def test_records_stop_at_the_byte_budget_and_later_messages_are_counted_unread() -> None:
+    kind = recognise(ARRAY)
+    assert isinstance(kind, StatusType)
+    payload = _array(STATUS, STATUS, STATUS)
+    probe = _writer()
+    probe.add(kind, STREAM, None, _sample(payload), payload, True, LIMITS)
+    sizes = [_size(record) for record in probe.records]
+    budget = sizes[0] + sizes[1]  # exactly two records: the boundary is inclusive
+    writer = StatusWriter(_config(), budget)
+    writer.add(kind, STREAM, None, _sample(payload), payload, True, LIMITS)
+    assert writer.records == probe.records[:2] and writer.bytes == budget
+    corrupt = _array(STATUS)[:-5]  # past the bound a message is counted, never decoded
+    writer.add(kind, STREAM, None, _sample(corrupt), corrupt, True, LIMITS)
+    writer.add(kind, STREAM, None, _sample(payload), payload, True, LIMITS)
+    assert len(writer.records) == 2
+    ((_, place, report),) = writer.reports()
+    assert place == ("place",) and report.category.value == "limit"
+    assert report.details["counts"] == {"byte_limit": 1, "past_limit": 2}
+    assert report.details["max_status_record_bytes"] == budget
+
+
+def test_one_byte_under_the_budget_writes_one_record_fewer() -> None:
+    kind = recognise(ARRAY)
+    assert isinstance(kind, StatusType)
+    payload = _array(STATUS, STATUS)
+    probe = _writer()
+    probe.add(kind, STREAM, None, _sample(payload), payload, True, LIMITS)
+    budget = sum(_size(record) for record in probe.records) - 1
+    writer = StatusWriter(_config(), budget)
+    writer.add(kind, STREAM, None, _sample(payload), payload, True, LIMITS)
+    assert writer.records == probe.records[:1]
+    ((_, _, report),) = writer.reports()
+    assert report.details["counts"] == {"byte_limit": 1}
+
+
+def test_messages_past_max_status_records_are_counted_unread() -> None:
+    kind = recognise(ARRAY)
+    assert isinstance(kind, StatusType)
+    payload = _array(STATUS, STATUS)
+    writer = _writer(max_status_records=2)
+    writer.add(kind, STREAM, None, _sample(payload), payload, True, LIMITS)
+    corrupt = payload[:-5]
+    writer.add(kind, STREAM, None, _sample(corrupt), corrupt, True, LIMITS)
+    ((_, _, report),) = writer.reports()
+    assert report.details["counts"] == {"past_limit": 1} and report.category.value == "limit"
 
 
 def test_a_payload_that_does_not_read_is_counted_never_raised() -> None:

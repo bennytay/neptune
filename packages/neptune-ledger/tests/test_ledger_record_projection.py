@@ -88,6 +88,16 @@ def bumped_schema() -> dict[str, Any]:
     return schema
 
 
+def widened_schema() -> dict[str, Any]:
+    """``bumped_schema`` whose contact event also states a run by logical id: a projection no
+    shipped version has, so its bump migration adds ``run_namespace`` and ``run_value``."""
+    schema = bumped_schema()
+    event = schema["$defs"]["ContactEvent"]
+    event["properties"]["run"] = {"$ref": "#/$defs/Knowledge_LogicalId"}
+    event["required"] = sorted([*event["required"], "run"])
+    return schema
+
+
 def migration(version: int, text: str) -> Migration:
     data = text.encode("utf-8")
     return Migration(version, "bump", text, "sha256:" + hashlib.sha256(data).hexdigest())
@@ -428,8 +438,9 @@ def test_a_schema_bump_migration_applies_and_files_the_new_kind(pg: Conn) -> Non
 
 def test_a_bump_migration_refuses_rows_of_its_kind_already_filed(pg: Conn) -> None:
     """Rows of the new kind filed in record_default before its projections exist would read as
-    not Known; the generated migration refuses and the catalog is rebuilt (ADR 0009 §3)."""
-    new = projection_spec(bumped_schema())
+    not Known; the generated migration refuses and the catalog is rebuilt (ADR 0009 §3). The
+    migration is one transaction: the columns it would add are not left behind."""
+    new = projection_spec(widened_schema())
     shipped = migrations()
     apply_migrations(pg, "acme")
     package = add_package(pg, "tenant_acme", "sha256:" + "e" * 64, 1)
@@ -439,9 +450,16 @@ def test_a_bump_migration_refuses_rows_of_its_kind_already_filed(pg: Conn) -> No
         " VALUES ('acme', 'contact_event', %s, %s, 1, 1, %s, %s)",
         (RECORD, package, BUMPED, "sha256:" + "0" * 64),
     )
-    bump = migration(len(shipped) + 1, render_migration(shipped_spec(), new, len(shipped) + 1))
+    text = render_migration(shipped_spec(), new, len(shipped) + 1)
+    assert "ADD COLUMN run_namespace text" in text and "ADD COLUMN run_value text" in text
+    bump = migration(len(shipped) + 1, text)
     with pytest.raises(psycopg.errors.RaiseException, match="rebuild this catalog"):
         apply_migrations(pg, "acme", shipped=(*shipped, bump))
+    columns = pg.execute(
+        "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'tenant_acme'"
+        " AND table_name = 'record' AND column_name IN ('run_namespace', 'run_value')"
+    ).fetchone()
+    assert columns == (0,)
     applied = pg.execute(
         "SELECT count(*) FROM tenant_acme.schema_migration WHERE version = %s",
         (len(shipped) + 1,),
