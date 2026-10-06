@@ -40,7 +40,13 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
 - The in-process engine is `neptune_context.engine.LocalEngine(memory_reader, catalog=None)` (ADR 0007): it
   runs the graph channel over a Memory reader (and the Ledger's indexes when a `CatalogApi` is given), fuses,
   cuts to the budget and assembles the packet. `read_graph(path)` loads a Memory graph document into Memory's
-  reference reader. Lexical and vector channels join through `LocalEngine(..., channels=[...])`.
+  reference reader, indexed by claim id for `why` (`explain.IndexedReader`). Lexical and vector channels join
+  through `LocalEngine(..., channels=[...])`.
+- `why` and `diff` answers carry `packet.trails` (ADR 0010): the why tree (root, corroborating, conflicting
+  and alternative claims, each with its evidence) and the what-changed list (opened, closed, superseded, by
+  predicate). `neptune_context.explain.render_markdown(packet)` renders any packet for people, with
+  `neptune://claim/<id>?as_of=N` links (open with `why`) and `neptune://evidence/<token>?as_of=N` links
+  (open with `hydrate`; the MCP server's resource URIs).
 - `StubEngine.from_directory(Path("tests/golden/packets"))` answers exactly the queries it has recorded
   packets for and says `not_found` for anything else: for fixtures and offline builds. It reads regular
   `*.json` files only (symlinks and other files are skipped), checks each size before reading, and refuses a
