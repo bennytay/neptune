@@ -49,6 +49,8 @@ if TYPE_CHECKING:
 
 # ADR 0003 §1.2: only the identity consolidator grounds ``same_as``, and never by inference.
 IDENTITY_CONSOLIDATOR_ID: Final = "memory.identity"
+# Here, not in ``events``, so identity can read event claims without importing it (ADR 0019 §1).
+EVENTS_CONSOLIDATOR_ID: Final = "memory.events"
 
 # Record kind hashed into finding ids. Changing it re-lineages every finding: new ADR.
 FINDING_KIND: Final = "memory.finding"

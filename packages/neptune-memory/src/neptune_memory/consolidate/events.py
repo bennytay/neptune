@@ -53,6 +53,9 @@ from neptune.model.provenance import Provenance
 from neptune.model.time import INT64_MAX, Timestamp
 from neptune.model.world import StructuredRecord, StructuredTable
 from neptune_memory.consolidate import event_records as parse
+from neptune_memory.consolidate.base import (
+    EVENTS_CONSOLIDATOR_ID as EVENTS_CONSOLIDATOR_ID,
+)
 from neptune_memory.consolidate.base import ClaimDraft, ConsolidationFinding, ConsolidatorOutput
 from neptune_memory.consolidate.identity import node_ref
 from neptune_memory.consolidate.identity_records import declared
@@ -85,7 +88,6 @@ if TYPE_CHECKING:
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim, ClaimObject
 
-EVENTS_CONSOLIDATOR_ID: Final = "memory.events"
 OBSERVED: Final = AssertionKind.OBSERVED
 STATED: Final = AssertionKind.STATED
 RECORD_NAMESPACE: Final = "record"
