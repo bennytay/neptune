@@ -33,20 +33,20 @@ from neptune_context.render.agent import parse_answer
 LAST_GOOD: Final = "cell3-2026-09-09"
 INCIDENT_RUN: Final = "cell3-2026-09-14"
 COMPARED: Final = {
-    "claim:sha256:ef693b954b6f": "WO-26-0911 action: replace finger set with FS-0340",
-    "claim:sha256:2a49e20b39f8": "WO-26-0911 action: remove and refit wrist camera bracket",
-    "claim:sha256:fa0007547495": "WO-26-0911 action: TCP z 145.5 -> 151.5 mm",
-    "claim:sha256:451755d364a0": "WO-26-0911 action: hand-eye recalibration deferred",
-    "claim:sha256:89fca8fdb982": "WO-26-0911 stated cause: finger pads worn; bracket loose",
-    "claim:sha256:65c06eb47c21": "name of the last good run's calibration: CAL-ARM3A-0818.yaml",
-    "claim:sha256:136023590398": "name of the incident run's calibration: CAL-ARM3A-0911.yaml",
-    "claim:sha256:bfa83696a535": "the incident run's reprojection_error [1.86]",
-    "claim:sha256:2c69ff21e97a": "the last good run's transformation z 0.0745",
-    "claim:sha256:616297a5c54d": "the incident run's transformation z 0.0702",
+    "claim:sha256:d650f8bab544": "WO-26-0911 action: replace finger set with FS-0340",
+    "claim:sha256:b10dab22bffb": "WO-26-0911 action: remove and refit wrist camera bracket",
+    "claim:sha256:a7f88bdfa3bd": "WO-26-0911 action: TCP z 145.5 -> 151.5 mm",
+    "claim:sha256:d031070c313f": "WO-26-0911 action: hand-eye recalibration deferred",
+    "claim:sha256:9e87bab6ae1a": "WO-26-0911 stated cause: finger pads worn; bracket loose",
+    "claim:sha256:aba87f30a1aa": "name of the last good run's calibration: CAL-ARM3A-0818.yaml",
+    "claim:sha256:f6a6bff0e224": "name of the incident run's calibration: CAL-ARM3A-0911.yaml",
+    "claim:sha256:ff33253fd282": "the incident run's reprojection_error [1.86]",
+    "claim:sha256:7f4dc60515e9": "the last good run's transformation z 0.0745",
+    "claim:sha256:603ba4866d4d": "the incident run's transformation z 0.0702",
 }
 INCIDENT: Final = {
-    "claim:sha256:04777de76121": "INC-C3-0011's stated root cause",
-    "claim:sha256:62c7813eea30": "INC-C3-0011's name",
+    "claim:sha256:99ff72fab873": "INC-C3-0011's stated root cause",
+    "claim:sha256:596d5615ffb3": "INC-C3-0011's name",
 }
 
 
