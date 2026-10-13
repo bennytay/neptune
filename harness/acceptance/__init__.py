@@ -20,7 +20,7 @@ from typing import Any, Final
 NAME: Final = "acceptance"
 # MAJOR: a gold answer changes meaning or evidence is removed. MINOR: files or questions are added
 # and every existing answer still holds. PATCH: bytes change and no answer does. ADR 0007 section 3.
-VERSION: Final = "2.1.0"
+VERSION: Final = "2.2.0"
 HERE: Final = Path(__file__).resolve().parent
 LOCK: Final = HERE / "corpus.lock.json"
 GOLD: Final = HERE / "gold.json"

@@ -1,0 +1,124 @@
+{
+  "schema": "neptune-deploy.pack-template/1",
+  "id": "configuration-traceability",
+  "version": 3,
+  "title": "Configuration traceability",
+  "description": "One machine's configuration from commissioning through every change and maintenance to requalification, the runs performed under each configuration, its sensors' calibration and the authorisation envelopes in force, as Memory states them (Memory ADR 0010, 0014, 0019). Changes are read from the machine's own configuration spans on a graph-schema 2 snapshot. The pack never labels a stage: the records each claim rests on (a commissioning baseline, a change, a work order, a requalification) are in the claims index. The machine is read under every other id Memory states is the same machine (same_as, stated or observed, never inferred or a candidate), and the same_as claims that link them are cited (Deploy ADR 0019); a machine no same_as links is shown as not linked. Gaps and ambiguous links are shown as such, never filled.",
+  "subject_types": ["machine"],
+  "sections": [
+    {
+      "id": "machine-identities",
+      "title": "Identities of the machine",
+      "description": "Every other id Memory states names this machine (same_as: stated or observed, never inferred; each claim cites the records that declare the ids together), and every reading it cannot decide (same_as_candidate, never followed). The sections below read the machine under these ids only. NOT COVERED here means the machine is not linked: no other id is read for it, and an id that merely looks alike is never taken as the same machine.",
+      "kind": "claims",
+      "about": [
+        [],
+        [{"predicate": "same_as", "direction": "closure"}]
+      ],
+      "predicates": {"same_as": "known", "same_as_candidate": "ambiguous"}
+    },
+    {
+      "id": "configuration-chain",
+      "title": "Configuration chain",
+      "description": "Each span of the machine's configuration in time order: decided, ambiguous (every candidate, none chosen) or unknown (the record that names the machine but leaves its configuration open). Spans on another clock are listed apart and never compared. Each id same_as links to the machine is read on its own spans.",
+      "kind": "states",
+      "about": [
+        [],
+        [{"predicate": "same_as", "direction": "closure"}]
+      ],
+      "predicates": {"has_configuration": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "configuration-changes",
+      "title": "Changes",
+      "description": "Each change of this machine's configuration: a decided span ending at the instant a decided span of another configuration begins, on one clock (graph-schema 2 rule 12). A boundary that an ambiguous, inferred or unknown span meets is shown as such, every reading with it: no change is read across it, and where two decided spans also meet there their change stands beside it. A change is the machine's own: configuration nodes are shared by every machine naming them, so nothing here is read from succeeds or from another machine. Each id same_as links to the machine is read on its own spans.",
+      "kind": "changes",
+      "graph_schema_majors": [2],
+      "about": [
+        [],
+        [{"predicate": "same_as", "direction": "closure"}]
+      ],
+      "predicates": {"has_configuration": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "configuration-values",
+      "title": "Configuration values",
+      "description": "The name and every value each configuration of the machine declares (a calibration's name, its reprojection error, its transformation), as the configuration states them: declared, never computed or compared here. Each configuration the chain reaches, decided or candidate.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "has_configuration", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "has_configuration", "direction": "out"}],
+        [{"predicate": "configuration_candidate", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "configuration_candidate", "direction": "out"}],
+        [{"predicate": "recorded_by", "direction": "in"}, {"predicate": "configuration_active_during", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "recorded_by", "direction": "in"}, {"predicate": "configuration_active_during", "direction": "out"}]
+      ],
+      "predicates": {"has_name": "known", "declared_value": "known"}
+    },
+    {
+      "id": "runs",
+      "title": "Runs and the configuration each ran with",
+      "description": "The runs recorded by the machine (or possibly by it), each with the configuration bound to it over its window on the run's own clock: decided, ambiguous or unknown.",
+      "kind": "states",
+      "about": [
+        [{"predicate": "recorded_by", "direction": "in"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "recorded_by", "direction": "in"}],
+        [{"predicate": "recorded_by_candidate", "direction": "in"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "recorded_by_candidate", "direction": "in"}]
+      ],
+      "predicates": {"configuration_active_during": "known", "configuration_candidate": "ambiguous", "configuration_unknown": "unknown"}
+    },
+    {
+      "id": "calibration",
+      "title": "Calibration state",
+      "description": "The calibrations in force on the sensors mounted on the machine, and the drift between consecutive calibrations as Memory states it (later minus earlier, in declared units). No drift is judged against a tolerance.",
+      "kind": "states",
+      "about": [
+        [{"predicate": "mounted_on", "direction": "in"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "mounted_on", "direction": "in"}]
+      ],
+      "predicates": {"has_calibration": "known", "calibrated_with": "known", "calibration_candidate": "ambiguous", "drift": "known"}
+    },
+    {
+      "id": "calibration-records",
+      "title": "Records that produced a calibration",
+      "description": "The maintenance or requalification record that states it produced each calibration in force.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "mounted_on", "direction": "in"}, {"predicate": "calibrated_with", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "mounted_on", "direction": "in"}, {"predicate": "calibrated_with", "direction": "out"}],
+        [{"predicate": "mounted_on", "direction": "in"}, {"predicate": "calibration_candidate", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "mounted_on", "direction": "in"}, {"predicate": "calibration_candidate", "direction": "out"}],
+        [{"predicate": "mounted_on", "direction": "in"}, {"predicate": "has_calibration", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "mounted_on", "direction": "in"}, {"predicate": "has_calibration", "direction": "out"}]
+      ],
+      "predicates": {"calibrated_by": "known"}
+    },
+    {
+      "id": "authorisation",
+      "title": "Authorisation envelopes in force",
+      "description": "Configurations an authorisation envelope approves at the machine's site, over the envelope's stated window.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "located_at", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "located_at", "direction": "out"}],
+        [{"predicate": "located_at", "direction": "out"}, {"predicate": "zone_of", "direction": "out"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "located_at", "direction": "out"}, {"predicate": "zone_of", "direction": "out"}]
+      ],
+      "predicates": {"authorised_configuration": "known"}
+    },
+    {
+      "id": "authorisation-gaps",
+      "title": "Runs outside any authorisation",
+      "description": "Parts of a run's window that no authorisation envelope in the Ledger covers for the configuration it ran with: a fact about the envelopes, not a judgement of the run.",
+      "kind": "claims",
+      "about": [
+        [{"predicate": "recorded_by", "direction": "in"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "recorded_by", "direction": "in"}],
+        [{"predicate": "recorded_by_candidate", "direction": "in"}],
+        [{"predicate": "same_as", "direction": "closure"}, {"predicate": "recorded_by_candidate", "direction": "in"}]
+      ],
+      "predicates": {"not_covered_by_authorisation": "known"}
+    }
+  ]
+}

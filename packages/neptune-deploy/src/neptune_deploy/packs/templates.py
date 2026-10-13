@@ -24,7 +24,10 @@ they are grouped. It holds no code: a new report is a new template file. ::
 ``about`` lists paths from the pack subject; each hop follows a claim of ``predicate`` outward (the
 subject's claim, to its object node) or inward (a claim whose object is the node, to its subject).
 ``shared`` goes from a node to every other node stating the same object under the predicate (an
-incident to the timeline entries evidenced by the same record). ``[]`` is the subject itself.
+incident to the timeline entries evidenced by the same record). ``closure`` goes from a node to
+every other node joined to it by a chain of the predicate's claims in either direction (a machine to
+every id Memory states is ``same_as`` it, ADR 0019); it never follows an inferred claim, whatever
+the spec's inference policy. ``[]`` is the subject itself.
 ``same_event`` (timeline sections) names predicates whose claims make two event nodes one event
 (two records of one incident), so their times are compared as one event's. ``predicates``
 selects the claims about the nodes reached and says which missingness state each one expresses:
@@ -66,7 +69,7 @@ from neptune_deploy.packs.spec import SUBJECT_TYPES
 TEMPLATE_SCHEMA: Final = "neptune-deploy.pack-template/1"
 SECTION_KINDS: Final = ("changes", "claims", "states", "timeline")
 KNOWLEDGE_ROLES: Final = ("ambiguous", "known", "unknown")
-DIRECTIONS: Final = ("in", "out", "shared")
+DIRECTIONS: Final = ("closure", "in", "out", "shared")
 MAX_TEMPLATE_BYTES: Final = 1024 * 1024
 LOCK_FILE: Final = "lock.json"
 
@@ -76,7 +79,9 @@ _R: Final = Reader("template_malformed")
 @dataclass(frozen=True)
 class Hop:
     predicate: str
-    direction: str  # "out": subject -> object; "in": object -> subject; "shared": same object
+    # "out": subject -> object; "in": object -> subject; "shared": same object; "closure": every
+    # node a chain of the predicate's non-inferred claims joins, either direction (ADR 0019)
+    direction: str
 
     def to_json(self) -> JsonObject:
         return {"direction": self.direction, "predicate": self.predicate}

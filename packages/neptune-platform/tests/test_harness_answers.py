@@ -57,6 +57,8 @@ EXPECTED_CLASSES: Final = {
         "Q6.C2",
         "Q6.C3",
         "Q7.C1",
+        "Q7.C2",
+        "Q7.C4",
     },
     "gaps": {
         "Q1.C2",
@@ -71,9 +73,7 @@ EXPECTED_CLASSES: Final = {
         "Q3.C5",
         "Q4.C4",
         "Q5.C3",
-        "Q7.C2",
         "Q7.C3",
-        "Q7.C4",
         "Q8.C1",
         "Q8.C2",
         "Q8.C3",
