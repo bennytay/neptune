@@ -15,6 +15,7 @@ flowchart LR
     MCP["mcp/ 6 read-only tools + Claude Code skill (ADR 0004, 0009)"]
     EXP["explain/ why + diff trails, Markdown (ADR 0010)"]
     EVA["eval/"]
+    SRC["sources.py source index: file and place per citation (ADR 0016)"]
   end
   OUT[("Agents / Deploy / Learn")]
   CON[("contracts/query-packet")]
@@ -29,6 +30,7 @@ flowchart LR
   MCP --> SDK
   RET --> ENG -->|engine seam| SDK
   EVA -.-> RET
+  LED -->|resolve: corpus paths| SRC --> RND
   PKT --> CON --> OUT
   SDK & MCP --> OUT
 
@@ -43,7 +45,7 @@ flowchart LR
   classDef partial fill:#c09a5b26,stroke:#c09a5b,stroke-width:2px
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
-  class K1,PIN,PKT built
+  class K1,PIN,PKT,SRC built
   class K2,QRY,RND,SDK,MCP,RET,ENG,EXP partial
   class EVA,K3 todo
   class LED,MEM,OUT,CON ext

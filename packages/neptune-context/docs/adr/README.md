@@ -22,3 +22,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0013](0013-demo-reads-memorys-gzip-snapshot.md) | The Demo reads Memory's pipeline-built snapshot (`.json.gz`), frozen for the goldens | Accepted |
 | [0014](0014-graph-schema-2-2-0-pin-and-query-packet-1-4-0.md) | graph-schema 2.2.0 pin and query-packet 1.4.0 | Accepted |
 | [0015](0015-compare-runs-and-named-runs-and-events.md) | compare_runs, and runs and events found by name | Accepted |
+| [0016](0016-readable-citations-a-source-index-beside-the-graph.md) | Readable citations: a source index beside the graph | Accepted |

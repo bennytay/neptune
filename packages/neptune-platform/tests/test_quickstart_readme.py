@@ -46,6 +46,7 @@ def test_the_script_is_strict_and_ends_with_the_demo_wired_into_claude_code() ->
         assert path in _script_block() and (REPO / path).is_file()
     assert (REPO / "packages/neptune-context/claude/skills/neptune/SKILL.md").is_file()
     assert "NEPTUNE_MEMORY_GRAPH=demo/graph.json" in _script_block()
+    assert "NEPTUNE_SOURCES=demo/sources.json" in _script_block()  # Context ADR 0016
     assert "learn" not in _script_block().lower()  # no LeRobot step in Demo v1
 
 
