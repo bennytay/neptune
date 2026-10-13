@@ -698,7 +698,7 @@
             "claim:sha256:741e6bf155b8193324b0ee8dee9780be78cf920dd35580cc2f1319bdefa2056a",
             "claim:sha256:ece3fbcf6c79e462acb94e7a9919e8392490dbf746bf3454e6b00bbd8f5940e0"
           ],
-          "reason": "Only the PLC E-stop's \"involves PLC-C3\" reaches the answer; the syslog stops' kinds and descriptions are cut at the skill's budget."
+          "reason": "The PLC E-stop's \"involves PLC-C3\" and the syslog stop's \"involves syslog.host:ARM-3A\" reach the answer; the stops' kinds and descriptions are cut at the skill's budget."
         },
         "Q7.C2": {
           "claims": [
