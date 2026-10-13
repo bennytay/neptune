@@ -13,6 +13,15 @@ The clause carries, as claim items, only what Memory states; it never says what 
   stated cause and each action's description. Placed on the runs' clock, only events between
   the two runs' starts count; on a clock no stated relation ties to the runs' (a CMMS's), the
   event is carried and a gap says it is not ordered against the runs. No clock is converted.
+- **Procedures** (ADR 0017). Every ``procedure_revision`` event that ``involves`` that machine,
+  grouped by the procedure its ``has_name`` states: what its revisions do not state alike. A
+  revision's ``declared_value`` (key path, value) or ``stated_blank`` (the label) is carried when
+  some other revision of the procedure does not state it; a revision-history row
+  (``<revision>/revisions/<i>``) is carried, with its description, values and blanks, when some
+  other revision lists no row stating exactly the same. Each revision with anything carried
+  carries its name. A procedure with one revision states no change and carries nothing. A
+  revision is dated on its document's own calendar, so it is carried with a gap saying it is not
+  ordered against the runs.
 - The runs' own names and machines.
 
 Nothing is inferred and nothing is ranked by meaning: every carried claim scores 1.
@@ -20,6 +29,7 @@ Nothing is inferred and nothing is ranked by meaning: every carried claim scores
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING, Final
 
 from neptune_memory.schema.claim import TypedLiteral
@@ -29,6 +39,8 @@ from neptune.identity.canonical_json import dumps
 from neptune_context.packets.model import GapCode
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from neptune_memory.schema.claim import Claim
 
     from neptune.model.time import Timestamp
@@ -47,6 +59,9 @@ CAUSE: Final = "stated_cause"
 DESCRIPTION: Final = "has_description"
 MAINTENANCE: Final = "maintenance"
 ACTIONS: Final = "/actions/"
+BLANK: Final = "stated_blank"
+PROCEDURE_REVISION: Final = "procedure_revision"
+REVISIONS: Final = "/revisions/"
 
 
 def _node(subject: Subject) -> NodeRef:
@@ -128,6 +143,7 @@ def explain_compare(run: Run, index: int, clause: CompareRuns) -> Trail | None:
             if key is not None and key not in other.pairs:
                 _carry(run, claim)
     _maintenance(run, at, tx, before, after)
+    _procedures(run, at, tx, before, after)
     return None
 
 
@@ -189,4 +205,88 @@ def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> Non
             sorted(unordered),
             "maintenance on a clock no stated mapping relates to the runs' clocks: carried, not"
             " ordered against the two runs",
+        )
+
+
+def _object_key(claim: Claim) -> tuple[str, bytes]:
+    return claim.predicate, dumps(claim.object.to_json())
+
+
+def _event_kind(claims: Sequence[Claim]) -> str | None:
+    kinds = {
+        str(c.object.value)
+        for c in claims
+        if c.predicate == EVENT_KIND and isinstance(c.object, TypedLiteral)
+    }
+    return next(iter(kinds)) if len(kinds) == 1 else None
+
+
+def _procedures(run: Run, at: str, tx: int, before: _Side, after: _Side) -> None:
+    involved: dict[str, Claim] = {}  # event node id -> its involves claim
+    for machine in sorted(_machines(run, tx, after), key=lambda n: n.node_id):
+        for claim in run.touching(machine, tx):
+            if claim.predicate == INVOLVES and claim.object == machine:
+                involved.setdefault(claim.subject.node_id, claim)
+    own: dict[str, list[Claim]] = {}  # revision or row node id -> its own claims
+    rows: dict[str, list[str]] = defaultdict(list)  # revision node id -> its rows' node ids
+    revisions: dict[str, str] = {}  # revision node id -> the procedure it names
+    unordered: set[str] = set()
+    for node_id, involves in sorted(involved.items()):
+        parent = node_id.split(REVISIONS)[0]
+        if parent not in own:
+            node = NodeRef(NodeType.EVENT, parent)
+            own[parent] = [c for c in run.touching(node, tx) if c.subject == node]
+        if _event_kind(own[parent]) != PROCEDURE_REVISION:
+            continue
+        names = {
+            str(c.object.value)
+            for c in own[parent]
+            if c.predicate == NAME and isinstance(c.object, TypedLiteral)
+        }
+        if len(names) != 1:
+            continue
+        revisions[parent] = names.pop()
+        if _between(involves.valid_from, before, after) is None:
+            unordered.add(parent)
+        if node_id != parent:
+            node = NodeRef(NodeType.EVENT, node_id)
+            own[node_id] = [c for c in run.touching(node, tx) if c.subject == node]
+            rows[parent].append(node_id)
+    by_procedure: dict[str, list[str]] = defaultdict(list)
+    for revision, name in sorted(revisions.items()):
+        by_procedure[name].append(revision)
+    stated = (VALUE, BLANK, DESCRIPTION)
+    for members in by_procedure.values():
+        if len(members) < 2:
+            continue
+        keys = {
+            m: {_object_key(c) for c in own[m] if c.predicate in (VALUE, BLANK)} for m in members
+        }
+        row_keys = {
+            m: {frozenset(_object_key(c) for c in own[r] if c.predicate in stated) for r in rows[m]}
+            for m in members
+        }
+        for member in members:
+            others = [m for m in members if m != member]
+            carried = [
+                c
+                for c in own[member]
+                if c.predicate in (VALUE, BLANK)
+                and not all(_object_key(c) in keys[o] for o in others)
+            ]
+            for row in rows[member]:
+                key = frozenset(_object_key(c) for c in own[row] if c.predicate in stated)
+                if not all(key in row_keys[o] for o in others):
+                    carried += [c for c in own[row] if c.predicate in stated]
+            if carried:
+                carried += [c for c in own[member] if c.predicate == NAME]
+            for claim in carried:
+                _carry(run, claim)
+    if unordered:
+        run.gap(
+            GapCode.NOT_COVERED,
+            at,
+            sorted(unordered),
+            "procedure revisions dated on their documents' own calendars: carried, not ordered"
+            " against the two runs",
         )

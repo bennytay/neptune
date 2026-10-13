@@ -1733,6 +1733,7 @@
                   "sensor_presence_unknown",
                   "sensor_recorded",
                   "starts_at",
+                  "stated_blank",
                   "stated_cause",
                   "stated_severity",
                   "succeeds",

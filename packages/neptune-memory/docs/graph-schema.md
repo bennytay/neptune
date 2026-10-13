@@ -1,7 +1,7 @@
 # Graph schema v2
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v2.2.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.2.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v2.3.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.3.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -19,7 +19,8 @@ the vocabulary is unchanged). **2.0.0 (major)** narrows `succeeds` and names the
 golden-only) republishes the goldens under identity v4 ([ADR 0021](adr/0021-a-machine-records-declared-ids-are-same-as.md),
 [ADR 0023](adr/0023-event-table-rows-declare-ids-in-their-at-id-column.md); schema and vocabulary unchanged); 2.2.0 (minor)
 adds `declared_value`, `stated_cause`, the `declared_value` value type and the `maintenance` event kind
-([ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md)). Within major 1, earlier goldens still
+([ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md)); 2.3.0 (minor) adds `stated_blank` and the
+`procedure_revision` event kind ([ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md)). Within major 1, earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -55,7 +56,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 12`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 13`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -126,6 +127,7 @@ major version (ADR 0002 §5).
 | `sensor_presence_unknown` | run | sensor | many | unknown: the evidence does not decide whether a configured sensor recorded in the run |
 | `sensor_recorded` | run | sensor | many | a sensor of a configuration bound to the run recorded in it: a run's file declares its identifier |
 | `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
+| `stated_blank` | event | text | many | a label or column the record shows with no value, named as written: the record names nothing there; never a value, never evidence that nothing exists |
 | `stated_cause` | event | text | one | the cause a record states for the event, verbatim: a root cause, a diagnosis; never inferred |
 | `stated_severity` | event | text, integer | one | the severity a record states, verbatim; never ranked or compared |
 | `succeeds` | configuration | configuration | many | a source states the subject replaces the object as configurations, wherever they appear; never read from one machine's chain (ADR 0019 §2) |
@@ -133,7 +135,7 @@ major version (ADR 0002 §5).
 
 `EventKind` (`#/$defs/EventKind`) lists the registered event kinds, the only objects of `event_kind`:
 `collision`, `emergency_stop`, `failsafe`, `fault`, `incident`, `intervention`, `maintenance`, `mode_change`, `near_miss`,
-`protective_stop`, `reset`, `safety_field_violation`, `stale`, `warning`. A kind is added with a vocabulary
+`procedure_revision`, `protective_stop`, `reset`, `safety_field_violation`, `stale`, `warning`. A kind is added with a vocabulary
 version and never renamed or removed within a major.
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
@@ -367,6 +369,12 @@ def test_graph_schema_contract(check):
     found at, `observed`. A run's `has_name` is the name its `run_declaration` states. Each claim holds where
     `memory.configuration` or `memory.runs` places the node, one claim per placement; a node placed nowhere gets
     none (a `declared.unplaced` finding), and a value that is not `Known` is a counted finding, never a fact.
+21. **A procedure revision is what its document states** ([ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md)).
+    `memory.procedures` reads only the documents its config declares: a revision event at its stated effective
+    date, on the document's own calendar (whole days, never ordered against another source), with its labels and
+    steps as `declared_value`s, each revision-history row its own event, and a label or cell shown blank as
+    `stated_blank`: never a value, never evidence that nothing exists. A machine joins only by an id a `machine`
+    record states.
 
 ## Caveat: a resolver configuration is a store generation
 

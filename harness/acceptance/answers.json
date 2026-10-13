@@ -3,8 +3,8 @@
   "corpus": "acceptance",
   "corpus_version": "2.2.0",
   "graph": {
-    "generation": "sha256:4c9c6b249cec227716962c6b24715dbe6f40f55bafa387fd6c8a2849d3210883",
-    "graph_schema": "2.2.0"
+    "generation": "sha256:e06387f6c411bb8442d788f09eb12d292384eff8826d5928439b3fe5a199a70a",
+    "graph_schema": "2.3.0"
   },
   "questions": [
     {
@@ -78,10 +78,6 @@
           "in_graph": false,
           "reason": "Memory now makes events of the bags' /diagnostics statuses (the compiler's status_report records, with their declared values such as residual_mm), but those claims are about the status_report record and cite the bag by byte range, not the /diagnostics row (topic and log time) the gold item names, so by the citation rule no claim cites it; cell_config.yaml's residual action is a configuration value Memory does not consolidate."
         },
-        "Q1.C5": {
-          "in_graph": false,
-          "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
-        },
         "Q1.C6": {
           "in_graph": true,
           "reason": "Memory holds ServiceNow's 2026-08-18 change (TCP z=145.5 mm, CHG0030013), but the calls SKILL.md prescribes for this question (reading the incident, comparing the two runs) do not reach it; no claim states that the 2026-09-10 work has no change record or requalification."
@@ -127,6 +123,30 @@
             "claim:sha256:ff33253fd282c83dbe11cf0a2cd55bb14095a8ec1e1f66f36ddbf9c88d0ac74f"
           ],
           "reason": "The comparison states WO-26-0912's action (\"Re-run hand-eye calibration with substitute 7x5 board per SOP-CELL-021 rev C\"), the incident run's calibration's reprojection error [1.86] and both runs' transformation z (0.0745, 0.0702); it also names CAL-ARM3A-0818 and -0911. CAL-ARM3A-0818's 0.44 px is not stated."
+        },
+        "Q1.C5": {
+          "claims": [
+            "claim:sha256:07cd32dfacd03d1ce20749ebb599893b5939e86318388f73c3d296a2e7ff2d13",
+            "claim:sha256:1270ae3bb721779b644a29fe1691cbdfe2b94cdeab2f3cf25d9071ed5aca2b1e",
+            "claim:sha256:4d3850614646f212cc6d961ec0fec0a74157ece52f11829d2d4078686100757d",
+            "claim:sha256:68924ecd5b1b21da094a2dcc29a082dcc8c19fcd348670f95fe1adcf8b07b082",
+            "claim:sha256:6a0d468adb272fa10c27c5ebeb9c88d8c04c1985facbf40212efebd052aa6e4e",
+            "claim:sha256:6b11078e5618cfaab6bbd32c9197b44dece07063dafa52fdb90290cd90357ed4",
+            "claim:sha256:6fb23b9fe0d4e8f8ccf3889469add7e1757851fffbf8a53fcaa190ba0f59a19e",
+            "claim:sha256:717b92af388b4a1119ddc30b7c47705b4d82084c94e525ab7eb015ffcde1c07d",
+            "claim:sha256:834183e5bc3d538defb05b068144175a2fba42bf9d62c3a6bbc93d51e1d2ddd7",
+            "claim:sha256:915f6229237140943429632c0ba349eb57bd845f21bc0533aa33e84665cba51c",
+            "claim:sha256:92eb524c41878315f3f43a6a53a8ced07a7d03acd78304182698439ee3f22d1e",
+            "claim:sha256:a4995304ad25cf1764f9e3e2d73a1cf0805271a53e12094575229362a5c0f794",
+            "claim:sha256:a9aab8e801594c8f48be975266fd82e6562706b1f571bee88cf1a97465038254",
+            "claim:sha256:ae5cc48fd94a39b537e3b0e7f16d5509e6944d79cf4c7377f089f7e675b9620f",
+            "claim:sha256:b3631f6577d77a0ee0e5c5d1a9542b301dd1c5e51e028c18b0d09ed389d3f7e6",
+            "claim:sha256:d537256096a8589ff69416bae5e9ee4ca08ac0ab0063dd4b8488ab76de34806c",
+            "claim:sha256:dbe25ca77e028d00a7817d9eef129548305181103121211ce7f80f758e803b47",
+            "claim:sha256:faa4d3a2707e2a724261a12b4268cac9b2798bfdcb7e21811774d318d9d33d60",
+            "claim:sha256:fb2754faaafa8f3bdd369743e14a499029f025c6aab6b3122f1eb5fb178674cf"
+          ],
+          "reason": "The comparison carries both SOP-CELL-021 revisions for ARM-3A as they differ: step 3 'at most 0.8 px' (rev B) and 'at most 2.0 px' (rev C); rev B's 10-pick verification steps, which rev C does not state; rev C's history row C (2026-09-11, 'Substitute board allowed; acceptance at 2.0 px') with 'Change record' stated_blank; and rev C's 'Approved by' stated_blank. 'Passed only because' is the answer composing these stated limits with the 1.86 px result (Q1.C4): Neptune states no cause."
         }
       }
     },
@@ -169,10 +189,6 @@
         }
       },
       "gaps": {
-        "Q2.C4": {
-          "in_graph": false,
-          "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
-        },
         "Q2.C5": {
           "in_graph": false,
           "reason": "Memory now makes events of the bags' /diagnostics statuses (the compiler's status_report records, with their declared values such as residual_mm), but those claims are about the status_report record and cite the bag by byte range, not the /diagnostics row (topic and log time) the gold item names, so by the citation rule no claim cites it."
@@ -217,6 +233,30 @@
             "claim:sha256:ff33253fd282c83dbe11cf0a2cd55bb14095a8ec1e1f66f36ddbf9c88d0ac74f"
           ],
           "reason": "The comparison states that the two runs ran with different configurations bound by the run sheet's calibration pins, names them CAL-ARM3A-0818 and CAL-ARM3A-0911, and states the incident run's reprojection error [1.86]. CAL-ARM3A-0818's 0.44 px is not stated."
+        },
+        "Q2.C4": {
+          "claims": [
+            "claim:sha256:07cd32dfacd03d1ce20749ebb599893b5939e86318388f73c3d296a2e7ff2d13",
+            "claim:sha256:1270ae3bb721779b644a29fe1691cbdfe2b94cdeab2f3cf25d9071ed5aca2b1e",
+            "claim:sha256:4d3850614646f212cc6d961ec0fec0a74157ece52f11829d2d4078686100757d",
+            "claim:sha256:68924ecd5b1b21da094a2dcc29a082dcc8c19fcd348670f95fe1adcf8b07b082",
+            "claim:sha256:6a0d468adb272fa10c27c5ebeb9c88d8c04c1985facbf40212efebd052aa6e4e",
+            "claim:sha256:6b11078e5618cfaab6bbd32c9197b44dece07063dafa52fdb90290cd90357ed4",
+            "claim:sha256:6fb23b9fe0d4e8f8ccf3889469add7e1757851fffbf8a53fcaa190ba0f59a19e",
+            "claim:sha256:717b92af388b4a1119ddc30b7c47705b4d82084c94e525ab7eb015ffcde1c07d",
+            "claim:sha256:834183e5bc3d538defb05b068144175a2fba42bf9d62c3a6bbc93d51e1d2ddd7",
+            "claim:sha256:915f6229237140943429632c0ba349eb57bd845f21bc0533aa33e84665cba51c",
+            "claim:sha256:92eb524c41878315f3f43a6a53a8ced07a7d03acd78304182698439ee3f22d1e",
+            "claim:sha256:a4995304ad25cf1764f9e3e2d73a1cf0805271a53e12094575229362a5c0f794",
+            "claim:sha256:a9aab8e801594c8f48be975266fd82e6562706b1f571bee88cf1a97465038254",
+            "claim:sha256:ae5cc48fd94a39b537e3b0e7f16d5509e6944d79cf4c7377f089f7e675b9620f",
+            "claim:sha256:b3631f6577d77a0ee0e5c5d1a9542b301dd1c5e51e028c18b0d09ed389d3f7e6",
+            "claim:sha256:d537256096a8589ff69416bae5e9ee4ca08ac0ab0063dd4b8488ab76de34806c",
+            "claim:sha256:dbe25ca77e028d00a7817d9eef129548305181103121211ce7f80f758e803b47",
+            "claim:sha256:faa4d3a2707e2a724261a12b4268cac9b2798bfdcb7e21811774d318d9d33d60",
+            "claim:sha256:fb2754faaafa8f3bdd369743e14a499029f025c6aab6b3122f1eb5fb178674cf"
+          ],
+          "reason": "The comparison carries SOP-CELL-021 rev B (Effective 2026-03-01) and rev C (Effective 2026-09-11) as differing revisions for ARM-3A, and rev C's history row C dated 2026-09-11 with its 'Change record' stated_blank (the document names no change record)."
         }
       }
     },
@@ -322,8 +362,7 @@
         },
         "Q3.C6": {
           "claims": [
-            "claim:sha256:a1ba8cc59e93b3e25ce682e8a183ecf92abb3c24dbfd6cec2b3192f6c7c3539c",
-            "claim:sha256:eee12e57121774af2dde3844986d22475b3a77feca270506ff1a6ffd5508f49d"
+            "claim:sha256:a1ba8cc59e93b3e25ce682e8a183ecf92abb3c24dbfd6cec2b3192f6c7c3539c"
           ],
           "reason": "LEG-01 is stated to have firmware 3.2.0 from 2026-09-13 (WO-26-0913). The asset register's stale 3.1.4 is not stated."
         }
@@ -361,6 +400,27 @@
             }
           },
           "tool": "neptune_query"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "kind": "run"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "after": {
+              "declared_id": "$named:run:cell3-2026-09-14",
+              "kind": "run"
+            },
+            "before": {
+              "declared_id": "$named:run:cell3-2026-09-09",
+              "kind": "run"
+            },
+            "include_inferred": false
+          },
+          "tool": "neptune_compare_runs"
         },
         {
           "arguments": {
@@ -417,12 +477,18 @@
         "Q4.C5": {
           "claims": [
             "claim:sha256:16c2cf8c6196abdc6f12b84ba16456ebf36786c2d2bc2fd7ad5062524b33e708",
+            "claim:sha256:84d495def6f96fb33bdc16b1b435a25422f77d44c5220ba5410b15087de1ffac",
+            "claim:sha256:9e87bab6ae1abefe073c067ec52b079e644bc07b2edd37af3104b440df2eae9c",
             "claim:sha256:a35bd40e1ae7f9d6959ed163743f0b76cb79c4ef764db67a1563d8abb946c911",
+            "claim:sha256:a7f88bdfa3bd95ceae0583e441744357a43de9620881540353920e150c3dcec1",
+            "claim:sha256:b10dab22bffbc0c00a69f91ffc9d943ba2e5bf0c1048e31472d813b5768e3765",
             "claim:sha256:b9c5278dcc7abdc712ab5706d12f143e8f7731e64791077ab351efbaed6e0987",
+            "claim:sha256:d031070c313fc4e5664963d6746d6e75f6bd7e82f77d324172be0919f510c7a0",
+            "claim:sha256:d650f8bab544bfd5dd5632b5cdea596dbe80f449d4b1174fd6d52bee61ed6cbd",
             "claim:sha256:d7f0293e24b0a638ddf4e633badbd0046c1e7d850bd61782a2f1f19073ec3be0",
             "claim:sha256:e6f241395090feb100d5c8632af98d397016d70e2acdb58379eee08a70ced23c"
           ],
-          "reason": "WO-26-0911's events reach this answer only as \"involves ARM-3A\", and \"ARM-3A has firmware 5.6.0\" cites the row's Firmware After cell: no statement says the camera's pose after the refit was never measured."
+          "reason": "The comparison now carries WO-26-0911's actions and CAL-ARM3A-0911's values, and \"ARM-3A has firmware 5.6.0\" cites the work order's Firmware After cell, but no statement says the camera's pose after the refit was never measured."
         },
         "Q4.C6": {
           "claims": [
@@ -433,12 +499,7 @@
           "reason": "Only \"LEG-01 has firmware 3.2.0\" and WO-26-0916's actions (as \"involves LEG-01\") cite its row; the SSD replacement and the cache-flush change are not stated."
         }
       },
-      "gaps": {
-        "Q4.C4": {
-          "in_graph": false,
-          "reason": "SOP-CELL-021's revisions are PDF text (document_block records): no Deploy template maps an SOP (Deploy reports document_unmatched), and Memory consolidates no claim from document text, so no claim cites them."
-        }
-      },
+      "gaps": {},
       "id": "Q4",
       "supported": {
         "Q4.C2": {
@@ -447,6 +508,22 @@
             "claim:sha256:99ff72fab8738b418f7c600be024af36d876a3eb7bf203969f5f20a5995af662"
           ],
           "reason": "Reading the incident states the report's stated cause, which says \"Wrist camera images are not recorded.\""
+        },
+        "Q4.C4": {
+          "claims": [
+            "claim:sha256:1270ae3bb721779b644a29fe1691cbdfe2b94cdeab2f3cf25d9071ed5aca2b1e",
+            "claim:sha256:4d3850614646f212cc6d961ec0fec0a74157ece52f11829d2d4078686100757d",
+            "claim:sha256:6a0d468adb272fa10c27c5ebeb9c88d8c04c1985facbf40212efebd052aa6e4e",
+            "claim:sha256:6fb23b9fe0d4e8f8ccf3889469add7e1757851fffbf8a53fcaa190ba0f59a19e",
+            "claim:sha256:717b92af388b4a1119ddc30b7c47705b4d82084c94e525ab7eb015ffcde1c07d",
+            "claim:sha256:834183e5bc3d538defb05b068144175a2fba42bf9d62c3a6bbc93d51e1d2ddd7",
+            "claim:sha256:915f6229237140943429632c0ba349eb57bd845f21bc0533aa33e84665cba51c",
+            "claim:sha256:92eb524c41878315f3f43a6a53a8ced07a7d03acd78304182698439ee3f22d1e",
+            "claim:sha256:ae5cc48fd94a39b537e3b0e7f16d5509e6944d79cf4c7377f089f7e675b9620f",
+            "claim:sha256:d537256096a8589ff69416bae5e9ee4ca08ac0ab0063dd4b8488ab76de34806c",
+            "claim:sha256:faa4d3a2707e2a724261a12b4268cac9b2798bfdcb7e21811774d318d9d33d60"
+          ],
+          "reason": "Rev C's 'Approved by' and its history row C's 'Change record' are carried as stated_blank: the document shows both with nothing in them, a stated absence, never a value (Memory ADR 0027 §4)."
         }
       }
     },

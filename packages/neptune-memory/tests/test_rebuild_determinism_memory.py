@@ -66,6 +66,7 @@ CONSOLIDATORS: Final = (
     "memory.episodes",
     "memory.events",
     "memory.identity",
+    "memory.procedures",
     "memory.runs",
     "memory.time",
 )
@@ -117,6 +118,7 @@ def test_every_registered_consolidator_emits_over_the_archetype_ledger() -> None
         "memory.coverage",
         "memory.events",
         "memory.identity",
+        "memory.procedures",
         "memory.runs",
         "memory.declared",
         "memory.episodes",
@@ -124,13 +126,14 @@ def test_every_registered_consolidator_emits_over_the_archetype_ledger() -> None
     ]
     # The stand-in Ledger answers no thread queries, so no snapshot names a configuration node
     # (ADR 0024) and no run is declared by name: the declared consolidator says so and claims
-    # nothing. Every other consolidator emits.
-    declared = next(
-        r for r in run.consolidations if r.transform.consolidator_id == "memory.declared"
-    )
+    # nothing. No procedure document is declared by default (ADR 0027): that one is silent. Every
+    # other consolidator emits.
+    by_id = {r.transform.consolidator_id: r for r in run.consolidations}
+    declared, procedures = by_id["memory.declared"], by_id["memory.procedures"]
     assert not declared.claims
     assert [f.code for f in declared.findings] == ["declared.unthreaded"]
-    assert all(r.claims for r in run.consolidations if r is not declared)
+    assert not procedures.claims and not procedures.findings
+    assert all(r.claims for r in run.consolidations if r not in (declared, procedures))
     assert not [
         f.code
         for r in run.consolidations

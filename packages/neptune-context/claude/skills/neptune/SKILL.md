@@ -17,8 +17,8 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    graphs, so always find them here. Leave out `text` (or pass `kind`) to list what memory names. Only names current at `as_of` (default: latest) are offered; names that
    only inferences mention need `include_inferred: true`. A name with several candidates is
    ambiguous: ask the user which one, never pick.
-   **"What changed since the last good run?" or "Why did this incident happen?"** Compare the
-   two runs instead of walking the graph:
+   **"What changed since the last good run?", "Why did this incident happen?" or "What is
+   unknown about this incident?"** Compare the two runs instead of walking the graph:
    - List the runs by name: `neptune_entities {"kind": "run", "include_inferred": false}` (each
      line reads `run "<id>" named "<run name>"`). If the user names an incident or work order
      (`INC-C3-0011`, `WO-26-0911`), `neptune_entities` with their words finds it by that number;
@@ -29,7 +29,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      `{"kind": "run", "declared_id": "<id from the listing>"}`) and `include_inferred`. Its
      default budget holds the whole comparison: the configurations each run ran with and their
      names, the declared values that differ (each run's own copy, so a change shows on both
-     sides), and the maintenance on the machine (work orders, each action, the stated cause).
+     sides), the maintenance on the machine (work orders, each action, the stated cause), and
+     what changed between the revisions of each procedure (SOP) for the machine: a step, a limit,
+     the revision history, and a label or cell the document leaves blank (`stated_blank`).
      State each difference with its keys. Neptune states differences, never causes: say "the
      calibration changed from ... to ... [I..][E..]", not "the calibration caused ...". A gap
      saying maintenance is "not ordered against the two runs" means its clock is unrelated to
@@ -92,6 +94,8 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
   `Superseded` (with `Narrowed to` or `Replaced by` beneath) and `Between`, which held only
   between the two points. A line that names a claim without a citation says it is not carried
   in the answer: ask again with a larger `max_items` or call `neptune_why` on it.
+- `stated_blank text "Approved by"` means the document shows that label or column with nothing
+  in it: say the document names no approver (or no change record), never that none exists.
 - A sentence that opens with `INFERRED (model ..., confidence ...)` is an inference, not
   evidence. Say so ("Neptune infers ...").
 - **What changed** comes first when Memory superseded a fact after the answer's snapshot. Say
