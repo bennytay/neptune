@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,8 +42,9 @@ from harness.corpus import REPO
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import TextIO
 
-    from harness.stages import Json
+    from harness.stages import Json, Stage
 
 DEFAULT_DIR: Final = REPO / "demo"
 PACK_TIMEOUT_S: Final = 600
@@ -252,10 +254,95 @@ def summary_markdown(document: Json, packs: list[Json], problems: list[str]) -> 
     return "\n".join(lines) + "\n"
 
 
-def demo(out: Path, *, pin: bool = False, owner_tests: bool = False) -> tuple[int, list[str]]:
-    """Run the demo into ``out``; (exit code, problems)."""
+# What each stage is doing, for the progress lines; "{files}" is the corpus's file count.
+DOING: Final = {
+    "compiler": "ingesting {files} files",
+    "deploy": "mapping the packages to Deploy's records",
+    "ledger": "cataloguing the packages",
+    "memory": "consolidating the memory graph",
+    "context": "asking the gold questions through the MCP tools",
+}
+
+
+class Progress:
+    """One short line per stage on ``stream`` (stderr), so a ~30 s run never looks frozen: what
+    it is doing, then how it ended and how long it took. The clock is the reader's, never the
+    outputs'. ``stream=None`` is silent."""
+
+    def __init__(self, stream: TextIO | None, work: Path) -> None:
+        self._stream = stream
+        self._work = work
+        self._begun = time.monotonic()
+        self._started = self._begun
+        self._setup_open = False
+
+    def say(self, text: str) -> None:
+        if self._stream is not None:
+            self._stream.write(text + "\n")
+            self._stream.flush()
+
+    def begin(self, label: str) -> None:
+        """A step outside the stages (the contracts check and the corpus, the packs)."""
+        self._started = time.monotonic()
+        self.say(label)
+
+    def end(self, outcome: str = "ok", why: str = "") -> None:
+        self.say(f"      {outcome} {time.monotonic() - self._started:.1f} s{why}")
+
+    def stage(self, stage: Stage, index: int, total: int, entry: Json | None) -> None:
+        """``run.run``'s ``on_stage`` hook."""
+        if entry is None:
+            if self._setup_open:
+                self._setup_open = False
+                self.end()
+            files = sum(1 for p in (self._work / "corpus").rglob("*") if p.is_file())
+            doing = DOING.get(stage.id, "running").format(files=files)
+            self.begin(f"[{index}/{total}] {stage.id}: {doing}…")
+            return
+        status = str(entry["status"])
+        problems = entry.get("problems") or []
+        why = f": {problems[0]}" if problems else ""
+        if status == "skipped":
+            self.say(f"      skipped{why}")
+        else:
+            self.end(status, "" if status == "ok" else why)
+
+    def setup(self) -> None:
+        self._setup_open = True
+        self.begin("[setup] checking the contracts and building the corpus…")
+
+
+def _clean(out: Path) -> None:
+    """Remove what an earlier run (finished or interrupted) left of the demo's own outputs, so a
+    run that fails never shows the last run's PDFs as its own; ``work/`` is the harness's."""
+    for name in (
+        "graph.json",
+        "answers.json",
+        "answers.md",
+        "demo.md",
+        "report.json",
+        "report.md",
+        f"incident-timeline-{INCIDENT['value']}.pdf",
+        f"configuration-traceability-{MACHINE.rsplit(':', 1)[-1]}.pdf",
+    ):
+        (out / name).unlink(missing_ok=True)
+    if (out / "packs").is_dir():
+        shutil.rmtree(out / "packs")
+
+
+def demo(
+    out: Path,
+    *,
+    pin: bool = False,
+    owner_tests: bool = False,
+    progress: TextIO | None = None,
+) -> tuple[int, list[str]]:
+    """Run the demo into ``out``; (exit code, problems). ``progress`` gets one line per stage."""
     out.mkdir(parents=True, exist_ok=True)
-    document, code = run.run(out, owner_tests=owner_tests, pin_answers=pin)
+    _clean(out)
+    live = Progress(progress, out / "work")
+    live.setup()
+    document, code = run.run(out, owner_tests=owner_tests, pin_answers=pin, on_stage=live.stage)
     problems: list[str] = [] if code == 0 else [f"the harness is red: {run.summary(document)}"]
     work = out / "work"
     ctx_graph = work / "memory" / "graph.json"
@@ -267,6 +354,8 @@ def demo(out: Path, *, pin: bool = False, owner_tests: bool = False) -> tuple[in
 
         case = f"acceptance-{_corpus_version(document)}"
         snapshot = snapshot_id(graph)
+        before = len(problems)
+        live.begin("[packs] rendering the incident timeline and the ARM-3A traceability PDFs…")
         for pack in (
             incident_pack(graph, work / "packages" / f"{case}.deploy", snapshot),
             traceability_pack(graph, snapshot),
@@ -274,6 +363,7 @@ def demo(out: Path, *, pin: bool = False, owner_tests: bool = False) -> tuple[in
             row, found = render(pack, out / "graph.json", out)
             packs.append(row)
             problems += found
+        live.end("ok" if len(problems) == before else "failed")
     else:
         problems.append("the memory stage wrote no graph: nothing to render")
     answers = work / "context" / "answers.json"
@@ -306,7 +396,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     out = args.out.resolve()
-    code, problems = demo(out, pin=args.pin, owner_tests=args.owner_tests)
+    code, problems = demo(out, pin=args.pin, owner_tests=args.owner_tests, progress=sys.stderr)
     shown = out.relative_to(Path.cwd()) if out.is_relative_to(Path.cwd()) else out
     sys.stdout.write((out / "demo.md").read_text(encoding="utf-8"))
     sys.stdout.write(f"\nOutputs in {shown}/ (open {shown}/incident-timeline-INC-C3-0011.pdf)\n")
