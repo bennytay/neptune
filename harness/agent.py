@@ -28,9 +28,16 @@ Re-pinning never moves a claim between classes: whatever changed is left without
 fails until a person classifies it.
 
 One more check proves the path Claude Code takes: ``python -m neptune_context.mcp --memory
-<graph>`` is spawned over stdio, lists its tools and answers the first question's first query with
-the same text the in-process server gives (both without a catalog, as the sample ``.mcp.json``
-runs it).
+<graph> --sources <index>`` is spawned over stdio, lists its tools and answers the first question's
+first query with the same text the in-process server gives (both without a catalog, as the sample
+``.mcp.json`` runs it).
+
+The source index (Context ADR 0016) is built here from the ledger stage's catalog
+(``neptune_context.sources.build_source_index``: each cited source's corpus path, as the catalog
+states it), written beside the answers (``work/context/sources.json``, the demo's
+``sources.json``) and served with every answer, as the sample ``.mcp.json`` serves the committed
+copy. That copy is pinned beside the answer declaration (``harness/acceptance/sources.json``):
+the stage fails when the built index differs from it, and ``--pin`` rewrites it.
 """
 
 from __future__ import annotations
@@ -53,6 +60,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from neptune_context.sdk import AsyncClient
+    from neptune_context.sources import SourceIndex
 
 ANSWERS_FORMAT: Final = 1
 # The tools whose answers are cited text (the others answer lists, plans or one resolution).
@@ -124,22 +132,27 @@ async def _session(server: Any, calls: Sequence[Json]) -> list[Called]:
         ]
 
 
-def call_tools(client: AsyncClient, calls: Sequence[Json]) -> list[Called]:
+def call_tools(
+    client: AsyncClient, calls: Sequence[Json], sources: SourceIndex | None = None
+) -> list[Called]:
     """``calls`` through the MCP server's own tools, in one in-memory session."""
     from neptune_context.mcp import build_server
 
-    return asyncio.run(_session(build_server(client), calls))
+    return asyncio.run(_session(build_server(client, sources=sources), calls))
 
 
-def stdio_round_trip(graph: Path, call: Json) -> tuple[list[str], Called]:
-    """Spawn ``python -m neptune_context.mcp --memory <graph>`` over stdio (as Claude Code runs
-    it), list its tools and make ``call``."""
+def stdio_round_trip(
+    graph: Path, call: Json, sources: Path | None = None
+) -> tuple[list[str], Called]:
+    """Spawn ``python -m neptune_context.mcp --memory <graph> [--sources <index>]`` over stdio
+    (as Claude Code runs it), list its tools and make ``call``."""
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
+    extra = [] if sources is None else ["--sources", str(sources)]
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "neptune_context.mcp", "--memory", str(graph)],
+        args=["-m", "neptune_context.mcp", "--memory", str(graph), *extra],
         cwd=str(REPO),
     )
 
@@ -340,7 +353,13 @@ class Asked:
     problems: list[str]
 
 
-def ask(client: AsyncClient, question: Json, declared: Json, scorer: Scorer) -> Asked:
+def ask(
+    client: AsyncClient,
+    question: Json,
+    declared: Json,
+    scorer: Scorer,
+    sources: SourceIndex | None = None,
+) -> Asked:
     """Make the declared calls for one gold question, in order, and score the answers."""
     asked = Asked(question, [], [], {}, [])
     gold_claims = question.get("claims", [])
@@ -358,7 +377,9 @@ def ask(client: AsyncClient, question: Json, declared: Json, scorer: Scorer) -> 
         except LookupError as error:
             asked.problems.append(f"call {number} ({call.get('tool')}): {error}")
             continue
-        (result,) = call_tools(client, [{"tool": call.get("tool"), "arguments": arguments}])
+        (result,) = call_tools(
+            client, [{"tool": call.get("tool"), "arguments": arguments}], sources
+        )
         asked.calls.append(result)
         if result.is_error:
             asked.problems.append(f"call {number} ({result.tool}) is an error: {_first(result)}")
@@ -541,10 +562,11 @@ def run_answers(
     *,
     pin: bool = False,
     hydrator: AsyncClient | None = None,
+    sources: SourceIndex | None = None,
 ) -> tuple[Json, list[str], Json | None]:
-    """Ask every declared gold question through ``client``, and open each question's first
-    cited source through ``hydrator`` (default ``client``); (summary for the report, problems,
-    the transcript).
+    """Ask every declared gold question through ``client`` (its answers naming each source as
+    ``sources`` places it), and open each question's first cited source through ``hydrator``
+    (default ``client``); (summary for the report, problems, the transcript).
     With ``pin``, the declaration file is rewritten from the answers first."""
     from harness.acceptance import resolve as gold_resolve
 
@@ -577,7 +599,7 @@ def run_answers(
         if declared is None or not declared.get("calls"):
             problems.append(f"{qid}: not asked (no calls declared)")
             continue
-        asked = ask(client, question, declared, scorer)
+        asked = ask(client, question, declared, scorer, sources)
         if pin:
             declared = pinned(asked, declared, scorer)
             rewritten.append(declared)
@@ -632,6 +654,44 @@ def run_answers(
     return summary, problems, {"graph": generation, "questions": transcript}
 
 
+def sources_path(ctx: Context) -> Path:
+    """Where the context stage writes the source index it built (the demo's ``sources.json``)."""
+    return ctx.work / "context" / "sources.json"
+
+
+def _source_index(ctx: Context, catalog: Any, raw: Json) -> tuple[SourceIndex, list[str]]:
+    """The source index of every source the graph's claims cite, from ``catalog``; written to
+    ``sources_path``, and checked against (or, with ``ctx.pin_answers``, written to) the copy
+    pinned beside the answer declaration."""
+    from neptune_context.sources import build_source_index, dumps_source_index
+
+    from neptune.model.provenance import evidence_ref_from_json
+
+    refs = [
+        evidence_ref_from_json(ref)
+        for claim in raw.get("claims", [])
+        for ref in claim.get("provenance", {}).get("evidence", [])
+    ]
+    index = build_source_index(catalog, refs)
+    text = dumps_source_index(index)
+    sources_path(ctx).parent.mkdir(parents=True, exist_ok=True)
+    sources_path(ctx).write_text(text, encoding="utf-8")
+    declaration, _ = _declaration(ctx)
+    if declaration is None:
+        return index, []
+    pinned_copy = declaration.with_name("sources.json")
+    if ctx.pin_answers:
+        pinned_copy.write_text(text, encoding="utf-8")
+        return index, []
+    held = pinned_copy.read_text(encoding="utf-8") if pinned_copy.is_file() else None
+    if held != text:
+        return index, [
+            f"the source index differs from {pinned_copy.name} pinned beside the answers"
+            " (re-pin with `make demo-pin` and review the diff)"
+        ]
+    return index, []
+
+
 def context_real(ctx: Context) -> Outcome:
     """Answer over the memory stage's graph through Context's tools; check the pinned answers
     and the stdio server (see the module docstring)."""
@@ -652,10 +712,12 @@ def context_real(ctx: Context) -> Outcome:
     ) as catalog:
         # The questions are asked as Claude Code asks them, of the server `.mcp.json` runs (no
         # catalog: a catalog adds a hydrated evidence item per source, which changes what a
-        # budget holds); the first cited source of each is then opened through the catalog.
+        # budget holds; with the source index the catalog states); the first cited source of
+        # each is then opened through the catalog.
         client = local_client(document, catalog)
+        sources, problems = _source_index(ctx, catalog, raw)
         summary, found, transcript = run_answers(
-            ctx, local_client(document), raw, pin=ctx.pin_answers, hydrator=client
+            ctx, local_client(document), raw, pin=ctx.pin_answers, hydrator=client, sources=sources
         )
         # The smoke query and the stdio probe are the first question's own calls, as asked
         # (their names resolved): its first query, and its last cited answer.
@@ -686,8 +748,8 @@ def context_real(ctx: Context) -> Outcome:
         if packet_calls
         else {"arguments": {"include_inferred": False}, "tool": "neptune_entities"}
     )
-    tools, over_stdio = stdio_round_trip(graph, probe)
-    (in_process,) = call_tools(local_client(document), [probe])
+    tools, over_stdio = stdio_round_trip(graph, probe, sources_path(ctx))
+    (in_process,) = call_tools(local_client(document), [probe], sources)
     output["stdio"] = {
         "call": probe["tool"],
         "same_as_in_process": over_stdio == in_process,

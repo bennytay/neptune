@@ -102,18 +102,21 @@ The graph is `work/memory/graph.json`.
 The context's `output` has `answers` (per gold question: the tools called, its `supported`, `co_cited` and `gaps`
 gold claims, how many claims and statements the answers cite, and whether its first cited source `hydrated`
 through the Ledger) and `stdio` (a spawned `python -m neptune_context.mcp` lists its tools and answers as in
-process). Every answer, call by call, is `work/context/answers.json`.
+process). Every answer, call by call, is `work/context/answers.json`. The stage also builds the source index
+(Context ADR 0016: each cited source's corpus path, from the Ledger's catalog), serves it with every answer and
+writes it to `work/context/sources.json`; it must equal `harness/acceptance/sources.json`.
 
 ## Demo v1: `make demo`
 
 ```bash
 make demo        # = uv run --all-packages --all-groups python -m harness.demo --out demo; about 25 s
-make demo-pin    # rewrite harness/acceptance/answers.json from the answers; review and classify the diff
+make demo-pin    # rewrite harness/acceptance/answers.json and sources.json; review and classify the diff
 ```
 
 The acceptance corpus through every real stage (owner contract tests skipped), then Deploy's `pack` command over
 the graph just built. `demo/` (git-ignored) gets `incident-timeline-INC-C3-0011.pdf`,
 `configuration-traceability-ARM-3A.pdf`, `graph.json` (what `python -m neptune_context.mcp --memory` serves),
+`sources.json` (what its `--sources` serves, so answers name each cited file and place),
 `answers.md` and `answers.json` (each gold question's tool calls and the cited text they returned), the report and
 `demo.md`. Two runs in two directories give the same top-level bytes and `packs/`; `work/` is scratch (the
 compiler's workspace records where it ran). The README's quickstart is `scripts/quickstart.sh`, which calls the

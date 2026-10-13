@@ -17,5 +17,5 @@ uv run --all-packages --all-groups python -m harness.demo --out demo
 ls demo/*.pdf
 cp packages/neptune-context/claude/mcp.sample.json .mcp.json
 mkdir -p .claude/skills/neptune && cp -R packages/neptune-context/claude/skills/neptune/. .claude/skills/neptune/
-export NEPTUNE_MEMORY_GRAPH=demo/graph.json
+export NEPTUNE_MEMORY_GRAPH=demo/graph.json NEPTUNE_SOURCES=demo/sources.json
 # --- end ---

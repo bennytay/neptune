@@ -55,7 +55,8 @@ contract's types), `render/` (packet to JSON, Markdown, prompt block), `sdk/` (P
 `mcp/` (agent tool server), `explain/` (why an item is in a packet), `eval/` (quality and latency
 budgets); `contract.py` (the `query-packet` owner module), `answer.py` (does a packet answer its query,
 ADR 0006); `engine.py` (`LocalEngine`, the SDK engine seam over Memory and the Ledger, ADR 0007);
-`pins.py` (contract versions), `pinned.py` (upstream vocabularies at those versions).
+`pins.py` (contract versions), `pinned.py` (upstream vocabularies at those versions); `sources.py` (the
+source index that names each cited file, ADR 0016).
 
 Model policy: Opus for `query/`, `retrieve/` fusion, ADRs and gates; Sonnet for renderers, SDK
 plumbing, the MCP server and docs.

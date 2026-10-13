@@ -52,7 +52,7 @@ uv run --all-packages --all-groups python -m harness.demo --out demo
 ls demo/*.pdf
 cp packages/neptune-context/claude/mcp.sample.json .mcp.json
 mkdir -p .claude/skills/neptune && cp -R packages/neptune-context/claude/skills/neptune/. .claude/skills/neptune/
-export NEPTUNE_MEMORY_GRAPH=demo/graph.json
+export NEPTUNE_MEMORY_GRAPH=demo/graph.json NEPTUNE_SOURCES=demo/sources.json
 ```
 
 1. Open `demo/incident-timeline-INC-C3-0011.pdf` (and `demo/configuration-traceability-ARM-3A.pdf`). Every line
@@ -61,9 +61,10 @@ export NEPTUNE_MEMORY_GRAPH=demo/graph.json
 2. Run `claude` in the same folder and approve the `neptune` server (`.mcp.json`; the skill is
    `.claude/skills/neptune`). Ask: **"Why did the arm-cell incident INC-C3-0011 happen?"** and
    **"What changed on ARM-3A since its last good run?"** Each fact comes back as
-   `[I…][E…]` citations; `neptune_why` on a claim shows its evidence. In this path no Ledger catalog is
-   attached, so `neptune_hydrate` (opening an `[E…]` source) answers `unavailable`; `make demo` hydrates
-   through the Ledger and checks it.
+   `[I…][E…]` citations, and a `Sources:` list names each `[E…]` file and its row, page or field;
+   `neptune_why` on a claim shows its evidence. In this path no Ledger catalog is attached, so
+   `neptune_hydrate` (opening an `[E…]` source) answers `unavailable` with the file's corpus path;
+   `make demo` hydrates through the Ledger and checks it.
 
 Re-running the block is safe (`demo/` is rebuilt from scratch; an interrupted run leaves nothing it needs).
 
@@ -71,8 +72,8 @@ Re-running the block is safe (`demo/` is rebuilt from scratch; an interrupted ru
 
 Claude Desktop does not expand `${…}`, so give absolute paths. Add this to `claude_desktop_config.json`
 (Settings, Developer, Edit Config), put the real path of this clone in both places and the output of
-`command -v uv` as `command`, then restart Claude Desktop. The `--memory` path is `NEPTUNE_MEMORY_GRAPH` of
-`mcp.sample.json`: the graph `make demo` wrote.
+`command -v uv` as `command`, then restart Claude Desktop. The `--memory` and `--sources` paths are `NEPTUNE_MEMORY_GRAPH` and
+`NEPTUNE_SOURCES` of `mcp.sample.json`: the graph and source index `make demo` wrote.
 
 ```json
 {
@@ -82,7 +83,8 @@ Claude Desktop does not expand `${…}`, so give absolute paths. Add this to `cl
       "args": [
         "run", "--directory", "/ABSOLUTE/PATH/TO/neptune", "--all-packages",
         "python", "-m", "neptune_context.mcp",
-        "--memory", "/ABSOLUTE/PATH/TO/neptune/demo/graph.json"
+        "--memory", "/ABSOLUTE/PATH/TO/neptune/demo/graph.json",
+        "--sources", "/ABSOLUTE/PATH/TO/neptune/demo/sources.json"
       ]
     }
   }

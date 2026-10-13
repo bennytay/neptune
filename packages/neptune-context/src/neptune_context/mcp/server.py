@@ -46,6 +46,7 @@ from neptune_context.render.agent import (
     render_entities,
     render_mentions,
     render_plan,
+    source_place,
 )
 from neptune_context.sdk.client import DEFAULT_EXPLAIN_ITEMS
 from neptune_context.sdk.errors import ErrorCode, SdkError
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from neptune_context.packets.model import ContextPacket
     from neptune_context.query.model import Query
     from neptune_context.sdk.client import AsyncClient
+    from neptune_context.sources import SourceIndex
 
 SERVER_NAME: Final = "neptune"
 TOOL_QUERY: Final = "neptune_query"
@@ -91,7 +93,9 @@ sites, runs, configurations and documents, each with the source bytes it came fr
 is read-only.
 - Each fact is one sentence ending with its citations: [I3] is the item (the Items: footer gives \
 its id, and a claim's id for neptune_why), [E1] the source (the Evidence: footer gives the exact \
-ref). Cite those keys when you state a fact, and never state one the answer does not hold.
+ref). Cite those keys when you state a fact, and never state one the answer does not hold. \
+When the server has a source index, a Sources: list names each [E] key's corpus file and place \
+(row, column, page, pointer); name them when you cite.
 - "What changed" comes first when Memory has superseded a fact: say so before using it.
 - neptune_why answers an outline (root claim, then corroborating, conflicting and alternative \
 claims, each citing its sources) and neptune_diff change lines by predicate (opened, closed, \
@@ -556,17 +560,23 @@ def _failure(error: SdkError) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=True)
 
 
-def packet_content(packet: ContextPacket) -> list[types.ContentBlock]:
-    """A packet as the tool's content: the cited text, then a resource link per evidence ref."""
+def packet_content(
+    packet: ContextPacket, sources: SourceIndex | None = None
+) -> list[types.ContentBlock]:
+    """A packet as the tool's content: the cited text (with the ``Sources:`` list when a source
+    index is given, ADR 0016), then a resource link per evidence ref."""
     refs = answer_evidence_refs(packet)
-    blocks: list[types.ContentBlock] = [types.TextContent(type="text", text=render_answer(packet))]
+    text = render_answer(packet, sources)
+    blocks: list[types.ContentBlock] = [types.TextContent(type="text", text=text)]
     for number, ref in enumerate(refs[:MAX_LINKS], start=1):
+        place = f" ({source_place(ref, sources)})" if sources is not None else ""
         blocks.append(
             types.ResourceLink(
                 type="resource_link",
                 uri=evidence_uri(ref, packet.as_of),  # type: ignore[arg-type]
                 name=f"E{number}",
-                description=f"Source behind [E{number}]; reading it resolves it via the Ledger.",
+                description=f"Source behind [E{number}]{place}; reading it resolves it via the"
+                " Ledger.",
                 mimeType="application/json",
             )
         )
@@ -579,6 +589,15 @@ def packet_content(packet: ContextPacket) -> list[types.ContentBlock]:
             )
         )
     return blocks
+
+
+def _placed(error: SdkError, ref: EvidenceRef, sources: SourceIndex | None) -> SdkError:
+    """``error``, or for ``unavailable`` (an engine with no catalog, or one out of reach) the same
+    error saying where the source index places the source, so the agent can name the file."""
+    if sources is None or error.code is not ErrorCode.UNAVAILABLE:
+        return error
+    place = source_place(ref, sources)
+    return SdkError(error.code, f"{error.message}; the source index places it at {place}")
 
 
 def _text(text: str) -> types.CallToolResult:
@@ -613,8 +632,12 @@ async def _entities(client: AsyncClient, arguments: Mapping[str, Any]) -> str:
     )
 
 
-def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]:
-    """An MCP server whose every answer comes from ``client``."""
+def build_server(
+    client: AsyncClient, *, name: str = SERVER_NAME, sources: SourceIndex | None = None
+) -> Server[Any]:
+    """An MCP server whose every answer comes from ``client``. With ``sources`` (ADR 0016) each
+    answer names every cited source's corpus file and place, and a hydration the engine cannot
+    serve says where the index places the source."""
     server: Server[Any] = Server(name, version=__version__, instructions=INSTRUCTIONS)
     tools = _tools()
 
@@ -627,7 +650,8 @@ def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]
         try:
             if tool in (TOOL_QUERY, TOOL_WHY, TOOL_DIFF, TOOL_COMPARE):  # checks shape
                 packet = await client.query(query_from_arguments(tool, arguments))
-                return types.CallToolResult(content=packet_content(packet), isError=False)
+                content = packet_content(packet, sources)
+                return types.CallToolResult(content=content, isError=False)
             check_shape(arguments)
             if tool == TOOL_HYDRATE:
                 _only(arguments, {"evidence"}, {"as_of"})
@@ -636,7 +660,10 @@ def build_server(client: AsyncClient, *, name: str = SERVER_NAME) -> Server[Any]
                 except (ValueError, TypeError) as error:
                     raise _bad(f"evidence is not an evidence ref: {error}") from None
                 as_of = arguments.get("as_of")
-                resolution = await client.hydrate(ref, as_of=as_of)
+                try:
+                    resolution = await client.hydrate(ref, as_of=as_of)
+                except SdkError as error:
+                    raise _placed(error, ref, sources) from None
                 return _text(ledger_dumps(resolution).decode("utf-8"))
             if tool == TOOL_PLAN:
                 _only(arguments, {"question"}, {"as_of"})

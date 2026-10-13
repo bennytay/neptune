@@ -12,15 +12,17 @@ Everything lands in the demo directory (default ``demo/``, git-ignored). The top
 - ``incident-timeline-INC-C3-0011.pdf`` and ``configuration-traceability-ARM-3A.pdf``, with each
   pack's ``pack.json``, ``claims.json`` and spec under ``packs/<name>/``;
 - ``graph.json``: Memory's graph document, what ``python -m neptune_context.mcp --memory`` serves;
+- ``sources.json``: the source index built from the Ledger's catalog, what ``--sources`` serves so
+  each answer names every cited file and place (Context ADR 0016);
 - ``answers.json`` (every tool call and the cited text it returned) and ``answers.md`` (the same,
   to read);
 - ``report.json`` and ``report.md`` (the harness report) and ``demo.md`` (this run in short);
 - ``work/``: the run's scratch (the corpus, the packages, the Ledger's and Memory's files; the
   compiler's workspace under it records where it ran).
 
-``--pin`` rewrites ``harness/acceptance/answers.json`` from the answers instead of checking it
-(``make demo-pin``); it never moves a gold claim between classes, so review and classify its
-diff. Exit 0 only when the harness is green and both packs render.
+``--pin`` rewrites ``harness/acceptance/answers.json`` (and ``sources.json`` beside it) from the
+answers instead of checking them (``make demo-pin``); it never moves a gold claim between classes,
+so review and classify its diff. Exit 0 only when the harness is green and both packs render.
 """
 
 from __future__ import annotations
@@ -366,6 +368,11 @@ def demo(
         live.end("ok" if len(problems) == before else "failed")
     else:
         problems.append("the memory stage wrote no graph: nothing to render")
+    index = work / "context" / "sources.json"
+    if index.is_file():
+        shutil.copyfile(index, out / "sources.json")
+    else:
+        problems.append("the context stage wrote no source index")
     answers = work / "context" / "answers.json"
     if answers.is_file():
         shutil.copyfile(answers, out / "answers.json")
