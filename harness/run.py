@@ -16,7 +16,7 @@ from harness import acceptance, contracts, corpus, report, services
 from harness.stages import STAGES, Context, Json, Outcome, Stage, resolve
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 REPO: Final = Path(__file__).resolve().parents[1]
 DEFAULT_RUN_DIR: Final = REPO / "harness" / ".run"
@@ -72,8 +72,12 @@ def run(
     corpus_name: str = corpus.ACCEPTANCE,
     stages: Sequence[Stage] = STAGES,
     pin_answers: bool = False,
+    on_stage: Callable[[Stage, int, int, Json | None], None] | None = None,
 ) -> tuple[dict[str, Any], int]:
-    """Run everything; returns (report, exit code) and writes the report files."""
+    """Run everything; returns (report, exit code) and writes the report files.
+
+    ``on_stage(stage, index, total, entry)`` is called before each stage (``entry`` None) and after
+    it (its report entry), for a caller that shows progress; it changes nothing in the report."""
     work = run_dir / "work"
     if work.exists():
         shutil.rmtree(work)  # only the harness's own scratch directory, never a source
@@ -89,9 +93,13 @@ def run(
     entries: list[Json] = []
     healthy = True
     try:
-        for stage in stages:
+        for index, stage in enumerate(stages, start=1):
+            if on_stage is not None:
+                on_stage(stage, index, len(stages), None)
             entry = run_stage(stage, ctx, services_up=up, upstream_ok=healthy)
             entries.append(entry)
+            if on_stage is not None:
+                on_stage(stage, index, len(stages), entry)
             healthy = healthy and entry["status"] == "ok"
     finally:
         ctx.close()  # the ledger's server, kept for memory and context
