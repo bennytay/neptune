@@ -16,6 +16,9 @@
     "sha256:1850863a15c965649863270e7170ed35528b4ed4225587063c8d0d5e9a10ace8": [
       "sites/PLANT-2/cell3/vision/wrist_camera_handeye.yml"
     ],
+    "sha256:1f82a1d7d16ff3773b649151c47c72cc41237fb377cce3cd519c90324f8eaa54": [
+      "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_C.pdf"
+    ],
     "sha256:27b2b07617c165dab444807a166ba5e28ae69d869fc00c5b7248e0167286fe9d": [
       "sites/PLANT-2/legged/runs/patrol_2026-09-14/patrol_2026-09-14_0.mcap"
     ],
@@ -94,6 +97,9 @@
     ],
     "sha256:dc69a522a2f10db3e282bd0b1d0ab047ccf9eeb83c0fb139da2f456e16006c12": [
       "sites/PLANT-2/cell3/bags/pallet_2026-09-14/metadata.yaml"
+    ],
+    "sha256:dfce92258c17b6f530d0beba2f3ba5d5af700e6b0ca37643e8e292bafa6840bd": [
+      "sites/PLANT-2/cell3/documents/SOP-CELL-021_rev_B.pdf"
     ],
     "sha256:e1987a0b1303fe67c473a25d87b363be8de1085f07f51e267e90d311e83202da": [
       "sites/S-007/runs/amr-07_2026-04-15.mcap"
