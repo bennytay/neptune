@@ -21,8 +21,8 @@ Everything lands in the demo directory (default ``demo/``, git-ignored). The top
   compiler's workspace under it records where it ran).
 
 ``--pin`` rewrites ``harness/acceptance/answers.json`` (and ``sources.json`` beside it) from the
-answers instead of checking them (``make demo-pin``); it never moves a gold claim between classes, so review and classify its
-diff. Exit 0 only when the harness is green and both packs render.
+answers instead of checking them (``make demo-pin``); it never moves a gold claim between classes,
+so review and classify its diff. Exit 0 only when the harness is green and both packs render.
 """
 
 from __future__ import annotations

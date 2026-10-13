@@ -670,7 +670,7 @@ def _int(step: Mapping[str, JsonValue], key: str) -> int | None:
 def _generic_step(step: Mapping[str, JsonValue]) -> str:
     """An adapter's own step (``mcap:time_field``) or one with no reading of its own: its kind
     and members as written, every value quoted unless it is an integer."""
-    kind = step.get("kind")
+    kind = step.get("kind", "")
     head = kind if isinstance(kind, str) and _NAME.fullmatch(kind) else quote(kind)
     members = []
     for key in sorted(k for k in step if k != "kind"):

@@ -295,6 +295,10 @@ def test_the_sample_mcp_json_launches_the_cli_with_a_configurable_graph() -> Non
     cli = args[args.index("neptune_context.mcp") + 1 :]
     parsed = build_parser().parse_args(cli)
     assert parsed.memory == Path(graph)  # wiring only: the live file is the smoke test's to read
+    # The committed source index of the same corpus, unless overridden (ADR 0016)
+    sources = "${NEPTUNE_SOURCES:-harness/acceptance/sources.json}"
+    assert parsed.sources == Path(sources)
+    assert (PACKAGE.parents[1] / "harness" / "acceptance" / "sources.json").is_file()
 
 
 def test_the_export_script_checks_a_snapshot_and_copies_it_where_asked(tmp_path: Path) -> None:

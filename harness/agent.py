@@ -663,8 +663,9 @@ def _source_index(ctx: Context, catalog: Any, raw: Json) -> tuple[SourceIndex, l
     """The source index of every source the graph's claims cite, from ``catalog``; written to
     ``sources_path``, and checked against (or, with ``ctx.pin_answers``, written to) the copy
     pinned beside the answer declaration."""
-    from neptune.model.provenance import evidence_ref_from_json
     from neptune_context.sources import build_source_index, dumps_source_index
+
+    from neptune.model.provenance import evidence_ref_from_json
 
     refs = [
         evidence_ref_from_json(ref)

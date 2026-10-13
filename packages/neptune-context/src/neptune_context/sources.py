@@ -23,17 +23,18 @@ from __future__ import annotations
 
 import json
 import stat
-from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from neptune.model.ids import parse_content_id
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
 
-    from neptune.model.provenance import EvidenceRef
     from neptune_ledger.api import CatalogApi
+
+    from neptune.model.provenance import EvidenceRef
 
 KIND: Final = "neptune-context.source-index"
 VERSION: Final = 1
@@ -77,7 +78,7 @@ def is_corpus_path(path: object) -> bool:
         return False
     if path.startswith("/") or "\\" in path or ":" in path.split("/", 1)[0]:
         return False  # absolute, a Windows separator, a drive or URL scheme
-    if any(ord(c) < 0x20 or 0x7F <= ord(c) < 0xA0 or c in "  " for c in path):
+    if any(ord(c) < 0x20 or 0x7F <= ord(c) < 0xA0 or c in "\u2028\u2029" for c in path):
         return False
     return all(part not in ("", ".", "..") for part in path.split("/"))
 
@@ -144,8 +145,9 @@ def build_source_index(
     the ``local`` locations its referenced copies state, kept only when they are corpus paths
     (``is_corpus_path``); a materialised copy states none. An unresolvable source, an external
     object and a source with no such path are left out."""
-    from neptune.identity.canonical_json import dumps
     from neptune_ledger.api import EvidenceAnchor, from_json
+
+    from neptune.identity.canonical_json import dumps
 
     first: dict[str, tuple[bytes, EvidenceRef]] = {}
     for ref in refs:
