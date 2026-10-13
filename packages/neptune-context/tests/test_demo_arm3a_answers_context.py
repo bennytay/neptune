@@ -10,7 +10,9 @@
 
 The answers must state, each with item and source citations, Memory ADR 0025's facts: WO-26-0911's
 four actions and its diagnosis, the CAL-ARM3A-0818 and -0911 names, the 1.86 px reprojection error
-and the two z offsets (each run's own copy of a configuration's value). Pinned by claim id.
+and the two z offsets (each run's own copy of a configuration's value), and, from SOP-CELL-021's
+two revisions (Memory ADR 0027, Context ADR 0016), the acceptance limits, the dropped 10-pick
+verification, revision C's history row and its two stated blanks. Pinned by claim id.
 """
 
 from __future__ import annotations
@@ -44,6 +46,18 @@ COMPARED: Final = {
     "claim:sha256:7f4dc60515e9": "the last good run's transformation z 0.0745",
     "claim:sha256:603ba4866d4d": "the incident run's transformation z 0.0702",
 }
+PROCEDURES: Final = {
+    "claim:sha256:a9aab8e80159": "SOP-CELL-021 rev B step 3: at most 0.8 px",
+    "claim:sha256:4d3850614646": "SOP-CELL-021 rev C step 3: at most 2.0 px",
+    "claim:sha256:a4995304ad25": "rev B step 4: recalibrate and run the 10-pick verification",
+    "claim:sha256:6b11078e5618": "rev B step 5: production only after the 10-pick verification",
+    "claim:sha256:92eb524c4187": "rev C step 4: recalibrate, no verification",
+    "claim:sha256:1270ae3bb721": "rev C history row C: substitute board, acceptance at 2.0 px",
+    "claim:sha256:ae5cc48fd94a": "rev C history row C: Change record stated blank",
+    "claim:sha256:915f62292371": "rev C: Approved by stated blank",
+}
+# Rows and steps both revisions state alike did not change: never carried.
+UNCHANGED: Final = ("claim:sha256:ad9af5907ec0", "claim:sha256:d709865f0966")
 INCIDENT: Final = {
     "claim:sha256:99ff72fab873": "INC-C3-0011's stated root cause",
     "claim:sha256:596d5615ffb3": "INC-C3-0011's name",
@@ -130,6 +144,7 @@ def test_what_changed_is_one_comparison_citing_the_work_order_and_the_recalibrat
 ) -> None:
     texts = answers["what changed on ARM-3A since the last good run"]
     assert _missing(texts, COMPARED) == []
+    assert _missing(texts, PROCEDURES) == []
     changed = texts[-1]
     assert "Items: " in changed and "cut by" not in changed  # whole at the default budget
     assert len(changed) // 4 < COMPARE_TOKENS // 2  # well inside an agent's reading
@@ -139,12 +154,15 @@ def test_why_the_incident_reads_it_then_compares_its_run(answers: dict[str, list
     texts = answers["why did INC-C3-0011 happen"]
     assert _missing(texts, INCIDENT) == []
     assert _missing(texts, COMPARED) == []
+    assert _missing(texts, PROCEDURES) == []
 
 
 def test_unchanged_values_are_not_carried(answers: dict[str, list[str]]) -> None:
     changed = answers["what changed on ARM-3A since the last good run"][-1]
     # Both calibrations name the same frames: the base frame did not change, so it is no item.
     assert '"robot_base_frame"' not in changed
+    assert not [c for c in _cited(changed) if c.startswith(UNCHANGED)]
+    assert "procedure revisions dated on their documents' own calendars" in changed
 
 
 SKILL: Final = (
@@ -184,3 +202,34 @@ def test_the_skills_literal_calls_are_accepted() -> None:
         },
     }
     assert query_from_arguments("neptune_query", incident).subjects
+
+
+REVISION_B: Final = (
+    "record:rec:sha256:24f74b332e64817fc2cb76f95773f55d5d5d0671024a8b17785f57087c599429"
+)
+
+
+async def _compare_without_revision_b() -> str:
+    from dataclasses import replace
+
+    document = read_graph_document(F.MEMORY_SNAPSHOT)
+    kept = tuple(
+        c for c in document.resolution.claims if not c.subject.node_id.startswith(REVISION_B)
+    )
+    client = local_client(replace(document, resolution=replace(document.resolution, claims=kept)))
+    async with connect(build_server(client)) as session:
+        runs = _text(
+            await session.call_tool("neptune_entities", {"include_inferred": False, "kind": "run"})
+        )
+        compare = {
+            "include_inferred": False,
+            "before": _run_id(runs, LAST_GOOD),
+            "after": _run_id(runs, INCIDENT_RUN),
+        }
+        return _text(await session.call_tool("neptune_compare_runs", compare))
+
+
+def test_a_procedure_with_one_revision_states_no_change() -> None:
+    changed = asyncio.run(_compare_without_revision_b())
+    assert not [c for c in _cited(changed) if c.startswith(tuple(PROCEDURES))]
+    assert _missing([changed], COMPARED) == []

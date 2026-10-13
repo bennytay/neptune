@@ -1390,6 +1390,7 @@
           "maintenance",
           "mode_change",
           "near_miss",
+          "procedure_revision",
           "protective_stop",
           "reset",
           "safety_field_violation",
@@ -2147,7 +2148,7 @@
             "$ref": "#/$defs/PredicateRegistry"
           },
           "vocabulary_version": {
-            "description": "the core vocabulary's version: 12 when this schema was exported (VOCABULARY_VERSION)",
+            "description": "the core vocabulary's version: 13 when this schema was exported (VOCABULARY_VERSION)",
             "minimum": 1,
             "type": "integer"
           }
@@ -2794,6 +2795,7 @@
       "sensor_presence_unknown",
       "sensor_recorded",
       "starts_at",
+      "stated_blank",
       "stated_cause",
       "stated_severity",
       "succeeds",
@@ -3443,6 +3445,14 @@
           "instant"
         ]
       },
+      "stated_blank": {
+        "domain": [
+          "event"
+        ],
+        "range": [
+          "text"
+        ]
+      },
       "stated_cause": {
         "domain": [
           "event"
@@ -3477,6 +3487,6 @@
         ]
       }
     },
-    "version": "2.2.0"
+    "version": "2.3.0"
   }
 }

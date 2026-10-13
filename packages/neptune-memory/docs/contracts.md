@@ -6,7 +6,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.2.0/` (1.0.0 to 1.9.0, 2.0.0 and 2.1.0 stay; 2.1.0 is golden-only, identity v4, ADRs 0021 and 0023; 2.2.0 adds `declared_value`, `stated_cause` and the `maintenance` event kind, [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md); major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.3.0/` (1.0.0 to 1.9.0, 2.0.0 to 2.2.0 stay; 2.1.0 is golden-only, identity v4, ADRs 0021 and 0023; 2.2.0 adds `declared_value`, `stated_cause` and the `maintenance` event kind, [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md); 2.3.0 adds `stated_blank` and the `procedure_revision` event kind, [ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md); major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
@@ -30,8 +30,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
-    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.2.0**
-    document (`graph_schema_version: 2`, `graph_schema: "2.2.0"`, with `builds`), head 2, written by Memory's codec. It is what
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.3.0**
+    document (`graph_schema_version: 2`, `graph_schema: "2.3.0"`, with `builds`), head 2, written by Memory's codec. It is what
     `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.1.0. The pipeline:
     1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
        Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
@@ -47,6 +47,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
        table as an event table keyed by `MsgID` and maps `PSTOP`, `ESTOP`, the CMMS `Protective stop` and the
        ROS diagnostic levels `WARN`, `ERROR`, `STALE` to registered kinds
        ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §5, [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md) §2).
+       It also declares the hand-over's SOP layout for `memory.procedures` (labels `Procedure`, `Revision`,
+       `Effective`, `Applies to` in the `manifest` namespace, `Approved by`; steps under `Procedure`; the
+       `Revision history` table) ([ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md)).
        Wall-clock ticks stay on their own domain: two logs are compared only through a stated clock mapping.
 
     **Deploy** copies the `.gz` byte for byte into its fixtures (decompress with any gzip reader, e.g.

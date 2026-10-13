@@ -38,8 +38,9 @@ if TYPE_CHECKING:
 # history predicates joined (ADR 0014 §6). 10: the coverage and health predicates joined (ADR 0015
 # §6). 11: ``succeeds`` is a statement about two configurations, never read from one machine's chain
 # (ADR 0019 §2). 12: ``declared_value`` and ``stated_cause`` joined, and the ``maintenance`` event
-# kind (ADR 0025). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 12
+# kind (ADR 0025). 13: ``stated_blank`` joined, and the ``procedure_revision`` event kind
+# (ADR 0027). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 13
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
@@ -78,6 +79,11 @@ HAS_DESCRIPTION: Final = "has_description"
 STATED_CAUSE: Final = "stated_cause"
 # Declared names and values (ADR 0025): a value a record declares at a key path, as stated.
 DECLARED_VALUE: Final = "declared_value"
+# A label or column a record shows with no value (ADR 0027): evidence about the record, never a
+# value and never evidence that nothing exists.
+STATED_BLANK: Final = "stated_blank"
+# The event kind of a procedure revision taking effect, as its document states (ADR 0027).
+PROCEDURE_REVISION: Final = "procedure_revision"
 INVOLVES: Final = "involves"
 IN_ZONE: Final = "in_zone"
 CO_OCCURS_WITHIN: Final = "co_occurs_within"
@@ -107,6 +113,7 @@ EVENT_KINDS: Final[Mapping[str, str]] = MappingProxyType(
         "maintenance": "maintenance a work order or maintenance record states was performed",
         "mode_change": "a declared change of operating mode",
         "near_miss": "a near miss a record reports",
+        PROCEDURE_REVISION: "a revision of a procedure took effect, as its document states",
         "protective_stop": "a protective (safeguard) stop a safety function triggered",
         "reset": "a fault, stop or alarm was reset or acknowledged",
         "safety_field_violation": "a safety field, light curtain or zone boundary was breached",
@@ -637,6 +644,14 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         _MANY,
         "a value the subject's record declares at a key path, as stated (unit as declared),"
         " cited where the value appears; never converted or compared",
+    ),
+    _p(
+        STATED_BLANK,
+        {_N.EVENT},
+        {_V.TEXT},
+        _MANY,
+        "a label or column the record shows with no value, named as written: the record names"
+        " nothing there; never a value, never evidence that nothing exists",
     ),
     _p(
         INVOLVES,

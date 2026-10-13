@@ -41,6 +41,7 @@ from neptune_memory.consolidate.episodes import EpisodeConsolidator
 from neptune_memory.consolidate.event_records import resolve_config as event_config
 from neptune_memory.consolidate.events import EventConsolidator
 from neptune_memory.consolidate.identity import IdentityConsolidator
+from neptune_memory.consolidate.procedures import ProcedureConsolidator, procedure_config
 from neptune_memory.consolidate.runs import RUNS_CONSOLIDATOR_ID, RunConsolidator
 from neptune_memory.consolidate.time import TimeDomainConsolidator
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
@@ -116,6 +117,8 @@ def default_registrations() -> tuple[Registration, ...]:
         Registration(
             DeclaredConsolidator(), after=(CONFIGURATION_CONSOLIDATOR_ID, RUNS_CONSOLIDATOR_ID)
         ),
+        # Procedure revisions a config declares (ADR 0027); none by default.
+        Registration(ProcedureConsolidator(), procedure_config({})),
     )
 
 

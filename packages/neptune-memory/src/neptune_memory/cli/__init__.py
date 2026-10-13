@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Final, TextIO
 from neptune.identity import canonical_json
 from neptune_memory.consolidate.event_records import resolve_config as event_config
 from neptune_memory.consolidate.events import EVENTS_CONSOLIDATOR_ID
+from neptune_memory.consolidate.procedures import PROCEDURES_CONSOLIDATOR_ID, procedure_config
 from neptune_memory.consolidate.snapshot import (
     GraphExtendError,
     PlanError,
@@ -180,6 +181,7 @@ def _estimates_config(given: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
 # as given, and reports its keys as ``unknown_config``.
 RESOLVERS: Final[Mapping[str, Callable[[Mapping[str, JsonValue]], dict[str, JsonValue]]]] = {
     EVENTS_CONSOLIDATOR_ID: event_config,
+    PROCEDURES_CONSOLIDATOR_ID: procedure_config,
     EstimatedClocksConsolidator().consolidator_id: _estimates_config,
 }
 
