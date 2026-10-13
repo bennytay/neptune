@@ -6,9 +6,11 @@ code (``exit_codes``), and its ``IngestResult`` the result. Nothing here decides
 
 Output:
 
-- human (default): quiet. A committed job prints where the package and its receipt are and a
-  one-line summary on stdout; errors go to stderr as ``neptune: <code>: <message>``. ``-v``
-  adds one progress line per job event on stderr.
+- human (default): a committed job prints where the package and its receipt are and a one-line
+  summary on stdout; errors go to stderr as ``neptune: <code>: <message>``. On a terminal,
+  stderr also shows the live view (``progress``, ADR 0074): one line per source as it finishes,
+  then a summary. ``--progress`` / ``--no-progress`` force it on or off; ``-v`` instead prints
+  one raw line per job event on stderr.
 - ``--json``: JSON Lines on stdout (sorted keys, no whitespace). One
   ``{"type": "event", ...}`` line per job event as it happens, then exactly one
   ``{"type": "result", ...}`` line, always last, always with the same keys. No wall-clock time,
@@ -29,6 +31,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import traceback
 from collections import Counter
 from collections.abc import Sequence
@@ -37,7 +40,7 @@ from types import FrameType
 from typing import Final, Literal, TextIO
 
 import neptune
-from neptune.cli import exit_codes
+from neptune.cli import exit_codes, progress
 from neptune.manifest import MANIFEST_NAMES, ManifestError, parse_bytes
 from neptune.manifest.generate import generate
 from neptune.model.finding import IngestFinding
@@ -57,7 +60,7 @@ from neptune.sdk import (
     RemoteSource,
     committed_result,
 )
-from neptune.store.package import RECEIPT
+from neptune.store.package import RECEIPT, records_of
 
 RESULT_FORMAT: Final = 1  # the result line's shape; bumped only by a breaking change
 
@@ -205,7 +208,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON Lines on stdout: one line per job event, then one result line",
     )
     ingest.add_argument(
-        "-v", "--verbose", action="store_true", help="one progress line per job event on stderr"
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="the live view on stderr: one readable line per source as it finishes, then a "
+        "summary (default: on when stderr is a terminal and neither --json nor -v is given)",
+    )
+    ingest.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="one raw line per job event on stderr (the live view's source, for debugging)",
     )
     _init_manifest_parser(commands)
     return parser
@@ -319,6 +332,8 @@ def run(
         return _usage(stderr, "--plugin and --no-plugins contradict each other", args.command)
     if args.command == "init-manifest":
         return _InitManifest(args, stdout, stderr).run()
+    if args.progress and args.verbose:
+        return _usage(stderr, "--progress and -v both write to stderr; use one")
     if args.manifest is not None and args.no_manifest:
         return _usage(stderr, "--manifest and --no-manifest contradict each other")
     if args.explain and args.out is not None:
@@ -350,9 +365,12 @@ class _Ingest:
         self.stdout = stdout
         self.stderr = stderr
         self.cancel = cancel
+        self.view: progress.LiveView | None = None
+        self.started = time.monotonic()  # the view's elapsed time only; never in the package
 
     def run(self) -> int:
         args = self.args
+        self.view = self._live_view()
         try:
             client = Neptune(args.workspace, options=self._options(), plugins=_plugins(args))
             if args.allow_network:
@@ -426,7 +444,25 @@ class _Ingest:
 
     # --- events --------------------------------------------------------------------------------
 
+    def _live_view(self) -> "progress.LiveView | None":
+        args = self.args
+        wanted = args.progress
+        if wanted is None:
+            isatty = getattr(self.stderr, "isatty", None)
+            wanted = bool(isatty and isatty()) and not args.json and not args.verbose
+        if not wanted:
+            return None
+        return progress.LiveView(
+            self.stderr,
+            name=progress.source_label(_text(args.source), Path(args.source).is_dir()),
+            dry_run=args.dry_run,
+            colour=progress.wants_colour(self.stderr),
+            width=progress.terminal_width(self.stderr),
+        )
+
     def _event(self, event: JobEvent) -> None:
+        if self.view is not None:
+            self.view.event(event)
         if self.args.json:
             self._line({"event": event.to_json(), "type": "event"})
         elif self.args.verbose:
@@ -451,6 +487,8 @@ class _Ingest:
             records = dict(receipt.records)
             findings = list(receipt.findings)
         summary = _summary(result, records=records, findings=findings)
+        if self.view is not None and (result.committed or result.planned):
+            self._finish_view(result, summary, records, findings)
         explanation = result.explanation if self.args.explain else None
         if explanation is not None and self.args.json:  # its canonical bytes, before the result
             self.stdout.write(
@@ -461,6 +499,33 @@ class _Ingest:
             self.stdout.write("\n" + explanation.render())
             self.stdout.flush()
         return status
+
+    def _finish_view(
+        self,
+        result: IngestResult,
+        summary: dict[str, object],
+        records: dict[str, int],
+        findings: Sequence[IngestFinding | ReceiptFinding],
+    ) -> None:
+        """The live view's end: the package's own findings say which sources they are about."""
+        assert self.view is not None
+        by_source: dict[str, list[progress.FindingLike]] = {}
+        if result.committed:
+            try:
+                package = result.read_package()
+                by_source = progress.finding_sources(
+                    list(records_of(package.records, "ingest_finding"))
+                )
+            except NeptuneError:  # the receipt still gives the totals; per-source notes are lost
+                by_source = {}
+        sources = summary["sources"]
+        self.view.finish(
+            ingested=sources if isinstance(sources, int) else 0,
+            records=sum(records.values()) if result.committed else None,
+            findings=findings,
+            by_source=by_source,
+            elapsed=time.monotonic() - self.started,
+        )
 
     def _failed(self, code: str, message: str, error: NeptuneError | None) -> int:
         status = exit_codes.for_code(code) if error is not None else exit_codes.INTERNAL

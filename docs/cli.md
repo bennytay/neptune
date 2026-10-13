@@ -45,7 +45,8 @@ python -m neptune.cli ingest ...        # the same command
 | `--allow-network` | let the workspace use the network from now on; it remembers (ADR 0026 §6). A connector needs it |
 | `--job NAME` | the job's name in the package's envelope (`volatile/`); default a random token |
 | `--json` | JSON Lines on stdout (below) |
-| `-v, --verbose` | one progress line per job event on stderr |
+| `--progress`, `--no-progress` | the [live view](#the-live-view) on stderr, forced on or off. Default: on when stderr is a terminal and neither `--json` nor `-v` is given. `--progress` with `-v` is a usage error (exit 2) |
+| `-v, --verbose` | one raw line per job event on stderr (`neptune: <phase>: <kind> {details}`), for debugging; no live view |
 
 ## Connectors
 
@@ -103,9 +104,41 @@ rules in all, or one refused line fails the run with exit 6 before anything is r
 never half-applied. The file itself is ingested as evidence. A single-file source has no ignore
 rules.
 
+## The live view
+
+On a terminal, or with `--progress`, stderr shows one line per source as it finishes, then a
+summary (ADR 0074). The Unicode marks fall back to ASCII (`+ ! x`) if the stream cannot encode them.
+
+```console
+$ neptune ingest acceptance-2.2.0 --out pkg
+Neptune · ingesting acceptance-2.2.0/                                                56 files
+✓ sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml      config             20 records
+✓ sites/PLANT-2/cmms/work_orders.csv                       tabular            11 records  · 1 finding
+✗ sites/PLANT-2/…/patrol_2026-09-14_0.mcap                 mcap          truncated: what was read is kept, the rest flagged (+5 more)
+── 55 ingested · 1,444 records · 1 error · 36 warnings · 5.4 s ──
+unknown: 13 runs with no software identity (not guessed)
+flagged: 1 MCAP file cut off mid-chunk (what was read is kept)
+```
+
+- `✓ path  adapter  N records` is a source whose chunks were all committed; `· k findings` is how
+  many findings its chunks raised (any severity). `reused` instead of a count is a chunk the
+  workspace already held. A copy of the same bytes at another path is `(+1 identical copy)`.
+- `·` is a source no adapter claims or that is ambiguous (kept as evidence, counted `unread`);
+  `⚠ ... salvaged` and `✗ ... quarantined` are the job's verdicts after parsing, for a source
+  that lost a chunk. A dry run ends each line at the plan (`would read N chunks`).
+- After the last source, once the package exists, a `⚠` or `✗` line per source the package flagged
+  with a warning or error (worst first, at most 8), in a few words.
+- The rule counts sources, all records in the package (as the receipt does), errors and warnings
+  (not info), unread sources and the elapsed time.
+- `unknown:` lines are missing evidence (nothing was guessed); `flagged:` lines the other kinds.
+  Both name the top three kinds in plain words; the receipt (`receipt.md`) lists every finding.
+- Colour only for a terminal and without `NO_COLOR`. The view is stderr only and never changes
+  stdout, `--json` or the package; the elapsed time is not in the package.
+
 ## Output
 
-Quiet by default: on success, the four lines above on stdout and nothing on stderr. A dry run
+Quiet by default: on success, the four lines above on stdout and nothing on stderr (on a
+terminal, the live view). A dry run
 prints `planned SOURCE: N sources to ingest; nothing written` and a findings summary; with
 `--explain`, a blank line and the rendered explanation follow. Errors are
 one line on stderr: `neptune: <code>: <message>`.
