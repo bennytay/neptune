@@ -12,7 +12,9 @@
         "-m",
         "neptune_context.mcp",
         "--memory",
-        "${NEPTUNE_MEMORY_GRAPH:-packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz}"
+        "${NEPTUNE_MEMORY_GRAPH:-packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz}",
+        "--sources",
+        "${NEPTUNE_SOURCES:-harness/acceptance/sources.json}"
       ]
     }
   }

@@ -3,6 +3,7 @@
     python -m neptune_context.mcp --url https://neptune.example   # token from $NEPTUNE_TOKEN
     python -m neptune_context.mcp --memory graph.json[.gz]        # the local engine (ADR 0007)
     python -m neptune_context.mcp --packets tests/golden/packets  # fixtures: recorded answers only
+    ... --sources sources.json   # with any of them: name each cited source's file (ADR 0016)
 
 Claude Code: ``claude mcp add neptune -- python -m neptune_context.mcp --memory graph.json``, or
 the sample ``.mcp.json`` and skill in ``packages/neptune-context/claude/`` (ADR 0009 §6).
@@ -14,6 +15,9 @@ Memory's strict codec into its reference reader), and gives ``neptune_entities``
 no model is configured. A Ledger catalog is attached in code, as
 ``build_server(AsyncClient(LocalEngine(reader, catalog)))``: Context may construct no Ledger
 implementation itself, so without one, series windows, frames and ``neptune_hydrate`` say so.
+``--sources FILE`` reads a source index (``neptune_context.sources``, written by ``make demo``
+from the Ledger's catalog): each answer then lists every cited source's corpus path and place, and
+an unavailable ``neptune_hydrate`` says where the source is. Without it answers are as before.
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from neptune_context.query.plan import (
 )
 from neptune_context.retrieve.graph import GraphChannel
 from neptune_context.sdk import AsyncClient, NoModel, Planner, SdkError, StubEngine, entity_index
+from neptune_context.sources import SourceIndex, read_source_index
 
 if TYPE_CHECKING:
     from neptune_memory.schema.codec import GraphDocument
@@ -79,8 +84,8 @@ def local_client(
     return AsyncClient(LocalEngine(reader, channels=channels(document, reader)), planner=planner)
 
 
-async def serve(client: AsyncClient) -> None:
-    server = build_server(client)
+async def serve(client: AsyncClient, sources: SourceIndex | None = None) -> None:
+    server = build_server(client, sources=sources)
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
 
@@ -104,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--memory", type=Path, help="Memory graph document (JSON, or .json.gz) to answer over"
     )
     where.add_argument("--packets", type=Path, help="directory of recorded packet JSON (fixtures)")
+    parser.add_argument(
+        "--sources",
+        type=Path,
+        help="source index (JSON) naming each cited source's corpus path (ADR 0016)",
+    )
     planner = parser.add_mutually_exclusive_group()
     planner.add_argument(
         "--planner",
@@ -125,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.memory is None and (args.planner != "none" or args.planner_recordings is not None):
         parser.error("--planner and --planner-recordings need --memory (the planner's names)")
     try:
+        sources = None if args.sources is None else read_source_index(args.sources)
         if args.url is not None:
             client = AsyncClient(args.url, token=os.environ.get(TOKEN_ENV) or None)
         elif args.memory is not None:
@@ -134,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     except (SdkError, OSError, ValueError, ModelUnavailable) as error:
         sys.stderr.write(f"neptune mcp: {error}\n")
         return 2
-    anyio.run(serve, client)
+    anyio.run(serve, client, sources)
     return 0
 
 

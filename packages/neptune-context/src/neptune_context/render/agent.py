@@ -18,8 +18,12 @@
   citing every item summarised;
 - **Resolver findings**, then **Not answered** (the gaps, each naming the query member it concerns);
 - an ``Items:`` footer mapping ``[I<n>]`` to the item id (and the claim id for a claim, the id to
-  pass to ``neptune_why``), and the ``Evidence:`` footer of ADR 0003 §7 mapping ``[E<k>]`` to the
-  evidence ref's canonical JSON.
+  pass to ``neptune_why``);
+- with a source index (ADR 0016), a ``Sources:`` list naming, for every ``[E<k>]``, the source's
+  corpus path and its place in human terms (``"sites/a/work_orders.csv", row 15, column
+  "action"``); without one the list is not written and the answer is as before;
+- and the ``Evidence:`` footer of ADR 0003 §7 mapping ``[E<k>]`` to the evidence ref's canonical
+  JSON.
 
 Every statement of fact ends with a citation run holding at least one item key and one evidence
 key; every other line is a fixed header, a section heading or a gap line. ``parse_answer`` checks
@@ -74,7 +78,7 @@ from neptune_context.pinned import older_graph_notice
 from neptune_context.render.citations import FOOTER, CitationError, parse_citations
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from neptune.model.jsonvalue import JsonValue
     from neptune.model.knowledge import Knowledge
@@ -82,6 +86,7 @@ if TYPE_CHECKING:
     from neptune.model.time import Timestamp
     from neptune_context.packets.trails import DiffPoint
     from neptune_context.query.plan import Entity, Mention, PlannedQuery
+    from neptune_context.sources import SourceIndex
 
 T = TypeVar("T")
 
@@ -91,6 +96,7 @@ QUANTITIES: Final = "Quantities (declared values in the facts above, by predicat
 FINDINGS: Final = "Resolver findings:"
 GAPS: Final = "Not answered:"
 ITEMS: Final = "Items:"
+SOURCES: Final = "Sources:"
 _CHANGED: Final = "What changed since transaction {n} (the facts below are as Memory knew them):"
 
 _HEX: Final = r"[0-9a-f]{64}"
@@ -579,8 +585,9 @@ def _change(
     )
 
 
-def render_answer(packet: ContextPacket) -> str:
-    """The packet as cited sentences. Deterministic: the same packet, byte-identical text."""
+def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> str:
+    """The packet as cited sentences. Deterministic: the same packet (and source index),
+    byte-identical text. ``sources`` adds the ``Sources:`` list (ADR 0016)."""
     evidence = {ref: n for n, ref in enumerate(answer_evidence_refs(packet), start=1)}
     keys: dict[str, int] = {}  # item id and claim id -> item number
     for number, item in enumerate(packet.items, start=1):
@@ -641,9 +648,75 @@ def render_answer(packet: ContextPacket) -> str:
     for number, item in enumerate(packet.items, start=1):
         claim = f" {item.claim.id}" if isinstance(item, ClaimItem) else ""
         lines.append(f"[I{number}] {item.kind} {item.id}{claim}")
+    if sources is not None and evidence:
+        lines += ["", SOURCES]
+        lines += [f"[E{n}] {source_place(ref, sources)}" for ref, n in evidence.items()]
     lines += ["", FOOTER]
     lines += [f"[E{n}] {quote(ref.to_json())}" for ref, n in evidence.items()]
     return "\n".join(lines) + "\n"
+
+
+# --- Sources (ADR 0016) -------------------------------------------------------------------------
+
+UNPLACED: Final = "a source the source index does not place"
+_NAME: Final = re.compile(r"[a-z][a-z0-9_.:-]*")
+
+
+def _int(step: Mapping[str, JsonValue], key: str) -> int | None:
+    value = step.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _generic_step(step: Mapping[str, JsonValue]) -> str:
+    """An adapter's own step (``mcap:time_field``) or one with no reading of its own: its kind
+    and members as written, every value quoted unless it is an integer."""
+    kind = step.get("kind")
+    head = kind if isinstance(kind, str) and _NAME.fullmatch(kind) else quote(kind)
+    members = []
+    for key in sorted(k for k in step if k != "kind"):
+        value = step[key]
+        name = key if _NAME.fullmatch(key) else quote(key)
+        shown = str(value) if _int(step, key) is not None else quote(value)
+        members.append(f"{name} {shown}")
+    return " ".join([str(head), *members])
+
+
+def locator_place(step: Mapping[str, JsonValue]) -> str:
+    """One locator step in a reader's terms. Rows, columns, pages and characters count from 1
+    as a spreadsheet, viewer or editor shows them (a row counts the header, as the compiler's
+    ``Row`` does); bytes are offsets from 0; a pointer is quoted as written."""
+    kind = step.get("kind")
+    offset, length = _int(step, "offset"), _int(step, "length")
+    row, column, index = _int(step, "row"), _int(step, "column"), _int(step, "index")
+    start, end = _int(step, "start"), _int(step, "end")
+    if kind == "byte_range" and offset is not None and length is not None:
+        return f"{length} bytes at offset {offset}"
+    if kind == "page" and index is not None:
+        return f"page {index + 1}"
+    if kind == "row" and row is not None:
+        return f"row {row + 1}"
+    if kind == "row_cell" and row is not None and column is not None:
+        name = step.get("column_name")
+        shown = quote(name) if isinstance(name, str) else str(column + 1)
+        return f"row {row + 1}, column {shown}"
+    if kind == "span" and start is not None and end is not None:
+        return f"characters {start + 1}-{end}" if end > start else f"before character {start + 1}"
+    if kind == "json_pointer" and isinstance(step.get("pointer"), str):
+        pointer = step["pointer"]
+        return "the whole document" if pointer == "" else f"pointer {quote(pointer)}"
+    return _generic_step(step)
+
+
+def source_place(ref: EvidenceRef, sources: SourceIndex) -> str:
+    """Where ``ref`` points, for a person: the source's corpus path (each, when the same bytes
+    sit at several) and its locator steps, outermost first, joined by ``>``. Paths and names are
+    quoted: they are data. A source the index does not place says so; nothing is guessed."""
+    paths = sources.get(ref.source)
+    where = " or ".join(quote(p) for p in paths) if paths else UNPLACED
+    document = ref.to_json()
+    locator = document.get("locator") if isinstance(document, dict) else None
+    steps = [locator_place(s) for s in locator if isinstance(s, dict)] if locator else []
+    return ", ".join([where, " > ".join(steps)]) if steps else where
 
 
 _Group = tuple[tuple[str, str], list[Item], list[float | NonFinite]]
@@ -726,6 +799,8 @@ class ParsedAnswer:
     evidence: tuple[EvidenceRef, ...]
     statements: tuple[Statement, ...]
     trail_lines: tuple[TrailLine, ...] = ()
+    # The ``Sources:`` text of each evidence key, in key order; empty when the answer has none.
+    places: tuple[str, ...] = ()
 
     @property
     def claim_ids(self) -> tuple[str, ...]:
@@ -990,9 +1065,12 @@ def parse_answer(text: str) -> ParsedAnswer:
         lines.pop()
     footer = _last(lines, FOOTER, len(lines))
     start = _last(lines, ITEMS, footer)
+    listed = lines.index(SOURCES, start + 1, footer) if SOURCES in lines[start + 1 : footer] else -1
+    items_end = footer if listed < 0 else listed
+    places = () if listed < 0 else _places(lines[listed + 1 : footer], len(evidence))
     items: list[ItemKey] = []
-    for offset, line in enumerate(lines[start + 1 : footer], start=1):
-        if offset == footer - start - 1 and line == "":
+    for offset, line in enumerate(lines[start + 1 : items_end], start=1):
+        if offset == items_end - start - 1 and line == "":
             break
         match = _ITEM_LINE.fullmatch(line)
         if match is None or int(match.group(1)) != offset:
@@ -1066,7 +1144,25 @@ def parse_answer(text: str) -> ParsedAnswer:
         )
     trails.close()
     trails.check_gaps(gap_pointers)
-    return ParsedAnswer(tuple(items), evidence, tuple(statements), tuple(trails.parsed))
+    return ParsedAnswer(tuple(items), evidence, tuple(statements), tuple(trails.parsed), places)
+
+
+_PLACE_LINE: Final = re.compile(r"\[E([1-9][0-9]*)\] (\S.*)")
+
+
+def _places(lines: list[str], evidence: int) -> tuple[str, ...]:
+    """The ``Sources:`` lines: ``[E<k>] <place>`` for every evidence key ``1..n``, in order."""
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
+    out = []
+    for offset, line in enumerate(lines, start=1):
+        match = _PLACE_LINE.fullmatch(line)
+        if match is None or int(match.group(1)) != offset:
+            raise CitationError(f"Sources line {offset} is not [E{offset}] <place>: {line!r}")
+        out.append(match.group(2))
+    if len(out) != evidence:
+        raise CitationError(f"Sources lists {len(out)} keys; the Evidence footer has {evidence}")
+    return tuple(out)
 
 
 def literal_values(line: str) -> list[str]:
