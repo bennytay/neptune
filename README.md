@@ -67,7 +67,7 @@ export NEPTUNE_MEMORY_GRAPH=demo/graph.json
 
 Re-running the block is safe (`demo/` is rebuilt from scratch; an interrupted run leaves nothing it needs).
 
-### Use it from Claude Desktop
+**Use it from Claude Desktop.**
 
 Claude Desktop does not expand `${…}`, so give absolute paths. Add this to `claude_desktop_config.json`
 (Settings, Developer, Edit Config), put the real path of this clone in both places and the output of
