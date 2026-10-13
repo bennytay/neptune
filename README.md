@@ -31,9 +31,9 @@ MCP tools. Every answer is cited, and CI checks the citations by claim id, never
   log runs about a minute and a half late, LEG-01 went to firmware 3.2.0, and INC-0007's stated cause (the
   rack face 40 mm out).
 - **Not answered yet:** 12 gold claims are cited only through statements about something else (`co_cited`),
-  among them "the calibration caused it": Neptune states differences, never causes, and the CMMS and syslog
-  stops, cited by machine but not by time. 16 are gaps: the stops' 32 s conflict on the syslog side (cut at
-  the skill's budget), the bags' statuses (events
+  among them "the calibration caused it" (Neptune states differences, never causes) and the CMMS and syslog
+  stops' 32 s conflict (both stops are cited by machine, not by time). 16 are gaps: A. Novak's assertion that
+  the two stops are one event (cut at the skill's budget), the bags' statuses (events
   that cite the bag by byte range, not by row), SOP and survey text, the stale config export's values, the
   envelope register. Each is pinned with its reason in `harness/acceptance/answers.json`.
   No spatial baseline (MVL-135), no LeRobot export, no hosted service; pre-alpha APIs.
