@@ -80,3 +80,4 @@ header).
 | [0070](0070-bounded-crash-safe-package-io-atomic-writes-and-a-streaming-reader.md) | Bounded, crash-safe package I/O: atomic writes and a streaming reader | Accepted |
 | [0071](0071-status-and-safety-state-records-from-declared-log-types.md) | Status and safety-state records from declared log types | Accepted |
 | [0072](0072-manifest-declarations-as-stated-records-run-declarations-entities-and-snapshot-pins.md) | Manifest declarations as stated records: run declarations, entities and snapshot pins | Accepted |
+| [0074](0074-neptune-ingest-live-view-progress-on-stderr-for-people.md) | `neptune ingest`: a readable live view on stderr, for people | Accepted |

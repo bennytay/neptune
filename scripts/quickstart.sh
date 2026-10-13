@@ -11,11 +11,11 @@ set -euo pipefail
 
 # --- quickstart ---
 command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"; }
-[ -f harness/acceptance/gold.json ] || { git clone https://github.com/bennytay/neptune.git && cd neptune; }
+[ -f harness/acceptance/gold.json ] || { [ -d neptune/.git ] || git clone https://github.com/bennytay/neptune.git; cd neptune; }
 uv sync --all-packages --all-groups
 uv run --all-packages --all-groups python -m harness.demo --out demo
 ls demo/*.pdf
 cp packages/neptune-context/claude/mcp.sample.json .mcp.json
-mkdir -p .claude/skills && cp -R packages/neptune-context/claude/skills/neptune .claude/skills/
+mkdir -p .claude/skills/neptune && cp -R packages/neptune-context/claude/skills/neptune/. .claude/skills/neptune/
 export NEPTUNE_MEMORY_GRAPH=demo/graph.json NEPTUNE_SOURCES=demo/sources.json
 # --- end ---
