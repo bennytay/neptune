@@ -62,6 +62,11 @@ query and packet is valid at 1.6.0.
 
   A new optional member is a minor version (ADR 0002 §9).
 
+Not a contract: the source index (`neptune_context.sources`, [ADR 0016](adr/0016-readable-citations-a-source-index-beside-the-graph.md))
+that `python -m neptune_context.mcp --sources` reads is Context's own input format, written by
+`build_source_index` from the Ledger's `resolve` and read by Context; no other package parses it. The `Sources:`
+list it adds to an answer sits between the `Items:` and `Evidence:` footers and leaves the packet unchanged.
+
 ## Consumes
 
 Pins live in `src/neptune_context/pins.py`; `tests/test_pins_context.py` keeps them, `contracts/lock.toml`

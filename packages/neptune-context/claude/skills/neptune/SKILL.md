@@ -83,6 +83,10 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
   The `Items:` footer maps `I6` to the item id (and a claim's id); the `Evidence:` footer maps
   `E6` to the exact source. **Every fact you repeat must keep its keys**, for example
   "ServiceNow records ARM-3A's configuration as `TCP z=145.5 mm` [I6][E6]". Never state anything the answer does not hold.
+- The `Sources:` list (when the server has a source index) names each `[E]` key's file in the
+  corpus and the place in it: `[E6] "sites/PLANT-2/cmms/work_orders.csv", row 15, column
+  "Action"` (rows, pages and characters count from 1; bytes are offsets). When you cite, name the
+  file and place too, for example "[E6] (work_orders.csv row 15, column Action)".
 - `neptune_why` answers an indented outline, root claim first: `Corroborated by`, `Conflicts with
   (resolver finding ...)` and `Alternative reading` lines, each citing its claim and sources. Say
   "Memory holds this, and these sources agree or conflict", never a cause: Neptune states
@@ -109,13 +113,15 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 The server answers over a Memory graph document: JSON, or gzipped JSON when the name ends `.gz`
 (one gzip member; the size cap applies to the decompressed bytes). For the Demo v1 two-site corpus
 serve Memory's pipeline-built snapshot, `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`,
-from the repository root:
+from the repository root, with the acceptance corpus's source index (`--sources`, which names
+each cited file and place):
 
 ```
-claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "${NEPTUNE_MEMORY_GRAPH:-packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz}"
+claude mcp add neptune -- uv run --all-packages python -m neptune_context.mcp --memory "${NEPTUNE_MEMORY_GRAPH:-packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz}" --sources "${NEPTUNE_SOURCES:-harness/acceptance/sources.json}"
 ```
 
 or copy `packages/neptune-context/claude/mcp.sample.json` to `.mcp.json`. Set `NEPTUNE_MEMORY_GRAPH`
-to serve another graph document instead. `scripts/export_demo_graph.py` checks that the server can
+to serve another graph document instead, and `NEPTUNE_SOURCES` to its source index (`make demo`
+writes `demo/sources.json`). `scripts/export_demo_graph.py` checks that the server can
 read the snapshot and, given a target, copies it there.
 Add `--planner anthropic` (the `anthropic` extra and an API key) to let `neptune_plan` call a model.
