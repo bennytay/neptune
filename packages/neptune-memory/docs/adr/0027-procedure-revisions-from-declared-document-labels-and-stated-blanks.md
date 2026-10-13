@@ -36,7 +36,7 @@ A new deterministic consolidator reads the compiler's document records under a d
 revision table's header), and states each revision as an event on the machine it applies to, with each label,
 step and history row as a declared value, and each blank label or cell as a stated blank. Context's
 `compare_runs` carries what differs between the revisions of a procedure on the later run's machine, and the
-skill compares the runs for "what is unknown" too (Context ADR 0016). Nothing is inferred: "it passed only
+skill compares the runs for "what is unknown" too (Context ADR 0017). Nothing is inferred: "it passed only
 because" is the answer composing the stated limits, the 1.86 px result and the stated blanks.
 
 Forces:
@@ -95,7 +95,7 @@ Forces:
    An instant is `[d, d + 1)`.
 7. **graph-schema 2.3.0, a minor**: the `stated_blank` predicate and the `procedure_revision` kind
    (`VOCABULARY_VERSION = 13`). Nothing is narrowed. Context and Deploy pin 2.3.0 in the same change;
-   query-packet 1.6.0 adds `stated_blank` to its predicate enums (Context ADR 0016).
+   query-packet 1.6.0 adds `stated_blank` to its predicate enums (Context ADR 0017).
 
 ## Alternatives considered
 

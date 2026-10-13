@@ -13,7 +13,7 @@ The clause carries, as claim items, only what Memory states; it never says what 
   stated cause and each action's description. Placed on the runs' clock, only events between
   the two runs' starts count; on a clock no stated relation ties to the runs' (a CMMS's), the
   event is carried and a gap says it is not ordered against the runs. No clock is converted.
-- **Procedures** (ADR 0016). Every ``procedure_revision`` event that ``involves`` that machine,
+- **Procedures** (ADR 0017). Every ``procedure_revision`` event that ``involves`` that machine,
   grouped by the procedure its ``has_name`` states: what its revisions do not state alike. A
   revision's ``declared_value`` (key path, value) or ``stated_blank`` (the label) is carried when
   some other revision of the procedure does not state it; a revision-history row

@@ -1,4 +1,4 @@
-# 0016 — Procedure revisions in compare_runs, graph-schema 2.3.0 pin and query-packet 1.6.0
+# 0017 — Procedure revisions in compare_runs, graph-schema 2.3.0 pin and query-packet 1.6.0
 
 - Status: Accepted
 - Date: 2026-10-14

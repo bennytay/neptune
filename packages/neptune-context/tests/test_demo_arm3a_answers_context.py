@@ -11,7 +11,7 @@
 The answers must state, each with item and source citations, Memory ADR 0025's facts: WO-26-0911's
 four actions and its diagnosis, the CAL-ARM3A-0818 and -0911 names, the 1.86 px reprojection error
 and the two z offsets (each run's own copy of a configuration's value), and, from SOP-CELL-021's
-two revisions (Memory ADR 0027, Context ADR 0016), the acceptance limits, the dropped 10-pick
+two revisions (Memory ADR 0027, Context ADR 0017), the acceptance limits, the dropped 10-pick
 verification, revision C's history row and its two stated blanks. Pinned by claim id.
 """
 
