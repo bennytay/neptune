@@ -377,8 +377,8 @@ def _gaps(
             "/text",
             None,
             (),
-            "no lexical or vector channel is attached (MVL-142, MVL-143): the text clause is"
-            " not searched",
+            "this engine has no text index, so the text was not searched: name the subjects"
+            " to read instead",
         )
         gaps[gap.sort_key()] = gap
     return tuple(gaps[k] for k in sorted(gaps))

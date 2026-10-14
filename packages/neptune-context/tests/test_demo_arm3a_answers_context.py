@@ -162,7 +162,18 @@ def test_unchanged_values_are_not_carried(answers: dict[str, list[str]]) -> None
     # Both calibrations name the same frames: the base frame did not change, so it is no item.
     assert '"robot_base_frame"' not in changed
     assert not [c for c in _cited(changed) if c.startswith(UNCHANGED)]
-    assert "procedure revisions dated on their documents' own calendars" in changed
+    assert "procedure revisions dated by the documents themselves" in changed
+    assert "not placed before, between or after the two runs" in changed
+
+
+def test_the_comparison_reads_in_plain_words(answers: dict[str, list[str]]) -> None:
+    """ADR 0018 §5: units, declared values and gaps in an engineer's words; nothing dropped."""
+    changed = answers["what changed on ARM-3A since the last good run"][-1]
+    assert 'declared_value at ["reprojection_error"]: reals [1.86] (no unit stated)' in changed
+    for jargon in ("channel)", "carried, not ordered", "not applicable", "declared value at"):
+        assert jargon not in changed, jargon
+    assert "on clock rec:sha256:" in changed  # the clock each fact is valid on stays
+    assert parse_answer(changed).claim_ids
 
 
 SKILL: Final = (

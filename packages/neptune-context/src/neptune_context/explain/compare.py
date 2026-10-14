@@ -215,8 +215,9 @@ def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> Non
             GapCode.NOT_COVERED,
             at,
             sorted(unordered),
-            "maintenance on a clock no stated mapping relates to the runs' clocks: carried, not"
-            " ordered against the two runs",
+            "maintenance dated on its records' own clock, which no source ties to the runs'"
+            " clock: each is listed, but not placed before, between or after the two runs; give"
+            " the date it states",
         )
 
 
@@ -299,6 +300,7 @@ def _procedures(run: Run, at: str, tx: int, before: _Side, after: _Side) -> None
             GapCode.NOT_COVERED,
             at,
             sorted(unordered),
-            "procedure revisions dated on their documents' own calendars: carried, not ordered"
-            " against the two runs",
+            "procedure revisions dated by the documents themselves, which no source ties to the"
+            " runs' clock: each is listed, but not placed before, between or after the two runs;"
+            " give the date it states",
         )

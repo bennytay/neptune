@@ -96,6 +96,9 @@ its id, and a claim's id for neptune_why), [E1] the source (the Evidence: footer
 ref). Cite those keys when you state a fact, and never state one the answer does not hold. \
 When the server has a source index, a Sources: list names each [E] key's corpus file and place \
 (row, column, page, pointer); name them when you cite.
+- Answer first, in one or two plain sentences built from cited facts; then the facts; then at \
+most three caveats in plain words. Never open with disclaimers or repeat internal terms (channels, \
+gap codes).
 - "What changed" comes first when Memory has superseded a fact: say so before using it.
 - neptune_why answers an outline (root claim, then corroborating, conflicting and alternative \
 claims, each citing its sources) and neptune_diff change lines by predicate (opened, closed, \

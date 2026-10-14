@@ -374,7 +374,8 @@ def test_a_delta_is_stated_as_declared_and_its_names_stay_quoted_data() -> None:
     for injected in INJECTIONS:
         assert injected in recovered, injected[:40]
     (rotation,) = [ln for ln in lines if '"representation":"quaternion"' in ln]
-    assert '"adjustment":"none"' in rotation and "(not applicable, as declared)" in rotation
+    # A unit that does not apply is not mentioned (ADR 0018); a stated unit is, as declared.
+    assert '"adjustment":"none"' in rotation and "as declared" not in rotation
     for line in lines:
         # The numbers as Memory wrote them, never a verdict on their size.
         for word in ("large", "small", "significant", "drifted", "exceeds", "within", "ok"):

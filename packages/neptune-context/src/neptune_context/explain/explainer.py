@@ -130,7 +130,7 @@ class Explainer:
                 "/explain",
                 Channel.CATALOG,
                 (),
-                "no Ledger catalog is attached: evidence refs are cited, not resolved to bytes",
+                "sources are cited but not re-read: no Ledger catalog is connected",
             )
             return ChannelAnswer(Channel.CATALOG, gaps=(gap,))
         best: dict[EvidenceRef, tuple[float, Claim]] = {}
