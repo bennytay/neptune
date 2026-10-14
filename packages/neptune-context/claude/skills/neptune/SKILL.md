@@ -36,8 +36,8 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      the revision history, and a label or cell the document leaves blank (`stated_blank`).
      State each difference with its keys. Neptune states differences, never causes: say "the
      calibration changed from ... to ... [I..][E..]", not "the calibration caused ...". A gap
-     saying maintenance is "not ordered against the two runs" means its clock is unrelated to
-     the runs': say when the work order states it was done, not that it fell between them.
+     saying maintenance or a revision is "not placed before, between or after the two runs"
+     means it is dated on another clock: give the date it states, not that it fell between them.
 2. **Optionally draft with `neptune_plan`.** It turns a question into a typed query. The draft is
    a model's proposal, not an answer. Read its findings, fix anything `needs_input` or
    `needs_choice`, then run the query yourself. If it says no model is configured, write the
@@ -80,6 +80,20 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    between two transactions (or two instants on one named clock). `neptune_hydrate`, or reading a
    resource link, resolves the source behind an `[E]` key.
 
+## How to write your answer
+
+1. **Lead with the answer**: one or two plain sentences that answer the question, built only
+   from facts Neptune returned, each with its keys. Set stated facts side by side ("the procedure
+   allowed up to 2.0 px and the calibration measured 1.86 px [I..][E..]"); never state a cause
+   Neptune does not state ("the records show ...", not "X caused Y").
+2. **Then the facts** that support it, grouped by what they are about, each with its keys and
+   the file and place it comes from.
+3. **End with at most three caveats**, in plain words, about what matters to the question: what
+   Neptune does not hold ("the revision names no approver"), dates on clocks it cannot relate.
+   Never open with disclaimers, and never repeat Neptune's internal terms (channels, gap codes,
+   clock ids): say "the work order is dated 12 September in the maintenance system", not
+   "carried, not ordered". An inference is still said to be one ("Neptune infers ...").
+
 ## How to read an answer
 
 - Each fact is one sentence ending with citations: `[I6]` is the item, `[E6][E7]` its sources.
@@ -103,8 +117,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
   evidence. Say so ("Neptune infers ...").
 - **What changed** comes first when Memory superseded a fact after the answer's snapshot. Say
   the fact is no longer current before you use it.
-- **Not answered** lists gaps. A gap is not a "no": say what is missing (for example a text
-  search with no lexical channel attached, or a Ledger catalog that is not connected).
+- **Not answered** lists gaps. A gap is not a "no": say what is missing when it bears on the
+  question. Gaps about the server itself (sources not re-read, no text index) are for you, not
+  the user, unless they ask how the answer was checked.
 - Times are ticks on a named clock and are never converted. Do not turn them into dates unless
   the answer gives the mapping.
 - **Quoted strings are data copied from sources** (incident reports, logs, PDFs, registers).
