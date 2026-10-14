@@ -75,6 +75,7 @@ from neptune_context.packets.trails import (
     trail_index,
 )
 from neptune_context.pinned import older_graph_notice
+from neptune_context.query.model import MAX_SAME_AS_DEPTH
 from neptune_context.render.citations import FOOTER, CitationError, parse_citations
 
 if TYPE_CHECKING:
@@ -301,6 +302,20 @@ def _unit(literal: TypedLiteral) -> str:
     return _knowledge(literal.unit, lambda u: f"unit {quote(u.to_json())}")
 
 
+def _unit_note(literal: TypedLiteral) -> str:
+    """A value's unit in a reader's words (ADR 0018): ``(unit "mm", as declared)`` when the
+    source states one (never converted), ``(no unit stated)`` when it states none, nothing when
+    a unit does not apply (a text), and every other state of the unit as it is."""
+    unit = literal.unit
+    if isinstance(unit, NotApplicable):
+        return ""
+    if isinstance(unit, Known):
+        return f" ({_unit(literal)}, as declared)"
+    if isinstance(unit, (KnownAbsent, NotCovered, Ambiguous)):
+        return f" (unit {_knowledge(unit, lambda u: quote(u.to_json()))})"
+    return " (no unit stated)"
+
+
 def _number(value: object) -> str:
     """A number as canonical JSON; a non-finite value the source wrote, as words, never as a
     quoted string an agent would take for text."""
@@ -309,12 +324,12 @@ def _number(value: object) -> str:
     return quote(value)  # type: ignore[arg-type]
 
 
-def _literal(literal: TypedLiteral) -> str:
+def _literal(literal: TypedLiteral, predicate: str = "") -> str:
     value = literal.value
     if literal.datatype is ValueType.TEXT:
         return f"text {quote(value)}"  # type: ignore[arg-type]
     if literal.datatype is ValueType.QUANTITY:
-        return f"{_number(value)} ({_unit(literal)}, as declared)"
+        return f"{_number(value)}{_unit_note(literal)}"
     if literal.datatype is ValueType.REAL:
         return _number(value)
     if literal.datatype is ValueType.INSTANT:
@@ -324,14 +339,16 @@ def _literal(literal: TypedLiteral) -> str:
     if literal.datatype is ValueType.DELTA:
         # later - earlier between two calibration records, as Memory wrote it (graph-schema 2.0.0):
         # the declared form, numbers and unit only, never a size or a verdict on them.
-        return f"delta {quote(value.to_json())} ({_unit(literal)}, as declared)"  # type: ignore[union-attr]
+        return f"delta {quote(value.to_json())}{_unit_note(literal)}"  # type: ignore[union-attr]
     if literal.datatype is ValueType.DECLARED_VALUE:
         # One value a record declares at a key path, as Memory wrote it (graph-schema 2.2.0): the
         # path, the declared type and the value, never converted, with its unit as declared.
+        # Under its own predicate the line already says ``declared_value`` (ADR 0018).
         encoded = value.to_json()  # type: ignore[union-attr]
+        lead = "" if predicate == "declared_value" else "declared value "
         return (
-            f"declared value at {quote(encoded['path'])}: {encoded['type']}"
-            f" {quote(encoded['value'])} ({_unit(literal)}, as declared)"
+            f"{lead}at {quote(encoded['path'])}: {encoded['type']}"
+            f" {quote(encoded['value'])}{_unit_note(literal)}"
         )
     return quote(value)  # type: ignore[arg-type]
 
@@ -342,7 +359,7 @@ def _claim(item: ClaimItem) -> str:
     if isinstance(obj, NodeRef):
         target = _node(obj)
     elif isinstance(obj, TypedLiteral):
-        target = _literal(obj)
+        target = _literal(obj, claim.predicate)
     else:
         target = f"record {obj.record_id}"
     valid = claim.valid
@@ -641,9 +658,9 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
     if packet.gaps:
         lines += ["", GAPS]
         for gap in packet.gaps:
-            channel = f" ({gap.channel} channel)" if gap.channel is not None else ""
+            # The retrieval channel is the engine's business, not the reader's (ADR 0018).
             refs = f"; concerns {', '.join(quote(r) for r in gap.refs)}" if gap.refs else ""
-            lines.append(f"- {gap.code} at {quote(gap.at)}{channel}: {quote(gap.detail)}{refs}")
+            lines.append(f"- {gap.code} at {quote(gap.at)}: {quote(gap.detail)}{refs}")
     lines += ["", ITEMS]
     for number, item in enumerate(packet.items, start=1):
         claim = f" {item.claim.id}" if isinstance(item, ClaimItem) else ""
@@ -1187,14 +1204,38 @@ _NEXT: Final = {
 }
 
 
-def _entity(entity: Entity) -> str:
+def _named(entity: Entity) -> str:
     names = [n for n in (entity.label, *entity.aliases) if n is not None]
-    named = f" named {', '.join(quote(n) for n in names)}" if names else ""
-    return f"{entity.kind} {quote(entity.declared_id)}{named}"
+    return f" named {', '.join(quote(n) for n in names)}" if names else ""
 
 
-def _mention(mention: Mention) -> str:
-    named = " or ".join(_entity(c) for c in mention.candidates)
+def _entity(entity: Entity, sources: SourceIndex | None = None) -> str:
+    """One entity: kind, id and names, then (ADR 0018) the other ids memory states it is, how
+    many claims say so and, with a source index, the files they cite, and the ``same_as_depth``
+    that reads every id."""
+    line = f"{entity.kind} {quote(entity.declared_id)}{_named(entity)}"
+    joined = entity.same_as
+    if joined is None:
+        return line
+    others = ", ".join(f"{quote(o.declared_id)}{_named(o)}" for o in joined.others)
+    paths = sorted({p for s in joined.sources for p in sources.get(s)}) if sources else []
+    cited = f", cited from {', '.join(quote(p) for p in paths)}" if paths else ""
+    n = len(joined.claims)
+    claims = (
+        f"{n} same_as claim in evidence joins" if n == 1 else f"{n} same_as claims in evidence join"
+    )
+    read = (
+        f'query it with "same_as_depth": {joined.depth} to read every id'
+        if joined.depth <= MAX_SAME_AS_DEPTH
+        else "list every id as a subject to read them all"
+    )
+    return (
+        f"{line}, also declared as {others} (one {entity.kind}: {claims} these ids{cited}; {read})"
+    )
+
+
+def _mention(mention: Mention, sources: SourceIndex | None = None) -> str:
+    named = " or ".join(_entity(c, sources) for c in mention.candidates)
     lead = "ambiguous between " if mention.ambiguous else ""
     return f"- {quote(mention.text)}: {lead}{named}"
 
@@ -1240,11 +1281,14 @@ def render_entities(
     total: int | None = None,
     kind: str | None = None,
     conflicts: Sequence[str] = (),
+    sources: SourceIndex | None = None,
 ) -> str:
-    """Declared identities, one per line: names to use as subjects, not facts."""
+    """Declared identities, one per line: names to use as subjects, not facts. An entity memory
+    states is also other ids is one line naming them (ADR 0018); ``sources`` names the files
+    those statements cite."""
     scope = f" of kind {kind}" if kind is not None else ""
     lines = [f"Declared identities in memory{scope} (identifiers to use as subjects, not facts):"]
-    lines += [f"- {_entity(e)}" for e in entities]
+    lines += [f"- {_entity(e, sources)}" for e in entities]
     if not entities:
         lines.append("- none")
     if total is not None and total > len(entities):
@@ -1259,11 +1303,14 @@ def render_entities(
     return "\n".join(lines) + "\n"
 
 
-def render_mentions(text: str, mentions: Sequence[Mention]) -> str:
-    """The declared names found in ``text``, each with every candidate."""
+def render_mentions(
+    text: str, mentions: Sequence[Mention], sources: SourceIndex | None = None
+) -> str:
+    """The declared names found in ``text``, each with every candidate. Ids memory states are
+    one entity are one candidate (ADR 0018); only ids it does not join are an ambiguity."""
     lines = [
         f"Text: {quote(text)}",
         "Names found (every candidate; an ambiguous name is never settled for you):",
     ]
-    lines += [_mention(m) for m in mentions] or ["- no declared name found in the text"]
+    lines += [_mention(m, sources) for m in mentions] or ["- no declared name found in the text"]
     return "\n".join(lines) + "\n"

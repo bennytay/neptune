@@ -14,7 +14,7 @@ Resolver findings:
 - clock_mismatch between item I1 and claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf. [I1][E1]
 
 Not answered:
-- unresolvable at "" (catalog channel): "cited sources no registered package holds at as_of; the citations stand"; concerns "sha256:68c74b9743851a06b3c3d669a28a887ed1475faf75e629c9a048621c08779b79"
+- unresolvable at "": "cited sources no registered package holds at as_of; the citations stand"; concerns "sha256:68c74b9743851a06b3c3d669a28a887ed1475faf75e629c9a048621c08779b79"
 
 Items:
 [I1] claim item:sha256:8f5774c6c4bdb7a6dbd90ca97b3ba59c1d692ef7c2b708b8decf36cd31a20328 claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a

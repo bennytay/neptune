@@ -9,7 +9,8 @@ The clause carries, as claim items, only what Memory states; it never says what 
   value is carried on both sides, a value only one run's configurations state on that side.
   Values both runs state alike are not carried: they did not change.
 - **Maintenance.** Every ``maintenance`` event that ``involves`` the later run's machine (the
-  run's ``recorded_by`` machine and the ids memory states are ``same_as`` it), with its name,
+  run's ``recorded_by`` machine and the ids memory states are ``same_as`` it, directly or
+  through each other: ADR 0018), with its name,
   stated cause and each action's description. Placed on the runs' clock, only events between
   the two runs' starts count; on a clock no stated relation ties to the runs' (a CMMS's), the
   event is carried and a gap says it is not ordered against the runs. No clock is converted.
@@ -22,13 +23,13 @@ The clause carries, as claim items, only what Memory states; it never says what 
   carries its name. A procedure with one revision states no change and carries nothing. A
   revision is dated on its document's own calendar, so it is carried with a gap saying it is not
   ordered against the runs.
-- **Procedures for the parts the maintenance changed** (ADR 0018). Every ``procedure_revision``
+- **Procedures for the parts the maintenance changed** (ADR 0019). Every ``procedure_revision``
   event that ``involves`` a part (an ``asset``) a carried maintenance event ``involves``, directly
   or through the ``same_as`` claims memory states between parts: what it states (its name, each
   label and step, each blank) with the claims that link it (the work order's ``involves``, each
   ``same_as`` on the way, the procedure's ``involves``). It says what the document advises for
   that part, never what was done; it is dated on its own calendar, so a gap says it is not
-  ordered against the runs.
+  placed against the runs.
 - The runs' own names and machines.
 
 Nothing is inferred and nothing is ranked by meaning: every carried claim scores 1.
@@ -163,11 +164,22 @@ def _carry(run: Run, claim: Claim) -> None:
 
 
 def _machines(run: Run, tx: int, side: _Side) -> set[NodeRef]:
+    """The run's ``recorded_by`` machines and every machine ``same_as`` joins to them, directly
+    or through others (ADR 0018): the same set whichever of a machine's ids the run names."""
     found = side.machines()
-    for machine in sorted(found, key=lambda n: n.node_id):
-        for claim in run.touching(machine, tx):
-            if claim.predicate == SAME_AS and not run.withheld(claim):
-                found |= {n for n in (claim.subject, claim.object) if isinstance(n, NodeRef)}
+    frontier = sorted(found, key=lambda n: n.node_id)
+    while frontier:
+        reached: set[NodeRef] = set()
+        for machine in frontier:
+            for claim in run.touching(machine, tx):
+                if claim.predicate == SAME_AS and not run.withheld(claim):
+                    reached |= {
+                        n
+                        for n in (claim.subject, claim.object)
+                        if isinstance(n, NodeRef) and n.node_type is NodeType.MACHINE
+                    }
+        frontier = sorted(reached - found, key=lambda n: n.node_id)
+        found |= reached
     return {n for n in found if n.node_type is NodeType.MACHINE}
 
 
@@ -214,8 +226,9 @@ def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> lis
             GapCode.NOT_COVERED,
             at,
             sorted(unordered),
-            "maintenance on a clock no stated mapping relates to the runs' clocks: carried, not"
-            " ordered against the two runs",
+            "maintenance dated on its records' own clock, which no source ties to the runs'"
+            " clock: each is listed, but not placed before, between or after the two runs; give"
+            " the date it states",
         )
     return sorted(carried)
 
@@ -287,8 +300,9 @@ def _part_procedures(run: Run, at: str, tx: int, events: Sequence[str]) -> None:
             GapCode.NOT_COVERED,
             at,
             sorted(found),
-            "procedures for the parts the maintenance changed, dated on their documents' own"
-            " calendars: carried as what they advise, not ordered against the two runs",
+            "procedures for the parts the maintenance changed, dated by the documents themselves:"
+            " each is listed as what it advises, not as what was done, and not placed before,"
+            " between or after the two runs; give the date it states",
         )
 
 
@@ -371,6 +385,7 @@ def _procedures(run: Run, at: str, tx: int, before: _Side, after: _Side) -> None
             GapCode.NOT_COVERED,
             at,
             sorted(unordered),
-            "procedure revisions dated on their documents' own calendars: carried, not ordered"
-            " against the two runs",
+            "procedure revisions dated by the documents themselves, which no source ties to the"
+            " runs' clock: each is listed, but not placed before, between or after the two runs;"
+            " give the date it states",
         )

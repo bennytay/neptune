@@ -71,7 +71,9 @@ SUPPORT_REF: Final = "$support:"
 # An argument written "$named:<kind>:<name>" is the id an earlier ``neptune_entities`` answer of
 # the question lists for that kind and name (``<kind> "<id>" named "<name>"``; the first id, sorted,
 # when one name has several, as SKILL.md allows for copies of one run): how the skill finds a run
-# or an incident by name. Calls never hard-code a content-addressed id.
+# or an incident by name. An id listed under another as ``also declared as "<id>" named "<name>"``
+# (Context ADR 0018: ids memory states are one entity) is that kind's id too: which of a stated
+# same_as group leads the line depends only on how its ids sort. Calls never hard-code an id.
 NAMED_REF: Final = "$named:"
 CALL_TIMEOUT_S: Final = 120
 SMOKE_SOURCE: Final = "context LocalEngine over the memory stage's graph, through neptune_query"
@@ -351,8 +353,16 @@ class Scorer:
 
 def _named(ref: str, earlier: Sequence[str]) -> str:
     kind, _, name = ref.removeprefix(NAMED_REF).partition(":")
-    pattern = re.compile(rf'{re.escape(kind)} "([^"]+)" named "{re.escape(name)}"')
-    found = sorted({str(m) for text in earlier for m in pattern.findall(text)})
+    named = rf'"([^"]+)" named "{re.escape(name)}"'
+    found = sorted(
+        {
+            str(m)
+            for text in earlier
+            for line in text.splitlines()
+            for m in re.findall(rf"{re.escape(kind)} {named}", line)
+            + (re.findall(rf"(?:also declared as |, ){named}", line) if f"{kind} " in line else [])
+        }
+    )
     if not found:
         raise LookupError(f"{ref}: no earlier neptune_entities answer names it")
     return found[0]

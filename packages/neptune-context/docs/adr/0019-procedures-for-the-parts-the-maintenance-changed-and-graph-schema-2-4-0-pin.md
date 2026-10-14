@@ -1,4 +1,4 @@
-# 0018 — Procedures for the parts the maintenance changed, in compare_runs, and the graph-schema 2.4.0 pin
+# 0019 — Procedures for the parts the maintenance changed, in compare_runs, and the graph-schema 2.4.0 pin
 
 - Status: Accepted
 - Date: 2026-10-14
@@ -23,8 +23,8 @@ so nothing reached it. Graph-schema 2.4.0 is a golden-only release (identity v5)
    claims memory states between assets (withheld inferred claims excluded): every `procedure_revision` event
    that `involves` one of those parts carries its `has_name`, each `declared_value` and each `stated_blank`, with
    the claims that link it (the event's `involves`, each `same_as` on the way, the procedure's `involves`). A
-   `not_covered` gap says they are dated on their documents' own calendars and carried as what they advise, not
-   ordered against the runs. Every carried claim scores 1. Nothing joins a part by equal text: without a stated
+   `not_covered` gap says they are dated by the documents themselves, listed as what they advise, not what was
+   done, and not placed before, between or after the runs. Every carried claim scores 1. Nothing joins a part by equal text: without a stated
    `same_as`, the vendor's FS-0340 and the CMMS serial are two parts and nothing is carried.
 3. **The skill** reads such a procedure as what should have been done, compares it step by step with what the
    work order records, and never states a step was done because the procedure requires it.

@@ -55,5 +55,5 @@ hand-over states it. No gold question asked about the bulletin's advice: it was 
 ## Consequences
 
 - The acceptance snapshot gains one stated `same_as` between the finger set's two ids and the bulletin's claims;
-  Context's comparison reaches the bulletin from WO-26-0911 (Context ADR 0018).
+  Context's comparison reaches the bulletin from WO-26-0911 (Context ADR 0019).
 - A later source naming the finger set in a third namespace needs its own statement in the same corpus version.

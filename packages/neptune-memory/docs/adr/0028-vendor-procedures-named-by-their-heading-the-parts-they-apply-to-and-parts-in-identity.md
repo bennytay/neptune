@@ -36,7 +36,7 @@ its `Issued` label, its steps under `Procedure`, and the part its `Applies to` l
 declared vendor namespace. The corpus states, as a reviewer's `same_identity` assertion, that the CMMS serial
 and the vendor part are one finger set (Platform ADR 0014); identity joins them with a stated `same_as`, so a
 path WO-26-0911 → `serial:FS-0340` → `vendor.part:FS-0340` → the bulletin exists only because someone said so.
-Context's comparison carries the procedures for the parts the maintenance changed (Context ADR 0018).
+Context's comparison carries the procedures for the parts the maintenance changed (Context ADR 0019).
 
 Forces: nothing inferred; the bulletin is the vendor's stated advice, which may say what should have been done
 and never what was (gold trap T5); its hidden comment must never be read as a step, a value or evidence (gold

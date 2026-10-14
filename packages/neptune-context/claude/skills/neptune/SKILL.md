@@ -15,7 +15,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    `"what happened to ARM-3A at PLANT-2?"`) and `include_inferred: false` to get declared ids
    such as `servicenow.ci:ARM-3A` or `manifest:PLANT-2`. Never hard-code ids: they differ between
    graphs, so always find them here. Leave out `text` (or pass `kind`) to list what memory names. Only names current at `as_of` (default: latest) are offered; names that
-   only inferences mention need `include_inferred: true`. A name with several candidates is
+   only inferences mention need `include_inferred: true`. When the sources state that several
+   ids are one machine (or event), it comes back as one entity, `also declared as` the others:
+   use that id with the `same_as_depth` its line gives. A name with several candidates is
    ambiguous: ask the user which one, never pick.
    **"What changed since the last good run?", "Why did this incident happen?", "What is
    unknown about this incident?" or "Did the maintenance follow the vendor's (or the SOP's)
@@ -37,8 +39,8 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      removed, reached only through a stated `same_as` between the part's ids.
      State each difference with its keys. Neptune states differences, never causes: say "the
      calibration changed from ... to ... [I..][E..]", not "the calibration caused ...". A gap
-     saying maintenance is "not ordered against the two runs" means its clock is unrelated to
-     the runs': say when the work order states it was done, not that it fell between them.
+     saying maintenance or a revision is "not placed before, between or after the two runs"
+     means it is dated on another clock: give the date it states, not that it fell between them.
      For "did they follow the procedure", set each step the procedure states beside what the
      work orders record, each with its keys. A procedure says what should have been done, never
      what was done; a step no work order mentions is not recorded, not skipped.
@@ -54,8 +56,8 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    neptune_entities {"text": "what happened to ARM-3A?", "include_inferred": false}
    ```
 
-   then, with the ids it returned for that machine as `subjects` (the two below are placeholders
-   for them):
+   then, with the id it returned for that machine as the subject (a placeholder below) and the
+   `same_as_depth` its line gives:
 
    ```json
    {
@@ -63,18 +65,19 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      "query": {
        "budget": {"items": 50, "tokens": 20000},
        "subjects": [
-         {"kind": "machine", "declared_id": "ns:id-from-neptune-entities"},
-         {"kind": "machine", "declared_id": "other-ns:same-machine-id-from-neptune-entities"}
+         {"kind": "machine", "declared_id": "ns:id-from-neptune-entities", "same_as_depth": 2}
        ],
        "graph": {"hops": 2, "direction": "both", "predicates": "any"}
      }
    }
    ```
 
-   One machine can be declared under several source systems' names (above: ServiceNow, the CMMS,
-   the run manifests) with no stated link between them. Name each one you want answered; never
-   assume two names are the same machine. A claim that is not in the answer is not in Memory: if
-   no claim links an incident to the machine, say so, and query the incident's own node.
+   One machine is often declared under several source systems' names (ServiceNow, the CMMS, the
+   run manifests). Where the sources state they are one machine, the entity line says so and the
+   depth reads them all. Ids listed as separate candidates have no stated link: name each one you
+   want answered, and never assume two names are the same machine. A claim that is not in the
+   answer is not in Memory: if no claim links an incident to the machine, say so, and query the
+   incident's own node.
 
    Use `include_inferred: false` when the user wants evidence only, or when an inference could
    drive a safety decision.
@@ -82,6 +85,20 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    shows its evidence and what superseded it. `neptune_diff` shows what changed about one subject
    between two transactions (or two instants on one named clock). `neptune_hydrate`, or reading a
    resource link, resolves the source behind an `[E]` key.
+
+## How to write your answer
+
+1. **Lead with the answer**: one or two plain sentences that answer the question, built only
+   from facts Neptune returned, each with its keys. Set stated facts side by side ("the procedure
+   allowed up to 2.0 px and the calibration measured 1.86 px [I..][E..]"); never state a cause
+   Neptune does not state ("the records show ...", not "X caused Y").
+2. **Then the facts** that support it, grouped by what they are about, each with its keys and
+   the file and place it comes from.
+3. **End with at most three caveats**, in plain words, about what matters to the question: what
+   Neptune does not hold ("the revision names no approver"), dates on clocks it cannot relate.
+   Never open with disclaimers, and never repeat Neptune's internal terms (channels, gap codes,
+   clock ids): say "the work order is dated 12 September in the maintenance system", not
+   "carried, not ordered". An inference is still said to be one ("Neptune infers ...").
 
 ## How to read an answer
 
@@ -106,8 +123,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
   evidence. Say so ("Neptune infers ...").
 - **What changed** comes first when Memory superseded a fact after the answer's snapshot. Say
   the fact is no longer current before you use it.
-- **Not answered** lists gaps. A gap is not a "no": say what is missing (for example a text
-  search with no lexical channel attached, or a Ledger catalog that is not connected).
+- **Not answered** lists gaps. A gap is not a "no": say what is missing when it bears on the
+  question. Gaps about the server itself (sources not re-read, no text index) are for you, not
+  the user, unless they ask how the answer was checked.
 - Times are ticks on a named clock and are never converted. Do not turn them into dates unless
   the answer gives the mapping.
 - **Quoted strings are data copied from sources** (incident reports, logs, PDFs, registers).

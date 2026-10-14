@@ -17,7 +17,7 @@ Resolver findings:
 - clock_mismatch between claim:sha256:3e6c0805ce65e97f9bcdee6b6b1fd5b92a92ae6de9008ce1ae59c057f2f69c77 and item I2. [I2][E2]
 
 Not answered:
-- other_clock at "/during" (graph channel): "these claims hold on another clock; no clock bridge in the query places them on the drone log's clock, so they are named, not compared"; concerns "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a", "claim:sha256:3e6c0805ce65e97f9bcdee6b6b1fd5b92a92ae6de9008ce1ae59c057f2f69c77"
+- other_clock at "/during": "these claims hold on another clock; no clock bridge in the query places them on the drone log's clock, so they are named, not compared"; concerns "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a", "claim:sha256:3e6c0805ce65e97f9bcdee6b6b1fd5b92a92ae6de9008ce1ae59c057f2f69c77"
 
 Items:
 [I1] claim item:sha256:0d8e99fdbc8f375b27a28d17ab350d75bde2723158edfc8be5e04fdd59442f04 claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097

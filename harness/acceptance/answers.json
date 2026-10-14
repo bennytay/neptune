@@ -112,7 +112,7 @@
             "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
             "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "neptune_compare_runs states WO-26-0911's actions, among them \"Remove and refit wrist camera bracket\" and \"Hand-eye recalibration deferred: ChArUco board out for repair\", at the work order's time (2026-09-10). Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0018), which cites the work order's Installed Serial cell and states no more of this claim."
+          "reason": "neptune_compare_runs states WO-26-0911's actions, among them \"Remove and refit wrist camera bracket\" and \"Hand-eye recalibration deferred: ChArUco board out for repair\", at the work order's time (2026-09-10). Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q1.C4": {
           "claims": [
@@ -187,7 +187,7 @@
             "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
             "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "Only WO-26-0911's actions cite its row; the comparison carries no statement that the controller software (5.6.0) or the application (PALLET_C3 1.4.0) stayed the same. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0018), which cites the work order's Installed Serial cell and states no more of this claim."
+          "reason": "Only WO-26-0911's actions cite its row; the comparison carries no statement that the controller software (5.6.0) or the application (PALLET_C3 1.4.0) stayed the same. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         }
       },
       "gaps": {
@@ -216,7 +216,7 @@
             "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
             "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "The comparison states WO-26-0911's actions \"Replace finger set with long set FS-0340 (+6.0 mm)\" and \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\". The runs' start lines are not stated. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0018), which cites the work order's Installed Serial cell and states no more of this claim."
+          "reason": "The comparison states WO-26-0911's actions \"Replace finger set with long set FS-0340 (+6.0 mm)\" and \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\". The runs' start lines are not stated. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q2.C2": {
           "claims": [
@@ -228,7 +228,7 @@
             "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
             "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "The comparison states WO-26-0911's action \"Remove and refit wrist camera bracket\". Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0018), which cites the work order's Installed Serial cell and states no more of this claim."
+          "reason": "The comparison states WO-26-0911's action \"Remove and refit wrist camera bracket\". Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q2.C3": {
           "claims": [
@@ -494,7 +494,7 @@
             "claim:sha256:f214a3a13dc49f5b392162d1a6428775fb2202e9d63059aea79d3cf5c65f723a",
             "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "The comparison now carries WO-26-0911's actions and CAL-ARM3A-0911's values, and \"ARM-3A has firmware 5.6.0\" cites the work order's Firmware After cell, but no statement says the camera's pose after the refit was never measured. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0018), which cites the work order's Installed Serial cell and states no more of this claim."
+          "reason": "The comparison now carries WO-26-0911's actions and CAL-ARM3A-0911's values, and \"ARM-3A has firmware 5.6.0\" cites the work order's Firmware After cell, but no statement says the camera's pose after the refit was never measured. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q4.C6": {
           "claims": [

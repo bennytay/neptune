@@ -10,7 +10,7 @@ Facts:
 2. Observed: configuration record rec:sha256:db51ab20577a4798da4bc4014bb82c195f9ca6e5d3cd7fe9f455c4dbeeb1ec94 ("calibration") configures unknown; rests on no claims. [I2][E1]
 
 Not answered:
-- not_covered at "/regions/0" (spatial channel): "Memory's spatial view answers not_covered until its spatial structure lands (G3): the scene rests on frame-graph records only, with no placed nodes"
+- not_covered at "/regions/0": "Memory's spatial view answers not_covered until its spatial structure lands (G3): the scene rests on frame-graph records only, with no placed nodes"
 
 Items:
 [I1] scene item:sha256:dfc131dbca6a47318c92df3fb9522c0dd09324aed564dbee95bc7c6ede9b3f42
