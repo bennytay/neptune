@@ -318,7 +318,7 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
 | `neptune_diff` | what changed about one subject | `subject`, `before`, `after`, `include_inferred`, `as_of`, `max_items` |
 | `neptune_hydrate` | what the Ledger knows about a cited source | `evidence`, `as_of` |
 | `neptune_plan` | a typed query drafted from a question (inferred; never run) | `question`, `as_of` |
-| `neptune_entities` | declared identities current at `as_of`, to use as subjects | `include_inferred`, `text` (find names in it), `kind`, `as_of` |
+| `neptune_entities` | declared identities current at `as_of`, to use as subjects; ids the sources state are one entity (`same_as`, never inferred) are one line naming the others and the `same_as_depth` that reads them all ([ADR 0018](adr/0018-stated-same-as-names-one-entity-and-plain-language-answers.md)) | `include_inferred`, `text` (find names in it), `kind`, `as_of` |
 
 - A packet answer is cited sentences (`render.agent.render_answer`):
   - a header with the snapshot, the clock and the inference policy;
@@ -328,7 +328,8 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
     finding, a repeat and every cap or gap says so, and a diff says `held only between the two points` for a
     version that opened and closed inside the window;
   - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`;
-  - quantities by declared unit, findings and gaps;
+  - quantities by declared unit, findings and gaps; a value's unit reads `(unit "mm", as declared)`, or
+    `(no unit stated)` when the source gives none, and nothing for a text ([ADR 0018](adr/0018-stated-same-as-names-one-entity-and-plain-language-answers.md));
   - an `Items:` footer (item and claim ids) and the `Evidence:` footer.
 
   One resource link follows per evidence ref. Reading `neptune://evidence/<token>?as_of=N` hydrates it at the

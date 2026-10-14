@@ -33,6 +33,7 @@ from neptune_context.query.plan.resolver import (
     Entity,
     EntityResolver,
     Mention,
+    SameAs,
 )
 from neptune_context.query.plan.result import (
     ModelLineage,
@@ -64,6 +65,7 @@ __all__ = [
     "RecordingClient",
     "RecordingMissing",
     "ReplayClient",
+    "SameAs",
     "Severity",
     "anthropic_arguments",
     "build_request",

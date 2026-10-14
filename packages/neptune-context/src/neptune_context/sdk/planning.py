@@ -10,14 +10,18 @@ declared identifiers a Memory graph document names (``servicenow.ci:ARM-3A``, ``
 because the catalog API cannot list declared identifiers yet (ADR 0005 §3). Content-addressed
 node ids (runs, events, clocks: ``record:rec:sha256:...``) are not names anyone types and are left
 out, and so is an identifier the graph declares under two kinds (never settled silently). Only
-names that stated or observed claims current at the snapshot mention are offered.
+names that stated or observed claims current at the snapshot mention are offered. Ids joined by
+stated or observed ``same_as`` claims are one entity, listed once under its representative (the
+least declared id) naming the others (Context ADR 0018); an inferred ``same_as`` joins nothing.
 ``NoModel`` stands in when no model is configured: every plan is then a visible ``failed`` plan
 with ``model_unavailable``, never a guess.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
@@ -37,14 +41,16 @@ from neptune_context.query.plan import (
     ModelClient,
     ModelUnavailable,
     PlannedQuery,
+    SameAs,
     choose,
     plan,
 )
 from neptune_context.sdk.errors import ErrorCode, SdkError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
+    from neptune_memory.schema.claim import Claim
     from neptune_memory.schema.codec import GraphDocument
 
     from neptune_context.packets.model import ContextPacket
@@ -142,6 +148,72 @@ def _declared(node: NodeRef) -> Entity | None:
 
 
 _NAMED_KINDS: Final = frozenset({"event", "run"})
+SAME_AS: Final = "same_as"
+
+
+def _joined(entities: list[Entity], same_as: Iterable[Claim]) -> list[Entity]:
+    """``entities`` with the ids ``same_as`` evidence joins made one (Context ADR 0018).
+
+    ``same_as`` claims between two nodes of one kind join them; ``same_as`` is an identity, so
+    joins are transitive, through nodes that are not offered as names too (an unnamed event).
+    Two or more offered entities in one joined group are listed under their representative,
+    the least declared id (deterministic, and the same whichever id a caller named), whose
+    ``SameAs`` names the others, the group's claims and their sources, and the most
+    ``same_as`` steps from an offered id to any node of the group: a query subject at that
+    ``same_as_depth`` reads the same nodes whichever offered id it names. Every id stays
+    declared on its own."""
+    Key = tuple[str, str]
+    neighbours: dict[Key, set[Key]] = defaultdict(set)
+    edges: dict[str, tuple[Claim, Key]] = {}
+    for claim in same_as:
+        a, b = claim.subject, claim.object
+        if not isinstance(b, NodeRef) or a == b or a.node_type != b.node_type:
+            continue
+        left, right = (str(a.node_type), a.node_id), (str(b.node_type), b.node_id)
+        neighbours[left].add(right)
+        neighbours[right].add(left)
+        edges[claim.id] = (claim, left)
+    group: dict[Key, frozenset[Key]] = {}
+    for key in sorted(neighbours):
+        if key not in group:
+            members = frozenset(_reach(key, neighbours))
+            group.update(dict.fromkeys(members, members))
+    offered: dict[frozenset[Key], list[Entity]] = defaultdict(list)
+    for entity in entities:
+        found = group.get((entity.kind, entity.declared_id))
+        if found is not None:
+            offered[found].append(entity)
+    out = {e.declared_id: e for e in entities}
+    for members, named in offered.items():
+        if len(named) < 2:
+            continue
+        lead, *rest = sorted(named, key=lambda e: e.declared_id)
+        inside = sorted((c for c, k in edges.values() if k in members), key=lambda c: c.id)
+        out[lead.declared_id] = dataclasses.replace(
+            lead,
+            same_as=SameAs(
+                others=tuple(rest),
+                claims=tuple(c.id for c in inside),
+                sources=tuple(
+                    sorted({str(r.source) for c in inside for r in c.provenance.evidence})
+                ),
+                depth=max(max(_reach((e.kind, e.declared_id), neighbours).values()) for e in named),
+            ),
+        )
+    return [out[e.declared_id] for e in entities]
+
+
+def _reach(
+    start: tuple[str, str], neighbours: Mapping[tuple[str, str], set[tuple[str, str]]]
+) -> dict[tuple[str, str], int]:
+    """Every node joined to ``start``, with the fewest ``same_as`` steps to it."""
+    steps = {start: 0}
+    frontier = [start]
+    while frontier:
+        reached = sorted({n for f in frontier for n in neighbours[f]} - steps.keys())
+        steps.update((n, steps[frontier[0]] + 1) for n in reached)
+        frontier = reached
+    return steps
 
 
 def entity_index(document: GraphDocument) -> GraphEntities:
@@ -151,13 +223,18 @@ def entity_index(document: GraphDocument) -> GraphEntities:
 
 class ListingIndex(DeclaredIdentifierIndex):
     """A ``DeclaredIdentifierIndex`` that can also list what it holds (``neptune_entities``),
-    and the identifiers it left out because the graph declares them under several kinds."""
+    and the identifiers it left out because the graph declares them under several kinds. An id
+    a representative's ``same_as`` names is listed under that representative, not on its own."""
 
     def __init__(self, entities: Iterable[Entity], *, conflicts: Iterable[str] = ()) -> None:
         listed = tuple(entities)
         super().__init__(listed)
+        joined = {o.declared_id for e in listed if e.same_as for o in e.same_as.others}
         self._listed: tuple[Entity, ...] = tuple(
-            sorted(listed, key=lambda e: (e.kind, e.declared_id))
+            sorted(
+                (e for e in listed if e.declared_id not in joined),
+                key=lambda e: (e.kind, e.declared_id),
+            )
         )
         self.conflicts: tuple[str, ...] = tuple(sorted(conflicts))
 
@@ -199,8 +276,9 @@ class GraphEntities:
         return found
 
     def _build(self, tx: int, include_inferred: bool) -> ListingIndex:
+        current = snapshot_of(self._history, ledger_tx(tx)).claims
         kinds: dict[str, set[str]] = {}
-        for claim in snapshot_of(self._history, ledger_tx(tx)).claims:
+        for claim in current:
             if is_inferred(claim.assertion_kind) and not include_inferred:
                 continue
             for node in (claim.subject, claim.object):
@@ -210,7 +288,7 @@ class GraphEntities:
         # the name memory states for it (a run sheet's run name, a work order or incident
         # number: ``has_name``) finds it (ADR 0015).
         named: dict[str, tuple[str, set[str]]] = {}
-        for claim in snapshot_of(self._history, ledger_tx(tx)).claims:
+        for claim in current:
             if claim.predicate != "has_name" or (
                 is_inferred(claim.assertion_kind) and not include_inferred
             ):
@@ -230,7 +308,12 @@ class GraphEntities:
             for node_id, (kind, names) in sorted(named.items())
             if node_id not in held
         ]
-        return ListingIndex(single, conflicts=conflicts)
+        # Ids memory states are one entity are listed once (ADR 0018): evidence only, whatever
+        # ``include_inferred`` says, so an inference never settles an identity.
+        stated = (
+            c for c in current if c.predicate == SAME_AS and not is_inferred(c.assertion_kind)
+        )
+        return ListingIndex(_joined(single, stated), conflicts=conflicts)
 
     # EntityResolver (the planner's seam): evidence only, at the plan's snapshot.
     def find(

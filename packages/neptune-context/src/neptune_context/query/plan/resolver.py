@@ -8,6 +8,10 @@ candidates for one name is an ambiguity the planner reports, never a choice it m
 
 ``DeclaredIdentifierIndex`` is the in-memory implementation: built from entities a caller loaded
 (from the Ledger catalog, a fixture or a test), matching whole tokens case-insensitively.
+
+Ids memory states are the same entity (evidence ``same_as`` claims, never inferred ones: Context
+ADR 0018) are one entity: its representative carries ``SameAs`` naming the others, and a name
+matching several of them is one candidate, not an ambiguity.
 """
 
 from __future__ import annotations
@@ -31,12 +35,30 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class SameAs:
+    """The other declared ids an entity is, as memory states (Context ADR 0018).
+
+    ``others`` are the entities joined to the representative by ``same_as`` claims that are
+    evidence (stated or observed; an inferred ``same_as`` never joins), directly or through each
+    other; ``claims`` are those claims' ids and ``sources`` the content ids of the sources they
+    cite (both sorted). ``depth`` is the most ``same_as`` steps from one of the ids to any node
+    of the group: a query subject at that ``same_as_depth`` reads them all, whichever id it names.
+    """
+
+    others: tuple[Entity, ...]
+    claims: tuple[str, ...]
+    sources: tuple[str, ...]
+    depth: int
+
+
+@dataclass(frozen=True)
 class Entity:
     """One declared identity, as the Ledger declares it. Nothing here is inferred.
 
     ``label`` and ``aliases`` are other names the declaration (or its record) states for the
     entity. ``primary_clock`` is the clock the entity's own records are stamped on, when declared;
     ``frames`` and the two bridge sets are the frames and clock/frame relations declared for it.
+    ``same_as``, on a representative only, names the other ids memory states it is.
     """
 
     kind: str
@@ -47,6 +69,7 @@ class Entity:
     frames: tuple[FrameRef, ...] = ()
     clock_bridges: tuple[ClockBridge, ...] = ()
     frame_bridges: tuple[FrameBridge, ...] = ()
+    same_as: SameAs | None = None
 
     @property
     def value(self) -> str:
@@ -64,6 +87,8 @@ class Entity:
             out["clock_bridges"] = [clock_bridge_to_json(b) for b in self.clock_bridges]
         if self.frame_bridges:
             out["frame_bridges"] = [frame_bridge_to_json(b) for b in self.frame_bridges]
+        if self.same_as is not None:
+            out["same_as"] = [o.declared_id for o in self.same_as.others]
         return out
 
 
@@ -86,6 +111,11 @@ class Mention:
             "candidates": [
                 {"declared_id": c.declared_id, "kind": c.kind}
                 | ({} if c.label is None else {"label": c.label})
+                | (
+                    {}
+                    if c.same_as is None
+                    else {"same_as": [o.declared_id for o in c.same_as.others]}
+                )
                 for c in self.candidates
             ],
             "resolution": "ambiguous" if self.ambiguous else "resolved",
@@ -117,7 +147,9 @@ class DeclaredIdentifierIndex:
 
     A name matches an entity by its declared value, its label or an alias, as whole tokens and
     ignoring case. Longer names are matched first and their span is consumed, so ``AMR-07``
-    never also matches ``AMR-0``. Two entities sharing a name are candidates of one mention.
+    never also matches ``AMR-0``. Two entities sharing a name are candidates of one mention,
+    unless a representative's ``same_as`` names them both: then the representative is the one
+    candidate. Every id stays declared on its own (``lookup``).
     """
 
     def __init__(self, entities: Iterable[Entity]) -> None:
@@ -127,13 +159,27 @@ class DeclaredIdentifierIndex:
                 raise ValueError(f"declared id {entity.declared_id!r} is declared twice")
             by_id[entity.declared_id] = entity
         self._by_id = by_id
+        represent: dict[str, Entity] = {}
+        for entity in by_id.values():
+            if entity.same_as is None:
+                continue
+            for other in entity.same_as.others:
+                if other.declared_id not in by_id or other.declared_id in represent:
+                    raise ValueError(
+                        f"{other.declared_id!r} is undeclared or joined to two representatives"
+                    )
+                represent[other.declared_id] = entity
         surfaces: dict[str, list[Entity]] = {}
         for entity in sorted(by_id.values(), key=lambda e: (e.kind, e.declared_id)):
             for name in {entity.value, *(n for n in (entity.label, *entity.aliases) if n)}:
                 bucket = surfaces.setdefault(name.casefold(), [])
-                if entity not in bucket:
-                    bucket.append(entity)
-        self._surfaces = sorted(surfaces.items(), key=lambda kv: (-len(kv[0]), kv[0]))
+                shown = represent.get(entity.declared_id, entity)
+                if shown not in bucket:
+                    bucket.append(shown)
+        self._surfaces = sorted(
+            ((k, sorted(v, key=lambda e: (e.kind, e.declared_id))) for k, v in surfaces.items()),
+            key=lambda kv: (-len(kv[0]), kv[0]),
+        )
 
     def lookup(self, declared_id: str, *, as_of: int | None) -> Entity | None:
         return self._by_id.get(declared_id)
