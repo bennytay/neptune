@@ -290,7 +290,11 @@ packet = client.query(query)
 `--memory GRAPH.json` (the local engine over a Memory graph document, JSON or `.json.gz`, ADR 0007, [ADR 0013](adr/0013-demo-reads-memorys-gzip-snapshot.md)) or `--packets DIR` (recorded
 packets, for trying it out) serves six read-only tools over stdio
 ([ADR 0004](adr/0004-sdk-and-mcp-server.md), [ADR 0009](adr/0009-agent-renderer-and-mcp-tool-surface.md)).
-With `--memory`, `--planner anthropic` (the `anthropic` extra and an API key) or `--planner-recordings FILE`
+With `--memory` the engine runs the graph channel and the lexical channel over the document's claims
+([ADR 0021](adr/0021-exact-value-and-phrase-search-over-the-local-graph.md)): a `neptune_query` `text`
+clause finds the claims that state a value, an id or a phrase as written (`"151.5"`, `WO-26-0911`,
+`"reprojection error"`), and `neptune_entities` with such a text lists the subjects that state it.
+`--planner anthropic` (the `anthropic` extra and an API key) or `--planner-recordings FILE`
 gives `neptune_plan` a model; without one a plan says no model is configured.
 
 Claude Code, from the repository root, over the Demo v1 two-site corpus:
