@@ -182,6 +182,8 @@ class Statement:
     citations: tuple[Json, ...]
     items: int
     evidence: int
+    # A clock line (Context ADR 0022) cites the evidence declaring a clock and names no item.
+    clock: bool = False
 
 
 def _about(claim: Json) -> list[str]:
@@ -307,6 +309,7 @@ class Scorer:
         """Every cited statement of an answer: its claims, and what it cites (each evidence ref
         it gives, and the records its claims rest on)."""
         from neptune_context.render.agent import parse_answer
+        from neptune_context.render.clocks import CLOCKS
 
         out = []
         for statement in parse_answer(text).statements:
@@ -317,7 +320,13 @@ class Scorer:
             for claim in claims:
                 citations += [c for c in self.claim_citations(claim) if "record" in c]
             out.append(
-                Statement(claims, tuple(citations), len(statement.items), len(statement.evidence))
+                Statement(
+                    claims,
+                    tuple(citations),
+                    len(statement.items),
+                    len(statement.evidence),
+                    statement.section == CLOCKS,
+                )
             )
         return out
 
@@ -463,7 +472,7 @@ def check(asked: Asked, declared: Json, scorer: Scorer, must_not: Sequence[str])
     """What the pins say against what the answers cite (see the module docstring)."""
     qid = asked.question["id"]
     problems = [f"{qid}: {p}" for p in asked.problems]
-    uncited = sum(1 for s in asked.statements if not s.evidence or not s.items)
+    uncited = sum(1 for s in asked.statements if not s.evidence or not (s.items or s.clock))
     if uncited:
         problems.append(f"{qid}: {uncited} statement(s) cite no item or no evidence")
     if not asked.statements:

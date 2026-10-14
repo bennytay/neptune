@@ -40,6 +40,9 @@
     "sha256:3e6ee0535a7ac7bd69af0c7a67d80bf18431c355b73f1a17bd80655132d25f1d": [
       "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0911.yaml"
     ],
+    "sha256:45788eab57528e0fb36a3e2ae9d72a843252edda2ed63596378bd2e3c2a187a1": [
+      "sites/S-007/authorisation/zone_register.csv"
+    ],
     "sha256:4bafc373118f24034015c9cd56dee2ea45ec2eb574b1a28402ce3c6dab6d9cfc": [
       "sites/PLANT-2/legged/runs/patrol_2026-09-12.mcap"
     ],
@@ -82,6 +85,9 @@
     "sha256:a868368a4ee5ee0701bb22dc0b4be70ed2f381fdfcf28d03e9f0e4b1de90ed4c": [
       "sites/PLANT-2/cell3/bags/pallet_2026-09-09/pallet_2026-09-09_0.mcap",
       "sites/PLANT-2/cell3/shared/for_vendor/cell3_reference_run.mcap"
+    ],
+    "sha256:aa0ed65ddb415d415ff71436f4d4b78b45f71ebcd923dd2e196261b7385de511": [
+      "sites/PLANT-2/authorisation/zone_register.csv"
     ],
     "sha256:aa7fa922273367c8b4b05835b460161536f41489e4730cb960888a5cc9f4826d": [
       "sites/PLANT-2/cell3/logs/syslog_LOG-P2_2026-09-14.csv"

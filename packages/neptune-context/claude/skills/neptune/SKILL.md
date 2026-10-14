@@ -19,6 +19,10 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    ids are one machine (or event), it comes back as one entity, `also declared as` the others:
    use that id with the `same_as_depth` its line gives. A name with several candidates is
    ambiguous: ask the user which one, never pick.
+   **"When did it stop (or what happened) on a date?"** List the events by name
+   (`neptune_entities {"kind": "event", "include_inferred": false}`), take the stops and incidents
+   named for that machine or date (`DT-26-0914-01`, `INC-C3-0011`), and read each with
+   `neptune_query` (`subjects` the event with the `same_as_depth` its line gives, `graph` 1 hop).
    **"What changed since the last good run?", "Why did this incident happen?", "What is
    unknown about this incident?" or "Did the maintenance follow the vendor's (or the SOP's)
    procedure?"** Compare the two runs instead of walking the graph:
