@@ -58,10 +58,11 @@ trap T1); a blank is never a fact; two equal strings in two namespaces are never
    service.`): the date is the leading `YYYY-MM-DD`, and the event's time cites those ten characters alone; the
    `declared_value` keeps the whole line. Anything else is still `date_unreadable`.
 4. **Identity v5: parts are nodes an assertion may name.** An asset that a `memory.events` or
-   `memory.procedures` claim `involves` and no Ledger thread holds becomes a node, placed where the claim naming
-   it with the fewest records (then the smallest id) starts, as event nodes are (ADR 0019 §1). A `same_identity`
-   assertion naming two of them gives a stated `same_as` citing the assertion; without one, nothing joins them.
-   Identity now runs after `memory.procedures` too.
+   `memory.procedures` claim `involves` and no Ledger thread holds becomes a node. A `same_identity` assertion
+   naming two of them gives a stated `same_as` citing the assertion, holding from its `authored_at` as every
+   assertion does (ADR 0008); without one, nothing joins them. A statement that states no start holds from where
+   the claim naming the part with the fewest records (then the smallest id) starts, as for event nodes (ADR 0019
+   §1). Identity now runs after `memory.procedures` too.
 5. **Only declared places are read.** Label lines of paragraph blocks, list items under the steps heading and
    the title heading; never a block of another role (the HTML comment), a summary paragraph or a heading's text
    as a value. `memory.procedures` is version 2.
@@ -85,9 +86,11 @@ trap T1); a blank is never a fact; two equal strings in two namespaces are never
 
 ## Consequences
 
-- The acceptance snapshot gains the bulletin (10 claims) and one `same_as` (16 to 17); every claim of
-  `memory.procedures` and `memory.identity` changes id (their versions and config), with the same content.
+- The acceptance snapshot gains the bulletin (10 claims) and one `same_as` (16 to 17), 1010 to 1021 claims; every
+  claim of `memory.procedures` and `memory.identity` changes id (their versions and config), with the same content.
 - A deployment can declare any vendor document whose title is its heading and whose applicability names part ids.
+- Every Deploy record and clock id moves with the corpus's base package (its id is in Deploy's transform config),
+  so the claims of `memory.events` and `memory.configuration` over Deploy records change id too, with the same
+  content.
 - Revisit when the compiler or Deploy states procedure documents or part identities as records, when a document's
-  applicability names machines and parts in one label, or when a part's lifetime matters (a `same_as` from an
-  assertion with no window holds from the first claim naming the part, a convention).
+  applicability names machines and parts in one label, or when a part's lifetime matters.

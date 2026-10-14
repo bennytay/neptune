@@ -32,6 +32,6 @@ is part of another rides on its version and has no column.
 |---|---|---|---|---|
 | `neptune-ledger` | 10.0.0 current |  |  |  |
 | `neptune-memory` |  | 1.7.0 current |  |  |
-| `neptune-context` |  | 1.7.0 current | 2.3.0 behind |  |
-| `neptune-deploy` | 10.0.0 current | 1.7.0 current | 2.3.0 behind | 1.6.0 current |
+| `neptune-context` |  | 1.7.0 current | 2.4.0 current |  |
+| `neptune-deploy` | 10.0.0 current | 1.7.0 current | 2.4.0 current | 1.6.0 current |
 | `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) |

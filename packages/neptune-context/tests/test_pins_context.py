@@ -62,7 +62,7 @@ def test_docs_state_the_same_pins() -> None:
         ROOT
         / "docs"
         / "adr"
-        / "0017-procedure-revisions-in-compare-runs-graph-schema-2-3-0-and-query-packet-1-6-0.md"
+        / "0018-procedures-for-the-parts-the-maintenance-changed-and-graph-schema-2-4-0-pin.md"
     ).read_text(encoding="utf-8")
     for text in (contracts, adr):
         assert f'CATALOG_API_VERSION = "{pins.CATALOG_API_VERSION}"' in text
