@@ -5,7 +5,8 @@ id); its object is a ``ClockDescription``, copied from the records that declare 
 nothing else:
 
 - ``field`` and ``scope``: which time field of which part of the source the ticks are read from,
-  verbatim (the domain's own, root ADR 0005 §2);
+  verbatim (the domain's own, root ADR 0005 §2); for a shared ``CivilClock`` (a node Memory keys
+  by its definition, ``schema.interval``), ``CIVIL_CLOCK_FIELD`` and no scope;
 - ``role``, ``resolution`` (exact seconds per tick), ``epoch`` and ``timescale``: the domain's
   states exactly as declared, ``Unknown`` or ``NotCovered`` where the record says so;
 - ``civil_time_zone``: the zone the clock's ``civil_time_zone`` companion declares (root ADR 0061
@@ -64,6 +65,9 @@ _KEYS: Final = frozenset(
         "zone_declared_by",
     }
 )
+# The ``field`` of a shared ``CivilClock``'s description (``schema.interval.CivilClock``): it is
+# read from no field of any source; its timescale, epoch and tick length are its definition.
+CIVIL_CLOCK_FIELD: Final = "civil clock"
 # A scope names parts of one source; a deeper one is not a clock any record declares.
 MAX_SCOPE_STEPS: Final = 64
 

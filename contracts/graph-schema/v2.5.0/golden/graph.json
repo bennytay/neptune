@@ -169,6 +169,7 @@
     },
     {
       "claims": [
+        "claim:sha256:0328dd9602192399284c86c0e508836c9fb512af2d5b414579ecb36e0f1aee14",
         "claim:sha256:05c50323347cad7fe5ed00c237b287014f3e1cc3697af611c1bd2284f4d82098",
         "claim:sha256:072e221daae52b9b79de0920dc50c5781d7ee93b0b7e738a17efc0e42660d98a",
         "claim:sha256:1d377ea5f2849a3633463fdfdce962fb00c688131ee6bf00d401c4ac4eee5046",
@@ -256,6 +257,7 @@
     },
     {
       "claims": [
+        "claim:sha256:0328dd9602192399284c86c0e508836c9fb512af2d5b414579ecb36e0f1aee14",
         "claim:sha256:05c50323347cad7fe5ed00c237b287014f3e1cc3697af611c1bd2284f4d82098",
         "claim:sha256:072e221daae52b9b79de0920dc50c5781d7ee93b0b7e738a17efc0e42660d98a",
         "claim:sha256:1d377ea5f2849a3633463fdfdce962fb00c688131ee6bf00d401c4ac4eee5046",
@@ -343,6 +345,7 @@
     },
     {
       "claims": [
+        "claim:sha256:0328dd9602192399284c86c0e508836c9fb512af2d5b414579ecb36e0f1aee14",
         "claim:sha256:05c50323347cad7fe5ed00c237b287014f3e1cc3697af611c1bd2284f4d82098",
         "claim:sha256:072e221daae52b9b79de0920dc50c5781d7ee93b0b7e738a17efc0e42660d98a",
         "claim:sha256:1d377ea5f2849a3633463fdfdce962fb00c688131ee6bf00d401c4ac4eee5046",
@@ -2182,6 +2185,84 @@
         "start": {
           "domain_id": "rec:sha256:1e3d871df8a74f4227f096710ce3683b5b2f7642102d12471a8bbc89f6aeb0fd",
           "ticks": 1790762400000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:0328dd9602192399284c86c0e508836c9fb512af2d5b414579ecb36e0f1aee14",
+      "object": {
+        "datatype": "clock_description",
+        "kind": "literal",
+        "unit": {
+          "knowledge": "not_applicable"
+        },
+        "value": {
+          "civil_time_zone": {
+            "knowledge": "not_applicable"
+          },
+          "epoch": {
+            "knowledge": "known",
+            "value": "unix"
+          },
+          "field": "civil clock",
+          "resolution": {
+            "knowledge": "known",
+            "value": {
+              "denominator": 1,
+              "numerator": 1
+            }
+          },
+          "role": {
+            "knowledge": "not_applicable"
+          },
+          "scope": [],
+          "timescale": {
+            "knowledge": "known",
+            "value": "posix"
+          },
+          "zone_declared_by": {
+            "knowledge": "not_applicable"
+          }
+        }
+      },
+      "predicate": "clock_description",
+      "provenance": {
+        "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "consolidator_id": "memory.clocks",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 67,
+                "offset": 0
+              }
+            ],
+            "source": "sha256:b6d3d9e91e3a0e6bcc19128f93ed02daedd47e75722945564f6b87fbe9b83df7"
+          }
+        ],
+        "records": [
+          "rec:sha256:4a03d9e80ef6aed7280a23b966960e00032a871f8e2414ec50cf7459831d19e7"
+        ]
+      },
+      "recorded_at": 3,
+      "subject": {
+        "kind": "node",
+        "node_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
+        "node_type": "clock"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": "open",
+        "start": {
+          "domain_id": "rec:sha256:6804ad12768e3726fbd3e190f6ed0486499111043729afbd1a864a619db698fd",
+          "ticks": -9223372036854775808
         }
       }
     },

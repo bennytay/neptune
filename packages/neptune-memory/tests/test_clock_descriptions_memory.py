@@ -30,12 +30,13 @@ from neptune_memory.consolidate.clocks import CLOCKS_CONSOLIDATOR_ID, ClockDescr
 from neptune_memory.ledger import StubLedger
 from neptune_memory.schema.claim import TypedLiteral, ValueType
 from neptune_memory.schema.clock_description import (
+    CIVIL_CLOCK_FIELD,
     ClockDescription,
     clock_description_from_json,
 )
 from neptune_memory.schema.codec import object_from_json
 from neptune_memory.schema.export import graph_schema
-from neptune_memory.schema.interval import OPEN, ledger_tx
+from neptune_memory.schema.interval import OPEN, CivilClock, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 
 if TYPE_CHECKING:
@@ -293,3 +294,17 @@ def test_the_consolidator_id_is_registered_by_default() -> None:
     from neptune_memory.consolidate.snapshot import default_registrations
 
     assert CLOCKS_CONSOLIDATOR_ID in {r.consolidator_id for r in default_registrations()}
+
+
+def test_a_shared_civil_clock_is_described_by_its_definition_citing_every_domain() -> None:
+    posix = {"timescale": Known(Timescale.POSIX), "epoch": Known(Epoch.UNIX)}
+    a, b = domain("authored_at", **posix), domain("created", **posix)  # type: ignore[arg-type]
+    result = run(ledger([a, b, domain("Stopped")]))
+    civil = CivilClock(Timescale.POSIX, Epoch.UNIX, Fraction(1)).domain_id
+    by_clock = {c.subject.node_id: c for c in result.claims}
+    assert set(by_clock) == {a.id, b.id, civil, domain("Stopped").id}
+    shared = described(result)[civil]
+    assert shared.field == CIVIL_CLOCK_FIELD and shared.role == NotApplicable()
+    assert shared.timescale == Known(Timescale.POSIX) and shared.resolution == Known(Fraction(1))
+    assert not shared.is_wall_clock
+    assert set(by_clock[civil].provenance.records) == {a.id, b.id}

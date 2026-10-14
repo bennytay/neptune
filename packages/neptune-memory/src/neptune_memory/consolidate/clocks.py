@@ -14,6 +14,10 @@ transform whose record declares that zone. Nothing is converted, completed or gu
   §3, ``civil_zone_repeated``): a finding, and the zone is ``Ambiguous`` between the names they
   state, or ``Unknown`` when they state fewer than two names.
 
+Each shared ``CivilClock`` a domain names (a civil timescale, an absolute epoch and a tick
+length, all ``Known``: ADR 0002 §3) is described too, since consolidators place that domain's
+instants on it: its definition, citing every domain that names it.
+
 The claim holds over the clock's whole time (from ``INT64_MIN`` ticks on the clock, open-ended):
 it describes how the ticks count, not something that happened. It cites the domain's evidence and
 the companions' (and any evidence a state cites of its own), its records are the domain, the
@@ -48,8 +52,8 @@ from neptune.model.reference import (
 from neptune.model.time import INT64_MIN, Timestamp
 from neptune_memory.consolidate.base import ClaimDraft, ConsolidationFinding, ConsolidatorOutput
 from neptune_memory.schema.claim import TypedLiteral, ValueType
-from neptune_memory.schema.clock_description import ClockDescription
-from neptune_memory.schema.interval import OPEN
+from neptune_memory.schema.clock_description import CIVIL_CLOCK_FIELD, ClockDescription
+from neptune_memory.schema.interval import OPEN, CivilClock
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CLOCK_DESCRIPTION
 
@@ -281,6 +285,63 @@ def describe(view: _View) -> list[ClaimDraft]:
     return drafts
 
 
+def _civil(domain: TimestampDomain) -> CivilClock | None:
+    """The shared ``CivilClock`` a domain names when it declares a civil timescale, an absolute
+    epoch and its tick length (ADR 0002 §3, as the consolidators place its instants)."""
+    timescale, epoch, resolution = domain.timescale, domain.epoch, domain.resolution
+    if not (
+        isinstance(timescale, Known) and isinstance(epoch, Known) and isinstance(resolution, Known)
+    ):
+        return None
+    try:
+        return CivilClock(timescale.value, epoch.value, resolution.value)
+    except ValueError:  # a timescale or epoch that is not civil
+        return None
+
+
+def describe_civil(view: _View) -> list[ClaimDraft]:
+    """One ``clock_description`` per shared ``CivilClock`` a readable domain names: Memory
+    places that domain's instants on it, so its ticks need a description too. It states exactly
+    the definition the domains declare (timescale, epoch, tick length), cites every domain that
+    names it, and has no field, role or zone of its own (``CIVIL_CLOCK_FIELD``)."""
+    named: dict[RecordId, tuple[CivilClock, list[TimestampDomain]]] = {}
+    for _, domain in sorted(view.domains.items()):
+        civil = _civil(domain)
+        if civil is not None:
+            named.setdefault(civil.domain_id, (civil, []))[1].append(domain)
+    drafts: list[ClaimDraft] = []
+    for clock, (civil, domains) in sorted(named.items()):
+        provenances = [d.provenance for d in domains]
+        for domain in domains:
+            for name in ("resolution", "epoch", "timescale"):
+                provenances += _bare(getattr(domain, name))[1]
+        na = NotApplicable()
+        description = ClockDescription(
+            field=CIVIL_CLOCK_FIELD,
+            scope=(),
+            role=na,
+            resolution=Known(civil.resolution),
+            epoch=Known(civil.epoch),
+            timescale=Known(civil.timescale),
+            civil_time_zone=na,
+            zone_declared_by=na,
+        )
+        stated = all(p.assertion_kind is AssertionKind.STATED for p in provenances)
+        drafts.append(
+            ClaimDraft(
+                subject=NodeRef(NodeType.CLOCK, clock),
+                predicate=CLOCK_DESCRIPTION,
+                object=TypedLiteral(ValueType.CLOCK_DESCRIPTION, description),
+                valid_from=Timestamp(INT64_MIN, clock),
+                valid_to=OPEN,
+                assertion_kind=AssertionKind.STATED if stated else AssertionKind.OBSERVED,
+                evidence=_evidence(provenances),
+                records=tuple(d.id for d in domains),
+            )
+        )
+    return drafts
+
+
 def _evidence(provenances: Sequence[Provenance]) -> tuple[EvidenceRef, ...]:
     return tuple(p.evidence for p in provenances)
 
@@ -308,5 +369,5 @@ class ClockDescriptionConsolidator:
                     keys=sorted(config),
                 )
             )
-        drafts = describe(view)
+        drafts = [*describe(view), *describe_civil(view)]
         return ConsolidatorOutput(tuple(drafts), tuple(view.findings))

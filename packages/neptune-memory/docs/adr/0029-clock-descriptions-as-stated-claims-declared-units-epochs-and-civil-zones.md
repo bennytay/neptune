@@ -54,6 +54,12 @@ back to the Ledger, which it does not read for this.
    - lists as records the domain, the companions and their transforms.
    - is `stated` when every provenance is, else `observed` (an MCAP `log_time` is `observed`).
 
+   Memory also places a domain's instants on a shared `CivilClock` (ADR 0002 §3) when the domain declares a
+   civil timescale, an absolute epoch and a tick length. Such a node is a clock too, and it gets one
+   description: its definition (timescale, epoch and tick length), field `civil clock` (`CIVIL_CLOCK_FIELD`)
+   and no role or zone. It cites every domain that names it. The demo's same-stop assertion is dated on one of
+   these clocks (POSIX, 1 s).
+
    Several companions on one clock leave its zone in doubt even when they agree (root ADR 0061 §3,
    `civil_zone_repeated`). That gives a `clocks.zone_repeated` finding, and the zone is `Ambiguous` between the
    names they state, or `Unknown` when there are fewer than two.
@@ -63,9 +69,9 @@ back to the Ledger, which it does not read for this.
    consumer comparing their declared wall times may say so, and it says it is a difference of declared wall
    times.
 4. **Contract.** graph-schema **2.5.0** (minor, additive) adds `clock_description` and its value type. Every
-   2.x golden still validates. The golden graph adds `memory.clocks` (priority 5): 16 descriptions of the
-   worked examples' clocks. The acceptance snapshot gains 77 claims (1021 → 1098), one per domain of the
-   corpus's two packages, and no other claim id moves. Context and Deploy pin 2.5.0 in the same change.
+   2.x golden still validates. The golden graph adds `memory.clocks` (priority 5): 17 descriptions of the
+   worked examples' clocks. The acceptance snapshot gains 79 claims (1021 → 1100): one per domain of the
+   corpus's two packages and one per shared civil clock. No other claim id moves. Context and Deploy pin 2.5.0 in the same change.
 
 ## Alternatives considered
 
