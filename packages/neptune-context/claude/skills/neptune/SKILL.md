@@ -44,6 +44,10 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      For "did they follow the procedure", set each step the procedure states beside what the
      work orders record, each with its keys. A procedure says what should have been done, never
      what was done; a step no work order mentions is not recorded, not skipped.
+   **To prove or find a value, id or phrase** (`151.5`, `1.86`, `WO-26-0911`, "reprojection
+   error"), search for it as the source writes it, quoted: `neptune_query` with
+   `"text": {"text": "\"151.5\"", "fields": ["claim_text", "declared_id"], "channels": ["lexical"]}`
+   answers every claim that states it, cited (numbers match as written: `151.5` never finds `151.50`).
 2. **Optionally draft with `neptune_plan`.** It turns a question into a typed query. The draft is
    a model's proposal, not an answer. Read its findings, fix anything `needs_input` or
    `needs_choice`, then run the query yourself. If it says no model is configured, write the

@@ -73,6 +73,14 @@ export NEPTUNE_MEMORY_GRAPH=demo/graph.json NEPTUNE_SOURCES=demo/sources.json
 
 Re-running the block is safe (`demo/` is rebuilt from scratch; an interrupted run leaves nothing it needs).
 
+**Record or use it from a clean folder**: only the server (`demo/` if `make demo` ran, else the committed
+snapshot), the skill and `MAX_MCP_OUTPUT_TOKENS`, none of the repository's agent instructions:
+
+```
+make demo-folder DIR=~/neptune-demo
+cd ~/neptune-demo && claude
+```
+
 **Use it from Claude Desktop.**
 
 Claude Desktop does not expand `${…}`, so give absolute paths. Add this to `claude_desktop_config.json`

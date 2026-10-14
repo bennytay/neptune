@@ -95,11 +95,11 @@ class Called:
 
 def local_client(document: Any, catalog: Any | None = None) -> AsyncClient:
     """What ``python -m neptune_context.mcp --memory`` serves (``local_client``), with a Ledger
-    catalog attached when given: the graph channel, claim histories for ``neptune_why``, the
-    declared identities for ``neptune_entities``, and no planner model."""
+    catalog attached when given: the graph and lexical channels, claim histories for
+    ``neptune_why``, the declared identities for ``neptune_entities``, and no planner model."""
     from neptune_context.engine import LocalEngine
     from neptune_context.explain.history import IndexedReader
-    from neptune_context.mcp.__main__ import AGENT_DEFAULTS
+    from neptune_context.mcp.__main__ import AGENT_DEFAULTS, text_channel
     from neptune_context.mcp.__main__ import local_client as served
     from neptune_context.retrieve.graph import GraphChannel
     from neptune_context.sdk import AsyncClient, NoModel, Planner, entity_index
@@ -107,7 +107,8 @@ def local_client(document: Any, catalog: Any | None = None) -> AsyncClient:
     if catalog is None:
         return served(document)
     reader = IndexedReader(document)
-    engine = LocalEngine(reader, catalog, channels=(GraphChannel(reader, catalog),))
+    channels = (GraphChannel(reader, catalog), text_channel(document, reader))
+    engine = LocalEngine(reader, catalog, channels=channels)
     planner = Planner(entity_index(document), AGENT_DEFAULTS, NoModel())
     return AsyncClient(engine, planner=planner)
 

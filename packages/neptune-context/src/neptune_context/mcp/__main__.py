@@ -8,7 +8,9 @@
 Claude Code: ``claude mcp add neptune -- python -m neptune_context.mcp --memory graph.json``, or
 the sample ``.mcp.json`` and skill in ``packages/neptune-context/claude/`` (ADR 0009 §6).
 ``--memory`` answers real queries with ``LocalEngine`` over a Memory graph document (read by
-Memory's strict codec into its reference reader), and gives ``neptune_entities`` and
+Memory's strict codec into its reference reader), with the graph channel and a lexical channel
+over the document's claims (a query's ``text`` finds the claims that state a value, an id or a
+phrase as written, ADR 0021), and gives ``neptune_entities`` and
 ``neptune_plan`` the document's declared identities. ``--planner anthropic`` lets
 ``neptune_plan`` ask the live model (the ``anthropic`` extra and credentials);
 ``--planner-recordings FILE`` replays recorded planner responses; without either, a plan says
@@ -46,6 +48,7 @@ from neptune_context.query.plan import (
     load_recordings,
 )
 from neptune_context.retrieve.graph import GraphChannel
+from neptune_context.retrieve.lexical import LexicalChannel, LexicalCorpus
 from neptune_context.sdk import AsyncClient, NoModel, Planner, SdkError, StubEngine, entity_index
 from neptune_context.sources import SourceIndex, read_source_index
 
@@ -62,12 +65,21 @@ AGENT_DEFAULTS = Defaults(Caller.AGENT, budget=Budget(items=50, tokens=20_000))
 ChannelFactory = Callable[["GraphDocument", "MemoryReader"], Sequence["RetrievalChannel"]]
 
 
+def text_channel(document: GraphDocument, reader: MemoryReader) -> LexicalChannel:
+    """The lexical channel over ``document`` (ADR 0021): every version of every claim indexed by
+    its literal value as written (text, numbers, declared values, names) and the declared ids it
+    names, read back from ``reader`` at each query's snapshot. Deterministic: no model, no
+    embeddings, no network."""
+    corpus = LexicalCorpus()
+    corpus.add_claims(document.resolution.claims, through=document.head)
+    return LexicalChannel(corpus, reader)
+
+
 def graph_channels(document: GraphDocument, reader: MemoryReader) -> Sequence[RetrievalChannel]:
-    """The channels ``--memory`` runs: the graph channel. A channel that indexes the document
-    itself (MVL-142's lexical channel needs the document export, ADR 0008) joins by passing
-    another factory to ``local_client``; the tools do not change."""
-    del document
-    return (GraphChannel(reader),)
+    """The channels ``--memory`` runs: the graph channel and the lexical channel over the
+    document's claims (ADR 0021), as peers. A host with more channels (a catalog's passages, a
+    vector index) passes another factory to ``local_client``; the tools do not change."""
+    return (GraphChannel(reader), text_channel(document, reader))
 
 
 def local_client(

@@ -27,3 +27,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0018](0018-stated-same-as-names-one-entity-and-plain-language-answers.md) | Stated same_as names one entity, and plain-language answers | Accepted |
 | [0019](0019-procedures-for-the-parts-the-maintenance-changed-and-graph-schema-2-4-0-pin.md) | Procedures for the parts the maintenance changed, in compare_runs, and the graph-schema 2.4.0 pin | Accepted |
 | [0020](0020-compact-grouped-answers-and-the-compare-runs-trail.md) | Compact, grouped answers that name things, and the compare_runs trail | Accepted |
+| [0021](0021-exact-value-and-phrase-search-over-the-local-graph.md) | Exact value and phrase search over the local graph | Accepted |
