@@ -117,8 +117,8 @@ def test_every_registered_consolidator_emits_over_the_archetype_ledger() -> None
         "memory.calibration",
         "memory.coverage",
         "memory.events",
-        "memory.identity",
         "memory.procedures",
+        "memory.identity",  # after procedures, whose parts it may join (ADR 0028 §4)
         "memory.runs",
         "memory.declared",
         "memory.episodes",
