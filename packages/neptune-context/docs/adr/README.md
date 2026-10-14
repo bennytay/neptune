@@ -26,3 +26,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0017](0017-procedure-revisions-in-compare-runs-graph-schema-2-3-0-and-query-packet-1-6-0.md) | Procedure revisions in compare_runs, graph-schema 2.3.0 pin and query-packet 1.6.0 | Accepted |
 | [0018](0018-stated-same-as-names-one-entity-and-plain-language-answers.md) | Stated same_as names one entity, and plain-language answers | Accepted |
 | [0019](0019-procedures-for-the-parts-the-maintenance-changed-and-graph-schema-2-4-0-pin.md) | Procedures for the parts the maintenance changed, in compare_runs, and the graph-schema 2.4.0 pin | Accepted |
+| [0022](0022-times-in-their-clocks-declared-terms-graph-schema-2-5-0-pin-and-query-packet-1-7-0.md) | Times in their clock's declared terms, the graph-schema 2.5.0 pin and query-packet 1.7.0 | Accepted |

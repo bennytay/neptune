@@ -387,6 +387,398 @@
       ],
       "type": "object"
     },
+    "ClockDescription": {
+      "additionalProperties": false,
+      "description": "what the Ledger declares about one clock: its TimestampDomain's field, scope, role, resolution (seconds per tick), epoch and timescale, and its civil_time_zone; copied, never converted (ADR 0029)",
+      "properties": {
+        "civil_time_zone": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "maxLength": 255,
+                  "pattern": "^[A-Za-z0-9_][A-Za-z0-9._+\\-]*(/[A-Za-z0-9_][A-Za-z0-9._+\\-]*)*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "maxLength": 255,
+                        "pattern": "^[A-Za-z0-9_][A-Za-z0-9._+\\-]*(/[A-Za-z0-9_][A-Za-z0-9._+\\-]*)*$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ],
+          "description": "the zone the clock's civil_time_zone record declares, as written (an IANA name, never looked up); not_applicable when no such record names the clock"
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/Epoch"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "$ref": "#/$defs/Epoch"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "field": {
+          "type": "string"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/Fraction"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "$ref": "#/$defs/Fraction"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/ClockRole"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "$ref": "#/$defs/ClockRole"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "scope": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timescale": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/Timescale"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "not_covered",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "$ref": "#/$defs/Timescale"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "zone_declared_by": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "value": {
+                  "$ref": "#/$defs/Token"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "not_applicable",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ],
+          "description": "the adapter id of the transform whose record declares the zone; not_applicable when no civil_time_zone record names the clock"
+        }
+      },
+      "required": [
+        "civil_time_zone",
+        "epoch",
+        "field",
+        "resolution",
+        "role",
+        "scope",
+        "timescale",
+        "zone_declared_by"
+      ],
+      "type": "object"
+    },
     "ClockMap": {
       "additionalProperties": false,
       "description": "a clock mapping onto target as the evidence states it: target(t) = anchor.target + rate * (t - anchor.source), within residual_bound target ticks; or, composed, the chain of mapping records it follows (via: the clocks between) and no parameters of its own (ADR 0011 §2)",
@@ -620,6 +1012,14 @@
       ],
       "type": "object"
     },
+    "ClockRole": {
+      "enum": [
+        "receive",
+        "publish",
+        "sample",
+        "document"
+      ]
+    },
     "Confidence": {
       "anyOf": [
         {
@@ -799,6 +1199,13 @@
     "ContextPacket": {
       "additionalProperties": false,
       "properties": {
+        "clocks": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
         "findings": {
           "items": {
             "$ref": "#/$defs/ResolutionFinding"
@@ -1676,6 +2083,7 @@
                   "calibrated_by",
                   "calibrated_with",
                   "calibration_candidate",
+                  "clock_description",
                   "clock_map",
                   "co_occurs_within",
                   "configuration_active_during",
@@ -1906,6 +2314,15 @@
         "ticks"
       ],
       "type": "object"
+    },
+    "Epoch": {
+      "enum": [
+        "unix",
+        "gps",
+        "boot",
+        "first_sample",
+        "simulation_start"
+      ]
     },
     "EvidenceItem": {
       "additionalProperties": false,
@@ -3343,6 +3760,16 @@
       ],
       "type": "object"
     },
+    "Timescale": {
+      "enum": [
+        "utc",
+        "tai",
+        "gps",
+        "posix",
+        "monotonic",
+        "simulated"
+      ]
+    },
     "Timestamp": {
       "additionalProperties": false,
       "properties": {
@@ -3634,6 +4061,30 @@
           "additionalProperties": false,
           "properties": {
             "datatype": {
+              "const": "clock_description"
+            },
+            "kind": {
+              "const": "literal"
+            },
+            "unit": {
+              "$ref": "#/$defs/NotApplicable"
+            },
+            "value": {
+              "$ref": "#/$defs/ClockDescription"
+            }
+          },
+          "required": [
+            "datatype",
+            "kind",
+            "unit",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "datatype": {
               "const": "delta"
             },
             "kind": {
@@ -3883,6 +4334,6 @@
       "$ref": "#/$defs/ContextPacket"
     }
   ],
-  "description": "Neptune Context's context packet (neptune-context ADR 0003): a header, items, claims superseded since as_of, resolver findings, gaps and, for explain clauses, trails (ADR 0010). Claims, findings and the compiler types they reuse are copied from Memory's graph-schema export. Generated from neptune_context.packets; the Python reader in neptune_context.packets.codec is stricter (ids, budgets and cross-references are recomputed).",
+  "description": "Neptune Context's context packet (neptune-context ADR 0003): a header, items, claims superseded since as_of, resolver findings, gaps, for explain clauses, trails (ADR 0010) and the descriptions of the items' clocks (ADR 0022). Claims, findings and the compiler types they reuse are copied from Memory's graph-schema export. Generated from neptune_context.packets; the Python reader in neptune_context.packets.codec is stricter (ids, budgets and cross-references are recomputed).",
   "title": "Neptune Context packet, version 1"
 }

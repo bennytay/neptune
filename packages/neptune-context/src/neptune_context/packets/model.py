@@ -33,7 +33,8 @@ from neptune_memory.schema.claim import (
     parse_claim_id,
 )
 from neptune_memory.schema.interval import LedgerTx, Open, ledger_tx
-from neptune_memory.schema.nodes import NodeRef
+from neptune_memory.schema.nodes import NodeRef, NodeType
+from neptune_memory.schema.predicates import CLOCK_DESCRIPTION
 from neptune_memory.schema.supersede import ResolutionFinding
 
 from neptune.identity.canonical_json import dumps
@@ -1048,6 +1049,10 @@ class ContextPacket:
     - ``gaps``: what the packet does not answer, and why.
     - ``trails``: the structure of each ``explain`` clause answered (ADR 0010), by clause; a
       member of the JSON only when there is one, so a packet without trails keeps its bytes.
+    - ``clocks``: Memory's ``clock_description`` claim for each clock a claim item's times are
+      on, as Memory knew it at its snapshot (ADR 0022), by clock id: what lets an answer show a
+      tick in its clock's own declared terms. Not items (no relevance, no budget): they describe
+      the items' clocks. A member of the JSON only when there is one.
     """
 
     query_id: str
@@ -1064,12 +1069,14 @@ class ContextPacket:
     findings: tuple[ResolutionFinding, ...] = ()
     gaps: tuple[Gap, ...] = ()
     trails: tuple[Trail, ...] = ()
+    clocks: tuple[Claim, ...] = ()
 
     def __post_init__(self) -> None:
         self._check_header()
         self._check_items()
         self._check_sections()
         self._check_trails()
+        self._check_clocks()
 
     def _check_header(self) -> None:
         if not isinstance(self.query_id, str) or not _QUERY_ID.fullmatch(self.query_id):
@@ -1225,6 +1232,25 @@ class ContextPacket:
                             " the diff's nodes",
                         )
 
+    def _check_clocks(self) -> None:
+        clocks = self.clocks
+        if not isinstance(clocks, tuple) or not all(isinstance(c, Claim) for c in clocks):
+            raise _fail(Code.SHAPE, "clocks must be a tuple of Memory claims")
+        _sorted_unique([c.subject.node_id for c in clocks], "clocks (by clock id)")
+        for claim in clocks:
+            if (
+                claim.predicate != CLOCK_DESCRIPTION
+                or claim.subject.node_type is not NodeType.CLOCK
+            ):
+                raise _fail(Code.BAD_VALUE, f"{claim.id} is not a clock_description of a clock")
+            if claim.recorded_at > self.memory.as_of or not isinstance(claim.superseded_at, Open):
+                raise _fail(Code.NOT_AS_OF, f"{claim.id} was not current at Memory's snapshot")
+            if is_inferred(claim.assertion_kind) and not self.inference_included:
+                raise _fail(
+                    Code.INFERENCE_EXCLUDED,
+                    f"{claim.id} is inferred but the packet excludes inference",
+                )
+
     @property
     def claim_ids(self) -> frozenset[ClaimId]:
         return frozenset(i.claim.id for i in self.items if isinstance(i, ClaimItem))
@@ -1258,6 +1284,8 @@ class ContextPacket:
         }
         if self.trails:
             out["trails"] = [t.to_json() for t in self.trails]
+        if self.clocks:
+            out["clocks"] = [c.to_json() for c in self.clocks]
         return out
 
     @cached_property

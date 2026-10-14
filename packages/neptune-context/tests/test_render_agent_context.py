@@ -231,10 +231,11 @@ def test_quantities_are_summarised_by_declared_unit_and_never_pooled() -> None:
 
 
 def test_a_series_window_is_described_by_what_the_packet_declares() -> None:
-    from neptune_context.render.agent import _summary
+    from neptune_context.render.agent import _summary, quote
+    from neptune_context.render.clocks import ClockBook
 
     window = next(i for i in golden_packet("q09").items if i.kind == "series_window")
-    sentence = _summary(window, {})
+    sentence = _summary(window, {}, ClockBook((), quote))
     assert "ticks [" in sentence and "declares no statistics" in sentence
     for adjective in ("high", "low", "spike", "stable", "normal", "noisy", "large", "small"):
         assert adjective not in sentence.split()

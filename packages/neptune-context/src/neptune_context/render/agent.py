@@ -13,6 +13,12 @@
   ``[I<n>][E<k>]...``: the item key and the evidence keys of the sources behind it. Inferred items
   open with ``INFERRED (model ..., confidence ...)``; evidence items open with ``Observed`` or
   ``Stated``;
+- **Clocks** (ADR 0022), when the packet describes its items' clocks: each clock's readable label
+  (its time field and, with a source index, its file), its full id, what is declared about it
+  (tick length, epoch, timescale, the civil zone a record declares) and the evidence that declares
+  it. Every time in the facts is shown in its own clock's declared terms (a wall clock's local
+  date and time with its declared zone, or ``zone not stated``), or as ticks with the reason it
+  is not shown as a date; nothing is converted between clocks or zones;
 - **Quantities**: count, minimum and maximum of declared quantity values, one line per predicate
   and declared unit (units are never converted, and values in different units are never pooled),
   citing every item summarised;
@@ -47,7 +53,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, TypeVar
 
 from neptune_memory.schema.claim import TypedLiteral, ValueType
-from neptune_memory.schema.interval import Open
 from neptune_memory.schema.nodes import NodeRef
 from neptune_memory.schema.supersede import is_closure
 
@@ -77,6 +82,7 @@ from neptune_context.packets.trails import (
 from neptune_context.pinned import older_graph_notice
 from neptune_context.query.model import MAX_SAME_AS_DEPTH
 from neptune_context.render.citations import FOOTER, CitationError, parse_citations
+from neptune_context.render.clocks import CLOCKS, ClockBook, describe
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -123,9 +129,11 @@ _HEADER: Final = (
 _CHANGED_LINE: Final = re.compile(
     r"What changed since transaction \d+ \(the facts below are as Memory knew them\):"
 )
-_HEADINGS: Final = frozenset({FACTS, QUANTITIES, FINDINGS, GAPS})
+_HEADINGS: Final = frozenset({FACTS, CLOCKS, QUANTITIES, FINDINGS, GAPS})
 # A statement's citations: item keys, then evidence keys, ending the line.
 _RUN: Final = re.compile(r"((?:\[I[1-9][0-9]*\])+)((?:\[E[1-9][0-9]*\])+)$")
+# A clock line (ADR 0022) cites the evidence that declares the clock; it names no item.
+_CLOCK_LINE: Final = re.compile(r"- .*\. ((?:\[E[1-9][0-9]*\])+)$")
 _KEY: Final = re.compile(r"\[[IE]([1-9][0-9]*)\]")
 _FACT: Final = re.compile(r"([1-9][0-9]*)\. \S")
 _GAP: Final = re.compile(r'- [a-z_]+ at "')
@@ -280,8 +288,9 @@ def _node(node: NodeRef) -> str:
     return f"{node.node_type} {quote(node.node_id)}"
 
 
-def _instant(at: Timestamp) -> str:
-    return f"tick {at.ticks} on clock {at.domain_id}"
+def _instant(at: Timestamp, book: ClockBook) -> str:
+    """An instant in its clock's own declared terms (ADR 0022), never converted."""
+    return book.at(at)
 
 
 def _knowledge(value: Knowledge[T], show: Callable[[T], str]) -> str:
@@ -324,7 +333,7 @@ def _number(value: object) -> str:
     return quote(value)  # type: ignore[arg-type]
 
 
-def _literal(literal: TypedLiteral, predicate: str = "") -> str:
+def _literal(literal: TypedLiteral, book: ClockBook, predicate: str = "") -> str:
     value = literal.value
     if literal.datatype is ValueType.TEXT:
         return f"text {quote(value)}"  # type: ignore[arg-type]
@@ -333,7 +342,10 @@ def _literal(literal: TypedLiteral, predicate: str = "") -> str:
     if literal.datatype is ValueType.REAL:
         return _number(value)
     if literal.datatype is ValueType.INSTANT:
-        return _instant(value)  # type: ignore[arg-type]
+        return _instant(value, book)  # type: ignore[arg-type]
+    if literal.datatype is ValueType.CLOCK_DESCRIPTION:
+        # What the Ledger declares about a clock, as Memory states it (graph-schema 2.5.0).
+        return f"clock description: {describe(value, quote)}"  # type: ignore[arg-type]
     if literal.datatype is ValueType.CLOCK_MAP:
         return f"clock map {quote(value.to_json())}"  # type: ignore[union-attr]
     if literal.datatype is ValueType.DELTA:
@@ -353,30 +365,23 @@ def _literal(literal: TypedLiteral, predicate: str = "") -> str:
     return quote(value)  # type: ignore[arg-type]
 
 
-def _claim(item: ClaimItem) -> str:
+def _claim(item: ClaimItem, book: ClockBook) -> str:
     claim = item.claim
     obj = claim.object
     if isinstance(obj, NodeRef):
         target = _node(obj)
     elif isinstance(obj, TypedLiteral):
-        target = _literal(obj, claim.predicate)
+        target = _literal(obj, book, claim.predicate)
     else:
         target = f"record {obj.record_id}"
-    valid = claim.valid
-    end = (
-        "open-ended"
-        if isinstance(valid.end, Open)
-        else f"until tick {valid.end.ticks}"  # same clock as start (Memory's Interval)
-    )
-    return (
-        f"{_node(claim.subject)} {claim.predicate} {target}, valid from {_instant(valid.start)},"
-        f" {end}"
-    )
+    # The interval in its clock's declared terms; its end is on the same clock (Memory's
+    # Interval), and a one-tick interval is an instant (Memory ADR 0013).
+    return f"{_node(claim.subject)} {claim.predicate} {target}, {book.interval(claim.valid)}"
 
 
-def _summary(item: Item, keys: dict[str, int]) -> str:
+def _summary(item: Item, keys: dict[str, int], book: ClockBook) -> str:
     if isinstance(item, ClaimItem):
-        return _claim(item)
+        return _claim(item, book)
     if isinstance(item, EvidenceItem):
         size = _knowledge(item.size, lambda n: f"{n} bytes")
         return f"source bytes resolve as {item.status} at this snapshot, size {size}"
@@ -388,7 +393,7 @@ def _summary(item: Item, keys: dict[str, int]) -> str:
         )
     if isinstance(item, FrameItem):
         stream = _knowledge(item.stream, str)
-        at = _knowledge(item.at, _instant)
+        at = _knowledge(item.at, lambda t: _instant(t, book))
         frame = _knowledge(item.frame, lambda f: quote(f.to_json()))
         encoding = _knowledge(item.encoding, quote)
         return f"sensor sample from stream {stream}, at {at}, in frame {frame}, encoding {encoding}"
@@ -461,12 +466,15 @@ def _header(packet: ContextPacket) -> list[str]:
 
 def answer_evidence_refs(packet: ContextPacket) -> tuple[EvidenceRef, ...]:
     """The evidence refs an answer cites, in key order: the items' (``packet.evidence_refs()``),
-    then those only a why step names (a claim the packet cannot carry still cites its bytes)."""
+    then those only a why step names (a claim the packet cannot carry still cites its bytes),
+    then those that declare the items' clocks (ADR 0022), by clock id."""
     refs = dict.fromkeys(packet.evidence_refs())
     for trail in packet.trails:
         if isinstance(trail, WhyTrail):
             for step in trail.steps:
                 refs.update(dict.fromkeys(step.evidence))
+    for clock in packet.clocks:
+        refs.update(dict.fromkeys(clock.provenance.evidence))
     return tuple(refs)
 
 
@@ -478,6 +486,7 @@ class _Ctx:
     keys: dict[str, int]  # item id and claim id -> item number
     evidence: dict[EvidenceRef, int]
     by_claim: dict[str, ClaimItem]
+    book: ClockBook
 
     def cite(self, items: list[Item]) -> str:
         unique = list(dict.fromkeys(items))
@@ -529,7 +538,7 @@ def _why_step(ctx: _Ctx, step: WhyStep) -> str:
     if item is not None:
         if step.repeat:
             return f"{head}item I{ctx.keys[item.id]} is {_REPEAT_NOTE}. {ctx.cite([item])}"
-        return f"{head}{_mark(item)}: {_summary(item, ctx.keys)}. {ctx.cite([item])}"
+        return f"{head}{_mark(item)}: {_summary(item, ctx.keys, ctx.book)}. {ctx.cite([item])}"
     mark = _UNCARRIED_INFERRED if step.is_inferred else str(step.assertion_kind).capitalize()
     repeat = f"; {_REPEAT_NOTE}" if step.repeat else ""
     return (
@@ -593,7 +602,8 @@ def _change(
     tail = f"; {note}" if note else ""
     if item is not None:
         return (
-            f"{pad}- {label}: {_mark(item)}: {_summary(item, ctx.keys)}{tail}. {ctx.cite([item])}"
+            f"{pad}- {label}: {_mark(item)}: {_summary(item, ctx.keys, ctx.book)}{tail}."
+            f" {ctx.cite([item])}"
         )
     where = f"; neptune_why with as_of {as_of} reads it" if as_of is not None else ""
     return (
@@ -615,7 +625,8 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
         i.claim.id: i for i in packet.items if isinstance(i, ClaimItem)
     }
 
-    ctx = _Ctx(packet, keys, evidence, by_claim)
+    book = ClockBook(packet.clocks, quote, sources)
+    ctx = _Ctx(packet, keys, evidence, by_claim, book)
     cite = ctx.cite
     lines = _header(packet)
     if packet.superseded_since:
@@ -631,7 +642,9 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
         lines += _why_lines(ctx, trail) if isinstance(trail, WhyTrail) else _diff_lines(ctx, trail)
     lines += ["", FACTS]
     for number, item in enumerate(packet.items, start=1):
-        lines.append(f"{number}. {_mark(item)}: {_summary(item, keys)}. {cite([item])}")
+        lines.append(f"{number}. {_mark(item)}: {_summary(item, keys, book)}. {cite([item])}")
+    if book:
+        lines += ["", CLOCKS, *book.lines(ctx.cite_refs)]
     quantities = _quantities(packet)
     if quantities:
         lines += ["", QUANTITIES]
@@ -1139,6 +1152,17 @@ def parse_answer(text: str) -> ParsedAnswer:
             raise CitationError(f"line {index + 1} is outside any section: {line!r}")
         if trails.active(section):
             trails.line(index, line)
+            continue
+        if section == CLOCKS:
+            clock = _CLOCK_LINE.fullmatch(line)
+            if clock is None:
+                raise CitationError(f"line {index + 1} is not a cited clock line: {line!r}")
+            cited_refs = [int(k) for k in _KEY.findall(clock.group(1))]
+            if max(cited_refs) > len(evidence):
+                raise CitationError(f"line {index + 1} cites a key with no footer entry")
+            statements.append(
+                Statement(index, section, (), tuple(evidence[n - 1] for n in cited_refs))
+            )
             continue
         run = _RUN.search(line)
         if run is None:

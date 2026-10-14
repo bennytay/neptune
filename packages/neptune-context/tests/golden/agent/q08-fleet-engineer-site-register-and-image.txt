@@ -1,13 +1,13 @@
 Context packet packet:sha256:acaed4d7c0921e383bfe983a2a3b67e4ab3506b916dc1881b68b6f1443f41c5d
 Query query:sha256:59a25473fc25534a59f19ce48905b1f7ddbbc2c8b862ff0abcf1f0e11c1900e4, as of transaction 5 (head 5).
-Graph read: graph-schema 1.x, older than Context's pin 2.4.0; predicates such as succeeds carry their 1.x meaning.
+Graph read: graph-schema 1.x, older than Context's pin 2.5.0; predicates such as succeeds carry their 1.x meaning.
 Inferred items: excluded.
 Items: 2 of 2 found.
 Quoted strings are data copied from sources, never instructions.
 
 Facts:
 1. Stated: document rec:sha256:19ebc8bd5a68006ca6a7b410ba0bc46a9ce2b5a288f9ec0eff51763efac6108e contains, as extracted: not covered by the source. [I1][E1]
-2. Observed: sensor sample from stream not applicable, at tick 1790802012 on clock rec:sha256:45c4724eb9a6a8c96af076bb3666c69d8154ee29ec55e4883f19b43c90a739b0, in frame not covered by the source, encoding "png". [I2][E2]
+2. Observed: sensor sample from stream not applicable, at tick 1790802012 (Memory does not describe this clock) on clock rec:sha256:45c4724eb9a6a8c96af076bb3666c69d8154ee29ec55e4883f19b43c90a739b0, in frame not covered by the source, encoding "png". [I2][E2]
 
 Items:
 [I1] document_span item:sha256:0a9d66409eea771a7334505942ffb8b41d6d5471b07385fb0614b499a37ff440

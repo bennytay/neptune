@@ -644,7 +644,7 @@ def _packet(value: JsonValue) -> ContextPacket:
         value,
         "",
         {"findings", "gaps", "header", "id", "items", "kind", "packet_version", "superseded_since"},
-        frozenset({"trails"}),
+        frozenset({"clocks", "trails"}),
     )
     if obj["kind"] != PACKET_KIND:
         raise _Bad(Code.SHAPE, "/kind", f"kind must be {PACKET_KIND!r}")
@@ -656,6 +656,13 @@ def _packet(value: JsonValue) -> ContextPacket:
     if "trails" in obj and not _list(obj["trails"], "/trails"):
         raise _Bad(Code.SHAPE, "/trails", "trails is written only when there is one (ADR 0010)")
     trails = _each(obj["trails"], "/trails", _trail) if "trails" in obj else ()
+    if "clocks" in obj and not _list(obj["clocks"], "/clocks"):
+        raise _Bad(Code.SHAPE, "/clocks", "clocks is written only when there is one (ADR 0022)")
+    clocks = (
+        _each(obj["clocks"], "/clocks", lambda v, a: _upstream(a, lambda: _claim(v)))
+        if "clocks" in obj
+        else ()
+    )
     packet = _upstream(
         "",
         lambda: ContextPacket(
@@ -665,6 +672,7 @@ def _packet(value: JsonValue) -> ContextPacket:
             findings=findings,
             gaps=gaps,
             trails=trails,
+            clocks=clocks,
         ),
     )
     stated, actual = _str(obj["id"], "/id"), _upstream("", lambda: packet.id)

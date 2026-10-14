@@ -140,6 +140,27 @@ def _clock_map(value: Mapping[str, JsonValue]) -> str:
     )
 
 
+def _clock_description(value: Mapping[str, JsonValue]) -> str:
+    """What the Ledger declares about a clock (Memory ADR 0029), as declared: never applied."""
+    scope = value.get("scope")
+    where = "/".join(str(s) for s in scope) if isinstance(scope, list | tuple) and scope else ""
+    field = json.dumps(value.get("field"), ensure_ascii=False)
+    zone = value.get("civil_time_zone")
+    wall = isinstance(zone, Mapping) and zone.get("knowledge") != "not_applicable"
+    kind = (
+        f"wall clock, zone {_state(zone, str)} as declared by"
+        f" {_state(value.get('zone_declared_by'), str)}"
+        if wall
+        else "no civil zone record"
+    )
+    return (
+        f"clock description: field {field}{f' of {where}' if where else ''}, tick"
+        f" {_state(value.get('resolution'), _fraction)} s, epoch"
+        f" {_state(value.get('epoch'), str)}, timescale {_state(value.get('timescale'), str)},"
+        f" {kind}"
+    )
+
+
 def claim_object(value: Mapping[str, JsonValue]) -> str:
     """A claim object as text: a node by type and id, a record by id, a literal as declared."""
     kind = value.get("kind")
@@ -159,6 +180,8 @@ def claim_object(value: Mapping[str, JsonValue]) -> str:
         return f"instant {literal.get('ticks')} on {literal.get('domain_id')}"
     if datatype == "clock_map" and isinstance(literal, Mapping):
         return _clock_map(literal)
+    if datatype == "clock_description" and isinstance(literal, Mapping):
+        return _clock_description(literal)
     if datatype == "declared_value" and isinstance(literal, Mapping):
         path = literal.get("path")
         key = "/".join(str(step) for step in path) if isinstance(path, list | tuple) else "?"
