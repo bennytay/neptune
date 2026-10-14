@@ -6,7 +6,7 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 ## Publishes
 
-- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.4.0/` (1.0.0 to 1.9.0, 2.0.0 to 2.3.0 stay; 2.1.0 is golden-only, identity v4, ADRs 0021 and 0023; 2.2.0 adds `declared_value`, `stated_cause` and the `maintenance` event kind, [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md); 2.3.0 adds `stated_blank` and the `procedure_revision` event kind, [ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md); 2.4.0 is golden-only, identity v5, [ADR 0028](adr/0028-vendor-procedures-named-by-their-heading-the-parts-they-apply-to-and-parts-in-identity.md); major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
+- Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 2`, published as `contracts/graph-schema/v2.5.0/` (1.0.0 to 1.9.0, 2.0.0 to 2.4.0 stay; 2.1.0 is golden-only, identity v4, ADRs 0021 and 0023; 2.2.0 adds `declared_value`, `stated_cause` and the `maintenance` event kind, [ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md); 2.3.0 adds `stated_blank` and the `procedure_revision` event kind, [ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md); 2.4.0 is golden-only, identity v5, [ADR 0028](adr/0028-vendor-procedures-named-by-their-heading-the-parts-they-apply-to-and-parts-in-identity.md); 2.5.0 adds `clock_description`, what the Ledger declares about each clock, [ADR 0029](adr/0029-clock-descriptions-as-stated-claims-declared-units-epochs-and-civil-zones.md); major 2 per [ADR 0019](adr/0019-events-in-identity-and-machine-scoped-configuration-changes.md) §3, migration in [`graph-schema.md`](graph-schema.md))
   (JSON Schema, golden graph and vocabulary, generator `contracts/graph-schema/goldens.py`); consumed by Context,
   Deploy and Learn. Surface, version policy and guarantees: [`graph-schema.md`](graph-schema.md) and
   [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md).
@@ -30,8 +30,8 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 - Acceptance-corpus snapshot (a test fixture, not a registry contract), for Deploy, Context and the Demo v1
   quickstart (MVL-191). Use it instead of a hand-made graph:
   - Path: `packages/neptune-memory/tests/fixtures/acceptance_corpus.graph.json.gz`, a deterministic gzip (no
-    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.4.0**
-    document (`graph_schema_version: 2`, `graph_schema: "2.4.0"`, with `builds`), head 2, written by Memory's codec. It is what
+    file name, `MTIME` 0, `OS` 255, level 9; `neptune_memory.store.gzipped`) of a graph-schema **2.5.0**
+    document (`graph_schema_version: 2`, `graph_schema: "2.5.0"`, with `builds`), head 2, written by Memory's codec. It is what
     `memory rebuild --with-estimates --config` makes of the MVL-181 acceptance corpus 2.3.0. The pipeline:
     1. The harness's own `compiler` and `deploy` stages (Platform ADR 0008) write package `<case>` and its
        Deploy mapping `<case>.deploy`, with the presets and templates `harness/acceptance/deploy.json` declares.
@@ -51,6 +51,9 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
        `Effective`, `Applies to` in the `manifest` namespace, `Approved by`; steps under `Procedure`; the
        `Revision history` table) ([ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md)).
        Wall-clock ticks stay on their own domain: two logs are compared only through a stated clock mapping.
+       Each clock is described as declared (`clock_description`: tick length, epoch, timescale, the civil zone a
+       Deploy mapping declares, e.g. `America/New_York` for the LOG-P2 syslog and the CMMS downtime log;
+       [ADR 0029](adr/0029-clock-descriptions-as-stated-claims-declared-units-epochs-and-civil-zones.md)).
 
     **Deploy** copies the `.gz` byte for byte into its fixtures (decompress with any gzip reader, e.g.
     `gzip -dc`, if it needs the JSON) and never edits either. **Context** reads the `.gz`: decompress it

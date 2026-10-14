@@ -25,10 +25,11 @@ The Ledger grows over five transactions, and the same plan is rebuilt at each on
 
 Plan, in order of priority (later arrives later within a transaction): ``golden.runs``
 (deterministic), ``golden.operator`` (stated), ``memory.identity`` (the real identity policy),
-``golden.fixture_model`` (inferred; ``_fixture_model``, golden only) and ``memory.time`` (the real
+``golden.fixture_model`` (inferred; ``_fixture_model``, golden only), ``memory.time`` (the real
 time-domain registry: the drone's clocks, and the quadruped's stated ``starting_time`` to
-``log_time`` mapping). Same inputs give byte-identical canonical JSON. Every consolidation finding
-is a hard error: golden inputs are clean by construction, so a finding means the inputs drifted.
+``log_time`` mapping) and ``memory.clocks`` (what each clock's domain declares, ADR 0029). Same
+inputs give byte-identical canonical JSON. Every consolidation finding is a hard error: golden
+inputs are clean by construction, so a finding means the inputs drifted.
 """
 
 from __future__ import annotations
@@ -52,6 +53,10 @@ from neptune_memory.consolidate.base import (
     ConsolidatorOutput,
     ModelRef,
     rebuild,
+)
+from neptune_memory.consolidate.clocks import (
+    CLOCKS_CONSOLIDATOR_ID,
+    ClockDescriptionConsolidator,
 )
 from neptune_memory.consolidate.identity import IdentityConsolidator
 from neptune_memory.consolidate.time import TIME_CONSOLIDATOR_ID, TimeDomainConsolidator
@@ -94,6 +99,7 @@ PRIORITIES: Final[Mapping[str, int]] = {
     IDENTITY_CONSOLIDATOR_ID: 2,
     FIXTURE_MODEL_ID: 3,
     TIME_CONSOLIDATOR_ID: 4,
+    CLOCKS_CONSOLIDATOR_ID: 5,
 }
 MODEL_CONFIG: Final[Mapping[str, JsonValue]] = {
     "candidates": {
@@ -353,6 +359,7 @@ def plan() -> list[tuple[Consolidator, Mapping[str, JsonValue]]]:
         (IdentityConsolidator(), {}),
         (_FixtureModel(), MODEL_CONFIG),
         (TimeDomainConsolidator(), {}),
+        (ClockDescriptionConsolidator(), {}),
     ]
 
 

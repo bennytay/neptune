@@ -32,6 +32,7 @@ from neptune_memory.consolidate.base import (
     skip_consolidator,
 )
 from neptune_memory.consolidate.calibration import CalibrationHistoryConsolidator
+from neptune_memory.consolidate.clocks import ClockDescriptionConsolidator
 from neptune_memory.consolidate.configuration import (
     CONFIGURATION_CONSOLIDATOR_ID,
     ConfigurationLineageConsolidator,
@@ -112,6 +113,8 @@ def default_registrations() -> tuple[Registration, ...]:
         ),
         Registration(RunConsolidator()),
         Registration(TimeDomainConsolidator()),
+        # What the records declare about each clock (ADR 0029).
+        Registration(ClockDescriptionConsolidator()),
         Registration(ConfigurationLineageConsolidator()),
         Registration(CalibrationHistoryConsolidator(), after=(CONFIGURATION_CONSOLIDATOR_ID,)),
         Registration(EpisodeConsolidator(), after=(RUNS_CONSOLIDATOR_ID,)),

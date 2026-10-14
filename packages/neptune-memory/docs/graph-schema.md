@@ -1,7 +1,7 @@
 # Graph schema v2
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v2.4.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.4.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v2.5.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.5.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -21,7 +21,8 @@ golden-only) republishes the goldens under identity v4 ([ADR 0021](adr/0021-a-ma
 adds `declared_value`, `stated_cause`, the `declared_value` value type and the `maintenance` event kind
 ([ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md)); 2.3.0 (minor) adds `stated_blank` and the
 `procedure_revision` event kind ([ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md)); 2.4.0 is golden-only
-(identity v5 joins the parts events and procedure documents involve, [ADR 0028](adr/0028-vendor-procedures-named-by-their-heading-the-parts-they-apply-to-and-parts-in-identity.md); schema and vocabulary unchanged). Within major 1, earlier goldens still
+(identity v5 joins the parts events and procedure documents involve, [ADR 0028](adr/0028-vendor-procedures-named-by-their-heading-the-parts-they-apply-to-and-parts-in-identity.md); schema and vocabulary unchanged); 2.5.0 (minor) adds `clock_description` and its value type, what the
+Ledger declares about each clock ([ADR 0029](adr/0029-clock-descriptions-as-stated-claims-declared-units-epochs-and-civil-zones.md)). Within major 1, earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -57,7 +58,7 @@ the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 13`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 14`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -71,6 +72,7 @@ major version (ADR 0002 §5).
 | `calibrated_by` | configuration | record | many | the maintenance or requalification record that states the calibration resulted from it |
 | `calibrated_with` | sensor | configuration | many | a calibration of the sensor, from its valid_from to its stated end or the next one |
 | `calibration_candidate` | sensor | configuration | many | ambiguous: the calibration could be the sensor's over the interval; one claim per reading |
+| `clock_description` | clock | clock_description | one | what the records declare about the clock: tick length, epoch, timescale and declared civil zone, as declared; never a conversion |
 | `clock_map` | clock | clock_map | many | a `maps_to`'s parameters as the evidence states them, or the chain it composes |
 | `co_occurs_within` | event | event | many | both events began inside the claim's valid interval, which is the configured window on that clock; different sources; never a cause |
 | `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
@@ -140,7 +142,11 @@ major version (ADR 0002 §5).
 version and never renamed or removed within a major.
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
-`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record`, `delta`, `declared_value` and `clock_map` (`#/$defs/ClockMap`:
+`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record`, `delta`, `declared_value`, `clock_description`
+(`#/$defs/ClockDescription`: a clock's `field` and `scope` verbatim, its `role`, `resolution` (seconds per tick),
+`epoch` and `timescale` as its `TimestampDomain` states them, the `civil_time_zone` its companion record declares
+(`not_applicable` when no companion names the clock) and `zone_declared_by`, the adapter id of the transform that
+declares the zone; every state inheriting the claim's provenance) and `clock_map` (`#/$defs/ClockMap`:
 a mapping's `anchor`, `rate` and `residual_bound` exactly as stated, each a `Knowledge` state inheriting the
 claim's provenance, with `method` `stated` or `co_sampled`; or a `composed` chain naming its mapping records in
 `chain` and the clocks between in `via`, with no parameters of its own). A `delta`
@@ -376,6 +382,13 @@ def test_graph_schema_contract(check):
     steps as `declared_value`s, each revision-history row its own event, and a label or cell shown blank as
     `stated_blank`: never a value, never evidence that nothing exists. A machine joins only by an id a `machine`
     record states.
+22. **A clock is described as declared, never converted** ([ADR 0029](adr/0029-clock-descriptions-as-stated-claims-declared-units-epochs-and-civil-zones.md)).
+    `memory.clocks` writes one `clock_description` per `TimestampDomain`, over the clock's whole time
+    (`[INT64_MIN, open)` on the clock): its tick length, epoch, timescale and role exactly as the domain states
+    them (`Unknown` stays `Unknown`), and the zone its `civil_time_zone` companion declares. A companion names
+    only a civil (wall) clock, so a zone state other than `not_applicable` says the ticks count local wall time;
+    `not_applicable` says only that no companion names the clock. Nothing relates two clocks or reads a wall
+    time as an instant: that is a stated mapping's job, or a derived transform's.
 
 ## Caveat: a resolver configuration is a store generation
 
