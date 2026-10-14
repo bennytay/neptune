@@ -131,8 +131,8 @@ two-hop walk at 50 items and 20,000 tokens), asked of the server `.mcp.json` run
 content-addressed id: `"$named:run:cell3-2026-09-09"` is the id an earlier `neptune_entities` answer lists
 for that name, `"$support:Q7.C3"` the first claim id an earlier answer cites for Q7.C3 and pins each gold claim
 in one class with a written reason: `supported` (the claim ids whose statements cite it, by Platform ADR 0007 §6's
-rule over each statement's evidence refs, a single cell only by its column, and the records its claims are
-about, and one of them carries the fact), `co_cited` (the claim
+rule over each statement's evidence refs, a single cell only by its column, a character span as the document
+block holding it (ADR 0014 §4), and the records its claims are about, and one of them carries the fact), `co_cited` (the claim
 ids citing it, none of which states it: they share a row, page or record while saying something else) or a gap
 (`in_graph`: whether any claim of the graph would cite it). Only `supported` counts as answered. When the graph
 moves (Memory regenerates its snapshot, an adapter or a Deploy mapping changes it), the context stage is red

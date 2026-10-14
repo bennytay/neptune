@@ -7,6 +7,7 @@ import csv
 import importlib.util
 import io
 import json
+import re
 import struct
 import sys
 from datetime import datetime
@@ -262,6 +263,50 @@ def test_machine_aliases_are_in_the_namespaces_the_mappings_key_machines_by(
         assert {row["Robot"] for row in _rows(files[path], "Requal ID").values()} == {robot}
     assert b"ARM-3A" in files["sites/PLANT-2/cell3/incidents/INC-C3-0011.pdf"]
     assert b"AMR-07" in files["sites/S-007/incidents/INC-0007.pdf"]
+
+
+def test_the_part_assertion_names_the_finger_set_as_each_reading_keys_it(
+    files: dict[str, bytes],
+) -> None:
+    """The bulletin's FS-0340 and WO-26-0911's are one part only because a person says so
+    (Platform ADR 0014): its scope is the CMMS's Installed Serial as Deploy's ``cmms_generic``
+    keys it and the bulletin's part as Memory's procedure declaration reads it, each written as
+    the source writes it."""
+    preset = json.loads(
+        (
+            corpus.REPO
+            / "packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/cmms_generic.json"
+        ).read_text(encoding="utf-8")
+    )
+    (parts,) = [p for r in preset["rules"] for p in r["fields"].get("parts", [])]
+    (installed,) = parts["installed"]
+    memory = json.loads(
+        (
+            corpus.REPO
+            / "packages/neptune-memory/tests/fixtures/acceptance_corpus.memory_config.json"
+        ).read_text(encoding="utf-8")
+    )
+    (bulletin,) = [d for d in memory["memory.procedures"]["documents"] if "parts" in d]
+    applies = next(
+        line.split(": ", 1)[1]
+        for line in files["sites/PLANT-2/vendor/SB-2026-117_PG-80_finger_sets.md"]
+        .decode()
+        .splitlines()
+        if line.startswith(f"{bulletin['parts']['label']}: ")
+    )
+    vendor_ids = re.findall(bulletin["parts"]["pattern"], applies)
+    work = _rows(files["sites/PLANT-2/cmms/work_orders.csv"], "WO Number")["WO-26-0911"]
+    document = json.loads(files["sites/PLANT-2/vendor/FS-0340.assertions.json"])
+    (entry,) = document["assertions"]
+    assert entry["assertion_type"] == "same_identity"
+    assert entry["scope"] == [
+        {"namespace": installed["namespace"], "value": work[installed["column"]]},
+        {"namespace": bulletin["parts"]["namespace"], "value": vendor_ids[0]},
+    ]
+    assert vendor_ids == ["FS-0340"] and work["Installed Serial"] == "FS-0340"
+    # Not a same-event assertion: the deploy stage's scope check is about events.
+    assert entry["payload"]["relation"] != "same_event"
+    assert entry["ticket"] == {"namespace": "cmms.work_order", "value": "WO-26-0911"}
 
 
 def test_the_cmms_and_syslog_stops_of_inc_c3_0011_are_32_s_apart(files: dict[str, bytes]) -> None:
