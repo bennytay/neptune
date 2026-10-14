@@ -11,9 +11,11 @@ which are for building Neptune, not for asking it. The folder holds only what an
 - ``.claude/settings.json``: ``{"env": {"MAX_MCP_OUTPUT_TOKENS": "100000"}}``, so a whole
   comparison reaches the agent.
 
-Nothing else. ``DIR`` is created when missing. A folder that already holds anything else is
-refused and left untouched; a previous demo folder is rewritten (a ``.claude/settings.local.json``
-Claude Code wrote there, such as an approval of the server, is kept). Symlinks are never followed.
+Nothing else. ``DIR`` is created when missing. A non-empty folder is rewritten only when it is
+provably this tool's: it holds nothing but the files the tool writes (and a
+``.claude/settings.local.json`` Claude Code wrote there, such as an approval of the server, which is
+kept), with a ``.mcp.json`` of the tool's shape and the tool's ``settings.json``. Anything else is
+refused and left untouched. Nothing is ever deleted, and symlinks are never followed.
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ import argparse
 import json
 import shutil
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
@@ -36,16 +37,22 @@ SNAPSHOT: Final = (
 SOURCES: Final = REPO / "harness" / "acceptance" / "sources.json"
 SETTINGS: Final = {"env": {"MAX_MCP_OUTPUT_TOKENS": "100000"}}
 SERVER: Final = "neptune"
-# What a demo folder may hold: these, and a settings.local.json Claude Code writes beside settings.
-OWN: Final[Mapping[str, object]] = {
-    ".mcp.json": None,
-    ".claude": {"settings.json": None, "skills": {"neptune": ...}},
-}
-KEPT: Final = frozenset({".claude/settings.local.json"})
+MODULE: Final = "neptune_context.mcp"
+KEPT: Final = frozenset({".claude/settings.local.json"})  # Claude Code's own (an approval)
 
 
 class Refused(Exception):
-    """The folder cannot be written: it holds something a demo folder does not."""
+    """The folder cannot be written: it holds something this tool did not write."""
+
+
+def written() -> tuple[frozenset[str], frozenset[str]]:
+    """The exact files and directories the tool writes, relative to the folder."""
+    skill = sorted(p.relative_to(SKILL) for p in SKILL.rglob("*"))
+    files = {".mcp.json", ".claude/settings.json"}
+    files |= {f".claude/skills/neptune/{p}" for p in skill if (SKILL / p).is_file()}
+    dirs = {".claude", ".claude/skills", ".claude/skills/neptune"}
+    dirs |= {f".claude/skills/neptune/{p}" for p in skill if (SKILL / p).is_dir()}
+    return frozenset(files), frozenset(dirs)
 
 
 def served(demo: Path = DEMO) -> tuple[Path, Path]:
@@ -61,66 +68,104 @@ def mcp_config(graph: Path, sources: Path, uv: str | None = None) -> dict[str, o
     """The ``.mcp.json`` document: the server run from this clone, every path absolute."""
     command = uv or shutil.which("uv") or "uv"
     args = ["run", "--directory", str(REPO), "--all-packages", "python", "-m"]
-    args += ["neptune_context.mcp", "--memory", str(graph), "--sources", str(sources)]
+    args += [MODULE, "--memory", str(graph), "--sources", str(sources)]
     return {"mcpServers": {SERVER: {"type": "stdio", "command": command, "args": args}}}
 
 
-def _foreign(folder: Path, allowed: Mapping[str, object], at: str = "") -> list[str]:
-    """What under ``folder`` a demo folder does not hold (relative paths), without following a
-    symlink: a symlink is always foreign. ``allowed`` maps a name to ``None`` (a file), ``...``
-    (a directory, whatever it holds: the skill copy) or the same kind of map (a directory)."""
+def _ours(document: object) -> bool:
+    """Whether ``document`` is a ``.mcp.json`` this tool wrote: one server, ``neptune``, of
+    exactly the shape ``mcp_config`` gives, running ``neptune_context.mcp``."""
+    if not isinstance(document, dict) or set(document) != {"mcpServers"}:
+        return False
+    servers = document["mcpServers"]
+    if not isinstance(servers, dict) or set(servers) != {SERVER}:
+        return False
+    server = servers[SERVER]
+    if not isinstance(server, dict) or set(server) != {"type", "command", "args"}:
+        return False
+    args = server["args"]
+    return (
+        server["type"] == "stdio"
+        and isinstance(server["command"], str)
+        and isinstance(args, list)
+        and len(args) == 11
+        and all(isinstance(a, str) for a in args)
+        and args[:2] == ["run", "--directory"]
+        and args[3:7] == ["--all-packages", "python", "-m", MODULE]
+        and args[7] == "--memory"
+        and args[9] == "--sources"
+    )
+
+
+def _json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+
+
+def _walk(folder: Path) -> list[Path]:
+    """Every entry under ``folder``, sorted, never descending into a symlink."""
     out = []
     for entry in sorted(folder.iterdir()):
-        name = f"{at}{entry.name}"
-        if name in KEPT and entry.is_file() and not entry.is_symlink():
-            continue
-        spec = allowed.get(entry.name, False)
-        if entry.is_symlink() or spec is False:
-            out.append(name)
-        elif spec is None:
-            out += [] if entry.is_file() else [name]
-        elif not entry.is_dir():
-            out.append(name)
-        elif isinstance(spec, Mapping):
-            out += _foreign(entry, spec, f"{name}/")
+        out.append(entry)
+        if entry.is_dir() and not entry.is_symlink():
+            out += _walk(entry)
     return out
 
 
 def check(folder: Path) -> None:
-    """Refuse ``folder`` unless it is missing, empty or a previous demo folder."""
+    """Refuse ``folder`` unless it is missing, empty or a demo folder this tool wrote: it holds
+    only the files and directories the tool writes (and ``KEPT``), no symlink, a ``.mcp.json``
+    of the tool's shape and, if present, the tool's ``settings.json``."""
     if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
         raise Refused(f"{folder} is not a directory")
-    if not folder.exists():
+    if not folder.exists() or not any(folder.iterdir()):
         return
-    foreign = _foreign(folder, OWN)
+    files, dirs = written()
+    foreign = []
+    for path in _walk(folder):
+        name = path.relative_to(folder).as_posix()
+        if path.is_symlink():
+            foreign.append(name)
+        elif path.is_dir():
+            foreign += [] if name in dirs else [name]
+        elif not (path.is_file() and (name in files or name in KEPT)):
+            foreign.append(name)
     if foreign:
         shown = ", ".join(foreign[:5]) + (", ..." if len(foreign) > 5 else "")
-        raise Refused(f"{folder} is not empty and not a demo folder (it holds {shown})")
+        raise Refused(
+            f"{folder} is not empty and not a demo folder (it holds {shown}); nothing was changed"
+        )
     mcp = folder / ".mcp.json"
-    if mcp.is_file():
-        try:
-            document = json.loads(mcp.read_text(encoding="utf-8"))
-            servers = set(document["mcpServers"])
-        except (ValueError, KeyError, TypeError, OSError):
-            servers = set()
-        if servers != {SERVER}:
-            raise Refused(f"{mcp} is not a demo folder's (it must serve only {SERVER!r})")
+    if not mcp.is_file() or not _ours(_json(mcp)):
+        raise Refused(
+            f"{folder} is not empty and not a demo folder (it holds no .mcp.json this tool"
+            f" wrote: one {SERVER!r} server running {MODULE}); nothing was changed"
+        )
+    settings = folder / ".claude" / "settings.json"
+    if settings.exists() and _json(settings) != SETTINGS:
+        raise Refused(
+            f"{folder} is not a demo folder ({settings} is not the one this tool writes);"
+            " nothing was changed"
+        )
 
 
 def write(folder: Path, demo: Path = DEMO, uv: str | None = None) -> tuple[Path, Path]:
     """Write the demo folder at ``folder`` (see the module docstring); the graph and source index
-    it serves. ``Refused`` when ``folder`` holds anything else; nothing is written then."""
+    it serves. ``Refused`` when ``folder`` holds anything the tool did not write; nothing is
+    written then. Only the tool's own files are (over)written; nothing is ever deleted."""
     check(folder)
     graph, sources = served(demo)
-    claude = folder / ".claude"
-    skill = claude / "skills" / "neptune"
-    if skill.exists():
-        shutil.rmtree(skill)
-    skill.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(SKILL, skill, symlinks=False)
-    (claude / "settings.json").write_text(json.dumps(SETTINGS, indent=2) + "\n", encoding="utf-8")
+    folder.mkdir(parents=True, exist_ok=True)
+    # .mcp.json first: a folder an interrupted run leaves is still recognised as this tool's.
     config = mcp_config(graph, sources, uv)
     (folder / ".mcp.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    claude = folder / ".claude"
+    skill = claude / "skills" / "neptune"
+    skill.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(SKILL, skill, symlinks=False, dirs_exist_ok=True)
+    (claude / "settings.json").write_text(json.dumps(SETTINGS, indent=2) + "\n", encoding="utf-8")
     return graph, sources
 
 

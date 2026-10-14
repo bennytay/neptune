@@ -5,7 +5,7 @@ holds anything else and rewrites a previous demo folder."""
 import json
 import re
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
 from harness import demo_folder as D
@@ -67,16 +67,29 @@ def test_a_previous_demo_folder_is_rewritten_byte_for_byte(tmp_path: Path) -> No
     folder = tmp_path / "f"
     D.write(folder, demo=tmp_path / "none", uv="uv")
     first = _files(folder)
-    stale = folder / ".claude" / "skills" / "neptune" / "OLD.md"
-    stale.write_text("from an older skill", encoding="utf-8")
+    skill = folder / ".claude" / "skills" / "neptune" / "SKILL.md"
+    skill.write_text("an older skill", encoding="utf-8")  # the tool's own file: refreshed
     approval = folder / ".claude" / "settings.local.json"
     approval.write_text('{"enabledMcpjsonServers": ["neptune"]}', encoding="utf-8")
+    D.write(folder, demo=tmp_path / "none", uv="/other/uv")  # another uv, another demo: ours
     D.write(folder, demo=tmp_path / "none", uv="uv")
-    assert not stale.exists()  # the skill is the current copy, not a merge
     assert approval.read_text() == '{"enabledMcpjsonServers": ["neptune"]}'  # Claude Code's own
     again = _files(folder)
     del again[".claude/settings.local.json"]
     assert again == first
+
+
+def _ours() -> dict[str, Any]:
+    return D.mcp_config(D.SNAPSHOT, D.SOURCES, "uv")
+
+
+def _spoof(change: Any) -> str:
+    document = _ours()
+    change(document["mcpServers"]["neptune"])
+    return json.dumps(document)
+
+
+_SETTINGS = json.dumps(D.SETTINGS)
 
 
 @pytest.mark.parametrize(
@@ -89,6 +102,20 @@ def test_a_previous_demo_folder_is_rewritten_byte_for_byte(tmp_path: Path) -> No
         {".mcp.json": '{"mcpServers": {"neptune": {}, "github": {}}}'},
         {".mcp.json": "not json"},
         {".claude/settings.json/inner": "a directory where a file belongs"},
+        # Review of #173: a layout that looks like a demo folder is not proof it is one.
+        {".claude/settings.json": '{"model": "opus"}'},  # a user's own settings, alone
+        {".claude/skills/neptune/notes.txt": "my notes"},  # a user's file in the skill dir
+        {".claude/skills/neptune/SKILL.md": "a skill of my own"},  # no .mcp.json: not ours
+        {".claude/settings.json": _SETTINGS},  # our settings, but no .mcp.json
+        # A .mcp.json that is not the tool's, beside otherwise-ours files.
+        {".mcp.json": json.dumps({"mcpServers": {"neptune": {"command": "uv", "args": []}}})},
+        {".mcp.json": _spoof(lambda s: s["args"].__setitem__(6, "evil.module"))},
+        {".mcp.json": _spoof(lambda s: s.__setitem__("env", {"X": "1"}))},
+        {".mcp.json": _spoof(lambda s: s["args"].append("--extra"))},
+        {".mcp.json": json.dumps({**_ours(), "other": 1})},
+        {".mcp.json": json.dumps(_ours()), ".claude/settings.json": '{"env": {}}'},
+        {".mcp.json": json.dumps(_ours()), ".claude/skills/neptune/notes.txt": "my notes"},
+        {".mcp.json": json.dumps(_ours()), ".claude/settings.local.json/x": "a directory"},
     ],
 )
 def test_a_folder_holding_anything_else_is_refused_and_untouched(
@@ -105,11 +132,38 @@ def test_a_folder_holding_anything_else_is_refused_and_untouched(
     assert _files(folder) == before
 
 
+def test_the_reviewers_two_reproductions_exit_2_and_change_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mine = tmp_path / "settings-only"
+    (mine / ".claude").mkdir(parents=True)
+    (mine / ".claude" / "settings.json").write_text('{"model": "opus"}', encoding="utf-8")
+    notes = tmp_path / "notes-only"
+    (notes / ".claude" / "skills" / "neptune").mkdir(parents=True)
+    (notes / ".claude" / "skills" / "neptune" / "notes.txt").write_text("x", encoding="utf-8")
+    for folder in (mine, notes):
+        before = _files(folder)
+        assert D.main([str(folder), "--demo", str(tmp_path / "none")]) == 2
+        assert "not a demo folder" in capsys.readouterr().err
+        assert _files(folder) == before
+    assert (notes / ".claude" / "skills" / "neptune" / "notes.txt").read_text() == "x"
+
+
+def test_an_interrupted_run_is_still_recognised(tmp_path: Path) -> None:
+    """``.mcp.json`` is written first, so a folder with it and part of the rest is ours."""
+    folder = tmp_path / "f"
+    folder.mkdir()
+    (folder / ".mcp.json").write_text(json.dumps(_ours()), encoding="utf-8")
+    D.write(folder, demo=tmp_path / "none", uv="uv")
+    assert (folder / ".claude" / "skills" / "neptune" / "SKILL.md").is_file()
+
+
 def test_symlinks_and_files_are_refused(tmp_path: Path) -> None:
     target = tmp_path / "elsewhere"
     target.mkdir()
     folder = tmp_path / "f"
     (folder / ".claude").mkdir(parents=True)
+    (folder / ".mcp.json").write_text(json.dumps(_ours()), encoding="utf-8")
     (folder / ".claude" / "skills").symlink_to(target)
     with pytest.raises(D.Refused, match="skills"):
         D.write(folder, demo=tmp_path / "none", uv="uv")
