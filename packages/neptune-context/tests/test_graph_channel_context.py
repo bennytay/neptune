@@ -422,12 +422,16 @@ def test_a_stale_snapshot_reads_a_busy_subject_once_per_group_not_once_per_claim
         def __init__(self) -> None:
             self.inner = F.reader()
             self.calls = 0
+            self.clocks: list[object] = []
 
         def __getattr__(self, name: str) -> object:
             return getattr(self.inner, name)
 
         def claims(self, *args: object, **kwargs: object) -> object:
-            self.calls += 1
+            if len(args) > 1 and args[1] == "clock_description":
+                self.clocks.append(args[0])  # the engine describes each clock once (ADR 0022)
+            else:
+                self.calls += 1
             return self.inner.claims(*args, **kwargs)  # type: ignore[arg-type]
 
     reader = Counting()
@@ -439,6 +443,7 @@ def test_a_stale_snapshot_reads_a_busy_subject_once_per_group_not_once_per_claim
     # Memory superseded since: never one bisection per claim.
     assert reader.calls <= len(groups) + 3
     assert len(packet.superseded_since) == 1
+    assert len(reader.clocks) == len(set(reader.clocks))
 
 
 def test_the_walk_stops_at_its_node_limit_and_says_so() -> None:

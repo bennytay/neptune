@@ -39,14 +39,17 @@ if TYPE_CHECKING:
 # §6). 11: ``succeeds`` is a statement about two configurations, never read from one machine's chain
 # (ADR 0019 §2). 12: ``declared_value`` and ``stated_cause`` joined, and the ``maintenance`` event
 # kind (ADR 0025). 13: ``stated_blank`` joined, and the ``procedure_revision`` event kind
-# (ADR 0027). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 13
+# (ADR 0027). 14: ``clock_description`` joined (ADR 0029). The vocabulary is part of graph-schema
+# (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 14
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
 HAS_CLOCK: Final = "has_clock"
 MAPS_TO: Final = "maps_to"
 CLOCK_MAP: Final = "clock_map"
+# What the Ledger declares about a clock (ADR 0029): unit, epoch, timescale, declared civil zone.
+CLOCK_DESCRIPTION: Final = "clock_description"
 
 # Identity predicates (ADR 0003 §1). Only ``memory.identity`` grounds ``same_as``, never by
 # inference; ``same_as_candidate`` is pairwise, one claim each way. The runner enforces both.
@@ -788,5 +791,13 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.CLOCK_MAP},
         _MANY,
         "a maps_to's parameters as the evidence states them, or the chain it composes",
+    ),
+    _p(
+        CLOCK_DESCRIPTION,
+        {_N.CLOCK},
+        {_V.CLOCK_DESCRIPTION},
+        _ONE,
+        "what the records declare about the clock: tick length, epoch, timescale and declared"
+        " civil zone, as declared; never a conversion",
     ),
 )

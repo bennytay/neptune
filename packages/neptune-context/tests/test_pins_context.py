@@ -55,14 +55,17 @@ def test_registry_lists_context_as_a_consumer_of_both() -> None:
 
 def test_docs_state_the_same_pins() -> None:
     # docs/contracts.md is the live mirror of pins.py. Accepted ADRs keep the pins as written:
-    # ADR 0001 declared the first pins, ADR 0007, ADR 0012 and ADR 0014 moved them, ADR 0017 is the
-    # latest.
+    # ADR 0001 declared the first pins, ADR 0007, ADR 0012, ADR 0014, ADR 0017 and ADR 0019 moved
+    # them, ADR 0022 is the latest.
     contracts = (ROOT / "docs" / "contracts.md").read_text(encoding="utf-8")
     adr = (
         ROOT
         / "docs"
         / "adr"
-        / "0019-procedures-for-the-parts-the-maintenance-changed-and-graph-schema-2-4-0-pin.md"
+        / (
+            "0022-times-in-their-clocks-declared-terms-graph-schema-2-5-0-pin-and-query-packet"
+            "-1-8-0.md"
+        )
     ).read_text(encoding="utf-8")
     for text in (contracts, adr):
         assert f'CATALOG_API_VERSION = "{pins.CATALOG_API_VERSION}"' in text

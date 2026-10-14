@@ -40,7 +40,7 @@ def _declared(doc: dict[str, Any]) -> int:
 
 def test_the_acceptance_snapshot_reads_with_its_declared_values() -> None:
     doc = document()
-    assert doc["graph_schema"] == GRAPH_SCHEMA_PIN == "2.4.0"
+    assert doc["graph_schema"] == GRAPH_SCHEMA_PIN == "2.5.0"
     snapshot = read_snapshot(doc)
     assert not snapshot.unread
     predicates = {c.predicate for c in snapshot.claims}

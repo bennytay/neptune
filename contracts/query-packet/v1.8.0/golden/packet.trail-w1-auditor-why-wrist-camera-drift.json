@@ -1,0 +1,310 @@
+{
+  "findings": [],
+  "gaps": [],
+  "header": {
+    "as_of": 4,
+    "budget": {
+      "dropped": 0,
+      "exhausted": [],
+      "limits": {
+        "items": 10
+      },
+      "tokenizer": "neptune-context.utf8-bytes-div-4/1",
+      "used": {
+        "bytes": 4490,
+        "items": 3,
+        "tokens": 1123
+      }
+    },
+    "head": 4,
+    "inference_included": false,
+    "ledger_snapshot": {
+      "catalog_api_version": "1.7.0"
+    },
+    "memory_snapshot": {
+      "as_of": 4,
+      "generation": "sha256:4fa4e0a00f170dd43a738763b3ba34a20defee91757d71e7c4b793b57a2eba01",
+      "graph_schema_version": 2
+    },
+    "produced_by": {
+      "config_hash": "sha256:00942ee9ca1cd0d6f4b9335773b91877c593d07fce55f116d44f943e6aa4bc87",
+      "engine_id": "neptune-context.local",
+      "engine_version": "1"
+    },
+    "query_id": "query:sha256:209465e2ffbac42e255bc83cc78fec22689f737482d4f9d38a580440001fee7d"
+  },
+  "id": "packet:sha256:e221a06586ff46ae46798fd239f515e1dae6985025cfc3ba2fca384cd4079d63",
+  "items": [
+    {
+      "assertion_kind": "observed",
+      "claim": {
+        "assertion_kind": "observed",
+        "confidence": {
+          "knowledge": "not_applicable"
+        },
+        "id": "claim:sha256:e11ffb96ef1dea4cff67f465407aeed308e33f44075830ae59a2e3864950a56e",
+        "object": {
+          "datatype": "delta",
+          "kind": "literal",
+          "unit": {
+            "knowledge": "known",
+            "value": "mm"
+          },
+          "value": {
+            "earlier": "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+            "later": "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796",
+            "name": "translation",
+            "quantity": "parameter",
+            "representation": "values",
+            "values": [
+              0.0,
+              -0.1,
+              4.3
+            ]
+          }
+        },
+        "predicate": "drift",
+        "provenance": {
+          "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
+          "consolidator_id": "fixture.calibration",
+          "consolidator_version": "1",
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/translation"
+                }
+              ],
+              "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+            },
+            {
+              "locator": [
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/translation"
+                }
+              ],
+              "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+            }
+          ],
+          "records": [
+            "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+            "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+          ]
+        },
+        "recorded_at": 2,
+        "subject": {
+          "kind": "node",
+          "node_id": "asset-tag:WCAM-7",
+          "node_type": "sensor"
+        },
+        "superseded_at": "open",
+        "supersedes": [],
+        "valid": {
+          "end": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1776124800000000000
+          },
+          "start": {
+            "domain_id": "rec:sha256:35d81ae54abb385b079ed2e68a26d36052207a9cdeefebc3c1407f3c239b2895",
+            "ticks": 1772323200000000000
+          }
+        }
+      },
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "item:sha256:044737c47ac0c32306b04b943abc572e290e544a8e5e669208216ec781ba3259",
+      "kind": "claim",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/translation"
+              }
+            ],
+            "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+          },
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/translation"
+              }
+            ],
+            "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+          }
+        ],
+        "records": [
+          "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+          "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+        ],
+        "transform": {
+          "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
+          "producer_id": "fixture.calibration",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "graph",
+            "rank": 1,
+            "score": 1.0
+          }
+        ],
+        "score": 0.01639344262295082
+      }
+    },
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/translation"
+          }
+        ],
+        "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+      },
+      "id": "item:sha256:c2a8a10d1f9f5cb021ad4c17e635d4141ce2600606a5934d1a79c6ecce991850",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/translation"
+              }
+            ],
+            "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+          }
+        ],
+        "records": [
+          "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+          "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+        ],
+        "transform": {
+          "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
+          "producer_id": "fixture.calibration",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 1,
+            "score": 0.5
+          }
+        ],
+        "score": 0.01639344262295082
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    },
+    {
+      "assertion_kind": "observed",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "evidence": {
+        "locator": [
+          {
+            "kind": "json_pointer",
+            "pointer": "/translation"
+          }
+        ],
+        "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+      },
+      "id": "item:sha256:da387ba42e5b4c0e112eafca605836475e06eacf8fe1426cbf1527983aa01057",
+      "kind": "evidence",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "json_pointer",
+                "pointer": "/translation"
+              }
+            ],
+            "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+          }
+        ],
+        "records": [
+          "rec:sha256:ac20888d60de2864a46ee179a1f467bbb54a0ee85c27b061af77ad157aaa690e",
+          "rec:sha256:d86959be2bdeda22677b3f84a8c60b3f13d854c345d8cd5bf6b76ac536da2796"
+        ],
+        "transform": {
+          "config_hash": "sha256:746bd538c49d0dafb6e7edd787f819b9c8bb580e0689fe7cca3fa23f35780d8a",
+          "producer_id": "fixture.calibration",
+          "producer_version": "1"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 2,
+            "score": 0.5
+          }
+        ],
+        "score": 0.016129032258064516
+      },
+      "size": {
+        "knowledge": "known",
+        "value": 744
+      },
+      "status": "resolved"
+    }
+  ],
+  "kind": "context_packet",
+  "packet_version": 1,
+  "superseded_since": [],
+  "trails": [
+    {
+      "at": "/explain/0",
+      "claim": "claim:sha256:e11ffb96ef1dea4cff67f465407aeed308e33f44075830ae59a2e3864950a56e",
+      "kind": "why",
+      "steps": [
+        {
+          "assertion_kind": "observed",
+          "claim": "claim:sha256:e11ffb96ef1dea4cff67f465407aeed308e33f44075830ae59a2e3864950a56e",
+          "depth": 0,
+          "evidence": [
+            {
+              "locator": [
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/translation"
+                }
+              ],
+              "source": "sha256:97f5284599e4b01bdd719e80754a1767af76dadd4abf0211f7aeb741f490318f"
+            },
+            {
+              "locator": [
+                {
+                  "kind": "json_pointer",
+                  "pointer": "/translation"
+                }
+              ],
+              "source": "sha256:4151ce03138888e41e43ca6f440608cf36b72521f5458ca14b4380741a5ed0eb"
+            }
+          ],
+          "relation": "root",
+          "repeat": false
+        }
+      ]
+    }
+  ]
+}

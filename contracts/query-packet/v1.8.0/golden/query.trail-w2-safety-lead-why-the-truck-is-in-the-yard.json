@@ -1,0 +1,18 @@
+{
+  "as_of": 4,
+  "budget": {
+    "items": 10
+  },
+  "clock_bridges": [],
+  "explain": [
+    {
+      "claim_id": "claim:sha256:42d0b79f0a426a54dd250725febee928a822a4e8bfbf5226d95f0144954c18fd",
+      "kind": "why"
+    }
+  ],
+  "frame_bridges": [],
+  "include_inferred": true,
+  "query_version": 1,
+  "regions": [],
+  "subjects": []
+}

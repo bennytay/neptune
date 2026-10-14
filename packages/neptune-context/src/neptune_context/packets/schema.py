@@ -432,8 +432,10 @@ def _packet_defs() -> dict[str, JsonValue]:
                     )
                 ),
                 "trails": _array(_ref("Trail"), min_items=1, max_items=MAX_TRAILS),
+                # Memory's clock_description claims of the items' clocks, by clock (ADR 0022).
+                "clocks": _array(_ref("Claim"), min_items=1),
             },
-            optional=("trails",),
+            optional=("clocks", "trails"),
         ),
         "Relevance": _obj(
             {
@@ -454,11 +456,12 @@ def packet_schema() -> JsonObject:
         "anyOf": [_ref("ContextPacket")],
         "description": (
             "Neptune Context's context packet (neptune-context ADR 0003): a header, items, claims"
-            " superseded since as_of, resolver findings, gaps and, for explain clauses, trails"
-            " (ADR 0010). Claims, findings and the"
-            " compiler types they reuse are copied from Memory's graph-schema export. Generated"
-            " from neptune_context.packets; the Python reader in neptune_context.packets.codec"
-            " is stricter (ids, budgets and cross-references are recomputed)."
+            " superseded since as_of, resolver findings, gaps, for explain clauses, trails"
+            " (ADR 0010) and the descriptions of the items' clocks (ADR 0022). Claims, findings"
+            " and the compiler types they reuse are copied from Memory's graph-schema export."
+            " Generated from neptune_context.packets; the Python reader in"
+            " neptune_context.packets.codec is stricter (ids, budgets and cross-references are"
+            " recomputed)."
         ),
         "title": f"Neptune Context packet, version {PACKET_VERSION}",
     }

@@ -45,6 +45,7 @@ from neptune.model.provenance import EvidenceRef
 from neptune.model.scalars import NonFinite, real_to_json
 from neptune.model.time import Timestamp
 from neptune.model.units import Unit
+from neptune_memory.schema.clock_description import ClockDescription
 from neptune_memory.schema.clock_map import ClockMap
 from neptune_memory.schema.interval import OPEN, Interval, LedgerTx, Open, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -99,6 +100,8 @@ class ValueType(StrEnum):
     DELTA = "delta"
     # One value a record declares at a key path, as stated (``DeclaredValue``, ADR 0025).
     DECLARED_VALUE = "declared_value"
+    # What the Ledger declares about one clock, as declared (``ClockDescription``, ADR 0029).
+    CLOCK_DESCRIPTION = "clock_description"
 
 
 class DeltaQuantity(StrEnum):
@@ -342,7 +345,16 @@ class DeclaredValue:
 
 
 LiteralValue: TypeAlias = (
-    str | int | bool | float | NonFinite | Timestamp | ClockMap | Delta | DeclaredValue
+    str
+    | int
+    | bool
+    | float
+    | NonFinite
+    | Timestamp
+    | ClockMap
+    | ClockDescription
+    | Delta
+    | DeclaredValue
 )
 
 
@@ -375,6 +387,7 @@ class TypedLiteral:
             ValueType.CLOCK_MAP: lambda: isinstance(value, ClockMap),
             ValueType.DELTA: lambda: isinstance(value, Delta),
             ValueType.DECLARED_VALUE: lambda: isinstance(value, DeclaredValue),
+            ValueType.CLOCK_DESCRIPTION: lambda: isinstance(value, ClockDescription),
         }[datatype]()
         if not ok:
             raise TypeError(f"{value!r} is not a {datatype} value")
@@ -417,7 +430,7 @@ class TypedLiteral:
     def to_json(self) -> JsonObject:
         value = self.value
         encoded: JsonValue
-        if isinstance(value, Timestamp | ClockMap | Delta | DeclaredValue):
+        if isinstance(value, Timestamp | ClockMap | ClockDescription | Delta | DeclaredValue):
             encoded = value.to_json()
         elif isinstance(value, float | NonFinite):
             encoded = real_to_json(value)

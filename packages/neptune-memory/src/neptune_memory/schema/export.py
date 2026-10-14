@@ -39,13 +39,16 @@ SCHEMA_ID: Final = f"urn:neptune:schema:graph:{GRAPH_SCHEMA_VERSION}"
 # Compiler definitions a claim embeds; their transitive references come along.
 COMPILER_DEFS: Final = (
     "ClockAnchor",
+    "ClockRole",
     "ConfigHash",
     "Duration",
+    "Epoch",
     "EvidenceRef",
     "Fraction",
     "FrameRef",
     "NonFinite",
     "RecordId",
+    "Timescale",
     "Timestamp",
     "Unit",
 )
@@ -125,6 +128,67 @@ def _inherited(value: JsonObject) -> JsonObject:
     }
 
 
+def _declared(value: JsonObject, missing: tuple[str, ...]) -> JsonObject:
+    """A declared state copied from a record, inheriting the claim's provenance: ``known``,
+    ``ambiguous`` or one of the ``missing`` states the record may hold."""
+    return {
+        "anyOf": [
+            _obj({"knowledge": _const("known"), "value": value}),
+            _obj({"knowledge": {"enum": sorted(missing)}}),
+            _obj(
+                {
+                    "candidates": _array(_obj({"value": value}), min_items=2),
+                    "knowledge": _const("ambiguous"),
+                }
+            ),
+        ]
+    }
+
+
+def _clock_description() -> JsonObject:
+    blanks = ("not_applicable", "not_covered", "unknown")
+    part = "[A-Za-z0-9_][A-Za-z0-9._+\\-]*"  # an IANA name component (root ADR 0061 §1)
+    zone = _declared(
+        {"maxLength": 255, "pattern": f"^{part}(/{part})*$", "type": "string"},
+        ("not_applicable", "not_covered", "unknown"),
+    )
+    return {
+        **_obj(
+            {
+                "civil_time_zone": {
+                    **zone,
+                    "description": (
+                        "the zone the clock's civil_time_zone record declares, as written (an IANA"
+                        " name, never looked up); not_applicable when no such record names the"
+                        " clock"
+                    ),
+                },
+                "epoch": _declared(_ref("Epoch"), blanks),
+                "field": {"type": "string"},
+                "resolution": _declared(_ref("Fraction"), blanks),
+                "role": _declared(_ref("ClockRole"), blanks),
+                "scope": _array({"type": "string"}),
+                "timescale": _declared(_ref("Timescale"), blanks),
+                "zone_declared_by": {
+                    "anyOf": [
+                        _obj({"knowledge": _const("known"), "value": _ref("Token")}),
+                        _obj({"knowledge": {"enum": ["not_applicable", "unknown"]}}),
+                    ],
+                    "description": (
+                        "the adapter id of the transform whose record declares the zone;"
+                        " not_applicable when no civil_time_zone record names the clock"
+                    ),
+                },
+            }
+        ),
+        "description": (
+            "what the Ledger declares about one clock: its TimestampDomain's field, scope, role,"
+            " resolution (seconds per tick), epoch and timescale, and its civil_time_zone; copied,"
+            " never converted (ADR 0029)"
+        ),
+    }
+
+
 def _memory_defs() -> dict[str, JsonValue]:
     not_applicable = _obj({"knowledge": _const("not_applicable")})
     number = {"anyOf": [{"type": "number"}, _ref("NonFinite")]}
@@ -158,6 +222,7 @@ def _memory_defs() -> dict[str, JsonValue]:
         "values": {**_array(finite, min_items=1), "maxItems": MAX_DELTA_VALUES},
     }
     return {
+        "ClockDescription": _clock_description(),
         "ClockMap": {
             **_obj(
                 {
@@ -480,6 +545,7 @@ def _memory_defs() -> dict[str, JsonValue]:
                 _literal(ValueType.QUANTITY, number, quantity_unit),
                 _literal(ValueType.INSTANT, _ref("Timestamp"), na),
                 _literal(ValueType.CLOCK_MAP, _ref("ClockMap"), na),
+                _literal(ValueType.CLOCK_DESCRIPTION, _ref("ClockDescription"), na),
                 _literal(ValueType.DELTA, _ref("Delta"), delta_unit),
                 _literal(
                     ValueType.DECLARED_VALUE,

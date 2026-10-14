@@ -39,7 +39,7 @@ from neptune_deploy.packs._read import (
 )
 from neptune_deploy.packs.errors import PackError
 
-GRAPH_SCHEMA_PIN: Final = "2.4.0"  # contracts/lock.toml; a test holds the two together
+GRAPH_SCHEMA_PIN: Final = "2.5.0"  # contracts/lock.toml; a test holds the two together
 # The 1.x minor whose shapes a 1.x document is read against strictly (ADR 0015, ADR 0018 §2).
 GRAPH_SCHEMA_1X_PIN: Final = "1.6.0"
 GRAPH_SCHEMA_MAJORS: Final = (1, 2)  # the majors this reader reads; any other is refused
@@ -54,10 +54,12 @@ SNAPSHOT_PREFIX: Final = "snapshot:"
 MAX_SNAPSHOT_BYTES: Final = 512 * 1024 * 1024
 ASSERTION_KINDS: Final = ("inferred", "observed", "stated")
 # graph-schema 1.0.0's datatypes, plus clock_map (1.4.0, Memory ADR 0011), delta (1.7.0, Memory
-# ADR 0014) and declared_value (2.2.0, Memory ADR 0025): a graph Memory builds with clock mappings,
-# calibration drift or declared configuration values holds them.
+# ADR 0014), declared_value (2.2.0, Memory ADR 0025) and clock_description (2.5.0, Memory ADR 0029):
+# a graph Memory builds with clock mappings, calibration drift, declared configuration values or
+# declared clocks holds them.
 LITERAL_TYPES: Final = (
     "boolean",
+    "clock_description",
     "clock_map",
     "declared_value",
     "delta",
@@ -555,6 +557,9 @@ def _object(value: JsonValue, pointer: str, subject: Node) -> JsonObject:
             _delta(literal["value"], child(pointer, "value"))
         elif datatype == "declared_value":
             _declared_value(literal["value"], child(pointer, "value"))
+        elif datatype == "clock_description":
+            _not_applicable(literal["unit"], child(pointer, "unit"))
+            _clock_description(literal["value"], child(pointer, "value"), subject)
     else:
         raise _R.fail("an object is a node, a record or a literal", child(pointer, "kind"))
     return value
@@ -638,6 +643,43 @@ def _clock_map(value: JsonValue, pointer: str, subject: Node) -> None:
     _state(clock["anchor"], child(pointer, "anchor"), anchor)
     _state(clock["rate"], child(pointer, "rate"), fraction)
     _state(clock["residual_bound"], child(pointer, "residual_bound"), bound)
+
+
+def _clock_description(value: JsonValue, pointer: str, subject: Node) -> None:
+    """A ``ClockDescription`` (graph-schema 2.5.0): what the Ledger declares about the subject
+    clock, as declared (Memory ADR 0029). Shown, never applied: no tick is converted here."""
+    if subject.node_type != "clock":
+        raise _R.fail("a clock description is stated about a clock node", pointer)
+    clock = _R.obj(
+        value,
+        pointer,
+        (
+            "civil_time_zone",
+            "epoch",
+            "field",
+            "resolution",
+            "role",
+            "scope",
+            "timescale",
+            "zone_declared_by",
+        ),
+    )
+    _R.string(clock["field"], child(pointer, "field"))
+    at = child(pointer, "scope")
+    for i, item in enumerate(_R.array(clock["scope"], at)):
+        _R.string(item, child(at, i))
+
+    def text(item: JsonValue, here: str) -> None:
+        _R.string(item, here)
+
+    def fraction(item: JsonValue, here: str) -> None:
+        rate = _R.obj(item, here, ("denominator", "numerator"))
+        _R.integer(rate["denominator"], child(here, "denominator"), 1)
+        _R.integer(rate["numerator"], child(here, "numerator"), 1)
+
+    for key in ("civil_time_zone", "epoch", "role", "timescale", "zone_declared_by"):
+        _state(clock[key], child(pointer, key), text)
+    _state(clock["resolution"], child(pointer, "resolution"), fraction)
 
 
 _DECLARED_TYPES: Final = ("boolean", "integer", "real", "reals", "text")

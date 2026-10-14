@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 HEAD: Final = max(ARCHETYPE)
 CONSOLIDATORS: Final = (
     "memory.calibration",
+    "memory.clocks",
     "memory.configuration",
     "memory.coverage",
     "memory.declared",
@@ -113,6 +114,7 @@ def cli(*argv: str | Path) -> tuple[int, str, str]:
 def test_every_registered_consolidator_emits_over_the_archetype_ledger() -> None:
     run = consolidate(ledger(), default_registrations(), HEAD)
     assert [r.transform.consolidator_id for r in run.consolidations] == [
+        "memory.clocks",
         "memory.configuration",
         "memory.calibration",
         "memory.coverage",

@@ -414,7 +414,9 @@ def test_closed_and_superseded_changes_name_what_replaced_them() -> None:
 def test_a_world_time_diff_names_its_instants_and_clock() -> None:
     text = check_trails(CASES["diff-world-superseded"])
     heading = next(ln for ln in text.split("\n") if ln.startswith("What changed about "))
-    assert f"between tick {X.APR_1} on clock {X.UTC} and tick {X.JUN_1} on clock {X.UTC}" in heading
+    # The instants on their clock's key; the Clocks list gives the key its full id (ADR 0022).
+    assert f"between tick {X.APR_1} on clock C1 and tick {X.JUN_1} on clock C1" in heading
+    assert f'\nC1 "{X.UTC}" is not described in Memory' in text
     assert "Replaced by: " in text
 
 

@@ -21,13 +21,17 @@ import stat
 import zlib
 from typing import TYPE_CHECKING, Final
 
+from neptune_memory.schema.claim import TypedLiteral
 from neptune_memory.schema.codec import graph_from_json
-from neptune_memory.schema.interval import ledger_tx
+from neptune_memory.schema.interval import Open, ledger_tx
+from neptune_memory.schema.nodes import NodeRef, NodeType
+from neptune_memory.schema.predicates import CLOCK_DESCRIPTION
 
 from neptune.identity.canonical_json import dumps
 from neptune.identity.hashing import content_id
 from neptune.model.ids import ConfigHash
 from neptune.model.knowledge import Known
+from neptune.model.time import Timestamp
 from neptune_context.answer import domain_id
 from neptune_context.explain.explainer import Explainer
 from neptune_context.explain.history import IndexedReader
@@ -38,6 +42,7 @@ from neptune_context.packets.model import (
     ClaimItem,
     ContextPacket,
     During,
+    FrameItem,
     Gap,
     GapCode,
     LedgerSnapshot,
@@ -59,13 +64,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from neptune_ledger.api import CatalogApi, Resolution
+    from neptune_memory.schema.claim import Claim
     from neptune_memory.schema.codec import GraphDocument
+    from neptune_memory.schema.interval import LedgerTx
     from neptune_memory.schema.reader import MemoryReader
 
+    from neptune.model.ids import RecordId
     from neptune.model.jsonvalue import JsonObject
     from neptune.model.provenance import EvidenceRef
     from neptune_context.explain.history import ClaimHistory
     from neptune_context.explain.run import Caps
+    from neptune_context.packets.model import Item
     from neptune_context.packets.trails import Trail
     from neptune_context.query.model import Query
     from neptune_context.retrieve.channel import RetrievalChannel
@@ -211,6 +220,13 @@ class LocalEngine:
                 limits, items, dropped=fitted.dropped, exhausted=fitted.exhausted
             ),
             items=items,
+            clocks=clock_descriptions(
+                self._memory,
+                items,
+                snapshot.memory_as_of,
+                include_inferred=query.include_inferred,
+                during=None if during is None else during.domain_id,
+            ),
             superseded_since=tuple(superseded[k] for k in sorted(superseded)),
             findings=tuple(
                 sorted(
@@ -241,6 +257,48 @@ class LocalEngine:
                 ErrorCode.INVALID_ARGUMENT, f"not a Ledger evidence anchor: {exc}"
             ) from exc
         return self._catalog.resolve(anchor, as_of=as_of)
+
+
+def item_clocks(items: Sequence[Item], during: RecordId | None = None) -> list[RecordId]:
+    """The clocks the items' times are on, sorted: each claim's valid interval and instant
+    object, each sensor sample's time, and the query's window (``during``). A clock map's
+    target is not a time, so not here."""
+    found: set[RecordId] = set() if during is None else {during}
+    for item in items:
+        if isinstance(item, ClaimItem):
+            found.add(item.claim.valid.start.domain_id)
+            obj = item.claim.object
+            if isinstance(obj, TypedLiteral) and isinstance(obj.value, Timestamp):
+                found.add(obj.value.domain_id)
+        elif isinstance(item, FrameItem) and isinstance(item.at, Known):
+            found.add(item.at.value.domain_id)
+    return sorted(found)
+
+
+def clock_descriptions(
+    memory: MemoryReader,
+    items: Sequence[Item],
+    as_of: LedgerTx,
+    *,
+    include_inferred: bool,
+    during: RecordId | None = None,
+) -> tuple[Claim, ...]:
+    """Memory's ``clock_description`` of each clock the items' times are on (ADR 0022), as
+    Memory knew it at ``as_of``: one per clock, by clock id. A clock Memory does not describe (or
+    describes twice, which a ``one`` predicate never should) has none, and its ticks render as
+    ticks. Never converts anything: it only reads what Memory states about each clock."""
+    out: list[Claim] = []
+    for clock in item_clocks(items, during):
+        found = memory.claims(
+            NodeRef(NodeType.CLOCK, clock),
+            CLOCK_DESCRIPTION,
+            as_of,
+            include_inferred=include_inferred,
+        ).claims
+        current = [c for c in found if isinstance(c.superseded_at, Open)]
+        if len(current) == 1:
+            out.append(current[0])
+    return tuple(out)
 
 
 def _retrieve(channel: RetrievalChannel, request: Retrieval) -> ChannelAnswer:

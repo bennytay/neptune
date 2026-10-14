@@ -5,13 +5,13 @@
 
 [neptune-context]
 catalog-api = "1.7.0"
-graph-schema = "2.4.0"
+graph-schema = "2.5.0"
 
 [neptune-deploy]
 catalog-api = "1.7.0"
-graph-schema = "2.4.0"
+graph-schema = "2.5.0"
 package-schema = "10.0.0"
-query-packet = "1.7.0"
+query-packet = "1.8.0"
 
 [neptune-ledger]
 package-schema = "10.0.0"

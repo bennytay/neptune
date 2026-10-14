@@ -81,6 +81,7 @@ from neptune_context.packets.trails import (
 from neptune_context.pinned import older_graph_notice
 from neptune_context.query.model import MAX_SAME_AS_DEPTH
 from neptune_context.render.citations import CitationError
+from neptune_context.render.clocks import ClockBook, describe
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -102,7 +103,10 @@ GAPS: Final = "Not answered:"
 ITEMS: Final = "Items:"
 SUMMARY: Final = "Summary:"
 NAMES: Final = "Names (each N key's full id: pass the id, never the name, to a tool):"
-CLOCKS: Final = "Clocks (each C key's full id):"
+CLOCKS: Final = (
+    "Clocks (each C key's full id, and how its ticks are declared; times are never converted"
+    " between clocks or zones):"
+)
 SOURCES_FOOTER: Final = (
     "Sources (each file once, then each key's place in it; rows, columns, pages and characters"
     " count from 1, bytes are offsets):"
@@ -122,7 +126,8 @@ _HEADER: Final = (
         r"Graph read: graph-schema \d+\.x, older than Context's pin \d+\.\d+\.\d+; predicates"
         r" such as succeeds carry their \d+\.x meaning\."
     ),
-    re.compile(rf"World time: ticks \[-?\d+, (?:-?\d+|open)\) on clock rec:sha256:{_HEX}\."),
+    # The query's window in its clock's declared terms (ADR 0022), the clock by its C key.
+    re.compile(r"World time: valid (?:at|from) .+ on clock C[1-9][0-9]*(?:, open-ended)?\."),
     re.compile(
         r"Inferred items: (?:included, each marked INFERRED; inferences are not evidence"
         r"|excluded)\."
@@ -143,7 +148,7 @@ _Q: Final = r'"(?:[^"\\]|\\.)*"'  # a quoted JSON string; its quotes inside are 
 _QUOTED: Final = re.compile(_Q)
 _NODE: Final = rf"[a-z_]+ {_Q}"
 _CLAIM: Final = rf"claim:sha256:{_HEX}"
-_POINT: Final = rf"(?:transaction \d+|tick -?\d+ on clock rec:sha256:{_HEX})"
+_POINT: Final = r"(?:transaction \d+|.+? on clock C[1-9][0-9]*)"
 _WHY_HEAD: Final = re.compile(
     rf"Why Memory holds (?P<claim>{_CLAIM}) \(explain clause (?P<clause>\d+), as Memory knew it at"
     r" transaction \d+; (?P<claims>\d+) claims?, (?P<repeats>\d+) repeated,"
@@ -303,7 +308,8 @@ class _Names:
     give each key's full id once, so nothing is lost and any id can still be passed to a tool.
     """
 
-    def __init__(self, packet: ContextPacket) -> None:
+    def __init__(self, packet: ContextPacket, book: ClockBook) -> None:
+        self.book = book
         names: dict[NodeRef, set[str]] = {}
         for item in packet.items:
             if not isinstance(item, ClaimItem) or item.is_inferred:
@@ -362,16 +368,26 @@ class _Names:
         return f"C{self.clocks.setdefault(domain_id, len(self.clocks) + 1)}"
 
     def instant(self, at: Timestamp) -> str:
-        return f"tick {at.ticks} on clock {self.clock(at.domain_id)}"
+        """An instant in its clock's own declared terms (ADR 0022), never converted."""
+        return self.point(at.ticks, at.domain_id)
 
-    def legend(self) -> list[str]:
+    def point(self, ticks: int, clock: str) -> str:
+        return f"{self.book.when(ticks, clock)} on clock {self.clock(clock)}"  # type: ignore[arg-type]
+
+    def valid(self, clock: str, start: int, end: int | None) -> str:
+        return self.book.span(clock, start, end, f"on clock {self.clock(clock)}")  # type: ignore[arg-type]
+
+    def legend(self, cite: Callable[[tuple[EvidenceRef, ...]], str]) -> list[str]:
         lines: list[str] = []
         if self.nodes:
             lines += ["", NAMES]
             lines += [f"N{k} {n.node_type} {quote(n.node_id)}" for n, k in self.nodes.items()]
         if self.clocks:
             lines += ["", CLOCKS]
-            lines += [f"C{k} {quote(c)}" for c, k in self.clocks.items()]
+            for c, k in self.clocks.items():
+                said, refs = self.book.entry(c)  # type: ignore[arg-type]
+                cited = f" {cite(refs)}" if refs else ""
+                lines.append(f"C{k} {quote(c)} is {said}.{cited}")
         return lines
 
 
@@ -451,11 +467,8 @@ class _Ctx:
         return "".join(f"[E{self.evidence[ref]}]" for ref in dict.fromkeys(refs))
 
     def valid(self, valid: Valid) -> str:
-        clock, start, end = valid
-        on = f"on clock {self.names.clock(clock)}"
-        if end is None:
-            return f"valid from tick {start} {on}, open-ended"
-        return f"valid from tick {start} until tick {end} {on}"
+        """A validity in its clock's declared terms (ADR 0022): readable times, never converted."""
+        return self.names.valid(*valid)
 
     def literal(self, literal: TypedLiteral, predicate: str = "") -> str:
         value = literal.value
@@ -469,6 +482,9 @@ class _Ctx:
             return self.names.instant(value)  # type: ignore[arg-type]
         if literal.datatype is ValueType.CLOCK_MAP:
             return f"clock map {quote(value.to_json())}"  # type: ignore[union-attr]
+        if literal.datatype is ValueType.CLOCK_DESCRIPTION:
+            # What the Ledger declares about a clock, as Memory states it (graph-schema 2.5.0).
+            return f"clock description: {describe(value, quote)}"  # type: ignore[arg-type]
         if literal.datatype is ValueType.DELTA:
             # later - earlier between two calibration records, as Memory wrote it (graph-schema
             # 2.0.0): the declared form, numbers and unit only, never a size or a verdict.
@@ -559,7 +575,7 @@ def _mark(item: Item) -> str:
 # --- The answer ----------------------------------------------------------------------------------
 
 
-def _header(packet: ContextPacket) -> list[str]:
+def _header(packet: ContextPacket, names: _Names) -> list[str]:
     budget = packet.budget
     lines = [
         f"Context packet {packet.id}",
@@ -574,10 +590,8 @@ def _header(packet: ContextPacket) -> list[str]:
     if notice is not None:
         lines.append(notice)
     if packet.during is not None:
-        end = "open" if packet.during.end is None else str(packet.during.end)
-        lines.append(
-            f"World time: ticks [{packet.during.start}, {end}) on clock {packet.during.domain_id}."
-        )
+        during = packet.during
+        lines.append(f"World time: {names.valid(during.domain_id, during.start, during.end)}.")
     lines.append(
         "Inferred items: "
         + (
@@ -594,12 +608,15 @@ def _header(packet: ContextPacket) -> list[str]:
 
 def answer_evidence_refs(packet: ContextPacket) -> tuple[EvidenceRef, ...]:
     """The evidence refs an answer cites, in key order: the items' (``packet.evidence_refs()``),
-    then those only a why step names (a claim the packet cannot carry still cites its bytes)."""
+    then those only a why step names (a claim the packet cannot carry still cites its bytes),
+    then those that declare the items' clocks (ADR 0022), by clock id."""
     refs = dict.fromkeys(packet.evidence_refs())
     for trail in packet.trails:
         if isinstance(trail, WhyTrail):
             for step in trail.steps:
                 refs.update(dict.fromkeys(step.evidence))
+    for clock in packet.clocks:
+        refs.update(dict.fromkeys(clock.provenance.evidence))
     return tuple(refs)
 
 
@@ -611,10 +628,10 @@ def _gaps_at(packet: ContextPacket, at: str) -> int:
     return sum(1 for g in packet.gaps if g.at == at or g.at.startswith(f"{at}/"))
 
 
-def _point(point: DiffPoint) -> str:
+def _point(point: DiffPoint, names: _Names) -> str:
     if isinstance(point, TxPoint):
         return f"transaction {point.tx}"
-    return f"tick {point.ticks} on clock {point.clock}"
+    return names.point(point.ticks, point.clock)
 
 
 _NATURAL: Final = re.compile(r"(\d+)")
@@ -778,8 +795,9 @@ def _diff_lines(ctx: _Ctx, trail: DiffTrail) -> list[str]:
         f", with its declared identities {' and '.join(map(_node, others))}" if others else ""
     )
     lines = [
-        f"What changed about {_node(trail.subject)}{identities} between {_point(trail.before)} and"
-        f" {_point(trail.after)} (explain clause {trail_index(trail.at)};"
+        f"What changed about {_node(trail.subject)}{identities} between"
+        f" {_point(trail.before, ctx.names)} and {_point(trail.after, ctx.names)}"
+        f" (explain clause {trail_index(trail.at)};"
         f" {_count(len(trail.claims), 'claim')},"
         f" {_count(_gaps_at(packet, trail.at), 'gap')} listed under Not answered):"
     ]
@@ -910,7 +928,7 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
     """The packet as cited sentences (ADR 0009, 0020). Deterministic: the same packet (and
     source index), byte-identical text. ``sources`` names each cited file (ADR 0016)."""
     evidence = {ref: n for n, ref in enumerate(answer_evidence_refs(packet), start=1)}
-    names = _Names(packet)
+    names = _Names(packet, ClockBook(packet.clocks, quote, sources))
     layout = _Layout(packet, names)
     shown = layout.items()
     keys: dict[str, int] = {}  # item id and claim id -> item number, in the order shown
@@ -923,7 +941,7 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
     }
     ctx = _Ctx(packet, names, keys, evidence, by_claim)
     cite = ctx.cite
-    lines = _header(packet)
+    lines = _header(packet, names)
     if any(isinstance(t, CompareTrail) for t in packet.trails):
         lines += ["", SUMMARY, *_summary_lines(ctx, layout)]
     if packet.superseded_since:
@@ -970,7 +988,7 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
             # The retrieval channel is the engine's business, not the reader's (ADR 0018).
             refs = f"; concerns {', '.join(names.ref(r) for r in gap.refs)}" if gap.refs else ""
             lines.append(f"- {gap.code} at {quote(gap.at)}: {quote(gap.detail)}{refs}")
-    lines += names.legend()
+    lines += names.legend(ctx.cite_refs)
     lines += ["", ITEMS]
     for number, item in enumerate(shown, start=1):
         what = item.claim.id if isinstance(item, ClaimItem) else f"{item.kind} {item.id}"
@@ -1463,7 +1481,10 @@ _FILE_LINE: Final = re.compile(
 )
 _KEY_LINE: Final = re.compile(r"\[E([1-9][0-9]*)\] F([1-9][0-9]*) (\S.*)")
 _NAME_LINE: Final = re.compile(rf"N([1-9][0-9]*) [a-z_]+ {_Q}")
-_CLOCK_LINE: Final = re.compile(r"C([1-9][0-9]*) \S+")
+# A clock's key and full id, then (ADR 0022) what is declared about it, citing the evidence.
+_CLOCK_LINE: Final = re.compile(
+    rf"C([1-9][0-9]*) {_Q}(?: is .*\.(?: (?P<refs>(?:\[E[1-9][0-9]*\])+))?)?"
+)
 _COUNTED: Final = re.compile(r".* \((\d+) facts?[ ,)].*:")
 
 
@@ -1610,6 +1631,14 @@ def parse_answer(text: str) -> ParsedAnswer:
             if match is None or int(match.group(1)) != numbered[section] + 1:
                 raise CitationError(f"line {index + 1} is not a {section} line: {line!r}")
             numbered[section] += 1
+            refs = match.groupdict().get("refs")
+            if refs:  # a described clock: a statement citing its declaration, naming no item
+                cited = [int(k) for k in _KEY.findall(refs)]
+                if max(cited) > len(evidence):
+                    raise CitationError(f"line {index + 1} cites a key with no footer entry")
+                statements.append(
+                    Statement(index, section, (), tuple(evidence[n - 1] for n in cited))
+                )
             continue
         if section == SUMMARY:
             if not line.startswith("- ") or not _uncited(line):

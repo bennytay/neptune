@@ -3,8 +3,8 @@
   "corpus": "acceptance",
   "corpus_version": "2.3.0",
   "graph": {
-    "generation": "sha256:e06387f6c411bb8442d788f09eb12d292384eff8826d5928439b3fe5a199a70a",
-    "graph_schema": "2.4.0"
+    "generation": "sha256:d009fbe3d6441efa46c73ada6ef70903ba2e8a38567fc242cb4cf4fcbbe7915b",
+    "graph_schema": "2.5.0"
   },
   "questions": [
     {
@@ -775,35 +775,108 @@
             }
           },
           "tool": "neptune_query"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "text": "When did ARM-3A stop during INC-C3-0011?"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 50,
+                "tokens": 20000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 1,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "$named:event:INC-C3-0011",
+                  "kind": "event",
+                  "same_as_depth": 2
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
         }
       ],
       "co_cited": {
-        "Q7.C1": {
-          "claims": [
-            "claim:sha256:97dbeaf73cece5ab4bea3a710834708a733e71ad58d834c5bfd4cf228fc5093f",
-            "claim:sha256:f363f676ccd88a0e645ab7a98f03f6a5bf3f865175d435449992dc5ee4899f24"
-          ],
-          "reason": "The PLC E-stop's \"involves PLC-C3\" and the syslog stop's \"involves syslog.host:ARM-3A\" reach the answer; the stops' kinds and descriptions are cut at the skill's budget."
-        },
         "Q7.C4": {
           "claims": [
+            "claim:sha256:1c96821da29ec4fc370ed9a7ab435b71d33b54572d88d48110d6688f68b5c946",
+            "claim:sha256:1cebac53ad24656ef4e042f6a58fac3fd48260d1f903c3b3e98d1ec45f2bbdb4",
+            "claim:sha256:375fcbf9e9f3fc1ca5347c903a8dcc1bd6e8debcf3f1e50424452d300373e326",
+            "claim:sha256:37d645cd43ff8445e0a34d147dd62db3bbb726c7dc597998176ce2fbb407c4fc",
+            "claim:sha256:3e2d7c657b14d1f5caa7133f1d0c1eba083fa2cb4a7706e744a8d7e9b2c90192",
+            "claim:sha256:459a92552c85ae1efc2cdbdcc0ef8a8eec23d83e53e56ae17ed25ae0391cd947",
+            "claim:sha256:58b070830e5692449d4962a9857d89cd4475cfbc2fcb9aa76eeeb25e8bfade0c",
+            "claim:sha256:77aa5b2545ac4ee7649b3ccd0d6f8c29b733afb2328492110efb2e7457e0ffdd",
+            "claim:sha256:81a06cf682a08fb1f6e8aedf3286b3f8d692895995309477692cddafff5fa712",
+            "claim:sha256:99e0bf0a27c1f757535f8ca651aefa89209a84b6c0c5cf2098625ed4957e619a",
+            "claim:sha256:b17612c7a5aac80e93ed15b5335c7d7727c8af3ef98e07b18297ff481bdd5e39",
+            "claim:sha256:b51ea259bc3bc27f0e4be59b3fb95b705305cec704ba42c57c8f1ffe0e5cd650",
+            "claim:sha256:c3fe0cb3e96e96fdb977468c538be2587be40bdec267c402a61255f222e9e477",
+            "claim:sha256:e5ea4ca6cff0d3570a352ab512ffc891f82f987ff7d889ce9e6c8aa5b84e29f5",
             "claim:sha256:f363f676ccd88a0e645ab7a98f03f6a5bf3f865175d435449992dc5ee4899f24"
           ],
-          "reason": "Only the syslog stop's \"involves ARM-3A\" (syslog.host) reaches the answer: corpus 2.3.0 moved every Deploy record's claim ids with the base package, and the 50-item budget, which orders equal scores by claim id, now cuts the CMMS stop's \"involves ARM-3A\". Neither stop's time, the 32 s difference nor the declared zones are stated."
+          "reason": "Co-cited: the answer now sets the syslog stop (14:32:38) and the CMMS stop (14:33:10) side by side, both America/New_York as declared, with the same_as that makes them one stop; the 32 s difference is the agent's arithmetic over two declared wall times (the tool never computes it, Context ADR 0022 §5), and nothing cites the site survey's statement that the controller keeps synchronised time."
         }
       },
-      "gaps": {
+      "gaps": {},
+      "id": "Q7",
+      "supported": {
+        "Q7.C1": {
+          "claims": [
+            "claim:sha256:06b83e45c727f1449561606f9061d82614fb1377d8c23c515c3316a87bdc7d8b",
+            "claim:sha256:082e3564fd5ac5a8b060b8d92bd5bde95623f96260ae3568b7b59f056a4b5860",
+            "claim:sha256:087961135de9967814b547b3044c67e6727941ddebad5b0a0d29a358c8be6973",
+            "claim:sha256:24de0986fc0125d340707c2012179fc4a4def8815497581e04a4b0ad438628fc",
+            "claim:sha256:320332bc319c1d520646620e8973c617158fdae5c506fbc3465003a689e4edd1",
+            "claim:sha256:37d645cd43ff8445e0a34d147dd62db3bbb726c7dc597998176ce2fbb407c4fc",
+            "claim:sha256:3e9046d451a9132d51b2a6bbc4b78a562521c95e52e8846b73a5c0ec8d8482fb",
+            "claim:sha256:58b070830e5692449d4962a9857d89cd4475cfbc2fcb9aa76eeeb25e8bfade0c",
+            "claim:sha256:6361e30173bc12f6a85c08fcd7196a58c77882fc22b27b896e6c603ca7044a31",
+            "claim:sha256:735df3df87d6ba3878e23e40694f544eba671fae58799901e8b5433c0fd715a6",
+            "claim:sha256:81a06cf682a08fb1f6e8aedf3286b3f8d692895995309477692cddafff5fa712",
+            "claim:sha256:97dbeaf73cece5ab4bea3a710834708a733e71ad58d834c5bfd4cf228fc5093f",
+            "claim:sha256:ad6b2e5838f6eed5e0bae0e05a42de9315011930b791ac928801a63a4d3b3e45",
+            "claim:sha256:b51ea259bc3bc27f0e4be59b3fb95b705305cec704ba42c57c8f1ffe0e5cd650",
+            "claim:sha256:b6f736c815947e5895b0fc880276e02791fa1df9a9371240f7c76c692d50df0c",
+            "claim:sha256:c3fe0cb3e96e96fdb977468c538be2587be40bdec267c402a61255f222e9e477",
+            "claim:sha256:cc20f189a01c7d10cd5ad5feb32ac466babcce67f92f8f069542c54ca79c3f50",
+            "claim:sha256:d7463c4401d126f95351923500a4f154cc893c19f85be3edcd12e3a4f4842c1a",
+            "claim:sha256:f363f676ccd88a0e645ab7a98f03f6a5bf3f865175d435449992dc5ee4899f24"
+          ],
+          "reason": "Supported since Context ADR 0022 shows each time in its clock's declared terms: the incident query (the skill's path for a named incident, same_as_depth 2) states syslog 4182 as declared kind \"PSTOP\" and event kind protective_stop \"valid at 2026-09-14 14:32:38 (local wall time, America/New_York as declared)\", and the machine query states the PLC-C3 event of row 4183 at 14:32:41 on the same clock, each cited to its syslog row. The E-stop's kind is not in its line; its time and row are."
+        },
         "Q7.C2": {
-          "in_graph": true,
-          "reason": "Memory holds the CMMS stop DT-26-0914-01 and its 14:33:10 time, but at the skill's budget (50 items, 20,000 tokens) the two-hop machine query is cut before any of its claims: corpus 2.3.0 moved every Deploy record's claim ids with the base package, and equal scores are ordered by claim id. In 2.2.0 its \"involves ARM-3A\" fitted, which cited the record without its time (co-cited)."
+          "claims": [
+            "claim:sha256:1cebac53ad24656ef4e042f6a58fac3fd48260d1f903c3b3e98d1ec45f2bbdb4",
+            "claim:sha256:375fcbf9e9f3fc1ca5347c903a8dcc1bd6e8debcf3f1e50424452d300373e326",
+            "claim:sha256:459a92552c85ae1efc2cdbdcc0ef8a8eec23d83e53e56ae17ed25ae0391cd947",
+            "claim:sha256:77aa5b2545ac4ee7649b3ccd0d6f8c29b733afb2328492110efb2e7457e0ffdd",
+            "claim:sha256:99e0bf0a27c1f757535f8ca651aefa89209a84b6c0c5cf2098625ed4957e619a",
+            "claim:sha256:b17612c7a5aac80e93ed15b5335c7d7727c8af3ef98e07b18297ff481bdd5e39",
+            "claim:sha256:e5ea4ca6cff0d3570a352ab512ffc891f82f987ff7d889ce9e6c8aa5b84e29f5"
+          ],
+          "reason": "Supported: the incident query, read with the same_as_depth its entity line gives, reaches DT-26-0914-01 through A. Novak's stated same_as and states its name, its declared kind \"Protective stop\" and its time \"from 2026-09-14 14:33:10 (local wall time, America/New_York as declared)\", cited to the downtime log's row."
         },
         "Q7.C3": {
-          "in_graph": true,
-          "reason": "Memory holds the stated same_as claim joining DT-26-0914-01 and syslog 4182 (A. Novak's assertion), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it."
+          "claims": [
+            "claim:sha256:1c96821da29ec4fc370ed9a7ab435b71d33b54572d88d48110d6688f68b5c946",
+            "claim:sha256:3e2d7c657b14d1f5caa7133f1d0c1eba083fa2cb4a7706e744a8d7e9b2c90192"
+          ],
+          "reason": "Supported: the incident query carries the stated same_as claims joining syslog 4182, DT-26-0914-01 and INC-C3-0011, cited to the assertion entry in INC-C3-0011.assertions.json and dated 2026-09-15 13:05:00 UTC on the assertion's POSIX clock. The author's name is in the cited entry, not in the line."
         }
-      },
-      "id": "Q7",
-      "supported": {}
+      }
     },
     {
       "asked_as": "was the arm authorised to run",

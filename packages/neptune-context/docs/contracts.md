@@ -10,7 +10,7 @@ consumes nothing, and an entry in `contracts/packages.toml`.
 
 ## Publishes
 
-`query-packet` **1.7.0, stable** (`contracts/query-packet/v1.7.0/`), consumed by Deploy and Learn. Fixed by
+`query-packet` **1.8.0, stable** (`contracts/query-packet/v1.8.0/`), consumed by Deploy and Learn. Fixed by
 [ADR 0002](adr/0002-query-language.md) (query), [ADR 0003](adr/0003-the-context-packet.md) (packet) and
 [ADR 0006](adr/0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) (publication, answer checks, C1 gate
 amendments). 1.1.0 is the additive pin bump of [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md):
@@ -30,7 +30,11 @@ differs between two runs; it adds no trail, its claims are the packet's items, s
 query and packet is valid at 1.6.0. 1.7.0 adds a third trail kind, `compare_runs`
 ([ADR 0020](adr/0020-compact-grouped-answers-and-the-compare-runs-trail.md), `ContextPacket/$defs/CompareTrail`): the
 part of a run comparison (maintenance, configuration values, procedure revisions, procedures for changed
-parts, the runs) each carried claim answers, by claim id; additive, so every 1.x packet is valid at 1.7.0.
+parts, the runs) each carried claim answers, by claim id; additive, so every 1.x packet is valid at 1.7.0. 1.8.0 is the additive pin bump of
+[ADR 0022](adr/0022-times-in-their-clocks-declared-terms-graph-schema-2-5-0-pin-and-query-packet-1-8-0.md): graph-schema
+2.5.0's `clock_description` joins the predicate enums and its literal joins `TypedLiteral`, and the packet gains the
+optional member `clocks` (Memory's description of each clock the items' times are on, written only when there is
+one); every 1.x query and packet is valid at 1.8.0.
 
 - **Owner module** `neptune_context.contract`.
   - `contract_schema()` is the registry export. It embeds both halves' schemas verbatim, each as its own
@@ -80,7 +84,7 @@ and this file in step.
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
 | `catalog-api` | `neptune-ledger` | `CATALOG_API_VERSION = "1.7.0"` | `neptune_ledger.api.CATALOG_API_VERSION`; read through `neptune_ledger.api.CatalogApi` (`query(spec)` with frame windows and budgets, Ledger ADR 0016) | Ledger ADR 0004, 0016; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md) |
-| `graph-schema` | `neptune-memory` | `GRAPH_SCHEMA_VERSION = "2.4.0"` | `neptune_memory.schema.GRAPH_SCHEMA_VERSION` (registry major 2); documents read through Memory's codec (a 2.x document names its release, a 1.x one is read as written, major 1) and `neptune_memory.schema.reader.MemoryReader` | Memory ADR 0006, 0019, 0025, 0027, 0028; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md), [ADR 0012](adr/0012-graph-schema-2-0-0-pin-and-query-packet-1-3-0.md), [ADR 0014](adr/0014-graph-schema-2-2-0-pin-and-query-packet-1-4-0.md), [ADR 0017](adr/0017-procedure-revisions-in-compare-runs-graph-schema-2-3-0-and-query-packet-1-6-0.md), [ADR 0019](adr/0019-procedures-for-the-parts-the-maintenance-changed-and-graph-schema-2-4-0-pin.md) (2.4.0 is golden-only: schema and vocabulary of 2.3.0) |
+| `graph-schema` | `neptune-memory` | `GRAPH_SCHEMA_VERSION = "2.5.0"` | `neptune_memory.schema.GRAPH_SCHEMA_VERSION` (registry major 2); documents read through Memory's codec (a 2.x document names its release, a 1.x one is read as written, major 1) and `neptune_memory.schema.reader.MemoryReader` | Memory ADR 0006, 0019, 0025, 0027, 0028, 0029; Context [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md), [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md), [ADR 0012](adr/0012-graph-schema-2-0-0-pin-and-query-packet-1-3-0.md), [ADR 0014](adr/0014-graph-schema-2-2-0-pin-and-query-packet-1-4-0.md), [ADR 0017](adr/0017-procedure-revisions-in-compare-runs-graph-schema-2-3-0-and-query-packet-1-6-0.md), [ADR 0019](adr/0019-procedures-for-the-parts-the-maintenance-changed-and-graph-schema-2-4-0-pin.md) (2.4.0 is golden-only: schema and vocabulary of 2.3.0), [ADR 0022](adr/0022-times-in-their-clocks-declared-terms-graph-schema-2-5-0-pin-and-query-packet-1-8-0.md) |
 
 The vocabularies and definitions Context publishes from these contracts (subject kinds, predicate names, the
 Memory definitions the packet schema embeds) come from `src/neptune_context/pinned.json`, a snapshot of the

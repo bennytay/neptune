@@ -21,7 +21,7 @@ MCP tools. Every answer is cited, and CI checks the citations by claim id, never
 - **Real:** compiler ingest · Deploy's lifecycle and event-log mapping · the Ledger's catalog (embedded
   PostgreSQL) · Memory's consolidation (byte-identical to its committed snapshot) · Context's local engine
   and MCP server · Deploy's evidence-pack PDFs. CI runs all of it.
-- **Answered today (19 of 46 gold claims supported)**, asked exactly as the Claude Code skill asks
+- **Answered today (22 of 46 gold claims supported)**, asked exactly as the Claude Code skill asks
   (`neptune_entities`, a one-hop read of the incident, `neptune_compare_runs` of the last good run and the
   incident run). *What happened:* the fingers struck PF-3, collision detection stopped the arm, the E-stop at
   OP-2. *What changed since the last good run:* WO-26-0911 replaced the finger set (FS-0340) and set TCP z
@@ -35,10 +35,13 @@ MCP tools. Every answer is cited, and CI checks the citations by claim id, never
   applies to the finger set WO-26-0911 installed (FS-0340, one part by a reviewer's stated assertion) and asks
   for torque 2.5 N.m, TCP z +6.0 mm, a hand-eye recalibration before production after a bracket removal and a
   change record; the work order raised TCP z by 6.0 mm but deferred the recalibration to the next day.
-- **Not answered yet:** 12 gold claims are cited only through statements about something else (`co_cited`),
-  among them "the calibration caused it" (Neptune states differences, never causes) and the CMMS and syslog
-  stops' 32 s conflict (the syslog stop is cited by machine, not by time). 15 are gaps: A. Novak's assertion that
-  the two stops are one event and the CMMS stop (cut at the skill's budget), that no change record sets the new TCP, the bags' statuses (events
+  *When did ARM-3A stop:* the controller syslog's protective stop at 14:32:38 and the CMMS downtime log's
+  DT-26-0914-01 at 14:33:10, both local wall time in America/New_York as Deploy's declaration states, shown on
+  their own clocks and never converted; a reviewer's stated assertion makes them one stop.
+- **Not answered yet:** 11 gold claims are cited only through statements about something else (`co_cited`),
+  among them "the calibration caused it" (Neptune states differences, never causes) and the hand-entered CMMS
+  time as the 32 s outlier (both times are shown; the difference is the agent's arithmetic). 13 are gaps: that
+  no change record sets the new TCP, the bags' statuses (events
   that cite the bag by byte range, not by row), survey text, the stale config export's values, the
   envelope register. Each is pinned with its reason in `harness/acceptance/answers.json`.
   No spatial baseline (MVL-135), no LeRobot export, no hosted service; pre-alpha APIs.

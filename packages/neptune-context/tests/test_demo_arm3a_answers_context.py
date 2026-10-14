@@ -170,7 +170,9 @@ def test_what_changed_is_one_comparison_citing_the_work_order_and_the_recalibrat
     changed = texts[-1]
     assert "Items: " in changed and "cut by" not in changed  # whole at the default budget
     assert len(changed) // 4 < COMPARE_TOKENS // 2  # well inside an agent's reading
-    assert len(changed) < 30_000  # 96 facts named, grouped and cited (ADR 0020; 77 600 before)
+    # 96 facts named, grouped and cited (ADR 0020; 77 600 before), with each clock declared and
+    # cited (ADR 0022: about 1 KB)
+    assert len(changed) < 31_000
 
 
 def test_why_the_incident_reads_it_then_compares_its_run(answers: dict[str, list[str]]) -> None:
