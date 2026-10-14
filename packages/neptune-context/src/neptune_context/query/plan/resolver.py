@@ -41,8 +41,8 @@ class SameAs:
     ``others`` are the entities joined to the representative by ``same_as`` claims that are
     evidence (stated or observed; an inferred ``same_as`` never joins), directly or through each
     other; ``claims`` are those claims' ids and ``sources`` the content ids of the sources they
-    cite (both sorted). ``depth`` is the most ``same_as`` steps between two of the ids: a query
-    subject at that ``same_as_depth`` reads every one of them, whichever id it names.
+    cite (both sorted). ``depth`` is the most ``same_as`` steps from one of the ids to any node
+    of the group: a query subject at that ``same_as_depth`` reads them all, whichever id it names.
     """
 
     others: tuple[Entity, ...]
@@ -169,7 +169,6 @@ class DeclaredIdentifierIndex:
                         f"{other.declared_id!r} is undeclared or joined to two representatives"
                     )
                 represent[other.declared_id] = entity
-        self._represent = represent
         surfaces: dict[str, list[Entity]] = {}
         for entity in sorted(by_id.values(), key=lambda e: (e.kind, e.declared_id)):
             for name in {entity.value, *(n for n in (entity.label, *entity.aliases) if n)}:
@@ -181,12 +180,6 @@ class DeclaredIdentifierIndex:
             ((k, sorted(v, key=lambda e: (e.kind, e.declared_id))) for k, v in surfaces.items()),
             key=lambda kv: (-len(kv[0]), kv[0]),
         )
-
-    def representative(self, declared_id: str) -> Entity | None:
-        """The entity ``declared_id`` is listed as: its representative when memory states it is
-        another id's, else itself; ``None`` when nothing declares it."""
-        entity = self._by_id.get(declared_id)
-        return None if entity is None else self._represent.get(declared_id, entity)
 
     def lookup(self, declared_id: str, *, as_of: int | None) -> Entity | None:
         return self._by_id.get(declared_id)
