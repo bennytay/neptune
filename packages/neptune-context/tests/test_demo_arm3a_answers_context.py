@@ -12,7 +12,10 @@ The answers must state, each with item and source citations, Memory ADR 0025's f
 four actions and its diagnosis, the CAL-ARM3A-0818 and -0911 names, the 1.86 px reprojection error
 and the two z offsets (each run's own copy of a configuration's value), and, from SOP-CELL-021's
 two revisions (Memory ADR 0027, Context ADR 0017), the acceptance limits, the dropped 10-pick
-verification, revision C's history row and its two stated blanks. Pinned by claim id.
+verification, revision C's history row and its two stated blanks, and (Memory ADR 0028, Context ADR
+0018) the vendor bulletin SB-2026-117 for the finger set WO-26-0911 installed: its applicability and
+steps, reached through the work order's serial and the reviewer's stated ``same_as``. Pinned by
+claim id.
 """
 
 from __future__ import annotations
@@ -35,11 +38,11 @@ from neptune_context.render.agent import parse_answer
 LAST_GOOD: Final = "cell3-2026-09-09"
 INCIDENT_RUN: Final = "cell3-2026-09-14"
 COMPARED: Final = {
-    "claim:sha256:d650f8bab544": "WO-26-0911 action: replace finger set with FS-0340",
-    "claim:sha256:b10dab22bffb": "WO-26-0911 action: remove and refit wrist camera bracket",
-    "claim:sha256:a7f88bdfa3bd": "WO-26-0911 action: TCP z 145.5 -> 151.5 mm",
-    "claim:sha256:d031070c313f": "WO-26-0911 action: hand-eye recalibration deferred",
-    "claim:sha256:9e87bab6ae1a": "WO-26-0911 stated cause: finger pads worn; bracket loose",
+    "claim:sha256:3469cf32a9c5": "WO-26-0911 action: replace finger set with FS-0340",
+    "claim:sha256:1ca76d706b36": "WO-26-0911 action: remove and refit wrist camera bracket",
+    "claim:sha256:fbafdf900a24": "WO-26-0911 action: TCP z 145.5 -> 151.5 mm",
+    "claim:sha256:957da0882223": "WO-26-0911 action: hand-eye recalibration deferred",
+    "claim:sha256:9c65afa04344": "WO-26-0911 stated cause: finger pads worn; bracket loose",
     "claim:sha256:aba87f30a1aa": "name of the last good run's calibration: CAL-ARM3A-0818.yaml",
     "claim:sha256:f6a6bff0e224": "name of the incident run's calibration: CAL-ARM3A-0911.yaml",
     "claim:sha256:ff33253fd282": "the incident run's reprojection_error [1.86]",
@@ -47,20 +50,33 @@ COMPARED: Final = {
     "claim:sha256:603ba4866d4d": "the incident run's transformation z 0.0702",
 }
 PROCEDURES: Final = {
-    "claim:sha256:a9aab8e80159": "SOP-CELL-021 rev B step 3: at most 0.8 px",
-    "claim:sha256:4d3850614646": "SOP-CELL-021 rev C step 3: at most 2.0 px",
-    "claim:sha256:a4995304ad25": "rev B step 4: recalibrate and run the 10-pick verification",
-    "claim:sha256:6b11078e5618": "rev B step 5: production only after the 10-pick verification",
-    "claim:sha256:92eb524c4187": "rev C step 4: recalibrate, no verification",
-    "claim:sha256:1270ae3bb721": "rev C history row C: substitute board, acceptance at 2.0 px",
-    "claim:sha256:ae5cc48fd94a": "rev C history row C: Change record stated blank",
-    "claim:sha256:915f62292371": "rev C: Approved by stated blank",
+    "claim:sha256:8807c15ed18e": "SOP-CELL-021 rev B step 3: at most 0.8 px",
+    "claim:sha256:4a8cac6fb821": "SOP-CELL-021 rev C step 3: at most 2.0 px",
+    "claim:sha256:36b4c5171e16": "rev B step 4: recalibrate and run the 10-pick verification",
+    "claim:sha256:40feb6728d29": "rev B step 5: production only after the 10-pick verification",
+    "claim:sha256:74ebc63e297f": "rev C step 4: recalibrate, no verification",
+    "claim:sha256:309035346562": "rev C history row C: substitute board, acceptance at 2.0 px",
+    "claim:sha256:0f2b05771f17": "rev C history row C: Change record stated blank",
+    "claim:sha256:87139f3823b9": "rev C: Approved by stated blank",
+}
+# The vendor's advice for the part WO-26-0911 installed, and the stated links that reach it.
+BULLETIN: Final = {
+    "claim:sha256:b7d0c17930ca": "SB-2026-117's name (its heading)",
+    "claim:sha256:146b6fe00d31": "SB-2026-117 applies to: finger set FS-0340",
+    "claim:sha256:41db60230f40": "SB-2026-117 issued 2026-08-30",
+    "claim:sha256:5f8597c05f77": "SB-2026-117 step 1: torque 2.5 N.m",
+    "claim:sha256:e24664026d8e": "SB-2026-117 step 2: TCP z +6.0 mm",
+    "claim:sha256:ab2957b17f2d": "SB-2026-117 step 3: recalibrate if bracket removed",
+    "claim:sha256:c2e9a1587061": "SB-2026-117 step 4: record the change",
+    "claim:sha256:67a2c2b795c1": "WO-26-0911 involves serial:FS-0340",
+    "claim:sha256:167a192e380d": "FS-0340 serial same_as vendor part (stated)",
+    "claim:sha256:ad95927c588a": "SB-2026-117 involves vendor.part:FS-0340",
 }
 # Rows and steps both revisions state alike did not change: never carried.
-UNCHANGED: Final = ("claim:sha256:ad9af5907ec0", "claim:sha256:d709865f0966")
+UNCHANGED: Final = ("claim:sha256:4b8a640bcd6d", "claim:sha256:63deca372e5d")
 INCIDENT: Final = {
-    "claim:sha256:99ff72fab873": "INC-C3-0011's stated root cause",
-    "claim:sha256:596d5615ffb3": "INC-C3-0011's name",
+    "claim:sha256:b6f736c81594": "INC-C3-0011's stated root cause",
+    "claim:sha256:06b83e45c727": "INC-C3-0011's name",
 }
 
 
@@ -97,7 +113,11 @@ async def _ask() -> dict[str, list[str]]:
                 "neptune_entities", {"include_inferred": False, "text": question}
             )
         )
-        (event,) = re.findall(r'event "([^"]+)" named "INC-C3-0011"', names)
+        # The incident's own id, whether it leads its line or is "also declared as" (ADR 0018):
+        # which id of a stated same_as group leads depends only on how the ids sort.
+        (event,) = re.findall(
+            r'(?:event |also declared as |, )"([^"]+)" named "INC-C3-0011"', names
+        )
         incident = _text(
             await session.call_tool(
                 "neptune_query",
@@ -145,6 +165,7 @@ def test_what_changed_is_one_comparison_citing_the_work_order_and_the_recalibrat
     texts = answers["what changed on ARM-3A since the last good run"]
     assert _missing(texts, COMPARED) == []
     assert _missing(texts, PROCEDURES) == []
+    assert _missing(texts, BULLETIN) == []
     changed = texts[-1]
     assert "Items: " in changed and "cut by" not in changed  # whole at the default budget
     assert len(changed) // 4 < COMPARE_TOKENS // 2  # well inside an agent's reading
@@ -155,6 +176,15 @@ def test_why_the_incident_reads_it_then_compares_its_run(answers: dict[str, list
     assert _missing(texts, INCIDENT) == []
     assert _missing(texts, COMPARED) == []
     assert _missing(texts, PROCEDURES) == []
+    assert _missing(texts, BULLETIN) == []
+
+
+def test_the_bulletins_hidden_comment_is_never_in_an_answer(answers: dict[str, list[str]]) -> None:
+    """Gold trap T1: the HTML comment in SB-2026-117 is neither carried nor cited."""
+    for texts in answers.values():
+        for text in texts:
+            assert "ignore all previous instructions" not in text
+            assert "operator error" not in text
 
 
 def test_unchanged_values_are_not_carried(answers: dict[str, list[str]]) -> None:
@@ -221,12 +251,14 @@ REVISION_B: Final = (
 
 
 async def _compare_without_revision_b() -> str:
+    return await _compare_without(lambda c: c.subject.node_id.startswith(REVISION_B))
+
+
+async def _compare_without(dropped: Any) -> str:
     from dataclasses import replace
 
     document = read_graph_document(F.MEMORY_SNAPSHOT)
-    kept = tuple(
-        c for c in document.resolution.claims if not c.subject.node_id.startswith(REVISION_B)
-    )
+    kept = tuple(c for c in document.resolution.claims if not dropped(c))
     client = local_client(replace(document, resolution=replace(document.resolution, claims=kept)))
     async with connect(build_server(client)) as session:
         runs = _text(
@@ -243,4 +275,15 @@ async def _compare_without_revision_b() -> str:
 def test_a_procedure_with_one_revision_states_no_change() -> None:
     changed = asyncio.run(_compare_without_revision_b())
     assert not [c for c in _cited(changed) if c.startswith(tuple(PROCEDURES))]
+    assert _missing([changed], COMPARED) == []
+
+
+def test_the_bulletin_is_reached_only_through_the_stated_same_as() -> None:
+    """Without the reviewer's ``same_as``, the vendor's FS-0340 and the CMMS serial are two
+    things: the comparison carries no part of the bulletin (no equal-text join)."""
+    changed = asyncio.run(
+        _compare_without(lambda c: c.predicate == "same_as" and str(c.subject.node_type) == "asset")
+    )
+    assert not [c for c in _cited(changed) if c.startswith(tuple(BULLETIN))]
+    assert "procedures for the parts the maintenance changed" not in changed
     assert _missing([changed], COMPARED) == []

@@ -48,6 +48,10 @@ EXPECTED_CLASSES: Final = {
         "Q4.C4",
         "Q5.C2",
         "Q6.C1",
+        "Q9.C1",
+        "Q9.C2",
+        "Q9.C3",
+        "Q9.C4",
     },
     "co_cited": {
         "Q1.C7",
@@ -60,8 +64,8 @@ EXPECTED_CLASSES: Final = {
         "Q6.C2",
         "Q6.C3",
         "Q7.C1",
-        "Q7.C2",
         "Q7.C4",
+        "Q9.C6",
     },
     "gaps": {
         "Q1.C2",
@@ -73,10 +77,12 @@ EXPECTED_CLASSES: Final = {
         "Q3.C4",
         "Q3.C5",
         "Q5.C3",
+        "Q7.C2",
         "Q7.C3",
         "Q8.C1",
         "Q8.C2",
         "Q8.C3",
+        "Q9.C5",
     },
 }
 

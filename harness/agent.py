@@ -71,7 +71,9 @@ SUPPORT_REF: Final = "$support:"
 # An argument written "$named:<kind>:<name>" is the id an earlier ``neptune_entities`` answer of
 # the question lists for that kind and name (``<kind> "<id>" named "<name>"``; the first id, sorted,
 # when one name has several, as SKILL.md allows for copies of one run): how the skill finds a run
-# or an incident by name. Calls never hard-code a content-addressed id.
+# or an incident by name. An id listed under another as ``also declared as "<id>" named "<name>"``
+# (Context ADR 0018: ids memory states are one entity) is that kind's id too: which of a stated
+# same_as group leads the line depends only on how its ids sort. Calls never hard-code an id.
 NAMED_REF: Final = "$named:"
 CALL_TIMEOUT_S: Final = 120
 SMOKE_SOURCE: Final = "context LocalEngine over the memory stage's graph, through neptune_query"
@@ -195,6 +197,22 @@ def _about(claim: Json) -> list[str]:
     return out
 
 
+def _span(locator: Any) -> tuple[int | None, int, int] | None:
+    """A locator that is a character span, after at most one page: (page index, start, end)."""
+    parts = [p for p in locator if isinstance(p, dict)] if isinstance(locator, list) else []
+    if not parts or parts[-1].get("kind") != "span" or len(parts) > 2:
+        return None
+    page = None
+    if len(parts) == 2:
+        if parts[0].get("kind") != "page" or not isinstance(parts[0].get("index"), int):
+            return None
+        page = parts[0]["index"]
+    start, end = parts[-1].get("start"), parts[-1].get("end")
+    if not isinstance(start, int) or not isinstance(end, int) or start > end:
+        return None
+    return page, start, end
+
+
 class Scorer:
     """Turns answers into citations and scores them against the gold evidence (ADR 0007 §6)."""
 
@@ -224,6 +242,18 @@ class Scorer:
             for record in package.kind("calibration"):
                 for item in record.get("parameters", []):
                     self._value(item.get("value"), {"parameter": item.get("name")})
+        # Document blocks by where their text is: a span inside one cites that block, as a cell
+        # cites its row and column (Platform ADR 0014 §4). A Markdown block has no page, so its
+        # span is the only way an answer can name it.
+        self.blocks: dict[tuple[str, int | None], list[tuple[int, int, str]]] = {}
+        for root in roots:
+            for block in Package(root).kind("document_block"):
+                evidence = block.get("provenance", {}).get("evidence", {})
+                located = _span(evidence.get("locator", []))
+                if located is not None:
+                    page, start, end = located
+                    key = (str(evidence.get("source")), page)
+                    self.blocks.setdefault(key, []).append((start, end, str(block["id"])))
 
     def _value(self, slot: Any, locator: Json) -> None:
         evidence = slot.get("provenance", {}).get("evidence") if isinstance(slot, dict) else None
@@ -255,6 +285,12 @@ class Scorer:
         key = (str(ref.get("source")), json.dumps(ref.get("locator", []), sort_keys=True))
         if key in self.values:
             out.append({"locator": self.values[key], "path": path})
+        located = _span(ref.get("locator", []))
+        if located is not None:
+            page, start, end = located
+            for low, high, block in self.blocks.get((str(ref.get("source")), page), []):
+                if low <= start and end <= high:
+                    out.append({"record": block})
         return out
 
     def claim_citations(self, claim_id: str) -> list[Json]:
@@ -317,8 +353,16 @@ class Scorer:
 
 def _named(ref: str, earlier: Sequence[str]) -> str:
     kind, _, name = ref.removeprefix(NAMED_REF).partition(":")
-    pattern = re.compile(rf'{re.escape(kind)} "([^"]+)" named "{re.escape(name)}"')
-    found = sorted({str(m) for text in earlier for m in pattern.findall(text)})
+    named = rf'"([^"]+)" named "{re.escape(name)}"'
+    found = sorted(
+        {
+            str(m)
+            for text in earlier
+            for line in text.splitlines()
+            for m in re.findall(rf"{re.escape(kind)} {named}", line)
+            + (re.findall(rf"(?:also declared as |, ){named}", line) if f"{kind} " in line else [])
+        }
+    )
     if not found:
         raise LookupError(f"{ref}: no earlier neptune_entities answer names it")
     return found[0]

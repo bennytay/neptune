@@ -1,10 +1,10 @@
 {
   "answers_format": 1,
   "corpus": "acceptance",
-  "corpus_version": "2.2.0",
+  "corpus_version": "2.3.0",
   "graph": {
     "generation": "sha256:e06387f6c411bb8442d788f09eb12d292384eff8826d5928439b3fe5a199a70a",
-    "graph_schema": "2.3.0"
+    "graph_schema": "2.4.0"
   },
   "questions": [
     {
@@ -67,8 +67,8 @@
           "claims": [
             "claim:sha256:603ba4866d4d96ee8991a0077f6470e5355b192d62813dca9ab4444b0766d081",
             "claim:sha256:7f4dc60515e9eaef3a68bbceabc2091d63e1aea4a5047f52256922aeefe462c7",
-            "claim:sha256:95ea86ae329105df5faa0b887ea5a5116921462e1d2ccae4380114be2a510938",
-            "claim:sha256:99ff72fab8738b418f7c600be024af36d876a3eb7bf203969f5f20a5995af662"
+            "claim:sha256:ad6b2e5838f6eed5e0bae0e05a42de9315011930b791ac928801a63a4d3b3e45",
+            "claim:sha256:b6f736c815947e5895b0fc880276e02791fa1df9a9371240f7c76c692d50df0c"
           ],
           "reason": "The report's stated cause (\"the fingers closed about 4 mm lower than taught\") and both runs' transformation z are stated: the evidence for this gold claim. Its inference, the calibration as the most probable cause, is not: Neptune states no causes."
         }
@@ -87,64 +87,65 @@
       "supported": {
         "Q1.C1": {
           "claims": [
-            "claim:sha256:34c21585dddb6c4d908d33b79891f0aa0ce02e68e17e3f51369647f5cb127529",
-            "claim:sha256:596d5615ffb3551efb49cc309eb16f6e64b98e0cd1c001e4fa0066ed15340965",
-            "claim:sha256:5ddaf9d34bc183003a11423f43d2b9a458f7b85983fc53e180475f605d0cc65d",
-            "claim:sha256:6147099dc99e11e74020d96d767d62d570b9e3fd9608c39840c97f76a6a4ffaf",
-            "claim:sha256:679084ae8d40e269ddaaeee8ffffcf2d374641d79ce64483912b2b20c3f54a79",
-            "claim:sha256:6e707d67f7d25b3a34b7c5e40c640da72b3a3dbd15058073cffb22c85807df44",
-            "claim:sha256:94540d7c66399885672b3bdd4ce5ca38b2ccf26ea6a287e9bf21ff314b6d4221",
-            "claim:sha256:95ea86ae329105df5faa0b887ea5a5116921462e1d2ccae4380114be2a510938",
-            "claim:sha256:99ff72fab8738b418f7c600be024af36d876a3eb7bf203969f5f20a5995af662",
-            "claim:sha256:a65fe2ffef8479e34aea8f288507b16976b7c8be46d00a8ee7886a67ca51c6a5",
-            "claim:sha256:c751296d248b8068653a271f0a635e1fd133bf33f7947b331d327210628de8b8",
-            "claim:sha256:d28a000434797f2a56c0bdf4d68d8148e3178058139b481d90d25dd16bd1a278"
+            "claim:sha256:06b83e45c727f1449561606f9061d82614fb1377d8c23c515c3316a87bdc7d8b",
+            "claim:sha256:082e3564fd5ac5a8b060b8d92bd5bde95623f96260ae3568b7b59f056a4b5860",
+            "claim:sha256:087961135de9967814b547b3044c67e6727941ddebad5b0a0d29a358c8be6973",
+            "claim:sha256:24de0986fc0125d340707c2012179fc4a4def8815497581e04a4b0ad438628fc",
+            "claim:sha256:320332bc319c1d520646620e8973c617158fdae5c506fbc3465003a689e4edd1",
+            "claim:sha256:3e9046d451a9132d51b2a6bbc4b78a562521c95e52e8846b73a5c0ec8d8482fb",
+            "claim:sha256:6361e30173bc12f6a85c08fcd7196a58c77882fc22b27b896e6c603ca7044a31",
+            "claim:sha256:735df3df87d6ba3878e23e40694f544eba671fae58799901e8b5433c0fd715a6",
+            "claim:sha256:ad6b2e5838f6eed5e0bae0e05a42de9315011930b791ac928801a63a4d3b3e45",
+            "claim:sha256:b6f736c815947e5895b0fc880276e02791fa1df9a9371240f7c76c692d50df0c",
+            "claim:sha256:cc20f189a01c7d10cd5ad5feb32ac466babcce67f92f8f069542c54ca79c3f50",
+            "claim:sha256:d7463c4401d126f95351923500a4f154cc893c19f85be3edcd12e3a4f4842c1a"
           ],
           "reason": "Reading the incident (one hop from INC-C3-0011) states the report's description: the fingers struck fixture PF-3 at pick P1, collision detection stopped the arm and the operator pressed the E-stop at OP-2. The 41.7 Nm against 35.0 Nm reading is not stated."
         },
         "Q1.C3": {
           "claims": [
-            "claim:sha256:84d495def6f96fb33bdc16b1b435a25422f77d44c5220ba5410b15087de1ffac",
-            "claim:sha256:9e87bab6ae1abefe073c067ec52b079e644bc07b2edd37af3104b440df2eae9c",
-            "claim:sha256:a7f88bdfa3bd95ceae0583e441744357a43de9620881540353920e150c3dcec1",
-            "claim:sha256:b10dab22bffbc0c00a69f91ffc9d943ba2e5bf0c1048e31472d813b5768e3765",
-            "claim:sha256:d031070c313fc4e5664963d6746d6e75f6bd7e82f77d324172be0919f510c7a0",
-            "claim:sha256:d650f8bab544bfd5dd5632b5cdea596dbe80f449d4b1174fd6d52bee61ed6cbd"
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:669c48f93a2186e1fc75d11032ae054a11888d78b8b2141f3ecd0f581a9425d2",
+            "claim:sha256:67a2c2b795c19a2b403fed9b2573193bbfd611e58922b012fe86c332804f1969",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "neptune_compare_runs states WO-26-0911's actions, among them \"Remove and refit wrist camera bracket\" and \"Hand-eye recalibration deferred: ChArUco board out for repair\", at the work order's time (2026-09-10)."
+          "reason": "neptune_compare_runs states WO-26-0911's actions, among them \"Remove and refit wrist camera bracket\" and \"Hand-eye recalibration deferred: ChArUco board out for repair\", at the work order's time (2026-09-10). Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q1.C4": {
           "claims": [
-            "claim:sha256:25948e4f3ddf52597d79bee577183860be1082f69c3a39e4a6840ab5065bb8c2",
+            "claim:sha256:3d0a839d8ff0e42ae72c2f67dd17e14f8a1fe5d06c0adfd041ecc1cb059ad9b9",
             "claim:sha256:603ba4866d4d96ee8991a0077f6470e5355b192d62813dca9ab4444b0766d081",
-            "claim:sha256:6b0aaa811a5cbe15deaf0b35fdff1e34313093eb13f701b628c84adb87320dc3",
+            "claim:sha256:634881374da75920df2491539bc0346a900f3f2affb1f21b0e566eb32a2a2786",
             "claim:sha256:7f4dc60515e9eaef3a68bbceabc2091d63e1aea4a5047f52256922aeefe462c7",
-            "claim:sha256:d4f407203f882d2ed76a8f683ad7e7f9b6f5728a5d3d0c00b62aa2844afeef99",
+            "claim:sha256:f93e8d58d3411a6933d229e92031370067cc3baabfd5fb1bfc16352a662205cb",
             "claim:sha256:ff33253fd282c83dbe11cf0a2cd55bb14095a8ec1e1f66f36ddbf9c88d0ac74f"
           ],
           "reason": "The comparison states WO-26-0912's action (\"Re-run hand-eye calibration with substitute 7x5 board per SOP-CELL-021 rev C\"), the incident run's calibration's reprojection error [1.86] and both runs' transformation z (0.0745, 0.0702); it also names CAL-ARM3A-0818 and -0911. CAL-ARM3A-0818's 0.44 px is not stated."
         },
         "Q1.C5": {
           "claims": [
-            "claim:sha256:07cd32dfacd03d1ce20749ebb599893b5939e86318388f73c3d296a2e7ff2d13",
-            "claim:sha256:1270ae3bb721779b644a29fe1691cbdfe2b94cdeab2f3cf25d9071ed5aca2b1e",
-            "claim:sha256:4d3850614646f212cc6d961ec0fec0a74157ece52f11829d2d4078686100757d",
-            "claim:sha256:68924ecd5b1b21da094a2dcc29a082dcc8c19fcd348670f95fe1adcf8b07b082",
-            "claim:sha256:6a0d468adb272fa10c27c5ebeb9c88d8c04c1985facbf40212efebd052aa6e4e",
-            "claim:sha256:6b11078e5618cfaab6bbd32c9197b44dece07063dafa52fdb90290cd90357ed4",
-            "claim:sha256:6fb23b9fe0d4e8f8ccf3889469add7e1757851fffbf8a53fcaa190ba0f59a19e",
-            "claim:sha256:717b92af388b4a1119ddc30b7c47705b4d82084c94e525ab7eb015ffcde1c07d",
-            "claim:sha256:834183e5bc3d538defb05b068144175a2fba42bf9d62c3a6bbc93d51e1d2ddd7",
-            "claim:sha256:915f6229237140943429632c0ba349eb57bd845f21bc0533aa33e84665cba51c",
-            "claim:sha256:92eb524c41878315f3f43a6a53a8ced07a7d03acd78304182698439ee3f22d1e",
-            "claim:sha256:a4995304ad25cf1764f9e3e2d73a1cf0805271a53e12094575229362a5c0f794",
-            "claim:sha256:a9aab8e801594c8f48be975266fd82e6562706b1f571bee88cf1a97465038254",
-            "claim:sha256:ae5cc48fd94a39b537e3b0e7f16d5509e6944d79cf4c7377f089f7e675b9620f",
-            "claim:sha256:b3631f6577d77a0ee0e5c5d1a9542b301dd1c5e51e028c18b0d09ed389d3f7e6",
-            "claim:sha256:d537256096a8589ff69416bae5e9ee4ca08ac0ab0063dd4b8488ab76de34806c",
-            "claim:sha256:dbe25ca77e028d00a7817d9eef129548305181103121211ce7f80f758e803b47",
-            "claim:sha256:faa4d3a2707e2a724261a12b4268cac9b2798bfdcb7e21811774d318d9d33d60",
-            "claim:sha256:fb2754faaafa8f3bdd369743e14a499029f025c6aab6b3122f1eb5fb178674cf"
+            "claim:sha256:0f2b05771f17f995fede1a05e5bb6e4ba87d72de7c00c40bbd5ae5e97bdfbd67",
+            "claim:sha256:309035346562a4c01115b6a8273d7963427d3d93876a381b87310d4bb67fa1b8",
+            "claim:sha256:36b4c5171e16edf22da30e12fbb87b18d2dc686988723f4fcedd927008543241",
+            "claim:sha256:40feb6728d295be8c195c7739a68233dd8762da2eff62d6b024cf5e118f07d20",
+            "claim:sha256:4a8cac6fb821060c4c3b24e6a556078d91321bda621bb2c15093b4dc2a585a09",
+            "claim:sha256:595dc5bcfc42edb5e89d7a6ee3c49eca07270f6dab58e81a157e08762fe8017d",
+            "claim:sha256:66ddd43acf23d8bcc6ee6e26eadd7a5427501abb4c1a09c1c58630233db9d0cc",
+            "claim:sha256:6fcb80b3024c0288d86b9f219ca69b80d07317c47666b84acfdb7c100805fbde",
+            "claim:sha256:74ebc63e297fde0c3367a635ee13d2e4502a270db5cb367b21b456a87ae507ff",
+            "claim:sha256:7718f3ad79038d5eb4154e0cbb97af928f653584823496fff17375a1a3be6642",
+            "claim:sha256:87139f3823b9d1c321332f88f9d795708c5a31c14b294dfd92ecd9c6729ea9be",
+            "claim:sha256:87c0e69ac5d5b5f92dde6c40026781a322bee29532bd7a6a87c9e0ac6bff54ae",
+            "claim:sha256:8807c15ed18ea75e5f0b9230eb7c8db203b6875fb098c9b51ca9aa9acd505fc7",
+            "claim:sha256:b67125a0e987674f428d214d163073a22baeac758d3b09b20c5af73abc97ada3",
+            "claim:sha256:bdcb0b6997b3c242aa0c82b2039856139761a3ccf57f6122f3cbfc649c82fb4d",
+            "claim:sha256:d025035c5c1424116c7c2c81f425596232fae9dfd4c3ae670767dafb11724297",
+            "claim:sha256:d1cb46b6d58d0f97bd65a8d6f9c683e83f65d3d50b70d4db042a77abd3c3fb58",
+            "claim:sha256:e2382a016c2a85873d71aac6f00cfb2472213752bb4f458fdf8cec5d4c5d3394",
+            "claim:sha256:eddc8cabec15eef783604d3092f48279c526d81c616c2d19934ab15e7d52a2a0"
           ],
           "reason": "The comparison carries both SOP-CELL-021 revisions for ARM-3A as they differ: step 3 'at most 0.8 px' (rev B) and 'at most 2.0 px' (rev C); rev B's 10-pick verification steps, which rev C does not state; rev C's history row C (2026-09-11, 'Substitute board allowed; acceptance at 2.0 px') with 'Change record' stated_blank; and rev C's 'Approved by' stated_blank. 'Passed only because' is the answer composing these stated limits with the 1.86 px result (Q1.C4): Neptune states no cause."
         }
@@ -178,14 +179,15 @@
       "co_cited": {
         "Q2.C7": {
           "claims": [
-            "claim:sha256:84d495def6f96fb33bdc16b1b435a25422f77d44c5220ba5410b15087de1ffac",
-            "claim:sha256:9e87bab6ae1abefe073c067ec52b079e644bc07b2edd37af3104b440df2eae9c",
-            "claim:sha256:a7f88bdfa3bd95ceae0583e441744357a43de9620881540353920e150c3dcec1",
-            "claim:sha256:b10dab22bffbc0c00a69f91ffc9d943ba2e5bf0c1048e31472d813b5768e3765",
-            "claim:sha256:d031070c313fc4e5664963d6746d6e75f6bd7e82f77d324172be0919f510c7a0",
-            "claim:sha256:d650f8bab544bfd5dd5632b5cdea596dbe80f449d4b1174fd6d52bee61ed6cbd"
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:669c48f93a2186e1fc75d11032ae054a11888d78b8b2141f3ecd0f581a9425d2",
+            "claim:sha256:67a2c2b795c19a2b403fed9b2573193bbfd611e58922b012fe86c332804f1969",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "Only WO-26-0911's actions cite its row; the comparison carries no statement that the controller software (5.6.0) or the application (PALLET_C3 1.4.0) stayed the same."
+          "reason": "Only WO-26-0911's actions cite its row; the comparison carries no statement that the controller software (5.6.0) or the application (PALLET_C3 1.4.0) stayed the same. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         }
       },
       "gaps": {
@@ -206,25 +208,27 @@
       "supported": {
         "Q2.C1": {
           "claims": [
-            "claim:sha256:84d495def6f96fb33bdc16b1b435a25422f77d44c5220ba5410b15087de1ffac",
-            "claim:sha256:9e87bab6ae1abefe073c067ec52b079e644bc07b2edd37af3104b440df2eae9c",
-            "claim:sha256:a7f88bdfa3bd95ceae0583e441744357a43de9620881540353920e150c3dcec1",
-            "claim:sha256:b10dab22bffbc0c00a69f91ffc9d943ba2e5bf0c1048e31472d813b5768e3765",
-            "claim:sha256:d031070c313fc4e5664963d6746d6e75f6bd7e82f77d324172be0919f510c7a0",
-            "claim:sha256:d650f8bab544bfd5dd5632b5cdea596dbe80f449d4b1174fd6d52bee61ed6cbd"
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:669c48f93a2186e1fc75d11032ae054a11888d78b8b2141f3ecd0f581a9425d2",
+            "claim:sha256:67a2c2b795c19a2b403fed9b2573193bbfd611e58922b012fe86c332804f1969",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "The comparison states WO-26-0911's actions \"Replace finger set with long set FS-0340 (+6.0 mm)\" and \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\". The runs' start lines are not stated."
+          "reason": "The comparison states WO-26-0911's actions \"Replace finger set with long set FS-0340 (+6.0 mm)\" and \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\". The runs' start lines are not stated. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q2.C2": {
           "claims": [
-            "claim:sha256:84d495def6f96fb33bdc16b1b435a25422f77d44c5220ba5410b15087de1ffac",
-            "claim:sha256:9e87bab6ae1abefe073c067ec52b079e644bc07b2edd37af3104b440df2eae9c",
-            "claim:sha256:a7f88bdfa3bd95ceae0583e441744357a43de9620881540353920e150c3dcec1",
-            "claim:sha256:b10dab22bffbc0c00a69f91ffc9d943ba2e5bf0c1048e31472d813b5768e3765",
-            "claim:sha256:d031070c313fc4e5664963d6746d6e75f6bd7e82f77d324172be0919f510c7a0",
-            "claim:sha256:d650f8bab544bfd5dd5632b5cdea596dbe80f449d4b1174fd6d52bee61ed6cbd"
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:669c48f93a2186e1fc75d11032ae054a11888d78b8b2141f3ecd0f581a9425d2",
+            "claim:sha256:67a2c2b795c19a2b403fed9b2573193bbfd611e58922b012fe86c332804f1969",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "The comparison states WO-26-0911's action \"Remove and refit wrist camera bracket\"."
+          "reason": "The comparison states WO-26-0911's action \"Remove and refit wrist camera bracket\". Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q2.C3": {
           "claims": [
@@ -236,25 +240,25 @@
         },
         "Q2.C4": {
           "claims": [
-            "claim:sha256:07cd32dfacd03d1ce20749ebb599893b5939e86318388f73c3d296a2e7ff2d13",
-            "claim:sha256:1270ae3bb721779b644a29fe1691cbdfe2b94cdeab2f3cf25d9071ed5aca2b1e",
-            "claim:sha256:4d3850614646f212cc6d961ec0fec0a74157ece52f11829d2d4078686100757d",
-            "claim:sha256:68924ecd5b1b21da094a2dcc29a082dcc8c19fcd348670f95fe1adcf8b07b082",
-            "claim:sha256:6a0d468adb272fa10c27c5ebeb9c88d8c04c1985facbf40212efebd052aa6e4e",
-            "claim:sha256:6b11078e5618cfaab6bbd32c9197b44dece07063dafa52fdb90290cd90357ed4",
-            "claim:sha256:6fb23b9fe0d4e8f8ccf3889469add7e1757851fffbf8a53fcaa190ba0f59a19e",
-            "claim:sha256:717b92af388b4a1119ddc30b7c47705b4d82084c94e525ab7eb015ffcde1c07d",
-            "claim:sha256:834183e5bc3d538defb05b068144175a2fba42bf9d62c3a6bbc93d51e1d2ddd7",
-            "claim:sha256:915f6229237140943429632c0ba349eb57bd845f21bc0533aa33e84665cba51c",
-            "claim:sha256:92eb524c41878315f3f43a6a53a8ced07a7d03acd78304182698439ee3f22d1e",
-            "claim:sha256:a4995304ad25cf1764f9e3e2d73a1cf0805271a53e12094575229362a5c0f794",
-            "claim:sha256:a9aab8e801594c8f48be975266fd82e6562706b1f571bee88cf1a97465038254",
-            "claim:sha256:ae5cc48fd94a39b537e3b0e7f16d5509e6944d79cf4c7377f089f7e675b9620f",
-            "claim:sha256:b3631f6577d77a0ee0e5c5d1a9542b301dd1c5e51e028c18b0d09ed389d3f7e6",
-            "claim:sha256:d537256096a8589ff69416bae5e9ee4ca08ac0ab0063dd4b8488ab76de34806c",
-            "claim:sha256:dbe25ca77e028d00a7817d9eef129548305181103121211ce7f80f758e803b47",
-            "claim:sha256:faa4d3a2707e2a724261a12b4268cac9b2798bfdcb7e21811774d318d9d33d60",
-            "claim:sha256:fb2754faaafa8f3bdd369743e14a499029f025c6aab6b3122f1eb5fb178674cf"
+            "claim:sha256:0f2b05771f17f995fede1a05e5bb6e4ba87d72de7c00c40bbd5ae5e97bdfbd67",
+            "claim:sha256:309035346562a4c01115b6a8273d7963427d3d93876a381b87310d4bb67fa1b8",
+            "claim:sha256:36b4c5171e16edf22da30e12fbb87b18d2dc686988723f4fcedd927008543241",
+            "claim:sha256:40feb6728d295be8c195c7739a68233dd8762da2eff62d6b024cf5e118f07d20",
+            "claim:sha256:4a8cac6fb821060c4c3b24e6a556078d91321bda621bb2c15093b4dc2a585a09",
+            "claim:sha256:595dc5bcfc42edb5e89d7a6ee3c49eca07270f6dab58e81a157e08762fe8017d",
+            "claim:sha256:66ddd43acf23d8bcc6ee6e26eadd7a5427501abb4c1a09c1c58630233db9d0cc",
+            "claim:sha256:6fcb80b3024c0288d86b9f219ca69b80d07317c47666b84acfdb7c100805fbde",
+            "claim:sha256:74ebc63e297fde0c3367a635ee13d2e4502a270db5cb367b21b456a87ae507ff",
+            "claim:sha256:7718f3ad79038d5eb4154e0cbb97af928f653584823496fff17375a1a3be6642",
+            "claim:sha256:87139f3823b9d1c321332f88f9d795708c5a31c14b294dfd92ecd9c6729ea9be",
+            "claim:sha256:87c0e69ac5d5b5f92dde6c40026781a322bee29532bd7a6a87c9e0ac6bff54ae",
+            "claim:sha256:8807c15ed18ea75e5f0b9230eb7c8db203b6875fb098c9b51ca9aa9acd505fc7",
+            "claim:sha256:b67125a0e987674f428d214d163073a22baeac758d3b09b20c5af73abc97ada3",
+            "claim:sha256:bdcb0b6997b3c242aa0c82b2039856139761a3ccf57f6122f3cbfc649c82fb4d",
+            "claim:sha256:d025035c5c1424116c7c2c81f425596232fae9dfd4c3ae670767dafb11724297",
+            "claim:sha256:d1cb46b6d58d0f97bd65a8d6f9c683e83f65d3d50b70d4db042a77abd3c3fb58",
+            "claim:sha256:e2382a016c2a85873d71aac6f00cfb2472213752bb4f458fdf8cec5d4c5d3394",
+            "claim:sha256:eddc8cabec15eef783604d3092f48279c526d81c616c2d19934ab15e7d52a2a0"
           ],
           "reason": "The comparison carries SOP-CELL-021 rev B (Effective 2026-03-01) and rev C (Effective 2026-09-11) as differing revisions for ARM-3A, and rev C's history row C dated 2026-09-11 with its 'Change record' stated_blank (the document names no change record)."
         }
@@ -339,16 +343,16 @@
       "supported": {
         "Q3.C1": {
           "claims": [
-            "claim:sha256:16c2cf8c6196abdc6f12b84ba16456ebf36786c2d2bc2fd7ad5062524b33e708",
-            "claim:sha256:84d495def6f96fb33bdc16b1b435a25422f77d44c5220ba5410b15087de1ffac",
-            "claim:sha256:9e87bab6ae1abefe073c067ec52b079e644bc07b2edd37af3104b440df2eae9c",
-            "claim:sha256:a35bd40e1ae7f9d6959ed163743f0b76cb79c4ef764db67a1563d8abb946c911",
-            "claim:sha256:a7f88bdfa3bd95ceae0583e441744357a43de9620881540353920e150c3dcec1",
-            "claim:sha256:b10dab22bffbc0c00a69f91ffc9d943ba2e5bf0c1048e31472d813b5768e3765",
-            "claim:sha256:b9c5278dcc7abdc712ab5706d12f143e8f7731e64791077ab351efbaed6e0987",
-            "claim:sha256:d031070c313fc4e5664963d6746d6e75f6bd7e82f77d324172be0919f510c7a0",
-            "claim:sha256:d650f8bab544bfd5dd5632b5cdea596dbe80f449d4b1174fd6d52bee61ed6cbd",
-            "claim:sha256:d7f0293e24b0a638ddf4e633badbd0046c1e7d850bd61782a2f1f19073ec3be0"
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:5319fd1e7e8b55ed61dd4b3950b5c83b251b931fe12242e36f833733d3430afc",
+            "claim:sha256:669c48f93a2186e1fc75d11032ae054a11888d78b8b2141f3ecd0f581a9425d2",
+            "claim:sha256:67a2c2b795c19a2b403fed9b2573193bbfd611e58922b012fe86c332804f1969",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
+            "claim:sha256:b69197742ea948a4e920573f705e4c3db29385521d7c299bbd9bf63073dc8f06",
+            "claim:sha256:c3d553321b409b771774d7a5e78c39e40cac857dd60431dbcaf490cc9541eb40",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
           "reason": "The comparison states WO-26-0911's actions \"Replace finger set with long set FS-0340 (+6.0 mm)\" and \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\", in force for the incident run after the last good run."
         },
@@ -362,9 +366,10 @@
         },
         "Q3.C6": {
           "claims": [
-            "claim:sha256:a1ba8cc59e93b3e25ce682e8a183ecf92abb3c24dbfd6cec2b3192f6c7c3539c"
+            "claim:sha256:12787e3609cad4ce5a33eb7bb22c7fb2d65d6b4585643f848a28c205d2413a62",
+            "claim:sha256:87c9b19688b06fa214aeaaaed7a507e5f8ba327e77903cff0c3c23b3e40318a2"
           ],
-          "reason": "LEG-01 is stated to have firmware 3.2.0 from 2026-09-13 (WO-26-0913). The asset register's stale 3.1.4 is not stated."
+          "reason": "LEG-01 is stated to have firmware 3.2.0 from 2026-09-13 (WO-26-0913). The asset register's stale 3.1.4 is not stated. Corpus 2.3.0: claim ids moved with the base package, and one more of WO-26-0913's \"involves LEG-01\" lines now fits the skill's budget; it states nothing more."
         }
       }
     },
@@ -461,40 +466,41 @@
       "co_cited": {
         "Q4.C1": {
           "claims": [
-            "claim:sha256:6ddfc375dc189ae0790f2a5f30a205d5c444c2ce8da76c1d592165c6f8cd01f9",
-            "claim:sha256:a1ba8cc59e93b3e25ce682e8a183ecf92abb3c24dbfd6cec2b3192f6c7c3539c",
-            "claim:sha256:eda0ba8725b96ef3ac13a309da7af28366383cf507902dd932939f880ebace5c"
+            "claim:sha256:63e4d5b7f0cac95a1c6a5ad11b91c3847fdc26f2918b2145c38b929dd68f8319",
+            "claim:sha256:db706e4a2de7eb26b7af301a93b719f905b901561855795370caa7a2401fe839",
+            "claim:sha256:fb69b431764ef6b189b2fc16119c183aadc89335b6670e8d46e655d768a59982"
           ],
           "reason": "Only \"LEG-01 has firmware 3.2.0\" and WO-26-0916's actions (as \"involves LEG-01\") cite WO-26-0916's row; no statement says the patrol bag is truncated or what the WP-6 capture recorded (the incident's stated cause mentions that LEG-01's recording ends before the collision, but cites the report, not the bag)."
         },
         "Q4.C3": {
           "claims": [
-            "claim:sha256:95ea86ae329105df5faa0b887ea5a5116921462e1d2ccae4380114be2a510938",
-            "claim:sha256:99ff72fab8738b418f7c600be024af36d876a3eb7bf203969f5f20a5995af662"
+            "claim:sha256:ad6b2e5838f6eed5e0bae0e05a42de9315011930b791ac928801a63a4d3b3e45",
+            "claim:sha256:b6f736c815947e5895b0fc880276e02791fa1df9a9371240f7c76c692d50df0c"
           ],
           "reason": "Only the incident's description and stated cause cite the report's clock note (\"about a minute and a half later\"); no statement says that the offset is inferred, its 96.7 s estimate or the survey's +94.1 s."
         },
         "Q4.C5": {
           "claims": [
-            "claim:sha256:16c2cf8c6196abdc6f12b84ba16456ebf36786c2d2bc2fd7ad5062524b33e708",
-            "claim:sha256:84d495def6f96fb33bdc16b1b435a25422f77d44c5220ba5410b15087de1ffac",
-            "claim:sha256:9e87bab6ae1abefe073c067ec52b079e644bc07b2edd37af3104b440df2eae9c",
-            "claim:sha256:a35bd40e1ae7f9d6959ed163743f0b76cb79c4ef764db67a1563d8abb946c911",
-            "claim:sha256:a7f88bdfa3bd95ceae0583e441744357a43de9620881540353920e150c3dcec1",
-            "claim:sha256:b10dab22bffbc0c00a69f91ffc9d943ba2e5bf0c1048e31472d813b5768e3765",
-            "claim:sha256:b9c5278dcc7abdc712ab5706d12f143e8f7731e64791077ab351efbaed6e0987",
-            "claim:sha256:d031070c313fc4e5664963d6746d6e75f6bd7e82f77d324172be0919f510c7a0",
-            "claim:sha256:d650f8bab544bfd5dd5632b5cdea596dbe80f449d4b1174fd6d52bee61ed6cbd",
-            "claim:sha256:d7f0293e24b0a638ddf4e633badbd0046c1e7d850bd61782a2f1f19073ec3be0",
-            "claim:sha256:e6f241395090feb100d5c8632af98d397016d70e2acdb58379eee08a70ced23c"
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:5319fd1e7e8b55ed61dd4b3950b5c83b251b931fe12242e36f833733d3430afc",
+            "claim:sha256:669c48f93a2186e1fc75d11032ae054a11888d78b8b2141f3ecd0f581a9425d2",
+            "claim:sha256:67a2c2b795c19a2b403fed9b2573193bbfd611e58922b012fe86c332804f1969",
+            "claim:sha256:8bfb57643c38afe5530b54d0d31a79fd126e668d9a70d475c724d962a0830377",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:9c65afa04344993d470ede27c8719f46b06a9ceafb44241aa21ca31239e6e9a3",
+            "claim:sha256:b69197742ea948a4e920573f705e4c3db29385521d7c299bbd9bf63073dc8f06",
+            "claim:sha256:c3d553321b409b771774d7a5e78c39e40cac857dd60431dbcaf490cc9541eb40",
+            "claim:sha256:f214a3a13dc49f5b392162d1a6428775fb2202e9d63059aea79d3cf5c65f723a",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
           ],
-          "reason": "The comparison now carries WO-26-0911's actions and CAL-ARM3A-0911's values, and \"ARM-3A has firmware 5.6.0\" cites the work order's Firmware After cell, but no statement says the camera's pose after the refit was never measured."
+          "reason": "The comparison now carries WO-26-0911's actions and CAL-ARM3A-0911's values, and \"ARM-3A has firmware 5.6.0\" cites the work order's Firmware After cell, but no statement says the camera's pose after the refit was never measured. Corpus 2.3.0: the comparison also carries WO-26-0911's \"involves serial:FS-0340\" (the link to the vendor bulletin, Context ADR 0019), which cites the work order's Installed Serial cell and states no more of this claim."
         },
         "Q4.C6": {
           "claims": [
-            "claim:sha256:6ddfc375dc189ae0790f2a5f30a205d5c444c2ce8da76c1d592165c6f8cd01f9",
-            "claim:sha256:a1ba8cc59e93b3e25ce682e8a183ecf92abb3c24dbfd6cec2b3192f6c7c3539c",
-            "claim:sha256:eda0ba8725b96ef3ac13a309da7af28366383cf507902dd932939f880ebace5c"
+            "claim:sha256:63e4d5b7f0cac95a1c6a5ad11b91c3847fdc26f2918b2145c38b929dd68f8319",
+            "claim:sha256:db706e4a2de7eb26b7af301a93b719f905b901561855795370caa7a2401fe839",
+            "claim:sha256:fb69b431764ef6b189b2fc16119c183aadc89335b6670e8d46e655d768a59982"
           ],
           "reason": "Only \"LEG-01 has firmware 3.2.0\" and WO-26-0916's actions (as \"involves LEG-01\") cite its row; the SSD replacement and the cache-flush change are not stated."
         }
@@ -504,24 +510,24 @@
       "supported": {
         "Q4.C2": {
           "claims": [
-            "claim:sha256:95ea86ae329105df5faa0b887ea5a5116921462e1d2ccae4380114be2a510938",
-            "claim:sha256:99ff72fab8738b418f7c600be024af36d876a3eb7bf203969f5f20a5995af662"
+            "claim:sha256:ad6b2e5838f6eed5e0bae0e05a42de9315011930b791ac928801a63a4d3b3e45",
+            "claim:sha256:b6f736c815947e5895b0fc880276e02791fa1df9a9371240f7c76c692d50df0c"
           ],
           "reason": "Reading the incident states the report's stated cause, which says \"Wrist camera images are not recorded.\""
         },
         "Q4.C4": {
           "claims": [
-            "claim:sha256:1270ae3bb721779b644a29fe1691cbdfe2b94cdeab2f3cf25d9071ed5aca2b1e",
-            "claim:sha256:4d3850614646f212cc6d961ec0fec0a74157ece52f11829d2d4078686100757d",
-            "claim:sha256:6a0d468adb272fa10c27c5ebeb9c88d8c04c1985facbf40212efebd052aa6e4e",
-            "claim:sha256:6fb23b9fe0d4e8f8ccf3889469add7e1757851fffbf8a53fcaa190ba0f59a19e",
-            "claim:sha256:717b92af388b4a1119ddc30b7c47705b4d82084c94e525ab7eb015ffcde1c07d",
-            "claim:sha256:834183e5bc3d538defb05b068144175a2fba42bf9d62c3a6bbc93d51e1d2ddd7",
-            "claim:sha256:915f6229237140943429632c0ba349eb57bd845f21bc0533aa33e84665cba51c",
-            "claim:sha256:92eb524c41878315f3f43a6a53a8ced07a7d03acd78304182698439ee3f22d1e",
-            "claim:sha256:ae5cc48fd94a39b537e3b0e7f16d5509e6944d79cf4c7377f089f7e675b9620f",
-            "claim:sha256:d537256096a8589ff69416bae5e9ee4ca08ac0ab0063dd4b8488ab76de34806c",
-            "claim:sha256:faa4d3a2707e2a724261a12b4268cac9b2798bfdcb7e21811774d318d9d33d60"
+            "claim:sha256:0f2b05771f17f995fede1a05e5bb6e4ba87d72de7c00c40bbd5ae5e97bdfbd67",
+            "claim:sha256:309035346562a4c01115b6a8273d7963427d3d93876a381b87310d4bb67fa1b8",
+            "claim:sha256:4a8cac6fb821060c4c3b24e6a556078d91321bda621bb2c15093b4dc2a585a09",
+            "claim:sha256:66ddd43acf23d8bcc6ee6e26eadd7a5427501abb4c1a09c1c58630233db9d0cc",
+            "claim:sha256:74ebc63e297fde0c3367a635ee13d2e4502a270db5cb367b21b456a87ae507ff",
+            "claim:sha256:7718f3ad79038d5eb4154e0cbb97af928f653584823496fff17375a1a3be6642",
+            "claim:sha256:87139f3823b9d1c321332f88f9d795708c5a31c14b294dfd92ecd9c6729ea9be",
+            "claim:sha256:bdcb0b6997b3c242aa0c82b2039856139761a3ccf57f6122f3cbfc649c82fb4d",
+            "claim:sha256:d025035c5c1424116c7c2c81f425596232fae9dfd4c3ae670767dafb11724297",
+            "claim:sha256:e2382a016c2a85873d71aac6f00cfb2472213752bb4f458fdf8cec5d4c5d3394",
+            "claim:sha256:eddc8cabec15eef783604d3092f48279c526d81c616c2d19934ab15e7d52a2a0"
           ],
           "reason": "Rev C's 'Approved by' and its history row C's 'Change record' are carried as stated_blank: the document shows both with nothing in them, a stated absence, never a value (Memory ADR 0027 §4)."
         }
@@ -595,18 +601,18 @@
       "co_cited": {
         "Q5.C1": {
           "claims": [
-            "claim:sha256:34c21585dddb6c4d908d33b79891f0aa0ce02e68e17e3f51369647f5cb127529",
-            "claim:sha256:596d5615ffb3551efb49cc309eb16f6e64b98e0cd1c001e4fa0066ed15340965",
-            "claim:sha256:5ddaf9d34bc183003a11423f43d2b9a458f7b85983fc53e180475f605d0cc65d",
-            "claim:sha256:6147099dc99e11e74020d96d767d62d570b9e3fd9608c39840c97f76a6a4ffaf",
-            "claim:sha256:679084ae8d40e269ddaaeee8ffffcf2d374641d79ce64483912b2b20c3f54a79",
-            "claim:sha256:6e707d67f7d25b3a34b7c5e40c640da72b3a3dbd15058073cffb22c85807df44",
-            "claim:sha256:94540d7c66399885672b3bdd4ce5ca38b2ccf26ea6a287e9bf21ff314b6d4221",
-            "claim:sha256:95ea86ae329105df5faa0b887ea5a5116921462e1d2ccae4380114be2a510938",
-            "claim:sha256:99ff72fab8738b418f7c600be024af36d876a3eb7bf203969f5f20a5995af662",
-            "claim:sha256:a65fe2ffef8479e34aea8f288507b16976b7c8be46d00a8ee7886a67ca51c6a5",
-            "claim:sha256:c751296d248b8068653a271f0a635e1fd133bf33f7947b331d327210628de8b8",
-            "claim:sha256:d28a000434797f2a56c0bdf4d68d8148e3178058139b481d90d25dd16bd1a278"
+            "claim:sha256:06b83e45c727f1449561606f9061d82614fb1377d8c23c515c3316a87bdc7d8b",
+            "claim:sha256:082e3564fd5ac5a8b060b8d92bd5bde95623f96260ae3568b7b59f056a4b5860",
+            "claim:sha256:087961135de9967814b547b3044c67e6727941ddebad5b0a0d29a358c8be6973",
+            "claim:sha256:24de0986fc0125d340707c2012179fc4a4def8815497581e04a4b0ad438628fc",
+            "claim:sha256:320332bc319c1d520646620e8973c617158fdae5c506fbc3465003a689e4edd1",
+            "claim:sha256:3e9046d451a9132d51b2a6bbc4b78a562521c95e52e8846b73a5c0ec8d8482fb",
+            "claim:sha256:6361e30173bc12f6a85c08fcd7196a58c77882fc22b27b896e6c603ca7044a31",
+            "claim:sha256:735df3df87d6ba3878e23e40694f544eba671fae58799901e8b5433c0fd715a6",
+            "claim:sha256:ad6b2e5838f6eed5e0bae0e05a42de9315011930b791ac928801a63a4d3b3e45",
+            "claim:sha256:b6f736c815947e5895b0fc880276e02791fa1df9a9371240f7c76c692d50df0c",
+            "claim:sha256:cc20f189a01c7d10cd5ad5feb32ac466babcce67f92f8f069542c54ca79c3f50",
+            "claim:sha256:d7463c4401d126f95351923500a4f154cc893c19f85be3edcd12e3a4f4842c1a"
           ],
           "reason": "Statements about the incident (its assets, site, kind, name, description and stated cause) cite the report's timeline page, but the HMI's 14:32:38 and 14:32:41 entries are not in this answer."
         }
@@ -621,8 +627,8 @@
       "supported": {
         "Q5.C2": {
           "claims": [
-            "claim:sha256:95ea86ae329105df5faa0b887ea5a5116921462e1d2ccae4380114be2a510938",
-            "claim:sha256:99ff72fab8738b418f7c600be024af36d876a3eb7bf203969f5f20a5995af662"
+            "claim:sha256:ad6b2e5838f6eed5e0bae0e05a42de9315011930b791ac928801a63a4d3b3e45",
+            "claim:sha256:b6f736c815947e5895b0fc880276e02791fa1df9a9371240f7c76c692d50df0c"
           ],
           "reason": "The incident report's description states that the cell PC's event log shows the alarms about a minute and a half later. The 96.7 s estimate and the missing time sync are not stated."
         }
@@ -704,20 +710,22 @@
       "co_cited": {
         "Q6.C2": {
           "claims": [
-            "claim:sha256:0003480715ab121566a7b3791338dbc1622a5e572124529c2f57d9d37590051c",
-            "claim:sha256:0be6b0e6e29c68aff208c52688f21fa43f4b70f253e9563091f0b9d28b30ac69",
-            "claim:sha256:3b331351fecfe2857168ef7719ae0ce9ec4a08021195dffc98d9882a3862852d",
-            "claim:sha256:4b165681fc29ab0446d5b0d6c5e33766b7114a8adebf2c277424abbee5c1d20b",
-            "claim:sha256:da80c580c604141ec082da520110b5aa91d8f051924a62b5f0f0e7ae410775bf"
+            "claim:sha256:24e564d21891b2ed37b60ca0a4e94c06cbf7e201cec16642f15d2be2dfd2530c",
+            "claim:sha256:310154bf1a84f99c1f2c6181181a0b27fe5efea69a380ecd289a4cf2f058e890",
+            "claim:sha256:47be589b18c05928d7a09a83177ac516e5dfc801b6280290eb1b2380605bab64",
+            "claim:sha256:48505fb7e11e304131c6d8311f8ca7c62df4e276da7665f89c96ebbb5ea05683",
+            "claim:sha256:6aa5d48cf998b2d4cb8bd8bd68200c285efe0e78b07ad22854c6824fb609a016",
+            "claim:sha256:a19526fcc9179b5b7b110d6c2deb27bd7f1d1d8348731362b0c6d6b2d9962ae9",
+            "claim:sha256:e8ae8ad4291bade51256bb4722bc88b297013ce3e9f851b09f18337c0039e5fc"
           ],
-          "reason": "Only INC-0007's work order (its stated cause \"Contact with rack upright\", its actions as \"involves AMR-07\"), \"AMR-07 has firmware 4.2.0\" and the requalification's configuration_unknown cite WO-26-0402 and RQ-S007-0007; none states the fork repair, the requalification or the return to service."
+          "reason": "Only INC-0007's work order (its stated cause \"Contact with rack upright\", its actions as \"involves AMR-07\"), \"AMR-07 has firmware 4.2.0\" and the requalification's configuration_unknown cite WO-26-0402 and RQ-S007-0007; none states the fork repair, the requalification or the return to service. Corpus 2.3.0: claim ids moved with the base package, and two more of WO-26-0402's lines (its kind, an action) now fit the skill's budget; they state nothing more."
         },
         "Q6.C3": {
           "claims": [
-            "claim:sha256:2ebf3798e3524a40f18c32be30ec3419bea83a881d68f36c457a51ec0ab83af6",
-            "claim:sha256:3ac6a99e5d68b5008897b8f005744c17d137daa879b1a2307ce45ae2c0716dba",
-            "claim:sha256:97e6c6548815e3ab8af9d75540a9e30e187242a3f88e86d80d0caa5e0d4c43e4",
-            "claim:sha256:9ef1531cf9885df73b567a153e5f14f2565e5b281b6544054f1cbdc1987506a9"
+            "claim:sha256:8c0c02ce9d88fd75b1b6954af4a6e8fcede74e3ba934c88b4febad8a82b7c6d5",
+            "claim:sha256:8e61a54dde8afd52ad92f62cbc127120b1d551bf6cbc58922c25ef28c9105895",
+            "claim:sha256:b7f25dc3b6d235c226c150786776b75398743b766cc9d94b2bdf8d48b54e2b76",
+            "claim:sha256:c2458260a6e393fc5a5c704240c5c9c1a79a6da36a596fc901ec9a57a5f60ba7"
           ],
           "reason": "Only \"AMR-07 has firmware 4.3.1 from 2026-04-14\" and WO-26-0414's events (its name, its actions as \"involves AMR-07\") cite WO-26-0414; no statement says that AMR-07's navigation configuration at INC-0007 is not in the hand-over."
         }
@@ -727,8 +735,8 @@
       "supported": {
         "Q6.C1": {
           "claims": [
-            "claim:sha256:9246b6d5aa00475dd8f1ad415d7272e86a02b8d9c274b80c362230edf4f21d34",
-            "claim:sha256:fea6ebaca78cee4551310ad21dfec327920ff18f69623cd80948a64a68555159"
+            "claim:sha256:bb9fe4a4e9b36cc924e8be66cbbce2bde9b0a6225509c55a87b53938aee788a0",
+            "claim:sha256:ce558d55de3a082237ffa157cb02bbff8ad341b853ef95f0568643229ddd91fd"
           ],
           "reason": "Reading INC-0007 states the report's stated cause: \"The rack face was 40 mm further out than the site map. The pick position had not been refreshed\" after the rack was re-bolted."
         }
@@ -772,26 +780,23 @@
       "co_cited": {
         "Q7.C1": {
           "claims": [
-            "claim:sha256:741e6bf155b8193324b0ee8dee9780be78cf920dd35580cc2f1319bdefa2056a",
-            "claim:sha256:ece3fbcf6c79e462acb94e7a9919e8392490dbf746bf3454e6b00bbd8f5940e0"
+            "claim:sha256:97dbeaf73cece5ab4bea3a710834708a733e71ad58d834c5bfd4cf228fc5093f",
+            "claim:sha256:f363f676ccd88a0e645ab7a98f03f6a5bf3f865175d435449992dc5ee4899f24"
           ],
           "reason": "The PLC E-stop's \"involves PLC-C3\" and the syslog stop's \"involves syslog.host:ARM-3A\" reach the answer; the stops' kinds and descriptions are cut at the skill's budget."
         },
-        "Q7.C2": {
-          "claims": [
-            "claim:sha256:301eefe6c1f6b85b132833efaa28c0e51a8ab9ac0889b0fe97ed00e97f76b47b"
-          ],
-          "reason": "Only the CMMS stop's \"involves ARM-3A\" (cmms.asset) reaches the answer: it cites the downtime record but not its 14:33:10 time, which the skill's budget cuts."
-        },
         "Q7.C4": {
           "claims": [
-            "claim:sha256:301eefe6c1f6b85b132833efaa28c0e51a8ab9ac0889b0fe97ed00e97f76b47b",
-            "claim:sha256:ece3fbcf6c79e462acb94e7a9919e8392490dbf746bf3454e6b00bbd8f5940e0"
+            "claim:sha256:f363f676ccd88a0e645ab7a98f03f6a5bf3f865175d435449992dc5ee4899f24"
           ],
-          "reason": "Only both stops' \"involves ARM-3A\" (cmms.asset and syslog.host, which 2.2.0's aliases join by stated same_as) reach the answer: the two records are cited, but not their times, the 32 s difference or the declared zones."
+          "reason": "Only the syslog stop's \"involves ARM-3A\" (syslog.host) reaches the answer: corpus 2.3.0 moved every Deploy record's claim ids with the base package, and the 50-item budget, which orders equal scores by claim id, now cuts the CMMS stop's \"involves ARM-3A\". Neither stop's time, the 32 s difference nor the declared zones are stated."
         }
       },
       "gaps": {
+        "Q7.C2": {
+          "in_graph": true,
+          "reason": "Memory holds the CMMS stop DT-26-0914-01 and its 14:33:10 time, but at the skill's budget (50 items, 20,000 tokens) the two-hop machine query is cut before any of its claims: corpus 2.3.0 moved every Deploy record's claim ids with the base package, and equal scores are ordered by claim id. In 2.2.0 its \"involves ARM-3A\" fitted, which cited the record without its time (co-cited)."
+        },
         "Q7.C3": {
           "in_graph": true,
           "reason": "Memory holds the stated same_as claim joining DT-26-0914-01 and syslog 4182 (A. Novak's assertion), but at the skill's budget (50 items, 20,000 tokens; SKILL.md) the answer is cut before it."
@@ -856,6 +861,123 @@
       },
       "id": "Q8",
       "supported": {}
+    },
+    {
+      "asked_as": "did the maintenance on ARM-3A before INC-C3-0011 follow the vendor's procedure",
+      "calls": [
+        {
+          "arguments": {
+            "include_inferred": false,
+            "text": "did the maintenance on ARM-3A before INC-C3-0011 follow the vendor's procedure"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "query": {
+              "budget": {
+                "items": 50,
+                "tokens": 20000
+              },
+              "graph": {
+                "direction": "both",
+                "hops": 1,
+                "predicates": "any"
+              },
+              "subjects": [
+                {
+                  "declared_id": "$named:event:INC-C3-0011",
+                  "kind": "event"
+                }
+              ]
+            }
+          },
+          "tool": "neptune_query"
+        },
+        {
+          "arguments": {
+            "include_inferred": false,
+            "kind": "run"
+          },
+          "tool": "neptune_entities"
+        },
+        {
+          "arguments": {
+            "after": {
+              "declared_id": "$named:run:cell3-2026-09-14",
+              "kind": "run"
+            },
+            "before": {
+              "declared_id": "$named:run:cell3-2026-09-09",
+              "kind": "run"
+            },
+            "include_inferred": false
+          },
+          "tool": "neptune_compare_runs"
+        }
+      ],
+      "co_cited": {
+        "Q9.C6": {
+          "claims": [
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
+          ],
+          "reason": "WO-26-0911's four actions cite its Work Performed cell, and none names a torque; no statement says the work order states no torque (as for Q4.C5)."
+        }
+      },
+      "gaps": {
+        "Q9.C5": {
+          "in_graph": false,
+          "reason": "Memory holds ServiceNow's changes, but the calls SKILL.md prescribes (reading the incident, comparing the two runs) do not reach them; no claim states that no change record sets TCP z to 151.5 mm."
+        }
+      },
+      "id": "Q9",
+      "supported": {
+        "Q9.C1": {
+          "claims": [
+            "claim:sha256:146b6fe00d31b0985282d7a5d511bd814a3a17628a547521c32910263847e973",
+            "claim:sha256:167a192e380da7b1e22ea1e1d2841c0c64b8c82a4c2813637a93e500ba778e08",
+            "claim:sha256:41db60230f40b461748356c06c009d8076d9e898974003c6657e14391603e7c2",
+            "claim:sha256:5f8597c05f7745dff237ad85c7cf17b1cc2edb38fd345e6f34c20908442f8fe1",
+            "claim:sha256:67a2c2b795c19a2b403fed9b2573193bbfd611e58922b012fe86c332804f1969",
+            "claim:sha256:ab2957b17f2d476e569b2b98831ba7c451a7836285aa43d66f6900881f79518b",
+            "claim:sha256:ad95927c588a560b1955fb322359d9a97df0752c892b101758e45dba23dc1367",
+            "claim:sha256:b7d0c17930cabd963a9c74dbc929a4052de169d1f8840d8813493da3528772ed",
+            "claim:sha256:c2e9a15870612bf319d0b135577fae1e261c7bd6835effc9c2f27f31c8d2ca75",
+            "claim:sha256:e24664026d8efb3805d3af9e9af782848a2e42bd9ecc27861e0ec2f3428e3340"
+          ],
+          "reason": "The comparison carries SB-2026-117's \"Applies to\" value (\"PG-80 grippers fitted with finger set FS-0340 (long, +6.0 mm).\") and its issue line, WO-26-0911's \"involves serial:FS-0340\" (its Installed Serial cell), A. Novak's stated same_as joining serial:FS-0340 and vendor.part:FS-0340 (citing ASR-P2-0340-01), and the bulletin's \"involves vendor.part:FS-0340\". The bulletin's steps cite the block too (where their date is stated) and state the advice, not the applicability."
+        },
+        "Q9.C2": {
+          "claims": [
+            "claim:sha256:5f8597c05f7745dff237ad85c7cf17b1cc2edb38fd345e6f34c20908442f8fe1",
+            "claim:sha256:ab2957b17f2d476e569b2b98831ba7c451a7836285aa43d66f6900881f79518b",
+            "claim:sha256:c2e9a15870612bf319d0b135577fae1e261c7bd6835effc9c2f27f31c8d2ca75",
+            "claim:sha256:e24664026d8efb3805d3af9e9af782848a2e42bd9ecc27861e0ec2f3428e3340"
+          ],
+          "reason": "The comparison carries the bulletin's four steps verbatim as declared values of SB-2026-117: torque 2.5 N.m, TCP z +6.0 mm, re-run the hand-eye calibration before production if the wrist camera bracket was removed, record the change. They are the vendor's stated advice (trap T5), never a record of what was done."
+        },
+        "Q9.C3": {
+          "claims": [
+            "claim:sha256:1ca76d706b36a3568fbb4c672602100ed5412a7cd0fc9ffe2a1ad6723797c6ab",
+            "claim:sha256:3469cf32a9c52fb6529b5e6320a119607c11f588096d326663095d1e4d8418e2",
+            "claim:sha256:957da0882223d44d8b016a539c652b822b4b293f1d22f5663ff5362f213a82ba",
+            "claim:sha256:fbafdf900a24ec3735a912b9ee3faef91e1427e1c8f5df9130b1fd3a70de8850"
+          ],
+          "reason": "The comparison states WO-26-0911's actions: \"Remove and refit wrist camera bracket\", \"Set TCP z 145.5 -> 151.5 mm on pendant (tool1)\" and \"Hand-eye recalibration deferred: ChArUco board out for repair\", at the work order's time."
+        },
+        "Q9.C4": {
+          "claims": [
+            "claim:sha256:3d0a839d8ff0e42ae72c2f67dd17e14f8a1fe5d06c0adfd041ecc1cb059ad9b9",
+            "claim:sha256:634881374da75920df2491539bc0346a900f3f2affb1f21b0e566eb32a2a2786",
+            "claim:sha256:f93e8d58d3411a6933d229e92031370067cc3baabfd5fb1bfc16352a662205cb"
+          ],
+          "reason": "The comparison states WO-26-0912's action (\"Re-run hand-eye calibration with substitute 7x5 board per SOP-CELL-021 rev C\") at its time and its stated cause; the incident run's reprojection error [1.86] and rev C's 2.0 px limit are carried as their own claims (Q1.C4, Q1.C5), which cite the calibration file and the SOP, not the calibration log row."
+        }
+      }
     }
   ]
 }

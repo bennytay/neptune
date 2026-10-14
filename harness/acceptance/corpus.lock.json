@@ -161,6 +161,10 @@
       "sha256": "sha256:d410bcb189212af7b275c8403890b1f6b3b584613347a329087977d5d7f56b2a",
       "size": 10337
     },
+    "sites/PLANT-2/vendor/FS-0340.assertions.json": {
+      "sha256": "sha256:b0345b68ff49a7bf44d0a19a6f1bc486c2d47cba6541c9eee9b3b234a1f0717f",
+      "size": 1022
+    },
     "sites/PLANT-2/vendor/SB-2026-117_PG-80_finger_sets.md": {
       "sha256": "sha256:127b45a4312653409438ae94fe88f132416e52b42cf88f98de9456a15ab32558",
       "size": 1004
@@ -227,6 +231,6 @@
     }
   },
   "lock_format": 1,
-  "tree": "sha256:14a1024fca9693e124c3f0c40f0ae318b9297bde4d5ed958d8c34ba141f0cc5d",
-  "version": "2.2.0"
+  "tree": "sha256:1ac2b14b1b62a876f326498fd8621a4048d20175267d3c67839ed9d0768a64a1",
+  "version": "2.3.0"
 }

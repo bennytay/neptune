@@ -19,8 +19,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    ids are one machine (or event), it comes back as one entity, `also declared as` the others:
    use that id with the `same_as_depth` its line gives. A name with several candidates is
    ambiguous: ask the user which one, never pick.
-   **"What changed since the last good run?", "Why did this incident happen?" or "What is
-   unknown about this incident?"** Compare the two runs instead of walking the graph:
+   **"What changed since the last good run?", "Why did this incident happen?", "What is
+   unknown about this incident?" or "Did the maintenance follow the vendor's (or the SOP's)
+   procedure?"** Compare the two runs instead of walking the graph:
    - List the runs by name: `neptune_entities {"kind": "run", "include_inferred": false}` (each
      line reads `run "<id>" named "<run name>"`). If the user names an incident or work order
      (`INC-C3-0011`, `WO-26-0911`), `neptune_entities` with their words finds it by that number;
@@ -33,11 +34,16 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      names, the declared values that differ (each run's own copy, so a change shows on both
      sides), the maintenance on the machine (work orders, each action, the stated cause), and
      what changed between the revisions of each procedure (SOP) for the machine: a step, a limit,
-     the revision history, and a label or cell the document leaves blank (`stated_blank`).
+     the revision history, and a label or cell the document leaves blank (`stated_blank`), and
+     each procedure (a vendor's service bulletin) for a part that maintenance installed or
+     removed, reached only through a stated `same_as` between the part's ids.
      State each difference with its keys. Neptune states differences, never causes: say "the
      calibration changed from ... to ... [I..][E..]", not "the calibration caused ...". A gap
      saying maintenance or a revision is "not placed before, between or after the two runs"
      means it is dated on another clock: give the date it states, not that it fell between them.
+     For "did they follow the procedure", set each step the procedure states beside what the
+     work orders record, each with its keys. A procedure says what should have been done, never
+     what was done; a step no work order mentions is not recorded, not skipped.
 2. **Optionally draft with `neptune_plan`.** It turns a question into a typed query. The draft is
    a model's proposal, not an answer. Read its findings, fix anything `needs_input` or
    `needs_choice`, then run the query yourself. If it says no model is configured, write the

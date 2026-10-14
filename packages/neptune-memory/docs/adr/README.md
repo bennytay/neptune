@@ -34,3 +34,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0025](0025-declared-names-and-values-maintenance-and-status-events.md) | Declared names and values, maintenance and status events (graph-schema 2.2.0) | Accepted |
 | [0026](0026-a-lifecycle-events-declared-number-is-its-name.md) | A lifecycle event's declared number is its name | Accepted |
 | [0027](0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md) | Procedure revisions from declared document labels, and stated blanks (graph-schema 2.3.0) | Accepted |
+| [0028](0028-vendor-procedures-named-by-their-heading-the-parts-they-apply-to-and-parts-in-identity.md) | Vendor procedures named by their heading, the parts they apply to, and parts in identity (graph-schema 2.4.0) | Accepted |

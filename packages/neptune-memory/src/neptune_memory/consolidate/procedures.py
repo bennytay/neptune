@@ -1,4 +1,4 @@
-"""Procedure revisions from declared document labels (ADR 0027).
+"""Procedure revisions from declared document labels (ADR 0027, version 2: ADR 0028).
 
 A deterministic consolidator that reads the compiler's document records (``document_record``,
 ``document_block``, ``structured_table``, ``structured_record``) under a declaration in its config,
@@ -13,6 +13,15 @@ and states what a procedure document says about itself, never what it means:
 - Each row of the declared revision-history table is an event, ``record:<id>/revisions/<i>``, at
   its date cell: ``has_description`` its description cell, ``declared_value`` per other cell,
   ``stated_blank`` per blank cell.
+- Since version 2 (ADR 0028): a declaration may name the procedure by the document's one heading
+  at a level (a vendor bulletin has no ``Procedure:`` label), need no revision label, and read the
+  parts a document applies to (each id a declared pattern reads in a label's value, ``involves``
+  an asset in the declared namespace, never joined to anything else here); an effective date may
+  be followed by more text on its line (``Issued: 2026-08-30 by ...``).
+
+Only label lines of paragraph blocks, the list items under the steps heading and the title heading
+are read: anything else (an HTML comment, which the compiler gives no paragraph role, a summary
+paragraph) is never a claim.
 
 A label is ``<label>:`` at the start of a line of a paragraph block; its value is the rest of
 that line, cited at its own span. A document's dates have no stated zone, so they are whole days on
@@ -49,6 +58,9 @@ from neptune.model.world import (
     structured_record_from_json,
     structured_table_from_json,
 )
+from neptune_memory.consolidate.base import (
+    PROCEDURES_CONSOLIDATOR_ID as PROCEDURES_CONSOLIDATOR_ID,
+)
 from neptune_memory.consolidate.base import ClaimDraft, ConsolidationFinding, ConsolidatorOutput
 from neptune_memory.consolidate.identity import node_ref
 from neptune_memory.consolidate.identity_records import Malformed
@@ -83,7 +95,6 @@ if TYPE_CHECKING:
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim, ClaimObject
 
-PROCEDURES_CONSOLIDATOR_ID: Final = "memory.procedures"
 HAS_NAME: Final = "has_name"
 RECORD_NAMESPACE: Final = "record"
 REVISIONS: Final = "revisions"
@@ -91,7 +102,8 @@ STATED: Final = AssertionKind.STATED
 DAY: Final = Fraction(86400)
 CALENDAR_KIND: Final = "memory.document_calendar"
 MAX_LISTED: Final = 16  # record ids a finding lists; its details give the count
-_DATE: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_DATE: Final = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})(?: .*)?", re.DOTALL)
+MAX_PATTERN: Final = 200  # characters of a declared part pattern
 _EPOCH: Final = _dt.date(1970, 1, 1)
 
 _T = TypeVar("_T")
@@ -125,12 +137,23 @@ class History:
 
 
 @dataclass(frozen=True)
+class Parts:
+    """The parts a document applies to (ADR 0028 §2): each match of ``pattern``'s one group in
+    the ``label``'s value is an id in ``namespace``."""
+
+    label: str
+    pattern: re.Pattern[str]
+    namespace: str
+
+
+@dataclass(frozen=True)
 class DocumentSpec:
-    """One declared kind of procedure document (ADR 0027 §1)."""
+    """One declared kind of procedure document (ADR 0027 §1, ADR 0028 §1)."""
 
     name: str
-    procedure: str
-    revision: str
+    procedure: str | None  # the label naming the procedure, or None when ``title`` does
+    title: int | None  # the heading level whose one heading names it
+    revision: str | None
     effective: str
     machines_label: str | None
     machines_separator: str
@@ -138,6 +161,7 @@ class DocumentSpec:
     labels: tuple[str, ...]
     steps: str | None
     history: History | None
+    parts: Parts | None = None
 
     @property
     def read_labels(self) -> tuple[str, ...]:
@@ -147,10 +171,11 @@ class DocumentSpec:
             self.procedure,
             self.revision,
             self.effective,
-            *((self.machines_label,) if self.machines_label else ()),
+            self.machines_label,
+            self.parts.label if self.parts else None,
             *self.labels,
         ):
-            if label not in out:
+            if label is not None and label not in out:
                 out.append(label)
         return tuple(out)
 
@@ -161,9 +186,21 @@ class _Bad(ValueError):
 
 _TOP: Final = frozenset({"documents"})
 _DOC: Final = frozenset(
-    {"name", "procedure", "revision", "effective", "machines", "labels", "steps", "history"}
+    {
+        "name",
+        "procedure",
+        "revision",
+        "effective",
+        "machines",
+        "parts",
+        "labels",
+        "steps",
+        "history",
+    }
 )
 _MACHINES: Final = frozenset({"label", "separator", "namespace"})
+_PARTS: Final = frozenset({"label", "pattern", "namespace"})
+_TITLE: Final = frozenset({"heading"})
 _HISTORY: Final = frozenset({"header", "date", "description"})
 
 
@@ -192,16 +229,45 @@ def _keys(value: object, allowed: frozenset[str], required: set[str], what: str)
     return value
 
 
+def _namespace(value: object, what: str) -> str:
+    namespace = _label(value, what)
+    LogicalId(namespace, "x")  # a namespace the compiler accepts, or ValueError
+    return namespace
+
+
+def _title(value: object, what: str) -> tuple[str | None, int | None]:
+    """The ``procedure`` key: a label, or ``{"heading": <level>}`` (ADR 0028 §1)."""
+    if isinstance(value, str):
+        return _label(value, what), None
+    level = _keys(value, _TITLE, {"heading"}, what)["heading"]
+    if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 6:
+        raise _Bad(f"{what}.heading is a heading level from 1 to 6")
+    return None, level
+
+
+def _parts(value: object, what: str) -> Parts:
+    p = _keys(value, _PARTS, {"label", "pattern", "namespace"}, what)
+    raw = p["pattern"]
+    if not isinstance(raw, str) or not raw or len(raw) > MAX_PATTERN:
+        raise _Bad(f"{what}.pattern is a regular expression of 1 to {MAX_PATTERN} characters")
+    try:
+        pattern = re.compile(raw)
+    except re.error as exc:
+        raise _Bad(f"{what}.pattern does not compile: {exc}") from exc
+    if pattern.groups != 1:
+        raise _Bad(f"{what}.pattern has exactly one group: the id it reads")
+    return Parts(_label(p["label"], f"{what}.label"), pattern, _namespace(p["namespace"], what))
+
+
 def _document(value: object, index: int) -> DocumentSpec:
     what = f"documents[{index}]"
-    doc = _keys(value, _DOC, {"name", "procedure", "revision", "effective"}, what)
+    doc = _keys(value, _DOC, {"name", "procedure", "effective"}, what)
     machines = doc.get("machines")
     label = separator = namespace = None
     if machines is not None:
         m = _keys(machines, _MACHINES, {"label", "namespace"}, f"{what}.machines")
         label = _label(m["label"], f"{what}.machines.label")
-        namespace = _label(m["namespace"], f"{what}.machines.namespace")
-        LogicalId(namespace, "x")  # a namespace the compiler accepts, or ValueError
+        namespace = _namespace(m["namespace"], f"{what}.machines.namespace")
         separator = m.get("separator", ", ")
         if not isinstance(separator, str) or not separator or "\n" in separator:
             raise _Bad(f"{what}.machines.separator is non-empty text on one line")
@@ -222,10 +288,14 @@ def _document(value: object, index: int) -> DocumentSpec:
             raise _Bad(f"{what}.history: date and description are two columns of its header")
         history = History(names, date, description)
     steps = doc.get("steps")
+    procedure, title = _title(doc["procedure"], f"{what}.procedure")
+    revision = doc.get("revision")
+    parts = doc.get("parts")
     return DocumentSpec(
         name=_label(doc["name"], f"{what}.name"),
-        procedure=_label(doc["procedure"], f"{what}.procedure"),
-        revision=_label(doc["revision"], f"{what}.revision"),
+        procedure=procedure,
+        title=title,
+        revision=None if revision is None else _label(revision, f"{what}.revision"),
         effective=_label(doc["effective"], f"{what}.effective"),
         machines_label=label,
         machines_separator=separator or ", ",
@@ -233,6 +303,7 @@ def _document(value: object, index: int) -> DocumentSpec:
         labels=tuple(_label(v, f"{what}.labels[]") for v in labels),
         steps=None if steps is None else _label(steps, f"{what}.steps"),
         history=history,
+        parts=None if parts is None else _parts(parts, f"{what}.parts"),
     )
 
 
@@ -340,11 +411,13 @@ def calendar(source: str) -> RecordId:
 
 
 def _day(text: str) -> int | None:
-    """Days since 1970-01-01 of an ISO calendar date written ``YYYY-MM-DD``; ``None`` otherwise."""
-    if not _DATE.fullmatch(text):
+    """Days since 1970-01-01 of an ISO calendar date written ``YYYY-MM-DD``, alone or followed by
+    a space and more text (``2026-08-30 by the vendor``, ADR 0028 §3); ``None`` otherwise."""
+    match = _DATE.fullmatch(text)
+    if match is None:
         return None
     try:
-        return (_dt.date.fromisoformat(text) - _EPOCH).days
+        return (_dt.date.fromisoformat(match.group(1)) - _EPOCH).days
     except ValueError:
         return None
 
@@ -424,6 +497,19 @@ def _steps(blocks: Sequence[DocumentBlock], heading: str) -> list[DocumentBlock]
         if role is BlockRole.LIST_ITEM and isinstance(block.text, Known):
             items.append(block)
     return items
+
+
+def _headings(blocks: Sequence[DocumentBlock], level: int) -> list[DocumentBlock]:
+    """The document's headings at ``level`` with text, in order."""
+    return [
+        b
+        for b in blocks
+        if isinstance(b.role, Known)
+        and b.role.value is BlockRole.HEADING
+        and isinstance(b.level, Known)
+        and b.level.value == level
+        and isinstance(b.text, Known)
+    ]
 
 
 def _text(value: str) -> TypedLiteral:
@@ -517,19 +603,39 @@ class _Builder:
         self.counts[code].add(record)
 
     def document(self, doc: DocumentRecord, spec: DocumentSpec) -> list[_Event] | None:
-        """The events one document states under ``spec``; ``None`` when it is not one of them."""
+        """The events one document states under ``spec``; ``None`` when it is not one of them.
+
+        A document named by a label is one when it shows that label and the revision label (when
+        declared). One named by its heading has nothing else saying it is a procedure, so it is
+        one only when it also shows the effective label (ADR 0028 §1)."""
         blocks = self.blocks.get(doc.id, [])
         read = _labels(blocks, spec.read_labels)
-        if not read.get(spec.procedure) or not read.get(spec.revision):
+        if spec.revision is not None and not read.get(spec.revision):
             return None
+        if spec.procedure is not None and not read.get(spec.procedure):
+            return None
+        titles: list[DocumentBlock] = []
+        if spec.title is not None:
+            titles = _headings(blocks, spec.title)
+            if not titles or not read.get(spec.effective):
+                return None
         single: dict[str, _Label] = {}
         for label, found in read.items():
             if len({f.value for f in found}) > 1:
                 self.note("label_repeated", doc.id)
                 return []
             single[label] = found[0]
-        name, revision = single[spec.procedure], single[spec.revision]
-        if name.value is None or revision.value is None:
+        if len({t.text.value for t in titles if isinstance(t.text, Known)}) > 1:
+            self.note("title_repeated", doc.id)
+            return []
+        if spec.procedure is not None:
+            name = single[spec.procedure]
+        else:
+            title = titles[0]
+            assert isinstance(title.text, Known)
+            name = _Label(title.text.value, title.provenance.evidence, title.id)
+        revision = None if spec.revision is None else single[spec.revision]
+        if name.value is None or (revision is not None and revision.value is None):
             self.note("label_blank", doc.id)
             return []
         source = doc.provenance.evidence.source
@@ -545,7 +651,8 @@ class _Builder:
             return []
         clock = calendar(source)
         node = event_node(doc.id)
-        event = _Event(node, day, clock, (effective.evidence,), (doc.id, effective.block))
+        dated = _sub(effective.evidence, 0, len("YYYY-MM-DD"))  # the date alone, ADR 0028 §3
+        event = _Event(node, day, clock, (dated,), (doc.id, effective.block))
         event.facts += [
             _Fact(EVENT_KIND, _text(PROCEDURE_REVISION)),
             _Fact(EVIDENCED_BY, LedgerRecordRef(doc.id)),
@@ -553,6 +660,7 @@ class _Builder:
         ]
         machines = self.involved(doc, spec, single)
         event.facts += machines
+        event.facts += self.parts(doc, spec, single)
         for label in spec.read_labels:
             got = single.get(label)
             if got is None:
@@ -592,6 +700,37 @@ class _Builder:
                 self.note("reference_unresolved", doc.id)
                 continue
             facts.append(_Fact(INVOLVES, node, (got.evidence,), (got.block,)))
+        return facts
+
+    def parts(
+        self, doc: DocumentRecord, spec: DocumentSpec, single: Mapping[str, _Label]
+    ) -> list[_Fact]:
+        """``involves`` each part the declared pattern reads in the parts label's value, as an
+        asset in the declared namespace, citing the id's own span (ADR 0028 §2). It joins nothing:
+        an asset in another namespace is the same part only through a stated ``same_as``."""
+        if spec.parts is None:
+            return []
+        got = single.get(spec.parts.label)
+        if got is None or got.value is None:
+            return []
+        facts: list[_Fact] = []
+        seen: set[str] = set()
+        for match in spec.parts.pattern.finditer(got.value):
+            item = match.group(1)
+            if item is None or item in seen:
+                continue
+            try:
+                if not is_declared_value(item):
+                    raise ValueError(item)
+                part = LogicalId(spec.parts.namespace, item)
+            except ValueError:
+                self.note("part_unreadable", doc.id)
+                continue
+            seen.add(item)
+            cited = _sub(got.evidence, match.start(1), match.end(1))
+            facts.append(_Fact(INVOLVES, node_ref(NodeType.ASSET, part), (cited,), (got.block,)))
+        if not facts:
+            self.note("part_unmatched", doc.id)
         return facts
 
     def history(
@@ -648,6 +787,11 @@ class _Builder:
         messages = {
             "label_repeated": "a label is shown twice with different values: document not read",
             "label_blank": "the procedure or revision label is blank: document not read",
+            "title_repeated": "two headings at the title's level differ: document not read",
+            "part_unmatched": "the parts label's value has no id the declared pattern reads:"
+            " it involves no part",
+            "part_unreadable": "a part id the pattern reads is blank, padded or no logical id:"
+            " it involves nothing",
             "untimed": "a procedure document states no effective date: no claim (Memory gives no"
             " time to what states none)",
             "date_unreadable": "an effective date is not written YYYY-MM-DD: no claim",
@@ -668,7 +812,8 @@ class ProcedureConsolidator:
     """Deterministic procedure-revision claims (ADR 0027); config: ``procedure_config``'s."""
 
     consolidator_id: Final = PROCEDURES_CONSOLIDATOR_ID
-    version: Final = "1"
+    # 2 (ADR 0028): heading-named procedures, parts, an effective date followed by text.
+    version: Final = "2"
     model: Final[ModelRef | None] = None
 
     def consolidate(

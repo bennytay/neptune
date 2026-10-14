@@ -67,6 +67,19 @@
         "procedure": "Procedure",
         "revision": "Revision",
         "steps": "Procedure"
+      },
+      {
+        "effective": "Issued",
+        "name": "vendor service bulletin",
+        "parts": {
+          "label": "Applies to",
+          "namespace": "vendor.part",
+          "pattern": "finger set ([A-Z0-9][A-Z0-9-]*)"
+        },
+        "procedure": {
+          "heading": 1
+        },
+        "steps": "Procedure"
       }
     ]
   }

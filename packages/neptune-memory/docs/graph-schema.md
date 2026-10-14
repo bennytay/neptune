@@ -1,7 +1,7 @@
 # Graph schema v2
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v2.3.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.3.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v2.4.0/` (`GRAPH_SCHEMA_VERSION = 2`, `GRAPH_SCHEMA_RELEASE = "2.4.0"`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
@@ -20,7 +20,8 @@ golden-only) republishes the goldens under identity v4 ([ADR 0021](adr/0021-a-ma
 [ADR 0023](adr/0023-event-table-rows-declare-ids-in-their-at-id-column.md); schema and vocabulary unchanged); 2.2.0 (minor)
 adds `declared_value`, `stated_cause`, the `declared_value` value type and the `maintenance` event kind
 ([ADR 0025](adr/0025-declared-names-and-values-maintenance-and-status-events.md)); 2.3.0 (minor) adds `stated_blank` and the
-`procedure_revision` event kind ([ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md)). Within major 1, earlier goldens still
+`procedure_revision` event kind ([ADR 0027](adr/0027-procedure-revisions-from-declared-document-labels-and-stated-blanks.md)); 2.4.0 is golden-only
+(identity v5 joins the parts events and procedure documents involve, [ADR 0028](adr/0028-vendor-procedures-named-by-their-heading-the-parts-they-apply-to-and-parts-in-identity.md); schema and vocabulary unchanged). Within major 1, earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 

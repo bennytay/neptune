@@ -15,7 +15,10 @@ merged: ``same_as`` is an edge that queries traverse (``schema.traverse.same_as_
 
 Event nodes are ``memory.events``'s, read from its claims (identity runs after it): an assertion
 may name an event by its record id or by an id the event's record declares, and a scope that
-names two events joins them like any two nodes (ADR 0019 §1).
+names two events joins them like any two nodes (ADR 0019 §1). Since version 5 (ADR 0028 §4) a part
+an event or a procedure document ``involves`` (an asset node no Ledger thread holds, such as a
+work order's installed serial) is a node an assertion may name too, placed where the claim naming
+it first is.
 
 Records are parsed by ``consolidate.identity_records``; this module decides. Malformed or
 contradictory input is a finding and never a claim, and the rest of the build is unaffected.
@@ -38,6 +41,7 @@ from neptune_memory.consolidate import run_records
 from neptune_memory.consolidate.base import (
     EVENTS_CONSOLIDATOR_ID,
     IDENTITY_CONSOLIDATOR_ID,
+    PROCEDURES_CONSOLIDATOR_ID,
     ClaimDraft,
     ConsolidationFinding,
     ConsolidatorOutput,
@@ -84,6 +88,10 @@ IDENTITY_PREDICATES: Final = CORE_PREDICATES
 # The claim ``memory.events`` names an event's record with (ADR 0013 §1): how identity finds the
 # event nodes it may join and the record each is keyed by.
 EVIDENCED_BY: Final = "evidenced_by"
+# The claim an event or a procedure document names a part with, and the consolidators whose
+# parts an assertion may name (ADR 0028 §4).
+INVOLVES: Final = "involves"
+PART_SOURCES: Final = frozenset({EVENTS_CONSOLIDATOR_ID, PROCEDURES_CONSOLIDATOR_ID})
 
 
 Key = bytes  # a logical id's canonical JSON: the order subjects are chosen in (ADR 0003 §1.4)
@@ -139,15 +147,15 @@ def _malformed(kind: str, package_id: str, index: int, reason: str) -> Consolida
 @dataclass(frozen=True)
 class _Node:
     ref: NodeRef
-    threads: tuple[Thread, ...]  # sorted by record id; none for an event node
-    # An event node's own start and the records placing it: its start when a statement states
-    # none, as a thread node's first thread is (ADR 0008 §2, ADR 0019 §1).
+    threads: tuple[Thread, ...]  # sorted by record id; none for an event or a part node
+    # An event or part node's own start and the records placing it: its start when a statement
+    # states none, as a thread node's first thread is (ADR 0008 §2, ADR 0019 §1, ADR 0028 §4).
     origin: tuple[Timestamp, tuple[RecordId, ...]] | None = None
 
     def first(self) -> tuple[Timestamp, tuple[RecordId, ...]]:
         if self.threads:
             return self.threads[0].valid_from, (self.threads[0].record,)
-        assert self.origin is not None  # an event node always has one
+        assert self.origin is not None  # an event or part node always has one
         return self.origin
 
 
@@ -451,6 +459,40 @@ def _events(view: _View, ledger: LedgerReader, previous: Sequence[Claim]) -> _Ev
             for node in ids:
                 found.declaring.setdefault(_key(node), (set(), set()))[slot].add(record)
     return found
+
+
+def _parts(view: _View, previous: Sequence[Claim]) -> None:
+    """Asset nodes ``memory.events`` or ``memory.procedures`` claims ``involves``, added to the node
+    view when no Ledger thread holds their id (ADR 0028 §4). Each is placed where the claim naming
+    it with the fewest records (then the smallest id) starts, as an event node is: the start of a
+    statement that states none, never the part's lifetime."""
+    best: dict[Key, tuple[tuple[int, str], Claim, LogicalId]] = {}
+    for claim in previous:
+        target = claim.object
+        if (
+            claim.provenance.consolidator_id not in PART_SOURCES
+            or claim.predicate != INVOLVES
+            or not isinstance(target, NodeRef)
+            or target.node_type is not NodeType.ASSET
+        ):
+            continue
+        namespace, _, value = target.node_id.partition(":")
+        try:
+            part = LogicalId(namespace, value)
+        except ValueError:
+            continue  # not an id a thread could hold: nothing names it
+        if node_ref(NodeType.ASSET, part) != target:
+            continue
+        key = _key(part)
+        rank = (len(claim.provenance.records), claim.id)
+        if key not in best or rank < best[key][0]:
+            best[key] = (rank, claim, part)
+    for key, (_, claim, part) in sorted(best.items()):
+        if key in view.nodes or key in view.untyped:
+            continue  # a Ledger thread's node stands, as for events
+        origin = (claim.valid_from, claim.provenance.records)
+        view.nodes[key] = _Node(node_ref(NodeType.ASSET, part), (), origin)
+    view.nodes = dict(sorted(view.nodes.items()))
 
 
 def _rows(ledger: LedgerReader, found: _Events) -> list[parse.Declaring]:
@@ -925,10 +967,11 @@ class IdentityConsolidator:
     read ADR 0003's stand-ins, so its claims are another lineage. Version 3 (ADR 0019) also joins
     event nodes, read from ``memory.events``'s claims, that an assertion names. Version 4 (ADR 0021)
     also reads ``machine`` records: the ids one declaration gives one machine are ``same_as``.
+    Version 5 (ADR 0028) also joins the parts events and procedure documents involve.
     """
 
     consolidator_id: Final = IDENTITY_CONSOLIDATOR_ID
-    version: Final = "4"
+    version: Final = "5"
     model: Final[ModelRef | None] = None
 
     def consolidate(
@@ -947,6 +990,7 @@ class IdentityConsolidator:
                 )
             )
         events = _events(view, ledger, previous)
+        _parts(view, previous)
         stated, distinct = _from_statements(view, events)
         machines = _from_machines(view, ledger)
         links = sorted((*view.links, *stated, *machines), key=lambda link: link.record)

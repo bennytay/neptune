@@ -531,10 +531,13 @@ def test_a_padded_declared_id_names_nothing_and_the_records_other_ids_still_do()
 
 def test_the_default_plan_runs_identity_after_events_without_a_cycle() -> None:
     registered = {r.consolidator_id: r for r in default_registrations()}
-    assert registered["memory.identity"].after == (EVENTS_CONSOLIDATOR_ID,)
+    # and after procedures, whose parts an assertion may name (ADR 0028 §4)
+    assert registered["memory.identity"].after == (EVENTS_CONSOLIDATOR_ID, "memory.procedures")
     assert registered[EVENTS_CONSOLIDATOR_ID].after == ()  # events reads no claims at all
+    assert registered["memory.procedures"].after == ()
     order = [r.consolidator_id for r in plan(default_registrations())]
     assert order.index(EVENTS_CONSOLIDATOR_ID) < order.index("memory.identity")
+    assert order.index("memory.procedures") < order.index("memory.identity")
     # Nothing identity's output feeds may be read by events: no registration reads identity.
     assert not [r for r in registered.values() if "memory.identity" in r.after]
 

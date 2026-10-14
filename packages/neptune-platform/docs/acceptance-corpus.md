@@ -8,13 +8,15 @@ declaration, the `assertion` selector, 2.0.0) and
 [ADR 0009](adr/0009-declared-source-zones-the-declaration-selector-and-corpus-2-1-0.md) (declared source zones,
 the `declaration` selector, 2.1.0) and
 [ADR 0013](adr/0013-corpus-2-2-0-machine-aliases-every-source-names-and-the-incident-in-its-same-event-assertion.md)
-(machine aliases for every source that names a machine, the incident in the same-event assertion, 2.2.0). Code:
+(machine aliases for every source that names a machine, the incident in the same-event assertion, 2.2.0) and
+[ADR 0014](adr/0014-corpus-2-3-0-the-finger-sets-stated-identity-and-the-vendor-procedure-question.md) (the finger
+set's stated identity, the vendor-procedure question Q9, 2.3.0). Code:
 `harness/acceptance/`.
 
 ## Use it
 
 ```bash
-uv run --all-packages python -m harness.acceptance build /tmp/corpus     # write it (56 files, 0.7 MB)
+uv run --all-packages python -m harness.acceptance build /tmp/corpus     # write it (57 files, 0.7 MB)
 uv run --all-packages neptune ingest /tmp/corpus --out /tmp/corpus-pkg  # one package; one error finding
 uv run --all-packages python -m harness.acceptance resolve /tmp/corpus-pkg   # gold evidence -> record ids
 uv run --all-packages python -m neptune_deploy map /tmp/corpus-pkg -p cmms_downtime -p cmms_generic \
@@ -27,7 +29,7 @@ uv run --all-packages python -m harness.acceptance check                # build 
 make harness                                                            # the harness ingests it by default
 ```
 
-A gate quotes the version and tree id from the report's corpus line: `acceptance 2.2.0 (tree sha256:…)`.
+A gate quotes the version and tree id from the report's corpus line: `acceptance 2.3.0 (tree sha256:…)`.
 
 ## What is in it
 
@@ -99,8 +101,8 @@ pointer) is ADR 0008 §6.
 `harness/acceptance/answers.json` (ADR 0011) is the gold questions asked through Context's MCP tools over the
 graph Memory builds from this corpus: per question, the tool calls; per gold claim, its class with a reason:
 `supported` (a cited statement carries the fact), `co_cited` (statements cite its evidence but state something
-else) or a gap. For 2.2.0 over graph-schema 2.3.0, asked as the Claude Code skill prescribes: 15 supported, 12 co-cited, 13
-gaps of 40. `cmms.WO-26-0911.work` and `.firmware` name single cells
+else) or a gap. For 2.3.0 over graph-schema 2.4.0, asked as the Claude Code skill prescribes: 19 supported, 12 co-cited, 15
+gaps of 46. `cmms.WO-26-0911.work` and `.firmware` name single cells
 of WO-26-0911's row (the `table_row` selector's `column`), next to the whole-row `cmms.WO-26-0911`. Changing the corpus moves the graph, so the
 same PR runs `make demo-pin` and classifies what moved ([harness](harness.md#the-pinned-answers)).
 
@@ -160,6 +162,13 @@ with evidence `pin.0909.calibration`, `pin.0914.calibration`, `pin.0914.vision`,
 `pin` selector; Q2.C3, Q3.C2, Q3.C6) and the gap claim Q6.C3 (`s007.manifest.amr07-0402`,
 `s007.nav2.amr07.firmware`, `s007.WO-26-0414`). No existing evidence id or answer changed meaning; a
 consumer that matches the scope's namespaces matches the new spelling.
+
+2.3.0 (MVL-191) added `sites/PLANT-2/vendor/FS-0340.assertions.json`, A. Novak's `same_identity` assertion that
+WO-26-0911's Installed Serial `{serial, FS-0340}` and the part the vendor bulletin applies to `{vendor.part, FS-0340}`
+are one finger set, and Q9 ("did the maintenance follow the vendor's procedure?") with evidence ids
+`bulletin.applies`, `bulletin.torque`, `bulletin.tcp`, `bulletin.record-change`, `assert.same-part` and
+`cmms.WO-26-0911.installed`. No existing evidence id or answer changed meaning; Deploy's record ids moved with the
+base package, as at every version.
 
 2.2.0 (MVL-191) gave ARM-3A the aliases `incident_report.machine`, `requalification.robot` and `syslog.host`, and
 AMR-07 `incident_report.machine` and `requalification.robot`, so Memory joins the incident report's, the

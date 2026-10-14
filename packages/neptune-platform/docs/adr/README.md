@@ -20,3 +20,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0011](0011-demo-v1-real-memory-and-context-stages-pinned-cited-answers-and-the-quickstart.md) | Demo v1: real memory and context stages, pinned cited answers, `make demo` and a quickstart CI runs | Accepted |
 | [0012](0012-documentation-site-sphinx-myst-built-strict-in-check.md) | Documentation site: Sphinx + MyST + Furo over the repository's own docs, built strict and offline in `check` | Accepted |
 | [0013](0013-corpus-2-2-0-machine-aliases-every-source-names-and-the-incident-in-its-same-event-assertion.md) | Corpus 2.2.0: machine aliases for every source that names a machine, and the incident in its same-event assertion | Accepted |
+| [0014](0014-corpus-2-3-0-the-finger-sets-stated-identity-and-the-vendor-procedure-question.md) | Corpus 2.3.0: the finger set's stated identity and the vendor-procedure question | Accepted |

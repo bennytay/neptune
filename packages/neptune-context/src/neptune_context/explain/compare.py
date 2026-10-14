@@ -23,6 +23,13 @@ The clause carries, as claim items, only what Memory states; it never says what 
   carries its name. A procedure with one revision states no change and carries nothing. A
   revision is dated on its document's own calendar, so it is carried with a gap saying it is not
   ordered against the runs.
+- **Procedures for the parts the maintenance changed** (ADR 0019). Every ``procedure_revision``
+  event that ``involves`` a part (an ``asset``) a carried maintenance event ``involves``, directly
+  or through the ``same_as`` claims memory states between parts: what it states (its name, each
+  label and step, each blank) with the claims that link it (the work order's ``involves``, each
+  ``same_as`` on the way, the procedure's ``involves``). It says what the document advises for
+  that part, never what was done; it is dated on its own calendar, so a gap says it is not
+  placed against the runs.
 - The runs' own names and machines.
 
 Nothing is inferred and nothing is ranked by meaning: every carried claim scores 1.
@@ -143,8 +150,9 @@ def explain_compare(run: Run, index: int, clause: CompareRuns) -> Trail | None:
             key = _value_key(claim)
             if key is not None and key not in other.pairs:
                 _carry(run, claim)
-    _maintenance(run, at, tx, before, after)
+    maintained = _maintenance(run, at, tx, before, after)
     _procedures(run, at, tx, before, after)
+    _part_procedures(run, at, tx, maintained)
     return None
 
 
@@ -184,13 +192,15 @@ def _between(start: Timestamp, before: _Side, after: _Side) -> bool | None:
     return lo.ticks <= start.ticks < hi.ticks
 
 
-def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> None:
+def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> list[str]:
+    """Carry the maintenance on the later run's machine; return the events carried."""
     events: dict[str, Claim] = {}  # event node id -> its involves claim (placed on its clock)
     for machine in sorted(_machines(run, tx, after), key=lambda n: n.node_id):
         for claim in run.touching(machine, tx):
             if claim.predicate == INVOLVES and claim.object == machine:
                 events.setdefault(claim.subject.node_id, claim)
     unordered: set[str] = set()
+    carried: set[str] = set()
     for node_id, involves in sorted(events.items()):
         parent = node_id.split(ACTIONS)[0]
         parent_claims = [c for c in run.touching(NodeRef(NodeType.EVENT, parent), tx)]
@@ -206,6 +216,7 @@ def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> Non
             continue
         if placed is None:
             unordered.add(parent)
+        carried.add(parent)
         node = NodeRef(NodeType.EVENT, node_id)
         for claim in run.touching(node, tx):
             if claim.subject == node and claim.predicate in (NAME, CAUSE, DESCRIPTION):
@@ -218,6 +229,80 @@ def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> Non
             "maintenance dated on its records' own clock, which no source ties to the runs'"
             " clock: each is listed, but not placed before, between or after the two runs; give"
             " the date it states",
+        )
+    return sorted(carried)
+
+
+def _usable(run: Run, claim: Claim) -> bool:
+    return not run.withheld(claim) and run.unplaceable(claim) is None
+
+
+def _part_links(run: Run, tx: int, events: Sequence[str]) -> dict[NodeRef, list[Claim]]:
+    """Each part the ``events`` involve, and each part memory states is ``same_as`` one of them,
+    with the claims that reach it: an event's ``involves``, then each ``same_as`` on the way."""
+    reached: dict[NodeRef, list[Claim]] = {}
+    queue: list[NodeRef] = []
+    for parent in events:
+        node = NodeRef(NodeType.EVENT, parent)
+        for claim in run.touching(node, tx):
+            part = claim.object
+            if (
+                claim.subject == node
+                and claim.predicate == INVOLVES
+                and isinstance(part, NodeRef)
+                and part.node_type is NodeType.ASSET
+                and part not in reached
+                and _usable(run, claim)
+            ):
+                reached[part] = [claim]
+                queue.append(part)
+    while queue:
+        part = queue.pop(0)
+        for claim in run.touching(part, tx):
+            if claim.predicate != SAME_AS or not _usable(run, claim):
+                continue
+            for other in (claim.subject, claim.object):
+                if (
+                    isinstance(other, NodeRef)
+                    and other.node_type is NodeType.ASSET
+                    and other not in reached
+                ):
+                    reached[other] = [*reached[part], claim]
+                    queue.append(other)
+    return reached
+
+
+def _part_procedures(run: Run, at: str, tx: int, events: Sequence[str]) -> None:
+    """Carry each procedure that applies to a part the carried maintenance involves (module
+    docstring): what it states, and the claims linking it to the maintenance."""
+    found: set[str] = set()
+    for part, path in sorted(_part_links(run, tx, events).items(), key=lambda i: i[0].node_id):
+        for claim in run.touching(part, tx):
+            subject = claim.subject
+            if (
+                claim.predicate != INVOLVES
+                or claim.object != part
+                or subject.node_type is not NodeType.EVENT
+                or not _usable(run, claim)
+            ):
+                continue
+            own = [c for c in run.touching(subject, tx) if c.subject == subject]
+            if _event_kind(own) != PROCEDURE_REVISION:
+                continue
+            found.add(subject.node_id)
+            for linked in (*path, claim):
+                _carry(run, linked)
+            for stated in own:
+                if stated.predicate in (NAME, VALUE, BLANK):
+                    _carry(run, stated)
+    if found:
+        run.gap(
+            GapCode.NOT_COVERED,
+            at,
+            sorted(found),
+            "procedures for the parts the maintenance changed, dated by the documents themselves:"
+            " each is listed as what it advises, not as what was done, and not placed before,"
+            " between or after the two runs; give the date it states",
         )
 
 

@@ -7,6 +7,9 @@
     "sha256:121b40151595a8d92373b25dd7aea5e1ae3043aec1989894c754e9e3d6593814": [
       "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0415.yaml"
     ],
+    "sha256:127b45a4312653409438ae94fe88f132416e52b42cf88f98de9456a15ab32558": [
+      "sites/PLANT-2/vendor/SB-2026-117_PG-80_finger_sets.md"
+    ],
     "sha256:13b72327894552ab66dd421ab7081c4ef2594e7b980ad77d48cd8b902c178c49": [
       "sites/PLANT-2/cell3/bags/pallet_2026-09-09/metadata.yaml"
     ],
@@ -85,6 +88,9 @@
     ],
     "sha256:af598a2c8eb5d2a3741bdf7b332012eceaf3a9a67a21dfaeb6beb2b2e410860e": [
       "neptune.yaml"
+    ],
+    "sha256:b0345b68ff49a7bf44d0a19a6f1bc486c2d47cba6541c9eee9b3b234a1f0717f": [
+      "sites/PLANT-2/vendor/FS-0340.assertions.json"
     ],
     "sha256:b793183fb43a23f9bb069be4e3f4c360321da5dc1c60d929312bd8942abbcda8": [
       "sites/S-007/incidents/INC-0007.pdf"

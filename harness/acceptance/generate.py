@@ -667,6 +667,41 @@ def assertions() -> bytes:
     return bytes(A.as_json(SAME_EVENT_ASSERTION))
 
 
+# A reviewer's statement that the long finger set WO-26-0911 installed (the CMMS's Installed
+# Serial, which Deploy's ``cmms_generic`` keys as ``serial``) is the FS-0340 the vendor's bulletin
+# SB-2026-117 applies to (which Memory's procedure declaration for the bulletin reads as
+# ``vendor.part``; Memory ADR 0028). The same text in two systems is never joined without it
+# (Platform ADR 0014). Added in 2.3.0, in a file of its own so no earlier evidence moves.
+SAME_PART_ASSERTION: Final = {
+    "format": "neptune.assertions",
+    "version": 1,
+    "assertions": [
+        {
+            "id": {"namespace": "plant-2.review", "value": "ASR-P2-0340-01"},
+            "assertion_type": "same_identity",
+            "author": {"namespace": "plant-2.staff", "value": "a.novak"},
+            "authored_at": "2026-09-15T09:20:00-04:00",
+            "authored_zone": PLANT_ZONE,
+            "scope": [
+                {"namespace": "serial", "value": "FS-0340"},
+                {"namespace": "vendor.part", "value": "FS-0340"},
+            ],
+            "payload": {"part": "PG-80 long finger set", "relation": "same_part"},
+            "rationale": (
+                "The long finger set K. Patel fitted under WO-26-0911 (Installed Serial FS-0340)"
+                " is the vendor's FS-0340: the set's label carries the vendor part number as its"
+                " serial, so SB-2026-117 applies to it."
+            ),
+            "ticket": {"namespace": "cmms.work_order", "value": "WO-26-0911"},
+        }
+    ],
+}
+
+
+def part_assertions() -> bytes:
+    return bytes(A.as_json(SAME_PART_ASSERTION))
+
+
 # --- PLANT-2: authorisation envelopes, in the register S-007 keeps ------------------------------
 
 PLANT_ENVELOPES: Final = (
@@ -1296,6 +1331,7 @@ def plant() -> dict[str, bytes]:
     files = {
         f"{PLANT}/survey/site_survey_SS-PLANT2-2026-09.pdf": site_survey(),
         f"{PLANT}/vendor/SB-2026-117_PG-80_finger_sets.md": SERVICE_BULLETIN.encode(),
+        f"{PLANT}/vendor/FS-0340.assertions.json": part_assertions(),
         f"{PLANT}/maps/PLANT-2_zones.geojson": plant_zones(),
     }
     files.update(cell())

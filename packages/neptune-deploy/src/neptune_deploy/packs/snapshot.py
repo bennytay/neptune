@@ -39,7 +39,7 @@ from neptune_deploy.packs._read import (
 )
 from neptune_deploy.packs.errors import PackError
 
-GRAPH_SCHEMA_PIN: Final = "2.3.0"  # contracts/lock.toml; a test holds the two together
+GRAPH_SCHEMA_PIN: Final = "2.4.0"  # contracts/lock.toml; a test holds the two together
 # The 1.x minor whose shapes a 1.x document is read against strictly (ADR 0015, ADR 0018 §2).
 GRAPH_SCHEMA_1X_PIN: Final = "1.6.0"
 GRAPH_SCHEMA_MAJORS: Final = (1, 2)  # the majors this reader reads; any other is refused

@@ -51,6 +51,8 @@ if TYPE_CHECKING:
 IDENTITY_CONSOLIDATOR_ID: Final = "memory.identity"
 # Here, not in ``events``, so identity can read event claims without importing it (ADR 0019 §1).
 EVENTS_CONSOLIDATOR_ID: Final = "memory.events"
+# The same for the parts a procedure document applies to (ADR 0028 §4).
+PROCEDURES_CONSOLIDATOR_ID: Final = "memory.procedures"
 
 # Runner findings that mean a consolidator did not run to completion: its output is not a
 # complete statement of its lineage, so it records no build and withdraws nothing (ADR 0016 §2).
