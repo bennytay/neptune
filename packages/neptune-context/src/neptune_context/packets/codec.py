@@ -75,10 +75,13 @@ from neptune_context.packets.model import (
 )
 from neptune_context.packets.trails import (
     Change,
+    CompareSection,
+    CompareTrail,
     DiffChange,
     DiffPoint,
     DiffTrail,
     Relation,
+    Section,
     Trail,
     TxPoint,
     WhyStep,
@@ -570,7 +573,28 @@ def _trail(value: JsonValue, at: str) -> Trail:
             at,
             lambda: DiffTrail(_str(obj["at"], f"{at}/at"), subject, nodes, before, after, changes),
         )
-    raise _Bad(Code.SHAPE, f"{at}/kind", f"a trail's kind is 'why' or 'diff', got {kind!r}")
+    if kind == CompareTrail.kind:
+        obj = _exact(value, at, {"after", "at", "before", "kind", "sections"})
+        first = _upstream(f"{at}/before", lambda: _node(obj["before"]))
+        second = _upstream(f"{at}/after", lambda: _node(obj["after"]))
+        sections = _each(obj["sections"], f"{at}/sections", _section)
+        return _upstream(
+            at, lambda: CompareTrail(_str(obj["at"], f"{at}/at"), first, second, sections)
+        )
+    raise _Bad(
+        Code.SHAPE, f"{at}/kind", f"a trail's kind is 'why', 'diff' or 'compare_runs', got {kind!r}"
+    )
+
+
+def _section(value: JsonValue, at: str) -> CompareSection:
+    obj = _exact(value, at, {"claims", "section"})
+    return _upstream(
+        at,
+        lambda: CompareSection(
+            _enum(obj["section"], f"{at}/section", Section),
+            _claim_ids(obj["claims"], f"{at}/claims"),
+        ),
+    )
 
 
 def _header(value: JsonValue, at: str) -> dict[str, Any]:

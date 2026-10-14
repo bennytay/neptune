@@ -92,10 +92,11 @@ Neptune is a deployment memory for robots of every kind: typed, cited claims abo
 sites, runs, configurations and documents, each with the source bytes it came from. Every tool \
 is read-only.
 - Each fact is one sentence ending with its citations: [I3] is the item (the Items: footer gives \
-its id, and a claim's id for neptune_why), [E1] the source (the Evidence: footer gives the exact \
-ref). Cite those keys when you state a fact, and never state one the answer does not hold. \
-When the server has a source index, a Sources: list names each [E] key's corpus file and place \
-(row, column, page, pointer); name them when you cite.
+a claim's id, for neptune_why), [E1] the source (the Sources footer gives its file and exact \
+place: row, column, page, pointer). Cite those keys when you state a fact, name the file and \
+place, and never state a fact the answer does not hold. Facts are grouped under a heading naming \
+the record they are about (N3 is its key in the Names list, which gives its full id: pass ids, \
+never names, to a tool); a comparison opens with a summary of its sections.
 - Answer first, in one or two plain sentences built from cited facts; then the facts; then at \
 most three caveats in plain words. Never open with disclaimers or repeat internal terms (channels, \
 gap codes).
@@ -346,8 +347,8 @@ def _tools() -> list[types.Tool]:
             "run' and 'why did this happen'. States differences, never causes."
         ),
         TOOL_HYDRATE: (
-            "Resolve one cited source (an evidence ref copied from an Evidence: footer line) "
-            "through the Ledger: whether it resolves, its size, and the records that cite it."
+            "Resolve one cited source (an evidence ref: a Sources footer key's content id and "
+            "locator) through the Ledger: whether it resolves, its size, and the records that cite it."
         ),
         TOOL_PLAN: (
             "Draft a typed query from a plain-language question. The draft is a model's "
@@ -566,11 +567,13 @@ def _failure(error: SdkError) -> types.CallToolResult:
 
 
 def packet_content(
-    packet: ContextPacket, sources: SourceIndex | None = None
+    packet: ContextPacket, sources: SourceIndex | None = None, *, links: bool = True
 ) -> list[types.ContentBlock]:
-    """A packet as the tool's content: the cited text (with the ``Sources:`` list when a source
-    index is given, ADR 0016), then a resource link per evidence ref."""
-    refs = answer_evidence_refs(packet)
+    """A packet as the tool's content: the cited text (naming each cited file when a source
+    index is given, ADR 0016), then, with ``links``, a resource link per evidence ref. A server
+    whose engine reads no Ledger catalog sends none (ADR 0020): reading one could only answer
+    that the source is unavailable, and the ``Sources:`` footer already names every source."""
+    refs = answer_evidence_refs(packet) if links else ()
     text = render_answer(packet, sources)
     blocks: list[types.ContentBlock] = [types.TextContent(type="text", text=text)]
     for number, ref in enumerate(refs[:MAX_LINKS], start=1):
@@ -644,11 +647,16 @@ async def _entities(
 
 
 def build_server(
-    client: AsyncClient, *, name: str = SERVER_NAME, sources: SourceIndex | None = None
+    client: AsyncClient,
+    *,
+    name: str = SERVER_NAME,
+    sources: SourceIndex | None = None,
+    links: bool = True,
 ) -> Server[Any]:
     """An MCP server whose every answer comes from ``client``. With ``sources`` (ADR 0016) each
     answer names every cited source's corpus file and place, and a hydration the engine cannot
-    serve says where the index places the source."""
+    serve says where the index places the source. ``links=False`` (an engine with no Ledger
+    catalog, ADR 0020) leaves the resource links out of packet answers."""
     server: Server[Any] = Server(name, version=__version__, instructions=INSTRUCTIONS)
     tools = _tools()
 
@@ -661,7 +669,7 @@ def build_server(
         try:
             if tool in (TOOL_QUERY, TOOL_WHY, TOOL_DIFF, TOOL_COMPARE):  # checks shape
                 packet = await client.query(query_from_arguments(tool, arguments))
-                content = packet_content(packet, sources)
+                content = packet_content(packet, sources, links=links)
                 return types.CallToolResult(content=content, isError=False)
             check_shape(arguments)
             if tool == TOOL_HYDRATE:

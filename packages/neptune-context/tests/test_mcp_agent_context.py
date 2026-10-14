@@ -69,7 +69,7 @@ def check_against_golden(results: list[dict[str, Any]]) -> None:
             and not step["is_error"]
         ):
             parsed = parse_answer(result["text"])  # every citation recoverable
-            assert len(result["links"]) == min(len(parsed.evidence), 100)
+            assert parsed.evidence and result["links"] == []  # no catalog, no links (ADR 0020)
 
 
 def test_the_planner_recording_is_current() -> None:
@@ -110,9 +110,9 @@ def test_the_agent_asks_about_the_incident_and_gets_its_cited_claims() -> None:
         if s["tool"] == "neptune_query" and F.DEMO_INCIDENT[1] in json.dumps(s["arguments"])
     )
     parsed = parse_answer(incident["text"])
-    assert 'has_description text "Operator reached into the pallet gate' in incident["text"]
-    assert 'event_kind text "incident"' in incident["text"]
-    assert parsed.evidence and len(incident["links"]) == len(parsed.evidence)
+    assert 'has_description "Operator reached into the pallet gate' in incident["text"]
+    assert 'event_kind "incident"' in incident["text"]
+    assert parsed.evidence and incident["links"] == []
     assert "involves" not in incident["text"]
 
 

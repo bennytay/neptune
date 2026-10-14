@@ -36,12 +36,13 @@ from neptune_context.packets.trails import Change, DiffTrail, WhyTrail
 from neptune_context.query import Budget, CivilTime, Instant, Query, Subject, Why
 from neptune_context.query.model import Diff
 from neptune_context.render.agent import (
+    SOURCES_FOOTER,
     answer_evidence_refs,
     literal_values,
     parse_answer,
     render_answer,
 )
-from neptune_context.render.citations import CitationError, parse_citations
+from neptune_context.render.citations import CitationError
 from neptune_context.sdk import Client
 
 UTC_NS = CivilTime("utc", "unix", Fraction(1, 10**9))
@@ -217,9 +218,10 @@ def check_trails(packet: ContextPacket) -> str:
     """Render ``packet``, parse it back and compare every trail line with the packet's trails."""
     text = render_answer(packet)
     parsed = parse_answer(text)
-    assert parsed.evidence == answer_evidence_refs(packet) == parse_citations(text)
+    assert parsed.evidence == answer_evidence_refs(packet)
     assert parsed.evidence[: len(packet.evidence_refs())] == packet.evidence_refs()
-    assert [k.item_id for k in parsed.items] == [i.id for i in packet.items]
+    named = sorted(str(k.claim_id or k.item_id) for k in parsed.items)
+    assert named == sorted(i.claim.id if isinstance(i, ClaimItem) else i.id for i in packet.items)
     expected: list[tuple[Any, ...]] = []
     for trail in packet.trails:
         clause = int(trail.at.rsplit("/", 1)[1])
@@ -655,7 +657,7 @@ def test_prompt_injections_in_claims_and_ids_stay_quoted_in_trails() -> None:
         )
         text = check_trails(packet)
         lines = text.split("\n")
-        assert lines.count("Evidence:") == 1 and lines.count("Items:") == 1
+        assert lines.count(SOURCES_FOOTER) == 1 and lines.count("Items:") == 1
         assert "</untrusted>" not in text and "<system>" not in text and "```" not in text
         (root,) = lines_of(text, "Why Memory holds ")
         recovered |= set(literal_values(root))

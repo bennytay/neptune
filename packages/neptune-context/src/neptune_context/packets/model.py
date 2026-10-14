@@ -69,6 +69,7 @@ from neptune_context.packets.findings import PacketFindingCode as Code
 from neptune_context.packets.trails import (
     MAX_TRAILS,
     TRAIL_KINDS,
+    CompareTrail,
     Trail,
     WhyTrail,
     trail_index,
@@ -1185,12 +1186,14 @@ class ContextPacket:
     def _check_trails(self) -> None:
         trails = self.trails
         if not isinstance(trails, tuple) or not all(isinstance(t, TRAIL_KINDS) for t in trails):
-            raise _fail(Code.SHAPE, "trails must be a tuple of WhyTrails and DiffTrails")
+            raise _fail(Code.SHAPE, "trails must be a tuple of why, diff and compare_runs trails")
         if len(trails) > MAX_TRAILS:
             raise _fail(Code.BAD_VALUE, f"at most {MAX_TRAILS} trails")
         _sorted_unique([trail_index(t.at) for t in trails], "trails (by explain clause)")
         carried = {i.claim.id: i.claim for i in self.items if isinstance(i, ClaimItem)}
         for trail in trails:
+            if isinstance(trail, CompareTrail):  # its claims are items, checked as items
+                continue
             if isinstance(trail, WhyTrail):
                 for step in trail.steps:
                     if step.is_inferred and not self.inference_included:

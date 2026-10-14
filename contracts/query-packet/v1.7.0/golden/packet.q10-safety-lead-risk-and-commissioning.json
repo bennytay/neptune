@@ -1,0 +1,173 @@
+{
+  "findings": [],
+  "gaps": [
+    {
+      "at": "/text",
+      "channel": "graph",
+      "code": "not_covered",
+      "detail": "the example graph holds no claims about this machine; Memory has not consolidated its deployment records, so no claim is returned",
+      "refs": []
+    }
+  ],
+  "header": {
+    "as_of": 5,
+    "budget": {
+      "dropped": 0,
+      "exhausted": [],
+      "limits": {
+        "items": 10
+      },
+      "tokenizer": "neptune-context.utf8-bytes-div-4/1",
+      "used": {
+        "bytes": 2176,
+        "items": 2,
+        "tokens": 544
+      }
+    },
+    "head": 5,
+    "inference_included": false,
+    "ledger_snapshot": {
+      "catalog_api_version": "1.7.0"
+    },
+    "memory_snapshot": {
+      "as_of": 5,
+      "generation": "sha256:25b298b7665b83de1b81dc8976225387962cd649bfa218bf62f300f422e5e0fe",
+      "graph_schema_version": 1
+    },
+    "produced_by": {
+      "config_hash": "sha256:75eeb847fd19641d461fd836bb30edbb9d6ade05c961a651d7abaac1f0eb0aa4",
+      "engine_id": "neptune-context.golden",
+      "engine_version": "1"
+    },
+    "query_id": "query:sha256:f5c7a23151332a99488561516d0e475f594bd0cf26f5885a65139ce2d1177684"
+  },
+  "id": "packet:sha256:68568ba5e03605d14f6c457a3ae3bd6efb66532b21eb11c3a980ce2ce0213d2e",
+  "items": [
+    {
+      "assertion_kind": "stated",
+      "claims": [],
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "item:sha256:88877ceb2d769accab5a987018bcef5dd27f482623ace2b12db452a39ff5924b",
+      "kind": "configuration",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 4903,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/commissioning/0"
+              }
+            ],
+            "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+          }
+        ],
+        "records": [
+          "rec:sha256:72691e355bb00480b91e2f5167b22628334850a49e4aefc9ab4ac03dafd2d68b"
+        ],
+        "transform": {
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "producer_id": "deployment_json",
+          "producer_version": "1.0.0"
+        }
+      },
+      "record": "rec:sha256:72691e355bb00480b91e2f5167b22628334850a49e4aefc9ab4ac03dafd2d68b",
+      "record_kind": "commissioning_baseline",
+      "relevance": {
+        "hits": [
+          {
+            "channel": "lexical",
+            "rank": 1,
+            "score": 1.0
+          },
+          {
+            "channel": "vector",
+            "rank": 1,
+            "score": 0.86
+          }
+        ],
+        "score": 0.03278688524590164
+      },
+      "subject": {
+        "knowledge": "not_covered"
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "document": "rec:sha256:6d03f4d6bf1da68121844b55d449611ad3de7cfbb6122b2d13228a681c47853c",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/risk_assessments/0/hazards/0/hazard"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "id": "item:sha256:b982f1a6b33d35d2981f5bdced4c97a111f04f10179180c41aa2b3427a535d2e",
+      "kind": "document_span",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 4903,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/risk_assessments/0/hazards/0/hazard"
+              }
+            ],
+            "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+          }
+        ],
+        "records": [
+          "rec:sha256:6d03f4d6bf1da68121844b55d449611ad3de7cfbb6122b2d13228a681c47853c"
+        ],
+        "transform": {
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "producer_id": "deployment_json",
+          "producer_version": "1.0.0"
+        }
+      },
+      "relevance": {
+        "hits": [
+          {
+            "channel": "lexical",
+            "rank": 1,
+            "score": 3.75
+          },
+          {
+            "channel": "vector",
+            "rank": 2,
+            "score": 0.82
+          }
+        ],
+        "score": 0.03252247488101534
+      },
+      "text": {
+        "knowledge": "known",
+        "value": "collision with a pedestrian in PICK-A"
+      }
+    }
+  ],
+  "kind": "context_packet",
+  "packet_version": 1,
+  "superseded_since": []
+}

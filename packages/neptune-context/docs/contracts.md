@@ -10,7 +10,7 @@ consumes nothing, and an entry in `contracts/packages.toml`.
 
 ## Publishes
 
-`query-packet` **1.6.0, stable** (`contracts/query-packet/v1.6.0/`), consumed by Deploy and Learn. Fixed by
+`query-packet` **1.7.0, stable** (`contracts/query-packet/v1.7.0/`), consumed by Deploy and Learn. Fixed by
 [ADR 0002](adr/0002-query-language.md) (query), [ADR 0003](adr/0003-the-context-packet.md) (packet) and
 [ADR 0006](adr/0006-c1-gate-query-packet-1-0-0-and-answer-checks.md) (publication, answer checks, C1 gate
 amendments). 1.1.0 is the additive pin bump of [ADR 0007](adr/0007-graph-channel-retrieval-interface-and-local-engine.md):
@@ -27,7 +27,10 @@ and packet is valid at 1.4.0. 1.5.0 adds the `compare_runs` explain clause of
 [ADR 0015](adr/0015-compare-runs-and-named-runs-and-events.md) (`Query/$defs/CompareRuns`): what memory states
 differs between two runs; it adds no trail, its claims are the packet's items, so every 1.x packet is valid. 1.6.0 is the additive pin bump of
 [ADR 0017](adr/0017-procedure-revisions-in-compare-runs-graph-schema-2-3-0-and-query-packet-1-6-0.md): graph-schema 2.3.0's `stated_blank` joins the predicate enums; every 1.x
-query and packet is valid at 1.6.0.
+query and packet is valid at 1.6.0. 1.7.0 adds a third trail kind, `compare_runs`
+([ADR 0020](adr/0020-compact-grouped-answers-and-the-compare-runs-trail.md), `ContextPacket/$defs/CompareTrail`): the
+part of a run comparison (maintenance, configuration values, procedure revisions, procedures for changed
+parts, the runs) each carried claim answers, by claim id; additive, so every 1.x packet is valid at 1.7.0.
 
 - **Owner module** `neptune_context.contract`.
   - `contract_schema()` is the registry export. It embeds both halves' schemas verbatim, each as its own
@@ -64,8 +67,10 @@ query and packet is valid at 1.6.0.
 
 Not a contract: the source index (`neptune_context.sources`, [ADR 0016](adr/0016-readable-citations-a-source-index-beside-the-graph.md))
 that `python -m neptune_context.mcp --sources` reads is Context's own input format, written by
-`build_source_index` from the Ledger's `resolve` and read by Context; no other package parses it. The `Sources:`
-list it adds to an answer sits between the `Items:` and `Evidence:` footers and leaves the packet unchanged.
+`build_source_index` from the Ledger's `resolve` and read by Context; no other package parses it. It names
+each file in the agent answer's `Sources` footer and leaves the packet unchanged. Nor is the agent answer's
+text (ADR 0009, 0020): read it with `render.agent.parse_answer`; the citation contract of ADR 0003 §7 is
+`render.citations.render_text` with `parse_citations`, which the conformance checks use.
 
 ## Consumes
 

@@ -1,0 +1,23 @@
+{
+  "as_of": "head",
+  "budget": {
+    "items": 10
+  },
+  "clock_bridges": [],
+  "explain": [],
+  "frame_bridges": [],
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [],
+  "subjects": [],
+  "text": {
+    "channels": [
+      "lexical",
+      "vector"
+    ],
+    "fields": [
+      "record"
+    ],
+    "text": "AMR-07 risk assessment"
+  }
+}
