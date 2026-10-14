@@ -10,7 +10,8 @@ ROS topics (``/uav21/imu/data``), declared ids (``asset_tag:hx-02``), firmware v
   marked. An unquoted compound in a query is found only as one whole compound of the document:
   ``SN-A4471-9`` matches neither ``SN-A4471-7`` nor ``SN-A4471-9-B``, and ``2.4.1`` not
   ``2.4.1-rc3``. A quoted phrase is found as adjacent terms anywhere, so ``"SN-A4471"`` finds
-  the whole serial family.
+  the whole serial family. One exception (ADR 0021 §3): a compound that is exactly one decimal
+  number (``151.5``, ``0.0745``) is one term, so ``151`` or ``5`` never finds ``151.5``.
 - ``Mode.PROSE`` additionally stems a word that stands alone and is made of letters only
   (``stalls`` and ``stalled`` meet at ``stall``). ``Mode.VERBATIM`` (declared ids) and every
   compound part are never stemmed. No stop words are removed: phrases keep their adjacency and
@@ -44,6 +45,7 @@ MAX_QUERY_CHARS: Final = 8192  # characters of query text analysed
 MAX_TEXT_CHARS: Final = 1_000_000  # characters of one text analysed (indexes cap lower and say so)
 MAX_COMPOUND_PARTS: Final = MAX_PHRASE_TERMS  # a longer compound is split into compounds this long
 SEPARATOR: Final = "\x1f"  # a phrase never matches across it (positions skip one)
+NUMBERS: Final = "decimal-one-term/1"  # how a decimal number is cut (ADR 0021 §3); in settings
 
 _QUOTED = re.compile(r'"([^"]*)"')
 _VOWELS = frozenset("aeiouy")
@@ -98,6 +100,7 @@ def _word(word: str) -> str:
 def _compounds(text: str) -> Iterator[list[str]]:
     """The compounds of normalised text, each a list of its words, lazily."""
     current: list[str] = []
+    joined: list[str] = []  # the joiner after each part of ``current`` but the last
     i, n = 0, len(text)
     while i < n:
         if not _is_word_char(text[i]):
@@ -114,10 +117,20 @@ def _compounds(text: str) -> Iterator[list[str]]:
             and text[i] in JOINERS
             and _is_word_char(text[i + 1])
         ):
+            joined.append(text[i])
             i += 1
             continue
-        yield current
-        current = []
+        yield _number(current, joined)
+        current, joined = [], []
+
+
+def _number(parts: list[str], joined: list[str]) -> list[str]:
+    """A compound that is one decimal number (digits, a point, digits: ``151.5``, ``0.0745``)
+    as one term (ADR 0021 §3), so ``151`` or ``5`` never finds ``151.5``; every other compound
+    (``2.4.1``, ``1e-05``, ``SN-1.86``) keeps its parts."""
+    if joined == ["."] and parts[0].isdigit() and parts[1].isdigit():
+        return [_word(f"{parts[0]}.{parts[1]}")]
+    return parts
 
 
 def _stem_english(word: str) -> str:
