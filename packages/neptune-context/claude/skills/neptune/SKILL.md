@@ -15,7 +15,9 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    `"what happened to ARM-3A at PLANT-2?"`) and `include_inferred: false` to get declared ids
    such as `servicenow.ci:ARM-3A` or `manifest:PLANT-2`. Never hard-code ids: they differ between
    graphs, so always find them here. Leave out `text` (or pass `kind`) to list what memory names. Only names current at `as_of` (default: latest) are offered; names that
-   only inferences mention need `include_inferred: true`. A name with several candidates is
+   only inferences mention need `include_inferred: true`. When the sources state that several
+   ids are one machine (or event), it comes back as one entity, `also declared as` the others:
+   use that id with the `same_as_depth` its line gives. A name with several candidates is
    ambiguous: ask the user which one, never pick.
    **"What changed since the last good run?", "Why did this incident happen?" or "What is
    unknown about this incident?"** Compare the two runs instead of walking the graph:
@@ -48,8 +50,8 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
    neptune_entities {"text": "what happened to ARM-3A?", "include_inferred": false}
    ```
 
-   then, with the ids it returned for that machine as `subjects` (the two below are placeholders
-   for them):
+   then, with the id it returned for that machine as the subject (a placeholder below) and the
+   `same_as_depth` its line gives:
 
    ```json
    {
@@ -57,18 +59,19 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
      "query": {
        "budget": {"items": 50, "tokens": 20000},
        "subjects": [
-         {"kind": "machine", "declared_id": "ns:id-from-neptune-entities"},
-         {"kind": "machine", "declared_id": "other-ns:same-machine-id-from-neptune-entities"}
+         {"kind": "machine", "declared_id": "ns:id-from-neptune-entities", "same_as_depth": 2}
        ],
        "graph": {"hops": 2, "direction": "both", "predicates": "any"}
      }
    }
    ```
 
-   One machine can be declared under several source systems' names (above: ServiceNow, the CMMS,
-   the run manifests) with no stated link between them. Name each one you want answered; never
-   assume two names are the same machine. A claim that is not in the answer is not in Memory: if
-   no claim links an incident to the machine, say so, and query the incident's own node.
+   One machine is often declared under several source systems' names (ServiceNow, the CMMS, the
+   run manifests). Where the sources state they are one machine, the entity line says so and the
+   depth reads them all. Ids listed as separate candidates have no stated link: name each one you
+   want answered, and never assume two names are the same machine. A claim that is not in the
+   answer is not in Memory: if no claim links an incident to the machine, say so, and query the
+   incident's own node.
 
    Use `include_inferred: false` when the user wants evidence only, or when an inference could
    drive a safety decision.

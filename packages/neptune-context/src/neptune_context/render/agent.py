@@ -75,6 +75,7 @@ from neptune_context.packets.trails import (
     trail_index,
 )
 from neptune_context.pinned import older_graph_notice
+from neptune_context.query.model import MAX_SAME_AS_DEPTH
 from neptune_context.render.citations import FOOTER, CitationError, parse_citations
 
 if TYPE_CHECKING:
@@ -1187,14 +1188,38 @@ _NEXT: Final = {
 }
 
 
-def _entity(entity: Entity) -> str:
+def _named(entity: Entity) -> str:
     names = [n for n in (entity.label, *entity.aliases) if n is not None]
-    named = f" named {', '.join(quote(n) for n in names)}" if names else ""
-    return f"{entity.kind} {quote(entity.declared_id)}{named}"
+    return f" named {', '.join(quote(n) for n in names)}" if names else ""
 
 
-def _mention(mention: Mention) -> str:
-    named = " or ".join(_entity(c) for c in mention.candidates)
+def _entity(entity: Entity, sources: SourceIndex | None = None) -> str:
+    """One entity: kind, id and names, then (ADR 0018) the other ids memory states it is, how
+    many claims say so and, with a source index, the files they cite, and the ``same_as_depth``
+    that reads every id."""
+    line = f"{entity.kind} {quote(entity.declared_id)}{_named(entity)}"
+    joined = entity.same_as
+    if joined is None:
+        return line
+    others = ", ".join(f"{quote(o.declared_id)}{_named(o)}" for o in joined.others)
+    paths = sorted({p for s in joined.sources for p in sources.get(s)}) if sources else []
+    cited = f", cited from {', '.join(quote(p) for p in paths)}" if paths else ""
+    n = len(joined.claims)
+    claims = (
+        f"{n} same_as claim in evidence joins" if n == 1 else f"{n} same_as claims in evidence join"
+    )
+    read = (
+        f'query it with "same_as_depth": {joined.depth} to read every id'
+        if joined.depth <= MAX_SAME_AS_DEPTH
+        else "list every id as a subject to read them all"
+    )
+    return (
+        f"{line}, also declared as {others} (one {entity.kind}: {claims} these ids{cited}; {read})"
+    )
+
+
+def _mention(mention: Mention, sources: SourceIndex | None = None) -> str:
+    named = " or ".join(_entity(c, sources) for c in mention.candidates)
     lead = "ambiguous between " if mention.ambiguous else ""
     return f"- {quote(mention.text)}: {lead}{named}"
 
@@ -1240,11 +1265,14 @@ def render_entities(
     total: int | None = None,
     kind: str | None = None,
     conflicts: Sequence[str] = (),
+    sources: SourceIndex | None = None,
 ) -> str:
-    """Declared identities, one per line: names to use as subjects, not facts."""
+    """Declared identities, one per line: names to use as subjects, not facts. An entity memory
+    states is also other ids is one line naming them (ADR 0018); ``sources`` names the files
+    those statements cite."""
     scope = f" of kind {kind}" if kind is not None else ""
     lines = [f"Declared identities in memory{scope} (identifiers to use as subjects, not facts):"]
-    lines += [f"- {_entity(e)}" for e in entities]
+    lines += [f"- {_entity(e, sources)}" for e in entities]
     if not entities:
         lines.append("- none")
     if total is not None and total > len(entities):
@@ -1259,11 +1287,14 @@ def render_entities(
     return "\n".join(lines) + "\n"
 
 
-def render_mentions(text: str, mentions: Sequence[Mention]) -> str:
-    """The declared names found in ``text``, each with every candidate."""
+def render_mentions(
+    text: str, mentions: Sequence[Mention], sources: SourceIndex | None = None
+) -> str:
+    """The declared names found in ``text``, each with every candidate. Ids memory states are
+    one entity are one candidate (ADR 0018); only ids it does not join are an ambiguity."""
     lines = [
         f"Text: {quote(text)}",
         "Names found (every candidate; an ambiguous name is never settled for you):",
     ]
-    lines += [_mention(m) for m in mentions] or ["- no declared name found in the text"]
+    lines += [_mention(m, sources) for m in mentions] or ["- no declared name found in the text"]
     return "\n".join(lines) + "\n"

@@ -9,7 +9,8 @@ The clause carries, as claim items, only what Memory states; it never says what 
   value is carried on both sides, a value only one run's configurations state on that side.
   Values both runs state alike are not carried: they did not change.
 - **Maintenance.** Every ``maintenance`` event that ``involves`` the later run's machine (the
-  run's ``recorded_by`` machine and the ids memory states are ``same_as`` it), with its name,
+  run's ``recorded_by`` machine and the ids memory states are ``same_as`` it, directly or
+  through each other: ADR 0018), with its name,
   stated cause and each action's description. Placed on the runs' clock, only events between
   the two runs' starts count; on a clock no stated relation ties to the runs' (a CMMS's), the
   event is carried and a gap says it is not ordered against the runs. No clock is converted.
@@ -155,11 +156,22 @@ def _carry(run: Run, claim: Claim) -> None:
 
 
 def _machines(run: Run, tx: int, side: _Side) -> set[NodeRef]:
+    """The run's ``recorded_by`` machines and every machine ``same_as`` joins to them, directly
+    or through others (ADR 0018): the same set whichever of a machine's ids the run names."""
     found = side.machines()
-    for machine in sorted(found, key=lambda n: n.node_id):
-        for claim in run.touching(machine, tx):
-            if claim.predicate == SAME_AS and not run.withheld(claim):
-                found |= {n for n in (claim.subject, claim.object) if isinstance(n, NodeRef)}
+    frontier = sorted(found, key=lambda n: n.node_id)
+    while frontier:
+        reached: set[NodeRef] = set()
+        for machine in frontier:
+            for claim in run.touching(machine, tx):
+                if claim.predicate == SAME_AS and not run.withheld(claim):
+                    reached |= {
+                        n
+                        for n in (claim.subject, claim.object)
+                        if isinstance(n, NodeRef) and n.node_type is NodeType.MACHINE
+                    }
+        frontier = sorted(reached - found, key=lambda n: n.node_id)
+        found |= reached
     return {n for n in found if n.node_type is NodeType.MACHINE}
 
 

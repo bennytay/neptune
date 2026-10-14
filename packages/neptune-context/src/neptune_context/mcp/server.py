@@ -355,7 +355,9 @@ def _tools() -> list[types.Tool]:
             "The declared identities memory names at a snapshot (machines, sensors, sites, "
             "zones, configurations ...): with text, every declared name in it and all its "
             "candidates; without, a list (optionally of one kind). Identifiers to use as query "
-            "subjects. Only names current at as_of; inferred-only names need include_inferred."
+            "subjects. Only names current at as_of; inferred-only names need include_inferred. "
+            "Ids the sources state are one entity (same_as) are one line, also declared as the "
+            "others, with the same_as_depth that reads them all; an inferred same_as joins none."
         ),
     }
     return [
@@ -604,7 +606,9 @@ def _text(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=False)
 
 
-async def _entities(client: AsyncClient, arguments: Mapping[str, Any]) -> str:
+async def _entities(
+    client: AsyncClient, arguments: Mapping[str, Any], sources: SourceIndex | None = None
+) -> str:
     _only(arguments, {"include_inferred"}, {"text", "kind", "as_of"})
     text, kind = arguments.get("text"), arguments.get("kind")
     flag = _flag(arguments)
@@ -624,11 +628,15 @@ async def _entities(client: AsyncClient, arguments: Mapping[str, Any]) -> str:
                 Mention(m.text, tuple(c for c in m.candidates if c.kind == kind)) for m in mentions
             )
             mentions = tuple(m for m in narrowed if m.candidates)
-        return render_mentions(text, mentions)
+        return render_mentions(text, mentions, sources)
     found = await client.entities(kind, as_of=as_of, include_inferred=flag)
     conflicts = await client.conflicts(as_of=as_of, include_inferred=flag)
     return render_entities(
-        found[:MAX_ENTITIES_LISTED], total=len(found), kind=kind, conflicts=conflicts
+        found[:MAX_ENTITIES_LISTED],
+        total=len(found),
+        kind=kind,
+        conflicts=conflicts,
+        sources=sources,
     )
 
 
@@ -675,7 +683,7 @@ def build_server(
                 planned = await client.plan(question, as_of=_snapshot(arguments))  # type: ignore[arg-type]
                 return _text(render_plan(planned))
             if tool == TOOL_ENTITIES:
-                return _text(await _entities(client, arguments))
+                return _text(await _entities(client, arguments, sources))
             raise _bad(f"unknown tool {tool!r}; the tools are {', '.join(TOOLS)}")
         except SdkError as error:
             return _failure(error)
