@@ -137,10 +137,11 @@ async def _session(server: Any, calls: Sequence[Json]) -> list[Called]:
 def call_tools(
     client: AsyncClient, calls: Sequence[Json], sources: SourceIndex | None = None
 ) -> list[Called]:
-    """``calls`` through the MCP server's own tools, in one in-memory session."""
+    """``calls`` through the MCP server's own tools, in one in-memory session, as ``--memory``
+    serves them: no Ledger catalog, so no resource links (Context ADR 0020)."""
     from neptune_context.mcp import build_server
 
-    return asyncio.run(_session(build_server(client, sources=sources), calls))
+    return asyncio.run(_session(build_server(client, sources=sources, links=False), calls))
 
 
 def stdio_round_trip(
