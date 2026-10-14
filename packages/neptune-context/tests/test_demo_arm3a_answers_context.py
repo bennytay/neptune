@@ -29,10 +29,10 @@ import pytest
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
 import retrieve_fixtures_context as F
+from neptune_context.answer import answer_problems
 from neptune_context.engine import read_graph_document
 from neptune_context.mcp import build_server
 from neptune_context.mcp.__main__ import local_client
-from neptune_context.answer import answer_problems
 from neptune_context.mcp.server import COMPARE_TOKENS, query_from_arguments
 from neptune_context.render.agent import parse_answer
 

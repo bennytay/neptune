@@ -282,6 +282,7 @@ def quote(value: JsonValue) -> str:
     """A value from evidence as hardened canonical JSON on one line."""
     return harden(dumps(value).decode("utf-8"))
 
+
 # --- Names and clocks (ADR 0020) -----------------------------------------------------------------
 
 # An id with a long run of hex is a content address: unreadable, and costly for a model to read.
@@ -499,8 +500,7 @@ class _Ctx:
         """A whole claim: subject, predicate, object and validity."""
         claim = item.claim
         return (
-            f"{self.names.node(claim.subject)} {self.statement(claim)},"
-            f" {self.valid(_valid(claim))}"
+            f"{self.names.node(claim.subject)} {self.statement(claim)}, {self.valid(_valid(claim))}"
         )
 
     def summary(self, item: Item) -> str:
@@ -554,6 +554,7 @@ def _mark(item: Item) -> str:
     named = quote(f"{model.model_id} {model.model_version}") if model is not None else "none named"
     confidence = _knowledge(item.confidence, repr)
     return f"INFERRED (model {named}, confidence {confidence})"
+
 
 # --- The answer ----------------------------------------------------------------------------------
 
@@ -621,9 +622,7 @@ _NATURAL: Final = re.compile(r"(\d+)")
 
 def _natural(text: str) -> tuple[tuple[int, int | str], ...]:
     """``/actions/10`` after ``/actions/9``: digits compare as numbers."""
-    return tuple(
-        (0, int(p)) if p.isdigit() else (1, p) for p in _NATURAL.split(text) if p != ""
-    )
+    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in _NATURAL.split(text) if p != "")
 
 
 @dataclass
@@ -979,6 +978,7 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
     lines += ["", SOURCES_FOOTER, *_source_lines(evidence, sources)]
     return "\n".join(lines) + "\n"
 
+
 # --- Sources (ADR 0016, 0020) --------------------------------------------------------------------
 
 UNPLACED: Final = "a source the source index does not place"
@@ -1124,6 +1124,7 @@ def _source_lines(evidence: dict[EvidenceRef, int], sources: SourceIndex | None)
         keyed.append(f"[E{n}] F{files[source]} {steps}")
     return [*heads, *keyed]
 
+
 _QuantityGroup = tuple[tuple[str, str], list[Item], list[float | NonFinite]]
 
 
@@ -1146,7 +1147,6 @@ def _quantities(packet: ContextPacket) -> list[_QuantityGroup]:
             members.append(item)
             values.append(obj.value)  # type: ignore[arg-type]  # int, float or NonFinite
     return [(key, m, v) for key, (m, v) in sorted(groups.items()) if len(m) > 1]
-
 
 
 # --- Reading it back -----------------------------------------------------------------------------
@@ -1212,6 +1212,7 @@ class ParsedAnswer:
     @property
     def claim_ids(self) -> tuple[str, ...]:
         return tuple(k.claim_id for k in self.items if k.claim_id is not None)
+
 
 class _Trails:
     """The trail sections of one answer while it is read: each line must be a cited sentence of
@@ -1445,6 +1446,7 @@ class _Trails:
         elif label not in _DIFF_LABELS.values() or depth != 0:
             raise CitationError(f"{where}: {label!r} is a top-level diff label")
 
+
 def _footer(lines: list[str], marker: str, before: int) -> int:
     for index in range(before - 1, -1, -1):
         if lines[index] == marker:
@@ -1493,9 +1495,7 @@ def _sources_footer(lines: list[str]) -> tuple[tuple[EvidenceRef, ...], tuple[st
                 raise CitationError(f"file line {line!r} is out of order")
             try:
                 source: JsonValue = (
-                    head["content"]
-                    if head["content"] is not None
-                    else json.loads(head["external"])
+                    head["content"] if head["content"] is not None else json.loads(head["external"])
                 )
             except ValueError as exc:
                 raise CitationError(f"{line!r} names no source") from exc
@@ -1517,9 +1517,7 @@ def _sources_footer(lines: list[str]) -> tuple[tuple[EvidenceRef, ...], tuple[st
             refs.append(evidence_ref_from_json({"locator": steps, "source": source}))
         except (TypeError, ValueError) as exc:
             raise CitationError(f"[E{len(refs) + 1}] is not an evidence ref: {exc}") from exc
-        words = " > ".join(
-            locator_place(s) if isinstance(s, dict) else str(s) for s in steps
-        )
+        words = " > ".join(locator_place(s) if isinstance(s, dict) else str(s) for s in steps)
         places.append(", ".join(p for p in (where, words) if p))
     return tuple(refs), tuple(places)
 
@@ -1656,9 +1654,11 @@ def parse_answer(text: str) -> ParsedAnswer:
     trails.check_gaps(gap_pointers)
     return ParsedAnswer(tuple(items), evidence, tuple(statements), tuple(trails.parsed), places)
 
+
 def literal_values(line: str) -> list[str]:
     """The JSON string literals in one rendered line, decoded: what a source said, verbatim."""
     return [json.loads(m) for m in re.findall(r'"(?:[^"\\]|\\.)*"', line)]
+
 
 # --- Plans and names (neptune_plan, neptune_entities) ---------------------------------------------
 

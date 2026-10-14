@@ -348,7 +348,8 @@ def _tools() -> list[types.Tool]:
         ),
         TOOL_HYDRATE: (
             "Resolve one cited source (an evidence ref: a Sources footer key's content id and "
-            "locator) through the Ledger: whether it resolves, its size, and the records that cite it."
+            "locator) through the Ledger: whether it resolves, its size, and the records that "
+            "cite it."
         ),
         TOOL_PLAN: (
             "Draft a typed query from a plain-language question. The draft is a model's "

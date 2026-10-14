@@ -41,9 +41,8 @@ from neptune_context.packets.codec import canonical_bytes
 from neptune_context.packets.model import ClaimItem
 from neptune_context.pins import GRAPH_SCHEMA_VERSION
 from neptune_context.query import Budget, Direction, GraphClause, Query, Subject, to_json
-from neptune_context.render.agent import render_answer
+from neptune_context.render.agent import parse_answer, render_answer
 from neptune_context.render.citations import parse_citations, render_text
-from neptune_context.render.agent import parse_answer
 from neptune_context.sdk import AsyncClient, Client
 
 if TYPE_CHECKING:

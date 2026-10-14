@@ -225,6 +225,7 @@ def check_trails(packet: ContextPacket) -> str:
     expected: list[tuple[Any, ...]] = []
     for trail in packet.trails:
         clause = int(trail.at.rsplit("/", 1)[1])
+        assert isinstance(trail, WhyTrail | DiffTrail)  # a comparison's trail heads no outline
         rows = (
             expected_why(packet, trail)
             if isinstance(trail, WhyTrail)

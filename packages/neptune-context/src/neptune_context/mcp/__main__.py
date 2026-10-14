@@ -25,8 +25,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from functools import partial
 from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 

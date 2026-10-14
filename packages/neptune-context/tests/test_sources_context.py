@@ -259,8 +259,8 @@ def test_each_locator_step_reads_as_a_person_counts(step: dict[str, Any], place:
     assert locator_place(step) == place
     # The footer writes a step in words exactly when the words read back to the step (ADR 0020);
     # an adapter's own step is written as its JSON.
-    exact = exact_place(step)
-    assert exact == (place if not str(step["kind"]).count(":") else json.dumps(step, sort_keys=True, separators=(",", ":")))
+    as_json = json.dumps(step, sort_keys=True, separators=(",", ":"))
+    assert exact_place(step) == (as_json if ":" in str(step["kind"]) else place)
 
 
 @pytest.mark.parametrize(

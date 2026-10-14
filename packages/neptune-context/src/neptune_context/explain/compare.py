@@ -345,9 +345,7 @@ def _event_kind(claims: Sequence[Claim]) -> str | None:
     return next(iter(kinds)) if len(kinds) == 1 else None
 
 
-def _procedures(
-    run: Run, found: _Sections, at: str, tx: int, before: _Side, after: _Side
-) -> None:
+def _procedures(run: Run, found: _Sections, at: str, tx: int, before: _Side, after: _Side) -> None:
     involved: dict[str, Claim] = {}  # event node id -> its involves claim
     for machine in sorted(_machines(run, tx, after), key=lambda n: n.node_id):
         for claim in run.touching(machine, tx):
