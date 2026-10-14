@@ -28,6 +28,7 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,8 +97,10 @@ def local_client(
     return AsyncClient(LocalEngine(reader, channels=channels(document, reader)), planner=planner)
 
 
-async def serve(client: AsyncClient, sources: SourceIndex | None = None) -> None:
-    server = build_server(client, sources=sources)
+async def serve(
+    client: AsyncClient, sources: SourceIndex | None = None, *, links: bool = True
+) -> None:
+    server = build_server(client, sources=sources, links=links)
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
 
@@ -157,7 +160,9 @@ def main(argv: list[str] | None = None) -> int:
     except (SdkError, OSError, ValueError, ModelUnavailable) as error:
         sys.stderr.write(f"neptune mcp: {error}\n")
         return 2
-    anyio.run(serve, client, sources)
+    # ``--memory`` attaches no Ledger catalog, so a resource link could only answer that the
+    # source is unavailable: its answers carry none (ADR 0020).
+    anyio.run(partial(serve, client, sources, links=args.memory is None))
     return 0
 
 

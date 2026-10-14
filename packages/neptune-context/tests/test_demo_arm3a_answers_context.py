@@ -29,10 +29,11 @@ import pytest
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
 import retrieve_fixtures_context as F
+from neptune_context.answer import answer_problems
 from neptune_context.engine import read_graph_document
 from neptune_context.mcp import build_server
 from neptune_context.mcp.__main__ import local_client
-from neptune_context.mcp.server import COMPARE_TOKENS
+from neptune_context.mcp.server import COMPARE_TOKENS, query_from_arguments
 from neptune_context.render.agent import parse_answer
 
 LAST_GOOD: Final = "cell3-2026-09-09"
@@ -169,6 +170,7 @@ def test_what_changed_is_one_comparison_citing_the_work_order_and_the_recalibrat
     changed = texts[-1]
     assert "Items: " in changed and "cut by" not in changed  # whole at the default budget
     assert len(changed) // 4 < COMPARE_TOKENS // 2  # well inside an agent's reading
+    assert len(changed) < 30_000  # 96 facts named, grouped and cited (ADR 0020; 77 600 before)
 
 
 def test_why_the_incident_reads_it_then_compares_its_run(answers: dict[str, list[str]]) -> None:
@@ -202,8 +204,66 @@ def test_the_comparison_reads_in_plain_words(answers: dict[str, list[str]]) -> N
     assert 'declared_value at ["reprojection_error"]: reals [1.86] (no unit stated)' in changed
     for jargon in ("channel)", "carried, not ordered", "not applicable", "declared value at"):
         assert jargon not in changed, jargon
-    assert "on clock rec:sha256:" in changed  # the clock each fact is valid on stays
+    assert "on clock C1" in changed and "\nC1 " in changed  # each fact's clock, by its key
     assert parse_answer(changed).claim_ids
+
+
+def test_the_comparison_is_grouped_named_and_compact(answers: dict[str, list[str]]) -> None:
+    """ADR 0020: a summary, then sections, each record named once by what the sources call it;
+    full ids appear once, in the Names, Clocks, Items and Sources lists."""
+    changed = answers["what changed on ARM-3A since the last good run"][-1]
+    summary = changed.split("\nSummary:\n", 1)[1].split("\n\n", 1)[0]
+    assert summary.startswith('- Compared run named "cell3-2026-09-09"')
+    assert 'with run named "cell3-2026-09-14"' in summary and ": 96 facts." in summary
+    for label in ("Maintenance: ", "Configuration values that differ: ", "Procedure revisions: "):
+        assert label in summary
+    assert "Procedures for the parts the maintenance changed: " in summary
+    assert "2 blank labels or cells" in summary
+    facts = changed.split("\nFacts:\n", 1)[1].split("\n\n", 1)[0]
+    assert "sha256:" not in facts  # no content address in a fact or a heading
+    assert 'event named "WO-26-0911" (N' in facts
+    assert '"/actions/3" has_description "Hand-eye recalibration deferred' in facts
+    assert 'configuration named "sites/PLANT-2/cell3/calibration/CAL-ARM3A-0818.yaml"' in facts
+    first = facts.index("Maintenance on the later run's machine (")
+    assert first < facts.index("Configuration values that differ, each run's own copy (")
+    assert facts.index("Procedure revisions for the machine") < facts.index(
+        "Procedures for the parts the maintenance changed"
+    )
+    # Each record is named once per section; its id is listed once.
+    names = changed.split("\nNames ", 1)[1].split("\n\n", 1)[0].splitlines()[1:]
+    assert len(names) == len(set(names)) and len(names) < 20
+
+
+def test_the_comparison_trail_round_trips() -> None:
+    from neptune_context.packets.codec import canonical_bytes, decode
+    from neptune_context.packets.trails import CompareTrail, Section
+
+    client = local_client(read_graph_document(F.MEMORY_SNAPSHOT))
+
+    async def go() -> Any:
+        listing = await client.entities("run", include_inferred=False)
+        names: dict[str, str] = {}
+        for entity in listing:  # the least id a name lists, as ``_run_id`` takes it
+            for name in (entity.label, *entity.aliases):
+                if name is not None:
+                    names[name] = min(names.get(name, entity.declared_id), entity.declared_id)
+        query = query_from_arguments(
+            "neptune_compare_runs",
+            {
+                "include_inferred": False,
+                "before": {"kind": "run", "declared_id": names[LAST_GOOD]},
+                "after": {"kind": "run", "declared_id": names[INCIDENT_RUN]},
+            },
+        )
+        return query, await client.query(query)
+
+    query, packet = asyncio.run(go())
+    (trail,) = packet.trails
+    assert isinstance(trail, CompareTrail)
+    assert [s.section for s in trail.sections] == list(Section)
+    assert set(trail.claims) == {c for c in packet.claim_ids}  # every item, in one section
+    assert decode(canonical_bytes(packet)) == packet
+    assert answer_problems(query, packet) == ()
 
 
 SKILL: Final = (

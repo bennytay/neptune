@@ -53,13 +53,14 @@ from neptune_context.render.agent import (
     DATA_NOTICE,
     FACTS,
     QUANTITIES,
+    SOURCES_FOOTER,
     harden,
     literal_values,
     parse_answer,
     quote,
     render_answer,
 )
-from neptune_context.render.citations import CitationError, parse_citations
+from neptune_context.render.citations import CitationError
 from neptune_context.sdk import Client
 from sdk_testing_context import STEMS, golden_packet
 
@@ -70,26 +71,35 @@ INJECTIONS: list[str] = json.loads((AGENT / "injection-texts.json").read_text(en
 UNSAFE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069\u200b-\u200f\ufeff]")
 
 
+def ident(item: Item) -> str:
+    """How the Items footer names an item: a claim by its claim id, anything else by item id."""
+    return item.claim.id if isinstance(item, ClaimItem) else item.id
+
+
 def check(packet: ContextPacket) -> str:
     """Render ``packet``, parse it back and check every citation against the packet."""
     text = render_answer(packet)
     parsed = parse_answer(text)
-    assert parsed.evidence == packet.evidence_refs()
-    assert parse_citations(text) == packet.evidence_refs()
-    assert [k.item_id for k in parsed.items] == [i.id for i in packet.items]
-    assert [k.kind for k in parsed.items] == [i.kind for i in packet.items]
-    claims = [i.claim.id if isinstance(i, ClaimItem) else None for i in packet.items]
-    assert [k.claim_id for k in parsed.items] == claims
+    assert parsed.evidence == packet.evidence_refs()  # keys in the packet's order (ADR 0003 §7)
+    named = [k.claim_id or k.item_id for k in parsed.items]
+    assert sorted(map(str, named)) == sorted(ident(i) for i in packet.items)
+    items = {ident(i): i for i in packet.items}
+    for key in parsed.items:
+        item = items[str(key.claim_id or key.item_id)]
+        assert key.kind == item.kind
+        assert key.claim_id == (item.claim.id if isinstance(item, ClaimItem) else None)
+        assert key.item_id == (None if isinstance(item, ClaimItem) else item.id)
     facts = [s for s in parsed.statements if s.section == FACTS]
     assert len(facts) == len(packet.items)  # one sentence per item, none without a citation
-    for statement, item in zip(facts, packet.items, strict=True):
-        assert statement.items[0].item_id == item.id
+    assert [s.items[0].number for s in facts] == list(range(1, len(facts) + 1))
+    shown = [items[str(s.items[0].claim_id or s.items[0].item_id)] for s in facts]
+    for statement, item in zip(facts, shown, strict=True):
         assert statement.evidence == tuple(dict.fromkeys(item.evidence_refs()))
     for statement in parsed.statements:
         assert statement.items and statement.evidence
     changed = [s for s in parsed.statements if s.section.startswith("What changed")]
     assert [s.items[0].claim_id for s in changed] == [e.claim for e in packet.superseded_since]
-    for item, line in zip(packet.items, _fact_lines(text), strict=True):
+    for item, line in zip(shown, _fact_lines(text), strict=True):
         assert line.split(": ", 1)[0].endswith(")") == item.is_inferred
         assert ("INFERRED" in line.split(": ", 1)[0]) == item.is_inferred
     assert not UNSAFE.search(text.replace("\n", ""))
@@ -97,8 +107,9 @@ def check(packet: ContextPacket) -> str:
 
 
 def _fact_lines(text: str) -> list[str]:
+    """The numbered fact lines (not the headings above them)."""
     body = text.split(f"\n{FACTS}\n", 1)[1].split("\n\n", 1)[0]
-    return body.splitlines()
+    return [line for line in body.splitlines() if re.match(r"[1-9][0-9]*\. ", line)]
 
 
 # --- The ten worked queries ------------------------------------------------------------------
@@ -164,7 +175,7 @@ def demo_answer() -> ContextPacket:
 def test_the_demo_answer_cites_every_fact() -> None:
     text = check(demo_answer())
     assert 'has_configuration configuration "servicenow.u_after:TCP z=145.5 mm"' in text
-    assert 'has_description text "Operator reached into the pallet gate' in text
+    assert 'has_description "Operator reached into the pallet gate' in text
     # The arm's neighbourhood holds no inferred claim (Memory's clock fits sit on clock nodes);
     # how an inferred item reads is the persona goldens' and the hostile document's to prove.
     assert "INFERRED" not in text.split("Facts:", 1)[1]
@@ -231,10 +242,9 @@ def test_quantities_are_summarised_by_declared_unit_and_never_pooled() -> None:
 
 
 def test_a_series_window_is_described_by_what_the_packet_declares() -> None:
-    from neptune_context.render.agent import _summary
-
-    window = next(i for i in golden_packet("q09").items if i.kind == "series_window")
-    sentence = _summary(window, {})
+    sentence = next(
+        line for line in _fact_lines(check(golden_packet("q09"))) if "series window" in line
+    )
     assert "ticks [" in sentence and "declares no statistics" in sentence
     for adjective in ("high", "low", "spike", "stable", "normal", "noisy", "large", "small"):
         assert adjective not in sentence.split()
@@ -247,10 +257,10 @@ def test_prompt_injections_in_documents_stay_quoted_data() -> None:
     text = check(hostile_answer())
     lines = text.split("\n")
     # No injected line, heading, footer or tag appears: each text is inside one fact sentence.
-    assert lines.count("Evidence:") == 1 and lines.count("Items:") == 1
+    assert lines.count(SOURCES_FOOTER) == 1 and lines.count("Items:") == 1
     assert lines.count(FACTS) == 1 and "Not answered:" not in lines[: lines.index(FACTS)]
     assert "</untrusted>" not in text and "<system>" not in text and "```" not in text
-    descriptions = [line for line in _fact_lines(text) if " has_description text " in line]
+    descriptions = [line for line in _fact_lines(text) if " has_description " in line]
     recovered = {value for line in descriptions for value in literal_values(line)}
     for injected in INJECTIONS:
         assert injected in recovered, injected[:40]
@@ -419,9 +429,12 @@ def test_the_parser_refuses_uncited_or_forged_lines() -> None:
         _mutate(text, first_fact, first_fact.replace("[I1]", "[I2]")),  # fact 1 cites item 2
         _mutate(text, f"\n{FACTS}\n", f"\n{FACTS}\nThe arm is safe.\n"),  # an uncited sentence
         _mutate(text, "Inferred items: excluded.", "Inferred items: optional."),  # a forged header
-        _mutate(text, "\n\nItems:\n", "\n\nItems:\n[I9] claim item:sha256:" + "0" * 64 + "\n"),
+        _mutate(text, "\n\nItems:\n", "\n\nItems:\n[I9] claim:sha256:" + "0" * 64 + "\n"),
         _mutate(text, "Resolver findings:", "Notes:"),  # a heading the grammar does not know
-        text.replace("\nEvidence:\n", "\n"),  # no footer
+        text.replace(f"\n{SOURCES_FOOTER}\n", "\n"),  # no footer
+        _mutate(text, "\n[E1] F1 ", "\n[E1] F9 "),  # a key in a file the footer does not list
+        _mutate(text, "\n[E1] F1 ", "\n[E1] F1 nowhere > "),  # a place that is no locator
+        _mutate(text, "\nNames ", "\nNames [I1] "),  # a heading cannot hold a citation key
     ]
     for broken in bad:
         with pytest.raises(CitationError):

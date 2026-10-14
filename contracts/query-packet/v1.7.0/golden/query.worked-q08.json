@@ -1,0 +1,54 @@
+{
+  "as_of": "head",
+  "budget": {
+    "items": 300
+  },
+  "clock_bridges": [
+    {
+      "mapping_id": "rec:sha256:ad648d2828d14d74915b586fc818fd3f66c67044fc88f5e927eb10e40df9cfd8",
+      "source": {
+        "domain_id": "rec:sha256:9eed593e7f9a98935f9c278870ce8bdc580c3533683178aca01741502c181bef",
+        "kind": "domain"
+      },
+      "target": {
+        "epoch": "unix",
+        "kind": "civil",
+        "resolution": {
+          "denominator": 1000000000,
+          "numerator": 1
+        },
+        "timescale": "utc"
+      }
+    }
+  ],
+  "during": {
+    "clock": {
+      "domain_id": "rec:sha256:9eed593e7f9a98935f9c278870ce8bdc580c3533683178aca01741502c181bef",
+      "kind": "domain"
+    },
+    "end": 2700000000000,
+    "start": 0
+  },
+  "explain": [],
+  "frame_bridges": [],
+  "graph": {
+    "direction": "out",
+    "hops": 2,
+    "predicates": [
+      "has_calibration",
+      "has_configuration",
+      "recorded_by",
+      "runs_model"
+    ]
+  },
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [],
+  "subjects": [
+    {
+      "declared_id": "run_log:quad-12-2026-09-14-0812",
+      "kind": "run",
+      "same_as_depth": 0
+    }
+  ]
+}

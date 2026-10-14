@@ -331,13 +331,21 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
     each node or change is a sentence naming its claim and citing its evidence, a conflict names the resolver
     finding, a repeat and every cap or gap says so, and a diff says `held only between the two points` for a
     version that opened and closed inside the window;
-  - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`;
+  - for a comparison, a **Summary**: the two runs, each section's size, the unknowns ([ADR 0020](adr/0020-compact-grouped-answers-and-the-compare-runs-trail.md));
+  - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`. A
+    comparison's facts come by section (maintenance, configuration values, procedure revisions, procedures for
+    changed parts, the runs); any other answer's by record. A heading names each record once, by the names its
+    evidence states (`event named "WO-26-0911" (N8)`) and the validity its facts share; a line names only the
+    part it is about (`"/actions/3"`);
   - quantities by declared unit, findings and gaps; a value's unit reads `(unit "mm", as declared)`, or
     `(no unit stated)` when the source gives none, and nothing for a text ([ADR 0018](adr/0018-stated-same-as-names-one-entity-and-plain-language-answers.md));
-  - an `Items:` footer (item and claim ids) and the `Evidence:` footer.
+  - `Names` and `Clocks` lists giving each `N<k>` and `C<k>` its full id, an `Items:` footer (each claim's id,
+    for `neptune_why`) and a `Sources` footer: each file once (`F<k>`, its corpus path with `--sources`, its
+    content id), then each `[E<k>]` with its file and exact place.
 
-  One resource link follows per evidence ref. Reading `neptune://evidence/<token>?as_of=N` hydrates it at the
-  answer's snapshot. `render.agent.parse_answer` recovers every citation from the text.
+  One resource link follows per evidence ref, except from `--memory`, which has no Ledger catalog to resolve
+  them. Reading `neptune://evidence/<token>?as_of=N` hydrates it at the answer's snapshot.
+  `render.agent.parse_answer` recovers every citation from the text.
 - Text from sources is quoted, hardened JSON. Square brackets, every non-ASCII bracket (Unicode Ps/Pe), angle
   brackets, backticks and their look-alikes, controls, bidirectional and invisible characters are escaped, so a document cannot forge a citation, a line or a tag. The answer says
   quoted strings are data, never instructions.

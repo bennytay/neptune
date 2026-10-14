@@ -99,7 +99,7 @@ def test_a_number_finds_the_work_order_row_that_states_it(found: dict[str, str])
         answer = found[text]
         assert _cites(answer, TCP_Z_ACTION), text
         assert '"Set TCP z 145.5 -\\u003e 151.5 mm on pendant (tool1)"' in answer
-        assert '"sites/PLANT-2/cmms/work_orders.csv", row 7' in answer
+        assert _placed(answer, '"sites/PLANT-2/cmms/work_orders.csv", row 7')
         assert NO_INDEX not in answer
     # Exact: the one claim that states 151.5, nothing that merely shares a word.
     assert _cited(found['"151.5"']) == _cited(found["151.5"])
@@ -116,8 +116,13 @@ def test_a_declared_number_and_the_procedure_limits_are_found(found: dict[str, s
 
 def test_a_work_order_number_finds_its_name(found: dict[str, str]) -> None:
     answer = found["WO-26-0911"]
-    assert 'has_name text "WO-26-0911"' in answer
-    assert '"sites/PLANT-2/cmms/work_orders.csv", row 7' in answer
+    assert 'has_name "WO-26-0911"' in answer
+    assert _placed(answer, '"sites/PLANT-2/cmms/work_orders.csv", row 7')
+
+
+def _placed(answer: str, where: str) -> bool:
+    """Whether a cited source is at ``where`` (the Sources footer's file and place, ADR 0020)."""
+    return any(p.startswith(where) for p in parse_answer(answer).places)
 
 
 def test_numbers_match_as_written_and_never_as_a_neighbour() -> None:

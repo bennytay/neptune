@@ -107,13 +107,20 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
 ## How to read an answer
 
 - Each fact is one sentence ending with citations: `[I6]` is the item, `[E6][E7]` its sources.
-  The `Items:` footer maps `I6` to the item id (and a claim's id); the `Evidence:` footer maps
-  `E6` to the exact source. **Every fact you repeat must keep its keys**, for example
-  "ServiceNow records ARM-3A's configuration as `TCP z=145.5 mm` [I6][E6]". Never state anything the answer does not hold.
-- The `Sources:` list (when the server has a source index) names each `[E]` key's file in the
-  corpus and the place in it: `[E6] "sites/PLANT-2/cmms/work_orders.csv", row 15, column
-  "Action"` (rows, pages and characters count from 1; bytes are offsets). When you cite, name the
-  file and place too, for example "[E6] (work_orders.csv row 15, column Action)".
+  Facts sit under a heading naming the record they are about, by the names its sources state
+  (`event named "WO-26-0911" (N8)`), and a line names only the part it is about (`"/actions/3"`:
+  one of that work order's actions; paths count from 0). `N8` and `C1` are keys: the `Names` and `Clocks` lists give
+  their full ids; pass ids, never names, to a tool. The `Items:` footer maps `I6` to a claim's id.
+  **Every fact you repeat must keep its keys**, for example "ServiceNow records ARM-3A's
+  configuration as `TCP z=145.5 mm` [I6][E6]". Never state anything the answer does not hold.
+- The `Sources` footer lists each file once (`F2 "sites/PLANT-2/cmms/work_orders.csv"`, with the
+  server's source index) and then each `[E]` key's file and place: `[E6] F2 row 15, column 7
+  "Action"` (rows, columns, pages and characters count from 1; bytes are offsets). When you cite,
+  name the file and place too, for example "[E6] (work_orders.csv row 15, column Action)".
+- `neptune_compare_runs` opens with a **Summary** (the two runs, how many facts each section
+  holds, the unknowns), then the facts section by section: maintenance, configuration values that
+  differ, procedure revisions, procedures for the parts the maintenance changed, the runs. Read
+  every section before you answer.
 - `neptune_why` answers an indented outline, root claim first: `Corroborated by`, `Conflicts with
   (resolver finding ...)` and `Alternative reading` lines, each citing its claim and sources. Say
   "Memory holds this, and these sources agree or conflict", never a cause: Neptune states
@@ -121,7 +128,7 @@ MCP server is read-only. Never answer from memory or guesswork when Neptune can 
   `Superseded` (with `Narrowed to` or `Replaced by` beneath) and `Between`, which held only
   between the two points. A line that names a claim without a citation says it is not carried
   in the answer: ask again with a larger `max_items` or call `neptune_why` on it.
-- `stated_blank text "Approved by"` means the document shows that label or column with nothing
+- `stated_blank "Approved by"` means the document shows that label or column with nothing
   in it: say the document names no approver (or no change record), never that none exists.
 - A sentence that opens with `INFERRED (model ..., confidence ...)` is an inference, not
   evidence. Say so ("Neptune infers ...").

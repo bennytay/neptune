@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -17,7 +18,7 @@ from neptune_context import mcp as neptune_mcp
 from neptune_context.mcp import server as mcp_server
 from neptune_context.packets.model import EvidenceItem
 from neptune_context.query import Budget, Query, Subject, Why, canonical_bytes, query_id
-from neptune_context.render.agent import render_answer
+from neptune_context.render.agent import SOURCES_FOOTER, render_answer
 from neptune_context.sdk import NO_RETRY, AsyncClient, ErrorCode, RetryPolicy, SdkError, StubEngine
 from sdk_testing_context import (
     UNAVAILABLE,
@@ -522,8 +523,8 @@ def test_source_text_cannot_forge_a_citation_through_the_tool() -> None:
     # The renderer escapes line breaks in evidence-derived values (ADR 0003 §7); the tool adds none.
     (text,) = texts(call(golden_client(), "neptune_query", q_arguments("q08")))
     assert text == render_answer(golden_packet("q08"))
-    body, _, footer = text.rpartition("\nEvidence:\n")
-    assert all(line.startswith("[E") for line in footer.splitlines())
+    body, _, footer = text.rpartition(f"\n{SOURCES_FOOTER}\n")
+    assert all(re.match(r"(?:F|\[E)[0-9]", line) for line in footer.splitlines())
     assert "\n[E" not in body.replace("\n\n", "\n")
 
 

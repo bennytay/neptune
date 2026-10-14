@@ -1,0 +1,46 @@
+{
+  "as_of": 4,
+  "budget": {
+    "items": 10
+  },
+  "clock_bridges": [],
+  "explain": [
+    {
+      "after": {
+        "clock": {
+          "epoch": "unix",
+          "kind": "civil",
+          "resolution": {
+            "denominator": 1000000000,
+            "numerator": 1
+          },
+          "timescale": "utc"
+        },
+        "ticks": 1780272000000000000
+      },
+      "before": {
+        "clock": {
+          "epoch": "unix",
+          "kind": "civil",
+          "resolution": {
+            "denominator": 1000000000,
+            "numerator": 1
+          },
+          "timescale": "utc"
+        },
+        "ticks": 1775001600000000000
+      },
+      "kind": "diff",
+      "subject": {
+        "declared_id": "asset-tag:LEG-9",
+        "kind": "machine",
+        "same_as_depth": 0
+      }
+    }
+  ],
+  "frame_bridges": [],
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [],
+  "subjects": []
+}

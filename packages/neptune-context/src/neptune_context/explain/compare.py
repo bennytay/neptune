@@ -45,11 +45,12 @@ from neptune_memory.schema.nodes import NodeRef, NodeType
 
 from neptune.identity.canonical_json import dumps
 from neptune_context.packets.model import GapCode
+from neptune_context.packets.trails import SECTION_ORDER, CompareSection, CompareTrail, Section
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from neptune_memory.schema.claim import Claim
+    from neptune_memory.schema.claim import Claim, ClaimId
 
     from neptune.model.time import Timestamp
     from neptune_context.explain.run import Run
@@ -125,10 +126,38 @@ class _Side:
         }
 
 
+class _Sections:
+    """The claims the comparison carried, by the part of it each answers (ADR 0020): a claim is
+    filed under the first section that carried it, in reading order."""
+
+    def __init__(self, run: Run) -> None:
+        self.run = run
+        self.found: dict[Section, set[ClaimId]] = defaultdict(set)
+
+    def carry(self, section: Section, claim: Claim) -> None:
+        if self.run.withheld(claim) or self.run.unplaceable(claim) is not None:
+            return
+        self.run.carry(claim, 1.0)
+        self.run.cite(claim, 1.0)
+        self.found[section].add(claim.id)
+
+    def trail(self, at: str, before: NodeRef, after: NodeRef) -> CompareTrail:
+        seen: set[ClaimId] = set()
+        sections = []
+        for section in SECTION_ORDER:
+            claims = tuple(sorted(self.found.get(section, set()) - seen))
+            seen |= set(claims)
+            if claims:
+                sections.append(CompareSection(section, claims))
+        return CompareTrail(at, before, after, tuple(sections))
+
+
 def explain_compare(run: Run, index: int, clause: CompareRuns) -> Trail | None:
     """Carry what differs between the two runs (module docstring); a gap for what cannot be
-    read. Returns no trail: the claims themselves are the answer."""
+    read. The trail files each carried claim under the part of the comparison it answers
+    (ADR 0020); the claims themselves are the answer."""
     at = f"/explain/{index}"
+    found = _Sections(run)
     tx = int(run.as_of)
     before = _Side(run, _node(clause.before), tx)
     after = _Side(run, _node(clause.after), tx)
@@ -143,24 +172,17 @@ def explain_compare(run: Run, index: int, clause: CompareRuns) -> Trail | None:
     for side, other in ((before, after), (after, before)):
         for claim in side.own:
             if claim.predicate in (NAME, ACTIVE):
-                _carry(run, claim)
+                found.carry(Section.RUNS, claim)
         for claim in side.names:
-            _carry(run, claim)
+            found.carry(Section.CONFIGURATIONS, claim)
         for claim in side.values:
             key = _value_key(claim)
             if key is not None and key not in other.pairs:
-                _carry(run, claim)
-    maintained = _maintenance(run, at, tx, before, after)
-    _procedures(run, at, tx, before, after)
-    _part_procedures(run, at, tx, maintained)
-    return None
-
-
-def _carry(run: Run, claim: Claim) -> None:
-    if run.withheld(claim) or run.unplaceable(claim) is not None:
-        return
-    run.carry(claim, 1.0)
-    run.cite(claim, 1.0)
+                found.carry(Section.CONFIGURATIONS, claim)
+    maintained = _maintenance(run, found, at, tx, before, after)
+    _procedures(run, found, at, tx, before, after)
+    _part_procedures(run, found, at, tx, maintained)
+    return found.trail(at, before.node, after.node)
 
 
 def _machines(run: Run, tx: int, side: _Side) -> set[NodeRef]:
@@ -192,7 +214,9 @@ def _between(start: Timestamp, before: _Side, after: _Side) -> bool | None:
     return lo.ticks <= start.ticks < hi.ticks
 
 
-def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> list[str]:
+def _maintenance(
+    run: Run, found: _Sections, at: str, tx: int, before: _Side, after: _Side
+) -> list[str]:
     """Carry the maintenance on the later run's machine; return the events carried."""
     events: dict[str, Claim] = {}  # event node id -> its involves claim (placed on its clock)
     for machine in sorted(_machines(run, tx, after), key=lambda n: n.node_id):
@@ -220,7 +244,7 @@ def _maintenance(run: Run, at: str, tx: int, before: _Side, after: _Side) -> lis
         node = NodeRef(NodeType.EVENT, node_id)
         for claim in run.touching(node, tx):
             if claim.subject == node and claim.predicate in (NAME, CAUSE, DESCRIPTION):
-                _carry(run, claim)
+                found.carry(Section.MAINTENANCE, claim)
     if unordered:
         run.gap(
             GapCode.NOT_COVERED,
@@ -272,7 +296,9 @@ def _part_links(run: Run, tx: int, events: Sequence[str]) -> dict[NodeRef, list[
     return reached
 
 
-def _part_procedures(run: Run, at: str, tx: int, events: Sequence[str]) -> None:
+def _part_procedures(
+    run: Run, found_in: _Sections, at: str, tx: int, events: Sequence[str]
+) -> None:
     """Carry each procedure that applies to a part the carried maintenance involves (module
     docstring): what it states, and the claims linking it to the maintenance."""
     found: set[str] = set()
@@ -291,10 +317,10 @@ def _part_procedures(run: Run, at: str, tx: int, events: Sequence[str]) -> None:
                 continue
             found.add(subject.node_id)
             for linked in (*path, claim):
-                _carry(run, linked)
+                found_in.carry(Section.PART_PROCEDURES, linked)
             for stated in own:
                 if stated.predicate in (NAME, VALUE, BLANK):
-                    _carry(run, stated)
+                    found_in.carry(Section.PART_PROCEDURES, stated)
     if found:
         run.gap(
             GapCode.NOT_COVERED,
@@ -319,7 +345,7 @@ def _event_kind(claims: Sequence[Claim]) -> str | None:
     return next(iter(kinds)) if len(kinds) == 1 else None
 
 
-def _procedures(run: Run, at: str, tx: int, before: _Side, after: _Side) -> None:
+def _procedures(run: Run, found: _Sections, at: str, tx: int, before: _Side, after: _Side) -> None:
     involved: dict[str, Claim] = {}  # event node id -> its involves claim
     for machine in sorted(_machines(run, tx, after), key=lambda n: n.node_id):
         for claim in run.touching(machine, tx):
@@ -379,7 +405,7 @@ def _procedures(run: Run, at: str, tx: int, before: _Side, after: _Side) -> None
             if carried:
                 carried += [c for c in own[member] if c.predicate == NAME]
             for claim in carried:
-                _carry(run, claim)
+                found.carry(Section.PROCEDURES, claim)
     if unordered:
         run.gap(
             GapCode.NOT_COVERED,

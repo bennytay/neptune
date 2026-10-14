@@ -37,9 +37,16 @@ from neptune_context.packets.model import (
     Limits,
     SeriesWindowItem,
 )
-from neptune_context.packets.trails import DiffTrail, TxPoint, WhyTrail, WorldPoint, trail_index
+from neptune_context.packets.trails import (
+    CompareTrail,
+    DiffTrail,
+    TxPoint,
+    WhyTrail,
+    WorldPoint,
+    trail_index,
+)
 from neptune_context.query.codec import query_id, to_json
-from neptune_context.query.model import Clock, Diff, DomainClock, Instant, Query, Why
+from neptune_context.query.model import Clock, CompareRuns, Diff, DomainClock, Instant, Query, Why
 
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
@@ -180,6 +187,14 @@ def _trail_problems(query: Query, packet: ContextPacket) -> list[str]:
                 or not _point_matches(clause.after, trail.after)
             ):
                 problems.append(f"the trail at {trail.at} is not the diff that clause asks for")
+        elif isinstance(clause, CompareRuns):
+            runs = tuple((s.kind, s.declared_id) for s in (clause.before, clause.after))
+            if not isinstance(trail, CompareTrail) or runs != tuple(
+                (str(n.node_type), n.node_id) for n in (trail.before, trail.after)
+            ):
+                problems.append(
+                    f"the trail at {trail.at} is not the comparison that clause asks for"
+                )
         else:
             problems.append(f"a trail points at {trail.at}, which the query does not have")
     return problems

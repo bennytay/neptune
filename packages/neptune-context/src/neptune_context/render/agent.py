@@ -44,15 +44,16 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, TypeVar
+from typing import TYPE_CHECKING, Final, TypeAlias, TypeVar
 
-from neptune_memory.schema.claim import TypedLiteral, ValueType
+from neptune_memory.schema.claim import Claim, TypedLiteral, ValueType
 from neptune_memory.schema.interval import Open
 from neptune_memory.schema.nodes import NodeRef
 from neptune_memory.schema.supersede import is_closure
 
 from neptune.identity.canonical_json import dumps
 from neptune.model.knowledge import Ambiguous, Known, KnownAbsent, NotApplicable, NotCovered
+from neptune.model.provenance import EvidenceRef, evidence_ref_from_json
 from neptune.model.scalars import NonFinite
 from neptune_context.packets.model import (
     ClaimItem,
@@ -65,7 +66,10 @@ from neptune_context.packets.model import (
     SeriesWindowItem,
 )
 from neptune_context.packets.trails import (
+    SECTION_LABELS,
+    SECTION_TITLES,
     Change,
+    CompareTrail,
     DiffChange,
     DiffTrail,
     Relation,
@@ -76,14 +80,13 @@ from neptune_context.packets.trails import (
 )
 from neptune_context.pinned import older_graph_notice
 from neptune_context.query.model import MAX_SAME_AS_DEPTH
-from neptune_context.render.citations import FOOTER, CitationError, parse_citations
+from neptune_context.render.citations import CitationError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from neptune.model.jsonvalue import JsonValue
     from neptune.model.knowledge import Knowledge
-    from neptune.model.provenance import EvidenceRef
     from neptune.model.time import Timestamp
     from neptune_context.packets.trails import DiffPoint
     from neptune_context.query.plan import Entity, Mention, PlannedQuery
@@ -97,7 +100,14 @@ QUANTITIES: Final = "Quantities (declared values in the facts above, by predicat
 FINDINGS: Final = "Resolver findings:"
 GAPS: Final = "Not answered:"
 ITEMS: Final = "Items:"
-SOURCES: Final = "Sources:"
+SUMMARY: Final = "Summary:"
+NAMES: Final = "Names (each N key's full id: pass the id, never the name, to a tool):"
+CLOCKS: Final = "Clocks (each C key's full id):"
+SOURCES_FOOTER: Final = (
+    "Sources (each file once, then each key's place in it; rows, columns, pages and characters"
+    " count from 1, bytes are offsets):"
+)
+BLANK_PREDICATE: Final = "stated_blank"
 _CHANGED: Final = "What changed since transaction {n} (the facts below are as Memory knew them):"
 
 _HEX: Final = r"[0-9a-f]{64}"
@@ -123,7 +133,7 @@ _HEADER: Final = (
 _CHANGED_LINE: Final = re.compile(
     r"What changed since transaction \d+ \(the facts below are as Memory knew them\):"
 )
-_HEADINGS: Final = frozenset({FACTS, QUANTITIES, FINDINGS, GAPS})
+_HEADINGS: Final = frozenset({SUMMARY, FACTS, QUANTITIES, FINDINGS, GAPS, NAMES, CLOCKS})
 # A statement's citations: item keys, then evidence keys, ending the line.
 _RUN: Final = re.compile(r"((?:\[I[1-9][0-9]*\])+)((?:\[E[1-9][0-9]*\])+)$")
 _KEY: Final = re.compile(r"\[[IE]([1-9][0-9]*)\]")
@@ -273,15 +283,99 @@ def quote(value: JsonValue) -> str:
     return harden(dumps(value).decode("utf-8"))
 
 
+# --- Names and clocks (ADR 0020) -----------------------------------------------------------------
+
+# An id with a long run of hex is a content address: unreadable, and costly for a model to read.
+_HASHY: Final = re.compile(r"[0-9a-f]{32,}")
+# A part of a record's node (``record:rec:sha256:<hex>/actions/2``): the record, then the path.
+_CHILD: Final = re.compile(r"(?P<root>.*?[0-9a-f]{64})(?P<part>/.+)")
+NAME_PREDICATE: Final = "has_name"
+
+
+class _Names:
+    """Short handles for the nodes and clocks an answer names (ADR 0020).
+
+    A node whose id is readable (``asset "serial:FS-0340"``) is written as it is. A node whose
+    id is a content address gets a key, ``N<k>``, and is written by the names the evidence in the
+    packet states for it (``event named "WO-26-0911" (N3)``); a part of such a record is its
+    record's handle and the part's path (``(N3) "/actions/2"``). A clock is ``C<k>``. Keys are
+    numbered in the order the answer first uses them, and the ``Names:`` and ``Clocks:`` lists
+    give each key's full id once, so nothing is lost and any id can still be passed to a tool.
+    """
+
+    def __init__(self, packet: ContextPacket) -> None:
+        names: dict[NodeRef, set[str]] = {}
+        for item in packet.items:
+            if not isinstance(item, ClaimItem) or item.is_inferred:
+                continue  # an inference never names a thing
+            claim = item.claim
+            obj = claim.object
+            if (
+                claim.predicate == NAME_PREDICATE
+                and isinstance(obj, TypedLiteral)
+                and obj.datatype is ValueType.TEXT
+                and isinstance(obj.value, str)
+            ):
+                names.setdefault(claim.subject, set()).add(obj.value)
+        self.names = {node: tuple(sorted(found)) for node, found in names.items()}
+        self.nodes: dict[NodeRef, int] = {}
+        self.clocks: dict[str, int] = {}
+        self.by_id: dict[str, set[NodeRef]] = {}
+        for item in packet.items:
+            if isinstance(item, ClaimItem):
+                for node in (item.claim.subject, item.claim.object):
+                    if isinstance(node, NodeRef):
+                        self.by_id.setdefault(node.node_id, set()).add(node)
+
+    def split(self, node: NodeRef) -> tuple[NodeRef, str]:
+        """The record a node is part of, and the part's path (``""`` for the record itself)."""
+        if node in self.names or _HASHY.search(node.node_id) is None:
+            return node, ""
+        match = _CHILD.fullmatch(node.node_id)
+        if match is None:
+            return node, ""
+        return NodeRef(node.node_type, match["root"]), match["part"]
+
+    def keyed(self, node: NodeRef) -> bool:
+        return _HASHY.search(node.node_id) is not None
+
+    def root(self, node: NodeRef) -> str:
+        """A record's handle, its parts not included."""
+        if not self.keyed(node):
+            return f"{node.node_type} {quote(node.node_id)}"
+        key = self.nodes.setdefault(node, len(self.nodes) + 1)
+        names = self.names.get(node, ())
+        if not names:
+            return f"{node.node_type} N{key}"
+        return f"{node.node_type} named {', '.join(quote(n) for n in names)} (N{key})"
+
+    def node(self, node: NodeRef) -> str:
+        root, part = self.split(node)
+        return self.root(root) + (f" {quote(part)}" if part else "")
+
+    def ref(self, ref: str) -> str:
+        """A gap's ref: the handle of the one node it names, else the ref as it is."""
+        nodes = self.by_id.get(ref, set())
+        return self.node(next(iter(nodes))) if len(nodes) == 1 else quote(ref)
+
+    def clock(self, domain_id: str) -> str:
+        return f"C{self.clocks.setdefault(domain_id, len(self.clocks) + 1)}"
+
+    def instant(self, at: Timestamp) -> str:
+        return f"tick {at.ticks} on clock {self.clock(at.domain_id)}"
+
+    def legend(self) -> list[str]:
+        lines: list[str] = []
+        if self.nodes:
+            lines += ["", NAMES]
+            lines += [f"N{k} {n.node_type} {quote(n.node_id)}" for n, k in self.nodes.items()]
+        if self.clocks:
+            lines += ["", CLOCKS]
+            lines += [f"C{k} {quote(c)}" for c, k in self.clocks.items()]
+        return lines
+
+
 # --- Sentences -----------------------------------------------------------------------------------
-
-
-def _node(node: NodeRef) -> str:
-    return f"{node.node_type} {quote(node.node_id)}"
-
-
-def _instant(at: Timestamp) -> str:
-    return f"tick {at.ticks} on clock {at.domain_id}"
 
 
 def _knowledge(value: Knowledge[T], show: Callable[[T], str]) -> str:
@@ -324,94 +418,133 @@ def _number(value: object) -> str:
     return quote(value)  # type: ignore[arg-type]
 
 
-def _literal(literal: TypedLiteral, predicate: str = "") -> str:
-    value = literal.value
-    if literal.datatype is ValueType.TEXT:
-        return f"text {quote(value)}"  # type: ignore[arg-type]
-    if literal.datatype is ValueType.QUANTITY:
-        return f"{_number(value)}{_unit_note(literal)}"
-    if literal.datatype is ValueType.REAL:
-        return _number(value)
-    if literal.datatype is ValueType.INSTANT:
-        return _instant(value)  # type: ignore[arg-type]
-    if literal.datatype is ValueType.CLOCK_MAP:
-        return f"clock map {quote(value.to_json())}"  # type: ignore[union-attr]
-    if literal.datatype is ValueType.DELTA:
-        # later - earlier between two calibration records, as Memory wrote it (graph-schema 2.0.0):
-        # the declared form, numbers and unit only, never a size or a verdict on them.
-        return f"delta {quote(value.to_json())}{_unit_note(literal)}"  # type: ignore[union-attr]
-    if literal.datatype is ValueType.DECLARED_VALUE:
-        # One value a record declares at a key path, as Memory wrote it (graph-schema 2.2.0): the
-        # path, the declared type and the value, never converted, with its unit as declared.
-        # Under its own predicate the line already says ``declared_value`` (ADR 0018).
-        encoded = value.to_json()  # type: ignore[union-attr]
-        lead = "" if predicate == "declared_value" else "declared value "
-        return (
-            f"{lead}at {quote(encoded['path'])}: {encoded['type']}"
-            f" {quote(encoded['value'])}{_unit_note(literal)}"
-        )
-    return quote(value)  # type: ignore[arg-type]
+Valid: TypeAlias = tuple[str, int, int | None]  # clock, first tick, end tick (None: open-ended)
 
 
-def _claim(item: ClaimItem) -> str:
-    claim = item.claim
-    obj = claim.object
-    if isinstance(obj, NodeRef):
-        target = _node(obj)
-    elif isinstance(obj, TypedLiteral):
-        target = _literal(obj, claim.predicate)
-    else:
-        target = f"record {obj.record_id}"
-    valid = claim.valid
-    end = (
-        "open-ended"
-        if isinstance(valid.end, Open)
-        else f"until tick {valid.end.ticks}"  # same clock as start (Memory's Interval)
-    )
+def _valid(claim: Claim) -> Valid:
+    end = claim.valid.end
     return (
-        f"{_node(claim.subject)} {claim.predicate} {target}, valid from {_instant(valid.start)},"
-        f" {end}"
+        claim.valid.start.domain_id,
+        claim.valid.start.ticks,
+        None if isinstance(end, Open) else end.ticks,  # same clock as start (Memory's Interval)
     )
 
 
-def _summary(item: Item, keys: dict[str, int]) -> str:
-    if isinstance(item, ClaimItem):
-        return _claim(item)
-    if isinstance(item, EvidenceItem):
-        size = _knowledge(item.size, lambda n: f"{n} bytes")
-        return f"source bytes resolve as {item.status} at this snapshot, size {size}"
-    if isinstance(item, SeriesWindowItem):
-        return (
-            f"series window of stream {item.stream} on clock {item.clock}, ticks"
-            f" [{item.start}, {item.end}) ({item.end - item.start} ticks); the packet declares no"
-            f" statistics for it; rows at {quote(item.arrow.package_id + '/' + item.arrow.path)}"
-        )
-    if isinstance(item, FrameItem):
-        stream = _knowledge(item.stream, str)
-        at = _knowledge(item.at, _instant)
-        frame = _knowledge(item.frame, lambda f: quote(f.to_json()))
-        encoding = _knowledge(item.encoding, quote)
-        return f"sensor sample from stream {stream}, at {at}, in frame {frame}, encoding {encoding}"
-    if isinstance(item, DocumentSpanItem):
-        text = _knowledge(item.text, lambda t: f"text {quote(t)}")
-        return f"document {item.document} contains, as extracted: {text}"
-    if isinstance(item, SceneItem):
-        site = _knowledge(item.site, _node)
-        nodes = ", ".join(_node(n) for n in item.nodes) or "no nodes"
-        return (
-            f"scene in frame {quote(item.frame.to_json())} at site {site} places {nodes};"
-            f" rests on {_rests(item.claims, keys)}; frame and geometry records"
-            f" {', '.join(item.records) or 'none'}"
-        )
-    subject = _knowledge(item.subject, _node)
-    return (
-        f"configuration record {item.record} ({quote(item.record_kind)}) configures {subject};"
-        f" rests on {_rests(item.claims, keys)}"
-    )
+@dataclass(frozen=True)
+class _Ctx:
+    """What every sentence of one answer needs: its names, item keys and evidence keys."""
 
+    packet: ContextPacket
+    names: _Names
+    keys: dict[str, int]  # item id and claim id -> item number
+    evidence: dict[EvidenceRef, int]
+    by_claim: dict[str, ClaimItem]
 
-def _rests(claims: tuple[str, ...], keys: dict[str, int]) -> str:
-    return ", ".join(f"item I{keys[c]}" for c in claims) or "no claims"
+    def cite(self, items: list[Item]) -> str:
+        unique = list(dict.fromkeys(items))
+        refs = dict.fromkeys(ref for item in unique for ref in item.evidence_refs())
+        return "".join(f"[I{self.keys[i.id]}]" for i in unique) + "".join(
+            f"[E{self.evidence[ref]}]" for ref in refs
+        )
+
+    def cite_refs(self, refs: tuple[EvidenceRef, ...]) -> str:
+        return "".join(f"[E{self.evidence[ref]}]" for ref in dict.fromkeys(refs))
+
+    def valid(self, valid: Valid) -> str:
+        clock, start, end = valid
+        on = f"on clock {self.names.clock(clock)}"
+        if end is None:
+            return f"valid from tick {start} {on}, open-ended"
+        return f"valid from tick {start} until tick {end} {on}"
+
+    def literal(self, literal: TypedLiteral, predicate: str = "") -> str:
+        value = literal.value
+        if literal.datatype is ValueType.TEXT:
+            return quote(value)  # type: ignore[arg-type]  # a quoted string is text
+        if literal.datatype is ValueType.QUANTITY:
+            return f"{_number(value)}{_unit_note(literal)}"
+        if literal.datatype is ValueType.REAL:
+            return _number(value)
+        if literal.datatype is ValueType.INSTANT:
+            return self.names.instant(value)  # type: ignore[arg-type]
+        if literal.datatype is ValueType.CLOCK_MAP:
+            return f"clock map {quote(value.to_json())}"  # type: ignore[union-attr]
+        if literal.datatype is ValueType.DELTA:
+            # later - earlier between two calibration records, as Memory wrote it (graph-schema
+            # 2.0.0): the declared form, numbers and unit only, never a size or a verdict.
+            return f"delta {quote(value.to_json())}{_unit_note(literal)}"  # type: ignore[union-attr]
+        if literal.datatype is ValueType.DECLARED_VALUE:
+            # One value a record declares at a key path, as Memory wrote it (graph-schema
+            # 2.2.0): the path, the declared type and the value, never converted, with its unit
+            # as declared. Under its own predicate the line already says ``declared_value``.
+            encoded = value.to_json()  # type: ignore[union-attr]
+            lead = "" if predicate == "declared_value" else "declared value "
+            return (
+                f"{lead}at {quote(encoded['path'])}: {encoded['type']}"
+                f" {quote(encoded['value'])}{_unit_note(literal)}"
+            )
+        return quote(value)  # type: ignore[arg-type]
+
+    def statement(self, claim: Claim) -> str:
+        """What a claim says, without its subject: predicate and object."""
+        obj = claim.object
+        if isinstance(obj, NodeRef):
+            target = self.names.node(obj)
+        elif isinstance(obj, TypedLiteral):
+            target = self.literal(obj, claim.predicate)
+        else:
+            target = f"record {obj.record_id}"
+        return f"{claim.predicate} {target}"
+
+    def claim(self, item: ClaimItem) -> str:
+        """A whole claim: subject, predicate, object and validity."""
+        claim = item.claim
+        return (
+            f"{self.names.node(claim.subject)} {self.statement(claim)}, {self.valid(_valid(claim))}"
+        )
+
+    def summary(self, item: Item) -> str:
+        names = self.names
+        if isinstance(item, ClaimItem):
+            return self.claim(item)
+        if isinstance(item, EvidenceItem):
+            size = _knowledge(item.size, lambda n: f"{n} bytes")
+            return f"source bytes resolve as {item.status} at this snapshot, size {size}"
+        if isinstance(item, SeriesWindowItem):
+            return (
+                f"series window of stream {item.stream} on clock {names.clock(item.clock)},"
+                f" ticks [{item.start}, {item.end}) ({item.end - item.start} ticks); the packet"
+                " declares no statistics for it; rows at"
+                f" {quote(item.arrow.package_id + '/' + item.arrow.path)}"
+            )
+        if isinstance(item, FrameItem):
+            stream = _knowledge(item.stream, str)
+            at = _knowledge(item.at, names.instant)
+            frame = _knowledge(item.frame, lambda f: quote(f.to_json()))
+            encoding = _knowledge(item.encoding, quote)
+            return (
+                f"sensor sample from stream {stream}, at {at}, in frame {frame}, encoding"
+                f" {encoding}"
+            )
+        if isinstance(item, DocumentSpanItem):
+            text = _knowledge(item.text, lambda t: f"text {quote(t)}")
+            return f"document {item.document} contains, as extracted: {text}"
+        if isinstance(item, SceneItem):
+            site = _knowledge(item.site, names.node)
+            nodes = ", ".join(names.node(n) for n in item.nodes) or "no nodes"
+            return (
+                f"scene in frame {quote(item.frame.to_json())} at site {site} places {nodes};"
+                f" rests on {self.rests(item.claims)}; frame and geometry records"
+                f" {', '.join(item.records) or 'none'}"
+            )
+        subject = _knowledge(item.subject, names.node)
+        return (
+            f"configuration record {item.record} ({quote(item.record_kind)}) configures"
+            f" {subject}; rests on {self.rests(item.claims)}"
+        )
+
+    def rests(self, claims: tuple[str, ...]) -> str:
+        return ", ".join(f"item I{self.keys[c]}" for c in claims) or "no claims"
 
 
 def _mark(item: Item) -> str:
@@ -470,26 +603,6 @@ def answer_evidence_refs(packet: ContextPacket) -> tuple[EvidenceRef, ...]:
     return tuple(refs)
 
 
-@dataclass(frozen=True)
-class _Ctx:
-    """What the trail sentences need to cite: the item and evidence keys of one answer."""
-
-    packet: ContextPacket
-    keys: dict[str, int]  # item id and claim id -> item number
-    evidence: dict[EvidenceRef, int]
-    by_claim: dict[str, ClaimItem]
-
-    def cite(self, items: list[Item]) -> str:
-        unique = list(dict.fromkeys(items))
-        refs = dict.fromkeys(ref for item in unique for ref in item.evidence_refs())
-        return "".join(f"[I{self.keys[i.id]}]" for i in unique) + "".join(
-            f"[E{self.evidence[ref]}]" for ref in refs
-        )
-
-    def cite_refs(self, refs: tuple[EvidenceRef, ...]) -> str:
-        return "".join(f"[E{self.evidence[ref]}]" for ref in dict.fromkeys(refs))
-
-
 def _count(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
@@ -502,6 +615,123 @@ def _point(point: DiffPoint) -> str:
     if isinstance(point, TxPoint):
         return f"transaction {point.tx}"
     return f"tick {point.ticks} on clock {point.clock}"
+
+
+_NATURAL: Final = re.compile(r"(\d+)")
+
+
+def _natural(text: str) -> tuple[tuple[int, int | str], ...]:
+    """``/actions/10`` after ``/actions/9``: digits compare as numbers."""
+    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in _NATURAL.split(text) if p != "")
+
+
+@dataclass
+class _Group:
+    """The facts about one record (a node and its parts), under one heading."""
+
+    root: NodeRef
+    items: list[ClaimItem]
+
+
+@dataclass
+class _Block:
+    """One part of the Facts: a comparison section, the other facts, or the other items."""
+
+    title: str | None
+    groups: list[_Group]
+    others: list[Item]
+    absent: int = 0  # claims the section names that the packet does not carry (cut)
+    label: str | None = None  # a comparison section's label in the summary
+
+    @property
+    def size(self) -> int:
+        return sum(len(g.items) for g in self.groups) + len(self.others)
+
+
+def _plural(noun: str) -> str:
+    return noun + ("es" if noun.endswith(("s", "x")) else "s")
+
+
+def _about(groups: list[_Group]) -> str:
+    kinds: dict[str, int] = {}
+    for group in groups:
+        kinds[str(group.root.node_type)] = kinds.get(str(group.root.node_type), 0) + 1
+    parts = [f"{n} {kind if n == 1 else _plural(kind)}" for kind, n in kinds.items()]
+    return " and ".join([", ".join(parts[:-1]), parts[-1]] if len(parts) > 1 else parts)
+
+
+class _Layout:
+    """Where each item is shown: comparison sections first (ADR 0020), then the other facts
+    grouped by the record they are about, then items that are not claims."""
+
+    def __init__(self, packet: ContextPacket, names: _Names) -> None:
+        self.packet = packet
+        self.names = names
+        self.blocks: list[_Block] = []
+        self.order = {item.id: n for n, item in enumerate(packet.items)}
+        by_claim = {i.claim.id: i for i in packet.items if isinstance(i, ClaimItem)}
+        shown: set[str] = set()
+        compares = [t for t in packet.trails if isinstance(t, CompareTrail)]
+        for trail in compares:
+            for section in trail.sections:
+                carried = [by_claim[c] for c in section.claims if c in by_claim]
+                fresh = [i for i in carried if i.id not in shown]
+                shown.update(i.id for i in fresh)
+                groups = self._groups(fresh, compare=True)
+                missing = len(section.claims) - len(carried)
+                self.blocks.append(
+                    _Block(
+                        SECTION_TITLES[section.section],
+                        groups,
+                        [],
+                        missing,
+                        SECTION_LABELS[section.section],
+                    )
+                )
+        rest = [i for i in packet.items if isinstance(i, ClaimItem) and i.id not in shown]
+        if rest:
+            title = "Other facts" if compares else None
+            self.blocks.append(_Block(title, self._groups(rest, compare=False), []))
+        others: list[Item] = [i for i in packet.items if not isinstance(i, ClaimItem)]
+        if others:
+            self.blocks.append(_Block("Other items", [], others))
+
+    def _groups(self, items: list[ClaimItem], *, compare: bool) -> list[_Group]:
+        groups: dict[NodeRef, _Group] = {}
+        for item in sorted(items, key=lambda i: self.order[i.id]):
+            root, _ = self.names.split(item.claim.subject)
+            groups.setdefault(root, _Group(root, []))
+            groups[root].items.append(item)
+        for group in groups.values():
+            group.items.sort(key=lambda i: self._fact_key(i, compare=compare))
+        listed = list(groups.values())
+        if compare:  # every claim scores alike: order by the record's own clock, then its handle
+            listed.sort(key=self._group_key)
+        return listed
+
+    def _fact_key(self, item: ClaimItem, *, compare: bool) -> tuple[object, ...]:
+        claim = item.claim
+        _, part = self.names.split(claim.subject)
+        named = claim.predicate != NAME_PREDICATE
+        if not compare:
+            return (_natural(part), named, self.order[item.id])
+        obj = claim.object
+        shown = dumps(obj.to_json()).decode("utf-8") if not isinstance(obj, NodeRef) else ""
+        target = obj.node_id if isinstance(obj, NodeRef) else ""
+        return (_natural(part), named, claim.predicate, _natural(shown), target, item.id)
+
+    def _group_key(self, group: _Group) -> tuple[object, ...]:
+        first = min((_valid(i.claim) for i in group.items), key=lambda v: (v[0], v[1]))
+        names = self.names.names.get(group.root, ())
+        return (first[0], first[1], str(group.root.node_type), names, group.root.node_id)
+
+    def items(self) -> list[Item]:
+        out: list[Item] = []
+        for block in self.blocks:
+            for group in block.groups:
+                out += group.items
+            out += block.others
+        return out
 
 
 def _why_lines(ctx: _Ctx, trail: WhyTrail) -> list[str]:
@@ -529,7 +759,7 @@ def _why_step(ctx: _Ctx, step: WhyStep) -> str:
     if item is not None:
         if step.repeat:
             return f"{head}item I{ctx.keys[item.id]} is {_REPEAT_NOTE}. {ctx.cite([item])}"
-        return f"{head}{_mark(item)}: {_summary(item, ctx.keys)}. {ctx.cite([item])}"
+        return f"{head}{_mark(item)}: {ctx.summary(item)}. {ctx.cite([item])}"
     mark = _UNCARRIED_INFERRED if step.is_inferred else str(step.assertion_kind).capitalize()
     repeat = f"; {_REPEAT_NOTE}" if step.repeat else ""
     return (
@@ -592,9 +822,7 @@ def _change(
     item = ctx.by_claim.get(claim_id)
     tail = f"; {note}" if note else ""
     if item is not None:
-        return (
-            f"{pad}- {label}: {_mark(item)}: {_summary(item, ctx.keys)}{tail}. {ctx.cite([item])}"
-        )
+        return f"{pad}- {label}: {_mark(item)}: {ctx.summary(item)}{tail}. {ctx.cite([item])}"
     where = f"; neptune_why with as_of {as_of} reads it" if as_of is not None else ""
     return (
         f"{pad}- {label}: {claim_id} is not carried in this packet, so its content and its"
@@ -602,22 +830,102 @@ def _change(
     )
 
 
+def _node(node: NodeRef) -> str:
+    """A node by its full id: trail headings name the subject exactly."""
+    return f"{node.node_type} {quote(node.node_id)}"
+
+
+def _summary_lines(ctx: _Ctx, layout: _Layout) -> list[str]:
+    """For a comparison (ADR 0020): the two runs, then each section's size, then the unknowns."""
+    sections = [b for b in layout.blocks if b.label is not None]
+    facts = sum(b.size for b in sections)
+    lines: list[str] = []
+    for trail in (t for t in ctx.packet.trails if isinstance(t, CompareTrail)):
+        lines.append(
+            f"- Compared {ctx.names.node(trail.before)}, before, with"
+            f" {ctx.names.node(trail.after)}, after: {_count(facts, 'fact')}."
+        )
+    sizes = [
+        f"{b.label}: {_count(b.size, 'fact')} about {_about(b.groups)}."
+        for b in sections
+        if b.groups
+    ]
+    if sizes:
+        lines.append("- " + " ".join(sizes))
+    blanks = sum(
+        1
+        for b in sections
+        for group in b.groups
+        for item in group.items
+        if item.claim.predicate == BLANK_PREDICATE
+    )
+    absent = sum(b.absent for b in sections)
+    unknown = [
+        f"{blanks} blank {'label or cell' if blanks == 1 else 'labels or cells'} a document"
+        " states (stated_blank)",
+        f"{_count(len(ctx.packet.gaps), 'gap')} under Not answered",
+    ]
+    if absent:
+        unknown.append(f"{_count(absent, 'fact')} the budget cut")
+    lines.append("- Unknowns: " + "; ".join(unknown) + ".")
+    return lines
+
+
+def _fact_lines(ctx: _Ctx, layout: _Layout) -> list[str]:
+    lines: list[str] = []
+    for block in layout.blocks:
+        if block.title is not None:
+            cut = f", {block.absent} more cut by the budget" if block.absent else ""
+            about = f" about {_about(block.groups)}" if block.groups else ""
+            lines.append(f"{block.title} ({_count(block.size, 'fact')}{about}{cut}):")
+        for group in block.groups:
+            lines += _group_lines(ctx, group)
+        for item in block.others:
+            lines.append(
+                f"{ctx.keys[item.id]}. {_mark(item)}: {ctx.summary(item)}. {ctx.cite([item])}"
+            )
+    return lines
+
+
+def _group_lines(ctx: _Ctx, group: _Group) -> list[str]:
+    """A record's heading (its handle, and the validity its facts share), then one cited line per
+    fact, each naming only the part of the record it is about and any validity of its own."""
+    valids = {_valid(i.claim) for i in group.items}
+    shared = next(iter(valids)) if len(valids) == 1 else None
+    common = f" ({ctx.valid(shared)})" if shared is not None else ""
+    lines = [f"{ctx.names.root(group.root)}{common}:"]
+    for item in group.items:
+        claim = item.claim
+        _, part = ctx.names.split(claim.subject)
+        lead = f"{quote(part)} " if part else ""
+        own = "" if shared is not None else f", {ctx.valid(_valid(claim))}"
+        lines.append(
+            f"{ctx.keys[item.id]}. {_mark(item)}: {lead}{ctx.statement(claim)}{own}."
+            f" {ctx.cite([item])}"
+        )
+    return lines
+
+
 def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> str:
-    """The packet as cited sentences. Deterministic: the same packet (and source index),
-    byte-identical text. ``sources`` adds the ``Sources:`` list (ADR 0016)."""
+    """The packet as cited sentences (ADR 0009, 0020). Deterministic: the same packet (and
+    source index), byte-identical text. ``sources`` names each cited file (ADR 0016)."""
     evidence = {ref: n for n, ref in enumerate(answer_evidence_refs(packet), start=1)}
-    keys: dict[str, int] = {}  # item id and claim id -> item number
-    for number, item in enumerate(packet.items, start=1):
+    names = _Names(packet)
+    layout = _Layout(packet, names)
+    shown = layout.items()
+    keys: dict[str, int] = {}  # item id and claim id -> item number, in the order shown
+    for number, item in enumerate(shown, start=1):
         keys[item.id] = number
         if isinstance(item, ClaimItem):
             keys[item.claim.id] = number
     by_claim: dict[str, ClaimItem] = {
         i.claim.id: i for i in packet.items if isinstance(i, ClaimItem)
     }
-
-    ctx = _Ctx(packet, keys, evidence, by_claim)
+    ctx = _Ctx(packet, names, keys, evidence, by_claim)
     cite = ctx.cite
     lines = _header(packet)
+    if any(isinstance(t, CompareTrail) for t in packet.trails):
+        lines += ["", SUMMARY, *_summary_lines(ctx, layout)]
     if packet.superseded_since:
         lines += ["", _CHANGED.format(n=packet.memory.as_of)]
         for entry in packet.superseded_since:
@@ -627,11 +935,11 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
                 f" {cite([by_claim[entry.claim]])}"
             )
     for trail in packet.trails:
-        lines.append("")
-        lines += _why_lines(ctx, trail) if isinstance(trail, WhyTrail) else _diff_lines(ctx, trail)
-    lines += ["", FACTS]
-    for number, item in enumerate(packet.items, start=1):
-        lines.append(f"{number}. {_mark(item)}: {_summary(item, keys)}. {cite([item])}")
+        if isinstance(trail, WhyTrail):
+            lines += ["", *_why_lines(ctx, trail)]
+        elif isinstance(trail, DiffTrail):
+            lines += ["", *_diff_lines(ctx, trail)]
+    lines += ["", FACTS, *_fact_lines(ctx, layout)]
     quantities = _quantities(packet)
     if quantities:
         lines += ["", QUANTITIES]
@@ -644,6 +952,7 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
                 if finite
                 else ""
             )
+            members = sorted(members, key=lambda i: keys[i.id])
             lines.append(
                 f"- {predicate} ({unit}): {len(values)} values{stated}{spread}."
                 f" {cite(list(members))}"
@@ -659,21 +968,18 @@ def render_answer(packet: ContextPacket, sources: SourceIndex | None = None) -> 
         lines += ["", GAPS]
         for gap in packet.gaps:
             # The retrieval channel is the engine's business, not the reader's (ADR 0018).
-            refs = f"; concerns {', '.join(quote(r) for r in gap.refs)}" if gap.refs else ""
+            refs = f"; concerns {', '.join(names.ref(r) for r in gap.refs)}" if gap.refs else ""
             lines.append(f"- {gap.code} at {quote(gap.at)}: {quote(gap.detail)}{refs}")
+    lines += names.legend()
     lines += ["", ITEMS]
-    for number, item in enumerate(packet.items, start=1):
-        claim = f" {item.claim.id}" if isinstance(item, ClaimItem) else ""
-        lines.append(f"[I{number}] {item.kind} {item.id}{claim}")
-    if sources is not None and evidence:
-        lines += ["", SOURCES]
-        lines += [f"[E{n}] {source_place(ref, sources)}" for ref, n in evidence.items()]
-    lines += ["", FOOTER]
-    lines += [f"[E{n}] {quote(ref.to_json())}" for ref, n in evidence.items()]
+    for number, item in enumerate(shown, start=1):
+        what = item.claim.id if isinstance(item, ClaimItem) else f"{item.kind} {item.id}"
+        lines.append(f"[I{number}] {what}")
+    lines += ["", SOURCES_FOOTER, *_source_lines(evidence, sources)]
     return "\n".join(lines) + "\n"
 
 
-# --- Sources (ADR 0016) -------------------------------------------------------------------------
+# --- Sources (ADR 0016, 0020) --------------------------------------------------------------------
 
 UNPLACED: Final = "a source the source index does not place"
 _NAME: Final = re.compile(r"[a-z][a-z0-9_.:-]*")
@@ -701,7 +1007,8 @@ def _generic_step(step: Mapping[str, JsonValue]) -> str:
 def locator_place(step: Mapping[str, JsonValue]) -> str:
     """One locator step in a reader's terms. Rows, columns, pages and characters count from 1
     as a spreadsheet, viewer or editor shows them (a row counts the header, as the compiler's
-    ``Row`` does); bytes are offsets from 0; a pointer is quoted as written."""
+    ``Row`` does); bytes are offsets from 0; a pointer is quoted as written; a cell names its
+    column by number and, when the source names it, by name (ADR 0020)."""
     kind = step.get("kind")
     offset, length = _int(step, "offset"), _int(step, "length")
     row, column, index = _int(step, "row"), _int(step, "column"), _int(step, "index")
@@ -714,8 +1021,8 @@ def locator_place(step: Mapping[str, JsonValue]) -> str:
         return f"row {row + 1}"
     if kind == "row_cell" and row is not None and column is not None:
         name = step.get("column_name")
-        shown = quote(name) if isinstance(name, str) else str(column + 1)
-        return f"row {row + 1}, column {shown}"
+        named = f" {quote(name)}" if isinstance(name, str) else ""
+        return f"row {row + 1}, column {column + 1}{named}"
     if kind == "span" and start is not None and end is not None:
         return f"characters {start + 1}-{end}" if end > start else f"before character {start + 1}"
     if kind == "json_pointer" and isinstance(step.get("pointer"), str):
@@ -724,22 +1031,104 @@ def locator_place(step: Mapping[str, JsonValue]) -> str:
     return _generic_step(step)
 
 
+_STEP_FORMS: Final = (
+    (re.compile(r"(\d+) bytes at offset (\d+)"), "byte_range"),
+    (re.compile(r"page ([1-9]\d*)"), "page"),
+    (re.compile(r"row ([1-9]\d*)"), "row"),
+    (re.compile(rf"row ([1-9]\d*), column ([1-9]\d*)(?: ({_Q}))?"), "row_cell"),
+    (re.compile(r"characters ([1-9]\d*)-(\d+)"), "span"),
+    (re.compile(r"before character ([1-9]\d*)"), "empty_span"),
+    (re.compile(rf"pointer ({_Q})"), "json_pointer"),
+)
+
+
+def _read_step(text: str) -> JsonValue | None:
+    """A step as ``locator_place`` or the exact form writes it, back to its JSON; ``None`` for
+    anything else."""
+    if text == "the whole document":
+        return {"kind": "json_pointer", "pointer": ""}
+    if text.startswith("{"):
+        try:
+            value: JsonValue = json.loads(text)
+        except ValueError:
+            return None
+        return value if isinstance(value, dict) else None
+    for pattern, kind in _STEP_FORMS:
+        match = pattern.fullmatch(text)
+        if match is None:
+            continue
+        a = match.group(1)
+        if kind == "byte_range":
+            return {"kind": kind, "length": int(a), "offset": int(match.group(2))}
+        if kind == "page":
+            return {"index": int(a) - 1, "kind": kind}
+        if kind == "row":
+            return {"kind": kind, "row": int(a) - 1}
+        if kind == "row_cell":
+            cell: dict[str, JsonValue] = {"column": int(match.group(2)) - 1, "kind": kind}
+            if match.group(3) is not None:
+                cell["column_name"] = json.loads(match.group(3))
+            return {**cell, "row": int(a) - 1}
+        if kind == "span":
+            return {"end": int(match.group(2)), "kind": kind, "start": int(a) - 1}
+        if kind == "empty_span":
+            return {"end": int(a) - 1, "kind": "span", "start": int(a) - 1}
+        return {"kind": kind, "pointer": json.loads(a)}
+    return None
+
+
+def exact_place(step: JsonValue) -> str:
+    """A step in a reader's terms when that reads back to exactly the step, else its hardened
+    canonical JSON: either way the ``Sources:`` footer recovers the evidence ref (ADR 0020)."""
+    if isinstance(step, dict):
+        shown = locator_place(step)
+        if _read_step(shown) == step:
+            return shown
+    return quote(step)
+
+
 def source_place(ref: EvidenceRef, sources: SourceIndex) -> str:
     """Where ``ref`` points, for a person: the source's corpus path (each, when the same bytes
     sit at several) and its locator steps, outermost first, joined by ``>``. Paths and names are
     quoted: they are data. A source the index does not place says so; nothing is guessed."""
-    paths = sources.get(ref.source)
+    paths = sources.get(ref.source) if isinstance(ref.source, str) else ()
     where = " or ".join(quote(p) for p in paths) if paths else UNPLACED
-    document = ref.to_json()
-    locator = document.get("locator") if isinstance(document, dict) else None
-    steps = [locator_place(s) for s in locator if isinstance(s, dict)] if locator else []
+    steps = [locator_place(s) for s in ref.locator_json() if isinstance(s, dict)]
     return ", ".join([where, " > ".join(steps)]) if steps else where
 
 
-_Group = tuple[tuple[str, str], list[Item], list[float | NonFinite]]
+def _source_id(ref: EvidenceRef) -> str:
+    return (
+        f"content {ref.source}"
+        if isinstance(ref.source, str)
+        else f"external {quote(ref.source.to_json())}"
+    )
 
 
-def _quantities(packet: ContextPacket) -> list[_Group]:
+def _source_lines(evidence: dict[EvidenceRef, int], sources: SourceIndex | None) -> list[str]:
+    """Each cited source once (``F<k>``: its corpus paths when the index has them, and its exact
+    id), then each evidence key's file and place, outermost step first (ADR 0020)."""
+    files: dict[str, int] = {}
+    heads: list[str] = []
+    keyed: list[str] = []
+    for ref, n in evidence.items():
+        source = _source_id(ref)
+        if source not in files:
+            files[source] = len(files) + 1
+            where = ""
+            if sources is not None:
+                paths = sources.get(ref.source) if isinstance(ref.source, str) else ()
+                where = (" or ".join(quote(p) for p in paths) if paths else UNPLACED) + ", "
+            heads.append(f"F{files[source]} {where}{source}")
+        steps = " > ".join(exact_place(s) for s in ref.locator_json())
+        keyed.append(f"[E{n}] F{files[source]} {steps}")
+    return [*heads, *keyed]
+
+
+_QuantityGroup = tuple[tuple[str, str], list[Item], list[float | NonFinite]]
+
+
+def _quantities(packet: ContextPacket) -> list[_QuantityGroup]:
     """Quantity claims grouped by predicate and one known declared unit; groups of two or more.
 
     A value whose unit is unknown or ambiguous is never summarised: two unknown units may be
@@ -765,11 +1154,12 @@ def _quantities(packet: ContextPacket) -> list[_Group]:
 
 @dataclass(frozen=True)
 class ItemKey:
-    """One ``Items:`` footer line: the key's number, the item kind and id, the claim id."""
+    """One ``Items:`` footer line: the key's number, the item kind, the item id (``None`` for a
+    claim, which the footer names by its claim id: ADR 0020) and the claim id."""
 
     number: int
     kind: str
-    item_id: str
+    item_id: str | None
     claim_id: str | None
 
 
@@ -816,19 +1206,12 @@ class ParsedAnswer:
     evidence: tuple[EvidenceRef, ...]
     statements: tuple[Statement, ...]
     trail_lines: tuple[TrailLine, ...] = ()
-    # The ``Sources:`` text of each evidence key, in key order; empty when the answer has none.
+    # Each evidence key's file and place, in key order (``source_place``'s words).
     places: tuple[str, ...] = ()
 
     @property
     def claim_ids(self) -> tuple[str, ...]:
         return tuple(k.claim_id for k in self.items if k.claim_id is not None)
-
-
-def _last(lines: list[str], marker: str, before: int) -> int:
-    for index in range(before - 1, -1, -1):
-        if lines[index] == marker:
-            return index
-    raise CitationError(f"no {marker} footer")
 
 
 class _Trails:
@@ -1064,44 +1447,127 @@ class _Trails:
             raise CitationError(f"{where}: {label!r} is a top-level diff label")
 
 
+def _footer(lines: list[str], marker: str, before: int) -> int:
+    for index in range(before - 1, -1, -1):
+        if lines[index] == marker:
+            return index
+    raise CitationError(f"no {marker} footer")
+
+
+_ITEM_KEY: Final = re.compile(
+    rf"\[I([1-9][0-9]*)\] (?:(?P<claim>{_CLAIM})|(?P<kind>[a-z_]+) (?P<item>item:sha256:{_HEX}))"
+)
+_FILE_LINE: Final = re.compile(
+    rf"F([1-9][0-9]*) (?:(?P<where>.+), )?(?:content (?P<content>sha256:{_HEX})"
+    r"|external (?P<external>\{.*\}))"
+)
+_KEY_LINE: Final = re.compile(r"\[E([1-9][0-9]*)\] F([1-9][0-9]*) (\S.*)")
+_NAME_LINE: Final = re.compile(rf"N([1-9][0-9]*) [a-z_]+ {_Q}")
+_CLOCK_LINE: Final = re.compile(r"C([1-9][0-9]*) \S+")
+_COUNTED: Final = re.compile(r".* \((\d+) facts?[ ,)].*:")
+
+
+def _items_footer(lines: list[str]) -> list[ItemKey]:
+    items: list[ItemKey] = []
+    for offset, line in enumerate(lines, start=1):
+        match = _ITEM_KEY.fullmatch(line)
+        if match is None or int(match.group(1)) != offset:
+            raise CitationError(f"Items line {offset} is not [I{offset}] <id>: {line!r}")
+        if match["claim"] is not None:
+            items.append(ItemKey(offset, "claim", None, match["claim"]))
+        elif match["kind"] == "claim":
+            raise CitationError(f"[I{offset}]: a claim is named by its claim id")
+        else:
+            items.append(ItemKey(offset, match["kind"], match["item"], None))
+    return items
+
+
+def _sources_footer(lines: list[str]) -> tuple[tuple[EvidenceRef, ...], tuple[str, ...]]:
+    """The ``Sources:`` footer (ADR 0020): ``F<k>`` file lines, then ``[E<n>] F<k> <place>``
+    for every evidence key ``1..n`` in order; each key's ref and its place in words."""
+    files: list[tuple[JsonValue, str]] = []
+    refs: list[EvidenceRef] = []
+    places: list[str] = []
+    for line in lines:
+        head = _FILE_LINE.fullmatch(line)
+        if head is not None and not refs:
+            if int(head.group(1)) != len(files) + 1:
+                raise CitationError(f"file line {line!r} is out of order")
+            try:
+                source: JsonValue = (
+                    head["content"] if head["content"] is not None else json.loads(head["external"])
+                )
+            except ValueError as exc:
+                raise CitationError(f"{line!r} names no source") from exc
+            files.append((source, head["where"] or ""))
+            continue
+        key = _KEY_LINE.fullmatch(line)
+        if key is None or int(key.group(1)) != len(refs) + 1:
+            raise CitationError(f"Sources line is not [E{len(refs) + 1}] F<k> <place>: {line!r}")
+        number = int(key.group(2))
+        if number > len(files):
+            raise CitationError(f"[E{len(refs) + 1}] names a file the footer does not list")
+        source, where = files[number - 1]
+        shown = key.group(3).split(" > ")
+        read = [_read_step(s) for s in shown]
+        steps: list[JsonValue] = [s for s in read if s is not None]
+        if len(steps) != len(read):
+            raise CitationError(f"[E{len(refs) + 1}]: a place does not read as a locator step")
+        try:
+            refs.append(evidence_ref_from_json({"locator": steps, "source": source}))
+        except (TypeError, ValueError) as exc:
+            raise CitationError(f"[E{len(refs) + 1}] is not an evidence ref: {exc}") from exc
+        words = " > ".join(locator_place(s) if isinstance(s, dict) else str(s) for s in steps)
+        places.append(", ".join(p for p in (where, words) if p))
+    return tuple(refs), tuple(places)
+
+
+def _uncited(line: str) -> bool:
+    """A line that states nothing: no citation run, and no bracket outside quoted strings."""
+    outside = _QUOTED.sub('""', line)
+    return "[" not in outside and "]" not in outside
+
+
 def parse_answer(text: str) -> ParsedAnswer:
     """Every citation in a rendered answer; ``CitationError`` if any line breaks the grammar.
 
-    The grammar: header lines of fixed forms; section headings; in ``What changed``, ``Facts``,
-    ``Quantities`` and ``Resolver findings`` every line is a statement ending with ``[I..]`` keys
-    then ``[E..]`` keys, all defined in the footers; in ``Not answered`` every line is a gap line;
-    the ``Items:`` and ``Evidence:`` footers number their keys ``1..n`` in order. A fact line
-    numbered ``n`` cites item ``I<n>`` first. A why or diff section (ADR 0011) holds only its two
-    heading forms, ``Predicate`` lines and trail lines of the fixed forms ``_Trails`` checks:
-    cited, evidence-only (a why step whose claim the packet does not carry) or named-only (a diff
-    claim it does not carry); ``ParsedAnswer.trail_lines`` returns each with its claim.
+    The grammar (ADR 0009, 0011, 0020): header lines of fixed forms; section headings; in ``What
+    changed``, ``Facts``, ``Quantities`` and ``Resolver findings`` every statement ends with
+    ``[I..]`` keys then ``[E..]`` keys, all defined in the footers; ``Facts`` also holds headings
+    (a comparison section, counting its facts, or the record the facts below it are about), which
+    end with ``:`` and hold no bracket outside a quoted string; the ``Summary`` lists counts, no
+    bracket outside a quoted string; ``Not answered`` holds gap lines; ``Names:`` and ``Clocks:``
+    give each ``N<k>`` and ``C<k>`` its full id, ``1..n`` in order; the ``Items:`` footer numbers
+    its keys ``1..n``; the ``Sources:`` footer lists each file, then every evidence key ``1..n``
+    with its file and exact place. A fact line numbered ``n`` cites item ``I<n>`` first. A why or
+    diff section holds only its heading forms, ``Predicate`` lines and trail lines of the fixed
+    forms ``_Trails`` checks; ``ParsedAnswer.trail_lines`` returns each with its claim.
     """
-    evidence = parse_citations(text)
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
-    footer = _last(lines, FOOTER, len(lines))
-    start = _last(lines, ITEMS, footer)
-    listed = lines.index(SOURCES, start + 1, footer) if SOURCES in lines[start + 1 : footer] else -1
-    items_end = footer if listed < 0 else listed
-    places = () if listed < 0 else _places(lines[listed + 1 : footer], len(evidence))
-    items: list[ItemKey] = []
-    for offset, line in enumerate(lines[start + 1 : items_end], start=1):
-        if offset == items_end - start - 1 and line == "":
-            break
-        match = _ITEM_LINE.fullmatch(line)
-        if match is None or int(match.group(1)) != offset:
-            raise CitationError(
-                f"Items line {offset} is not [I{offset}] <kind> <item id>: {line!r}"
-            )
-        if (match.group(2) == "claim") != (match.group(4) is not None):
-            raise CitationError(f"[I{offset}]: a claim item names its claim id, no other does")
-        items.append(ItemKey(offset, match.group(2), match.group(3), match.group(4)))
+    footer = _footer(lines, SOURCES_FOOTER, len(lines))
+    start = _footer(lines, ITEMS, footer)
+    evidence, places = _sources_footer(lines[footer + 1 :])
+    listed = lines[start + 1 : footer]
+    if listed and listed[-1] == "":
+        listed = listed[:-1]
+    items = _items_footer(listed)
     statements: list[Statement] = []
     trails = _Trails(items, evidence, 0)
     after_facts = False
     gap_pointers: list[str] = []
+    numbered = {NAMES: 0, CLOCKS: 0}
     section = "header"
+    counted: tuple[int, int] | None = None  # a section heading's line and the facts it counts
+    facts_since = 0
+
+    def check_count() -> None:
+        if counted is not None and counted[1] != facts_since:
+            raise CitationError(
+                f"line {counted[0] + 1} counts {counted[1]} facts; {facts_since} follow it"
+            )
+
     for index, line in enumerate(lines[:start]):
         if line == "":
             section = "" if section == "header" else section
@@ -1115,6 +1581,9 @@ def parse_answer(text: str) -> ParsedAnswer:
             continue
         if line in _HEADINGS or _CHANGED_LINE.fullmatch(line):
             trails.close()
+            if section == FACTS:
+                check_count()
+                counted = None
             section = line
             after_facts = after_facts or line == FACTS
             continue
@@ -1135,10 +1604,29 @@ def parse_answer(text: str) -> ParsedAnswer:
                     f"line {index + 1}: a gap's pointer is not a JSON string"
                 ) from exc
             continue
+        if section in numbered:
+            form = _NAME_LINE if section == NAMES else _CLOCK_LINE
+            match = form.fullmatch(line)
+            if match is None or int(match.group(1)) != numbered[section] + 1:
+                raise CitationError(f"line {index + 1} is not a {section} line: {line!r}")
+            numbered[section] += 1
+            continue
+        if section == SUMMARY:
+            if not line.startswith("- ") or not _uncited(line):
+                raise CitationError(f"line {index + 1} is not a summary line: {line!r}")
+            continue
         if not section:
             raise CitationError(f"line {index + 1} is outside any section: {line!r}")
         if trails.active(section):
             trails.line(index, line)
+            continue
+        if section == FACTS and line.endswith(":") and not _FACT.match(line):
+            if not _uncited(line):
+                raise CitationError(f"line {index + 1} is not a heading: {line!r}")
+            count = _COUNTED.fullmatch(_QUOTED.sub('""', line))
+            if count is not None:
+                check_count()
+                counted, facts_since = (index, int(count.group(1))), 0
             continue
         run = _RUN.search(line)
         if run is None:
@@ -1151,6 +1639,7 @@ def parse_answer(text: str) -> ParsedAnswer:
             fact = _FACT.match(line)
             if fact is None or cited_items[0] != int(fact.group(1)):
                 raise CitationError(f"line {index + 1}: fact n must cite [In] first: {line!r}")
+            facts_since += 1
         statements.append(
             Statement(
                 index,
@@ -1159,27 +1648,11 @@ def parse_answer(text: str) -> ParsedAnswer:
                 tuple(evidence[n - 1] for n in cited_refs),
             )
         )
+    if section == FACTS:
+        check_count()
     trails.close()
     trails.check_gaps(gap_pointers)
     return ParsedAnswer(tuple(items), evidence, tuple(statements), tuple(trails.parsed), places)
-
-
-_PLACE_LINE: Final = re.compile(r"\[E([1-9][0-9]*)\] (\S.*)")
-
-
-def _places(lines: list[str], evidence: int) -> tuple[str, ...]:
-    """The ``Sources:`` lines: ``[E<k>] <place>`` for every evidence key ``1..n``, in order."""
-    if lines and lines[-1] == "":
-        lines = lines[:-1]
-    out = []
-    for offset, line in enumerate(lines, start=1):
-        match = _PLACE_LINE.fullmatch(line)
-        if match is None or int(match.group(1)) != offset:
-            raise CitationError(f"Sources line {offset} is not [E{offset}] <place>: {line!r}")
-        out.append(match.group(2))
-    if len(out) != evidence:
-        raise CitationError(f"Sources lists {len(out)} keys; the Evidence footer has {evidence}")
-    return tuple(out)
 
 
 def literal_values(line: str) -> list[str]:

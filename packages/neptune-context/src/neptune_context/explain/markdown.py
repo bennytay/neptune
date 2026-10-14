@@ -39,7 +39,9 @@ from neptune_context.packets.model import (
     Item,
 )
 from neptune_context.packets.trails import (
+    SECTION_TITLES,
     Change,
+    CompareTrail,
     DiffChange,
     DiffTrail,
     TxPoint,
@@ -278,6 +280,17 @@ class _Writer:
         while self.lines and self.lines[-1] == "":
             self.lines.pop()
 
+    def compare(self, trail: CompareTrail) -> None:
+        """A run comparison (ADR 0020): its claims, section by section."""
+        self.add(
+            "",
+            f"## What differs between {_node(trail.before)} and {_node(trail.after)}",
+        )
+        for section in trail.sections:
+            self.add("", f"### {SECTION_TITLES[section.section]}", "")
+            for claim_id in section.claims:
+                self.add(f"- {self.claim(claim_id)}")
+
     def change(self, change: DiffChange, old: int | None, new: int | None, *, world: bool) -> None:
         """One change; a claim no longer carried links to ``why`` where it was held."""
         if change.change is Change.OPENED:
@@ -373,6 +386,8 @@ def render_markdown(packet: ContextPacket) -> str:
     for trail in packet.trails:
         if isinstance(trail, WhyTrail):
             writer.why(trail)
+        elif isinstance(trail, CompareTrail):
+            writer.compare(trail)
         else:
             writer.diff(trail)
     writer.rest()
