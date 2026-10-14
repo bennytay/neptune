@@ -1,4 +1,4 @@
-"""The source index and the ``Sources:`` list of an answer (ADR 0016)."""
+"""The source index and the ``Sources`` footer of an answer (ADR 0016, ADR 0020)."""
 
 from __future__ import annotations
 
@@ -17,15 +17,16 @@ from neptune_context.mcp import build_server
 from neptune_context.mcp.__main__ import main
 from neptune_context.query import canonical_bytes
 from neptune_context.render.agent import (
-    SOURCES,
+    SOURCES_FOOTER,
     UNPLACED,
     answer_evidence_refs,
+    exact_place,
     locator_place,
     parse_answer,
     render_answer,
     source_place,
 )
-from neptune_context.render.citations import CitationError, parse_citations
+from neptune_context.render.citations import CitationError
 from neptune_context.sdk import AsyncClient, ErrorCode, SdkError, StubEngine
 from neptune_context.sources import (
     MAX_INDEX_BYTES,
@@ -240,7 +241,7 @@ def test_the_index_holds_the_corpus_paths_the_catalog_states_and_nothing_else() 
         ({"kind": "row", "row": 0}, "row 1"),
         (
             {"column": 6, "column_name": "Action", "kind": "row_cell", "row": 13},
-            'row 14, column "Action"',
+            'row 14, column 7 "Action"',
         ),
         ({"column": 2, "kind": "row_cell", "row": 4}, "row 5, column 3"),
         ({"end": 192, "kind": "span", "start": 183}, "characters 184-192"),
@@ -256,6 +257,27 @@ def test_the_index_holds_the_corpus_paths_the_catalog_states_and_nothing_else() 
 )
 def test_each_locator_step_reads_as_a_person_counts(step: dict[str, Any], place: str) -> None:
     assert locator_place(step) == place
+    # The footer writes a step in words exactly when the words read back to the step (ADR 0020);
+    # an adapter's own step is written as its JSON.
+    as_json = json.dumps(step, sort_keys=True, separators=(",", ":"))
+    assert exact_place(step) == (as_json if ":" in str(step["kind"]) else place)
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        {"kind": "row", "row": 0, "extra": 1},  # a member the words do not carry
+        {"kind": "row", "row": True},  # not an integer
+        {"column": 0, "column_name": 7, "kind": "row_cell", "row": 0},
+        {"end": 3, "kind": "span", "start": 5},  # an end before its start
+        {"kind": "page", "index": -1},
+        {"kind": "json_pointer", "pointer": "a > b [E1]"},
+    ],
+)
+def test_a_step_the_words_cannot_carry_is_written_exactly(step: dict[str, Any]) -> None:
+    from neptune_context.render.agent import _read_step
+
+    assert _read_step(exact_place(step)) == step
 
 
 def test_values_from_sources_are_quoted_and_cannot_pose_as_structure() -> None:
@@ -293,26 +315,35 @@ def test_an_answer_with_an_index_lists_every_key_and_parses_back(stem: str) -> N
     parsed, before = parse_answer(text), parse_answer(plain)
     assert parsed.evidence == before.evidence == refs
     assert parsed.statements == before.statements and parsed.items == before.items
-    assert parsed.places == tuple(source_place(r, index) for r in refs)
-    assert parse_citations(text) == parse_citations(plain)
-    assert before.places == () and SOURCES not in plain.split("\n")
-    if refs:  # only the Sources list is added; every other line is as before
-        lines = text.split("\n")
-        at = lines.index(SOURCES)
-        assert lines[:at] + lines[at + len(refs) + 2 :] == plain.split("\n")
-        assert lines[at + 1].startswith("[E1] ")
+    assert parsed.places == tuple(_place(r, index) for r in refs)
+    # Only the file lines name paths; every other line is as before.
+    lines, bare = text.split("\n"), plain.split("\n")
+    at = lines.index(SOURCES_FOOTER)
+    assert lines[:at] == bare[:at] and len(lines) == len(bare)
+    files = [ln for ln in lines[at + 1 :] if ln.startswith("F")]
+    assert all(", content sha256:" in ln for ln in files)
+    assert lines[at + 1 + len(files) :] == bare[at + 1 + len(files) :]
 
 
-def test_a_broken_sources_list_is_a_citation_error() -> None:
+def _place(ref: EvidenceRef, index: SourceIndex) -> str:
+    """``source_place``, with each step as the footer writes it (ADR 0020)."""
+    paths = index.get(ref.source)
+    where = " or ".join(json.dumps(p) for p in paths) if paths else UNPLACED
+    steps = " > ".join(locator_place(s) for s in ref.locator_json() if isinstance(s, dict))
+    return f"{where}, {steps}"
+
+
+def test_a_broken_sources_footer_is_a_citation_error() -> None:
     packet = golden_packet("q04")
     text = render_answer(packet, _index_for(packet))
     lines = text.split("\n")
-    first = lines.index(SOURCES) + 1
+    first = next(i for i, ln in enumerate(lines) if ln.startswith("[E1] "))
     for broken in (
         lines[:first] + lines[first + 1 :],  # a key missing
         [*lines[:first], lines[first].replace("[E1]", "[E2]"), *lines[first + 1 :]],
         [*lines[:first], "[E1]", *lines[first + 1 :]],  # no place
         [*lines[:first], lines[first], *lines[first:]],  # a key twice
+        [*lines[:first], lines[first].replace(" F1 ", " F7 "), *lines[first + 1 :]],  # no file
     ):
         with pytest.raises(CitationError):
             parse_answer("\n".join(broken))
@@ -345,7 +376,7 @@ def test_the_server_names_sources_in_answers_links_and_unavailable_hydration() -
     text = answer.content[0]
     assert isinstance(text, types.TextContent) and text.text == render_answer(packet, index)
     assert isinstance(plain.content[0], types.TextContent)
-    assert plain.content[0].text == render_answer(packet)  # no index: as before
+    assert plain.content[0].text == render_answer(packet)  # no index: files by content id
     link = answer.content[1]
     assert isinstance(link, types.ResourceLink) and link.description is not None
     first = answer_evidence_refs(packet)[0]

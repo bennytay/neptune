@@ -41,7 +41,7 @@ from neptune_context.packets.codec import canonical_bytes
 from neptune_context.packets.model import ClaimItem
 from neptune_context.pins import GRAPH_SCHEMA_VERSION
 from neptune_context.query import Budget, Direction, GraphClause, Query, Subject, to_json
-from neptune_context.render.agent import render_answer
+from neptune_context.render.agent import parse_answer, render_answer
 from neptune_context.render.citations import parse_citations, render_text
 from neptune_context.sdk import AsyncClient, Client
 
@@ -155,7 +155,7 @@ def test_a_calibration_drift_renders_its_declared_delta() -> None:
         assert '"quantity":"parameter"' in line and '(unit "mm", as declared)' in line
         for adjective in ("large", "small", "significant", "high", "low", "exceeds", "within"):
             assert adjective not in line.split()
-    assert parse_citations(text) == packet.evidence_refs()
+    assert parse_answer(text).evidence == packet.evidence_refs()
     markdown = [ln for ln in render_markdown(packet).split("\n") if " *drift* " in ln]
     assert len(markdown) == len(drifts)
     assert all('"quantity":"parameter"' in ln and '"value":"mm"' in ln for ln in markdown)

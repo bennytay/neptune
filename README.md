@@ -69,12 +69,20 @@ export NEPTUNE_MEMORY_GRAPH=demo/graph.json NEPTUNE_SOURCES=demo/sources.json
 2. Run `claude` in the same folder and approve the `neptune` server (`.mcp.json`; the skill is
    `.claude/skills/neptune`). Ask: **"Why did the arm-cell incident INC-C3-0011 happen?"** and
    **"What changed on ARM-3A since its last good run?"** Each fact comes back as
-   `[I…][E…]` citations, and a `Sources:` list names each `[E…]` file and its row, page or field;
+   `[I…][E…]` citations, and the `Sources` footer names each `[E…]` file and its row, page or field;
    `neptune_why` on a claim shows its evidence. In this path no Ledger catalog is attached, so
    `neptune_hydrate` (opening an `[E…]` source) answers `unavailable` with the file's corpus path;
    `make demo` hydrates through the Ledger and checks it.
 
 Re-running the block is safe (`demo/` is rebuilt from scratch; an interrupted run leaves nothing it needs).
+
+**Record or use it from a clean folder**: only the server (`demo/` if `make demo` ran, else the committed
+snapshot), the skill and `MAX_MCP_OUTPUT_TOKENS`, none of the repository's agent instructions:
+
+```
+make demo-folder DIR=~/neptune-demo
+cd ~/neptune-demo && claude
+```
 
 **Use it from Claude Desktop.**
 

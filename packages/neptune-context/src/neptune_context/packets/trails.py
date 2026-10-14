@@ -1,4 +1,5 @@
-"""Explain trails (ADR 0010): the structure of a ``why`` or ``diff`` answer inside a packet.
+"""Explain trails (ADR 0010): the structure of a ``why``, ``diff`` or ``compare_runs`` answer
+inside a packet (``compare_runs``: ADR 0020).
 
 A packet's items are a flat, ranked list. An ``explain`` clause asks for structure: *why* memory
 holds one claim (the claims that corroborate, conflict with or offer an alternative to it, each
@@ -43,6 +44,7 @@ MAX_WHY_STEPS: Final = 256  # claims one why tree may name
 MAX_WHY_DEPTH: Final = 8
 MAX_DIFF_CLAIMS: Final = 1024  # claim ids one diff may name across its changes
 MAX_DIFF_NODES: Final = 64
+MAX_COMPARE_CLAIMS: Final = 10_000  # claim ids one comparison may name (an item budget's maximum)
 TRAIL_AT: Final = re.compile(r"/explain/(0|[1-9][0-9]?)")
 
 
@@ -401,5 +403,105 @@ def _point_key(point: DiffPoint) -> int:
     return point.tx if isinstance(point, TxPoint) else point.ticks
 
 
-Trail: TypeAlias = WhyTrail | DiffTrail
-TRAIL_KINDS: Final = (WhyTrail, DiffTrail)
+# --- Compare runs (ADR 0020) ------------------------------------------------------------------
+
+
+class Section(StrEnum):
+    """What part of a run comparison a claim answers (ADR 0015, 0017, 0019), in reading order."""
+
+    MAINTENANCE = "maintenance"  # maintenance on the later run's machine: names, causes, actions
+    CONFIGURATIONS = "configurations"  # bound configurations: names and the values that differ
+    PROCEDURES = "procedures"  # what differs between a procedure's revisions for the machine
+    PART_PROCEDURES = "part_procedures"  # procedures for the parts the maintenance changed
+    RUNS = "runs"  # the two runs: their names and the configurations bound to them
+
+
+SECTION_ORDER: Final = tuple(Section)
+# Each section's title, as both renderers write it, and its short label in an answer's summary.
+SECTION_TITLES: Final = {
+    Section.MAINTENANCE: "Maintenance on the later run's machine",
+    Section.CONFIGURATIONS: "Configuration values that differ, each run's own copy",
+    Section.PROCEDURES: "Procedure revisions for the machine, what differs between them",
+    Section.PART_PROCEDURES: (
+        "Procedures for the parts the maintenance changed, what they advise and not what was done"
+    ),
+    Section.RUNS: "The two runs and their configurations",
+}
+SECTION_LABELS: Final = {
+    Section.MAINTENANCE: "Maintenance",
+    Section.CONFIGURATIONS: "Configuration values that differ",
+    Section.PROCEDURES: "Procedure revisions",
+    Section.PART_PROCEDURES: "Procedures for the parts the maintenance changed",
+    Section.RUNS: "The runs",
+}
+
+
+@dataclass(frozen=True)
+class CompareSection:
+    """The claims one part of a comparison carries, sorted by id."""
+
+    section: Section
+    claims: tuple[ClaimId, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.section, Section):
+            raise _fail(Code.BAD_VALUE, f"section must be a Section: {self.section!r}")
+        _claims(self.claims, f"the {self.section} section's claims")
+        if not self.claims:
+            raise _fail(Code.BAD_VALUE, "a comparison section names at least one claim")
+
+    def to_json(self) -> JsonObject:
+        return {"claims": list(self.claims), "section": str(self.section)}
+
+
+@dataclass(frozen=True)
+class CompareTrail:
+    """How a ``compare_runs`` answer (ADR 0015) reads: which part of the comparison each claim it
+    carried answers. It adds no fact and no relation: the claims are the packet's items, and the
+    section is the reason the clause carried each one (ADR 0020)."""
+
+    kind: ClassVar[str] = "compare_runs"
+    at: str
+    before: NodeRef
+    after: NodeRef
+    sections: tuple[CompareSection, ...]
+
+    def __post_init__(self) -> None:
+        trail_index(self.at)
+        for name in ("before", "after"):
+            if not isinstance(getattr(self, name), NodeRef):
+                raise _fail(Code.SHAPE, f"{name} must be a NodeRef")
+        if self.before == self.after:
+            raise _fail(Code.BAD_VALUE, "a comparison compares two different runs")
+        sections = self.sections
+        if not isinstance(sections, tuple) or not all(
+            isinstance(s, CompareSection) for s in sections
+        ):
+            raise _fail(Code.SHAPE, "sections must be a tuple of CompareSections")
+        order = [SECTION_ORDER.index(s.section) for s in sections]
+        if len(set(order)) != len(order):
+            raise _fail(Code.DUPLICATE, "a comparison names each section once")
+        if order != sorted(order):
+            raise _fail(Code.ORDER, "comparison sections are in reading order")
+        named = [c for s in sections for c in s.claims]
+        if len(named) > MAX_COMPARE_CLAIMS:
+            raise _fail(Code.BAD_VALUE, f"a comparison names at most {MAX_COMPARE_CLAIMS} claims")
+        if len(set(named)) != len(named):
+            raise _fail(Code.DUPLICATE, "a claim is in one comparison section")
+
+    @property
+    def claims(self) -> tuple[ClaimId, ...]:
+        return tuple(c for s in self.sections for c in s.claims)
+
+    def to_json(self) -> JsonObject:
+        return {
+            "after": self.after.to_json(),
+            "at": self.at,
+            "before": self.before.to_json(),
+            "kind": self.kind,
+            "sections": [s.to_json() for s in self.sections],
+        }
+
+
+Trail: TypeAlias = WhyTrail | DiffTrail | CompareTrail
+TRAIL_KINDS: Final = (WhyTrail, DiffTrail, CompareTrail)

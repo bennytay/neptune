@@ -1,0 +1,169 @@
+{
+  "findings": [],
+  "gaps": [
+    {
+      "at": "/regions/0",
+      "channel": "spatial",
+      "code": "not_covered",
+      "detail": "Memory's spatial view answers not_covered until its spatial structure lands (G3): the scene rests on frame-graph records only, with no placed nodes",
+      "refs": []
+    }
+  ],
+  "header": {
+    "as_of": 5,
+    "budget": {
+      "dropped": 0,
+      "exhausted": [],
+      "limits": {
+        "items": 10
+      },
+      "tokenizer": "neptune-context.utf8-bytes-div-4/1",
+      "used": {
+        "bytes": 2199,
+        "items": 2,
+        "tokens": 550
+      }
+    },
+    "head": 5,
+    "inference_included": false,
+    "ledger_snapshot": {
+      "catalog_api_version": "1.7.0"
+    },
+    "memory_snapshot": {
+      "as_of": 5,
+      "generation": "sha256:25b298b7665b83de1b81dc8976225387962cd649bfa218bf62f300f422e5e0fe",
+      "graph_schema_version": 1
+    },
+    "produced_by": {
+      "config_hash": "sha256:75eeb847fd19641d461fd836bb30edbb9d6ade05c961a651d7abaac1f0eb0aa4",
+      "engine_id": "neptune-context.golden",
+      "engine_version": "1"
+    },
+    "query_id": "query:sha256:3007c65384a146b26628aefaa96ce87770a0f23ebd074e6c5d51fd119e590a40"
+  },
+  "id": "packet:sha256:aedf7585202c61313c210c6231893038971cb839574519fe0ad2eb35f259d983",
+  "items": [
+    {
+      "assertion_kind": "observed",
+      "claims": [],
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "frame": {
+        "frame_graph_id": "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a",
+        "frame_id": "tool0"
+      },
+      "id": "item:sha256:dfc131dbca6a47318c92df3fb9522c0dd09324aed564dbee95bc7c6ede9b3f42",
+      "kind": "scene",
+      "nodes": [],
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 348,
+                "offset": 0
+              }
+            ],
+            "source": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa"
+          },
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 348,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/transformation"
+              }
+            ],
+            "source": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa"
+          }
+        ],
+        "records": [
+          "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a",
+          "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6"
+        ],
+        "transform": {
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "producer_id": "handeye",
+          "producer_version": "1.0.0"
+        }
+      },
+      "records": [
+        "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a",
+        "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6"
+      ],
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 1,
+            "score": 1.0
+          },
+          {
+            "channel": "spatial",
+            "rank": 1,
+            "score": 1.0
+          }
+        ],
+        "score": 0.03278688524590164
+      },
+      "site": {
+        "knowledge": "not_covered"
+      }
+    },
+    {
+      "assertion_kind": "observed",
+      "claims": [],
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "item:sha256:654da6d86fcea2bb22dc6f46be93bba5e6435bddebbe1b241570768903640d9e",
+      "kind": "configuration",
+      "provenance": {
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 348,
+                "offset": 0
+              }
+            ],
+            "source": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa"
+          }
+        ],
+        "records": [
+          "rec:sha256:db51ab20577a4798da4bc4014bb82c195f9ca6e5d3cd7fe9f455c4dbeeb1ec94"
+        ],
+        "transform": {
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "producer_id": "handeye",
+          "producer_version": "1.0.0"
+        }
+      },
+      "record": "rec:sha256:db51ab20577a4798da4bc4014bb82c195f9ca6e5d3cd7fe9f455c4dbeeb1ec94",
+      "record_kind": "calibration",
+      "relevance": {
+        "hits": [
+          {
+            "channel": "catalog",
+            "rank": 2,
+            "score": 1.0
+          }
+        ],
+        "score": 0.016129032258064516
+      },
+      "subject": {
+        "knowledge": "unknown"
+      }
+    }
+  ],
+  "kind": "context_packet",
+  "packet_version": 1,
+  "superseded_since": []
+}

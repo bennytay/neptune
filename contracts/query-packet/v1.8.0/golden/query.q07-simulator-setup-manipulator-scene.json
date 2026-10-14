@@ -1,0 +1,30 @@
+{
+  "as_of": "head",
+  "budget": {
+    "items": 10
+  },
+  "clock_bridges": [],
+  "explain": [],
+  "frame_bridges": [],
+  "include_inferred": false,
+  "query_version": 1,
+  "regions": [
+    {
+      "frame": {
+        "frame_id": "tool0",
+        "graph_id": "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a"
+      },
+      "shape": {
+        "center": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "kind": "sphere",
+        "radius": 0.5
+      },
+      "unit": "m"
+    }
+  ],
+  "subjects": []
+}

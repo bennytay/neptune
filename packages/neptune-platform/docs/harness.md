@@ -111,6 +111,7 @@ writes it to `work/context/sources.json`; it must equal `harness/acceptance/sour
 ```bash
 make demo        # = uv run --all-packages --all-groups python -m harness.demo --out demo; about 25 s
 make demo-pin    # rewrite harness/acceptance/answers.json and sources.json; review and classify the diff
+make demo-folder DIR=~/neptune-demo  # a clean folder for Claude Code: .mcp.json, the skill, settings.json
 ```
 
 The acceptance corpus through every real stage (owner contract tests skipped), then Deploy's `pack` command over

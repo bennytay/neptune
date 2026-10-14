@@ -65,7 +65,7 @@ class TextField(StrEnum):
     """What free text may match. Every field is evidence or a claim, never a rendered packet."""
 
     DECLARED_ID = "declared_id"  # node and thread ids, ``<namespace>:<value>``
-    CLAIM_TEXT = "claim_text"  # text-valued claim objects (``has_summary``, ``maintenance_state``)
+    CLAIM_TEXT = "claim_text"  # literal claim objects as written (text, numbers, declared values)
     RECORD = "record"  # text fields of Ledger catalog records
     DOCUMENT = "document"  # text the compiler extracted from documents
     FINDING = "finding"  # ingest and resolver finding codes and messages

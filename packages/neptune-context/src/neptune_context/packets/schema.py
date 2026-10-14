@@ -33,6 +33,7 @@ from neptune_context.packets.trails import (
     MAX_WHY_STEPS,
     Change,
     Relation,
+    Section,
 )
 
 if TYPE_CHECKING:
@@ -357,7 +358,29 @@ def _packet_defs() -> dict[str, JsonValue]:
                 _obj({"clock": _ref("RecordId"), "ticks": _ticks()}),
             ]
         },
-        "Trail": {"oneOf": [_ref("DiffTrail"), _ref("WhyTrail")]},
+        "CompareTrail": {
+            **_obj(
+                {
+                    "after": _ref("NodeRef"),
+                    "at": _ref("TrailAt"),
+                    "before": _ref("NodeRef"),
+                    "kind": _const("compare_runs"),
+                    "sections": _array(
+                        _obj(
+                            {
+                                "claims": _array(_ref("ClaimId"), min_items=1),
+                                "section": _enum([str(s) for s in Section]),
+                            }
+                        ),
+                        max_items=len(Section),
+                    ),
+                }
+            ),
+            "description": (
+                "which part of a run comparison each claim it carried answers (ADR 0015, 0020)"
+            ),
+        },
+        "Trail": {"oneOf": [_ref("CompareTrail"), _ref("DiffTrail"), _ref("WhyTrail")]},
         "TrailAt": {"pattern": "^/explain/(0|[1-9][0-9]?)$", "type": "string"},
         "WhyTrail": {
             **_obj(

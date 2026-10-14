@@ -221,7 +221,11 @@ class LocalEngine:
             ),
             items=items,
             clocks=clock_descriptions(
-                self._memory, items, snapshot.memory_as_of, include_inferred=query.include_inferred
+                self._memory,
+                items,
+                snapshot.memory_as_of,
+                include_inferred=query.include_inferred,
+                during=None if during is None else during.domain_id,
             ),
             superseded_since=tuple(superseded[k] for k in sorted(superseded)),
             findings=tuple(
@@ -255,10 +259,11 @@ class LocalEngine:
         return self._catalog.resolve(anchor, as_of=as_of)
 
 
-def item_clocks(items: Sequence[Item]) -> list[RecordId]:
+def item_clocks(items: Sequence[Item], during: RecordId | None = None) -> list[RecordId]:
     """The clocks the items' times are on, sorted: each claim's valid interval and instant
-    object, and each sensor sample's time. A clock map's target is not a time, so not here."""
-    found: set[RecordId] = set()
+    object, each sensor sample's time, and the query's window (``during``). A clock map's
+    target is not a time, so not here."""
+    found: set[RecordId] = set() if during is None else {during}
     for item in items:
         if isinstance(item, ClaimItem):
             found.add(item.claim.valid.start.domain_id)
@@ -271,14 +276,19 @@ def item_clocks(items: Sequence[Item]) -> list[RecordId]:
 
 
 def clock_descriptions(
-    memory: MemoryReader, items: Sequence[Item], as_of: LedgerTx, *, include_inferred: bool
+    memory: MemoryReader,
+    items: Sequence[Item],
+    as_of: LedgerTx,
+    *,
+    include_inferred: bool,
+    during: RecordId | None = None,
 ) -> tuple[Claim, ...]:
     """Memory's ``clock_description`` of each clock the items' times are on (ADR 0022), as
     Memory knew it at ``as_of``: one per clock, by clock id. A clock Memory does not describe (or
     describes twice, which a ``one`` predicate never should) has none, and its ticks render as
     ticks. Never converts anything: it only reads what Memory states about each clock."""
     out: list[Claim] = []
-    for clock in item_clocks(items):
+    for clock in item_clocks(items, during):
         found = memory.claims(
             NodeRef(NodeType.CLOCK, clock),
             CLOCK_DESCRIPTION,

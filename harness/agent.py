@@ -95,11 +95,11 @@ class Called:
 
 def local_client(document: Any, catalog: Any | None = None) -> AsyncClient:
     """What ``python -m neptune_context.mcp --memory`` serves (``local_client``), with a Ledger
-    catalog attached when given: the graph channel, claim histories for ``neptune_why``, the
-    declared identities for ``neptune_entities``, and no planner model."""
+    catalog attached when given: the graph and lexical channels, claim histories for
+    ``neptune_why``, the declared identities for ``neptune_entities``, and no planner model."""
     from neptune_context.engine import LocalEngine
     from neptune_context.explain.history import IndexedReader
-    from neptune_context.mcp.__main__ import AGENT_DEFAULTS
+    from neptune_context.mcp.__main__ import AGENT_DEFAULTS, text_channel
     from neptune_context.mcp.__main__ import local_client as served
     from neptune_context.retrieve.graph import GraphChannel
     from neptune_context.sdk import AsyncClient, NoModel, Planner, entity_index
@@ -107,7 +107,8 @@ def local_client(document: Any, catalog: Any | None = None) -> AsyncClient:
     if catalog is None:
         return served(document)
     reader = IndexedReader(document)
-    engine = LocalEngine(reader, catalog, channels=(GraphChannel(reader, catalog),))
+    channels = (GraphChannel(reader, catalog), text_channel(document, reader))
+    engine = LocalEngine(reader, catalog, channels=channels)
     planner = Planner(entity_index(document), AGENT_DEFAULTS, NoModel())
     return AsyncClient(engine, planner=planner)
 
@@ -137,10 +138,11 @@ async def _session(server: Any, calls: Sequence[Json]) -> list[Called]:
 def call_tools(
     client: AsyncClient, calls: Sequence[Json], sources: SourceIndex | None = None
 ) -> list[Called]:
-    """``calls`` through the MCP server's own tools, in one in-memory session."""
+    """``calls`` through the MCP server's own tools, in one in-memory session, as ``--memory``
+    serves them: no Ledger catalog, so no resource links (Context ADR 0020)."""
     from neptune_context.mcp import build_server
 
-    return asyncio.run(_session(build_server(client, sources=sources), calls))
+    return asyncio.run(_session(build_server(client, sources=sources, links=False), calls))
 
 
 def stdio_round_trip(
@@ -308,8 +310,7 @@ class Scorer:
     def statements(self, text: str) -> list[Statement]:
         """Every cited statement of an answer: its claims, and what it cites (each evidence ref
         it gives, and the records its claims rest on)."""
-        from neptune_context.render.agent import parse_answer
-        from neptune_context.render.clocks import CLOCKS
+        from neptune_context.render.agent import CLOCKS, parse_answer
 
         out = []
         for statement in parse_answer(text).statements:

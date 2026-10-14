@@ -1020,6 +1020,62 @@
         "document"
       ]
     },
+    "CompareTrail": {
+      "additionalProperties": false,
+      "description": "which part of a run comparison each claim it carried answers (ADR 0015, 0020)",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/NodeRef"
+        },
+        "at": {
+          "$ref": "#/$defs/TrailAt"
+        },
+        "before": {
+          "$ref": "#/$defs/NodeRef"
+        },
+        "kind": {
+          "const": "compare_runs"
+        },
+        "sections": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "claims": {
+                "items": {
+                  "$ref": "#/$defs/ClaimId"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "section": {
+                "enum": [
+                  "configurations",
+                  "maintenance",
+                  "part_procedures",
+                  "procedures",
+                  "runs"
+                ]
+              }
+            },
+            "required": [
+              "claims",
+              "section"
+            ],
+            "type": "object"
+          },
+          "maxItems": 5,
+          "type": "array"
+        }
+      },
+      "required": [
+        "after",
+        "at",
+        "before",
+        "kind",
+        "sections"
+      ],
+      "type": "object"
+    },
     "Confidence": {
       "anyOf": [
         {
@@ -3792,6 +3848,9 @@
     },
     "Trail": {
       "oneOf": [
+        {
+          "$ref": "#/$defs/CompareTrail"
+        },
         {
           "$ref": "#/$defs/DiffTrail"
         },

@@ -64,7 +64,7 @@ def test_docs_state_the_same_pins() -> None:
         / "adr"
         / (
             "0022-times-in-their-clocks-declared-terms-graph-schema-2-5-0-pin-and-query-packet"
-            "-1-7-0.md"
+            "-1-8-0.md"
         )
     ).read_text(encoding="utf-8")
     for text in (contracts, adr):

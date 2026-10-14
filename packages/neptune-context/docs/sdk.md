@@ -290,7 +290,11 @@ packet = client.query(query)
 `--memory GRAPH.json` (the local engine over a Memory graph document, JSON or `.json.gz`, ADR 0007, [ADR 0013](adr/0013-demo-reads-memorys-gzip-snapshot.md)) or `--packets DIR` (recorded
 packets, for trying it out) serves six read-only tools over stdio
 ([ADR 0004](adr/0004-sdk-and-mcp-server.md), [ADR 0009](adr/0009-agent-renderer-and-mcp-tool-surface.md)).
-With `--memory`, `--planner anthropic` (the `anthropic` extra and an API key) or `--planner-recordings FILE`
+With `--memory` the engine runs the graph channel and the lexical channel over the document's claims
+([ADR 0021](adr/0021-exact-value-and-phrase-search-over-the-local-graph.md)): a `neptune_query` `text`
+clause finds the claims that state a value, an id or a phrase as written (`"151.5"`, `WO-26-0911`,
+`"reprojection error"`), and `neptune_entities` with such a text lists the subjects that state it.
+`--planner anthropic` (the `anthropic` extra and an API key) or `--planner-recordings FILE`
 gives `neptune_plan` a model; without one a plan says no model is configured.
 
 Claude Code, from the repository root, over the Demo v1 two-site corpus:
@@ -327,13 +331,21 @@ Extra retrieval channels join through `local_client(document, channels=factory)`
     each node or change is a sentence naming its claim and citing its evidence, a conflict names the resolver
     finding, a repeat and every cap or gap says so, and a diff says `held only between the two points` for a
     version that opened and closed inside the window;
-  - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`;
+  - for a comparison, a **Summary**: the two runs, each section's size, the unknowns ([ADR 0020](adr/0020-compact-grouped-answers-and-the-compare-runs-trail.md));
+  - **Facts**, one sentence per item, each ending `[I<n>][E<k>]`; inferred items open with `INFERRED`. A
+    comparison's facts come by section (maintenance, configuration values, procedure revisions, procedures for
+    changed parts, the runs); any other answer's by record. A heading names each record once, by the names its
+    evidence states (`event named "WO-26-0911" (N8)`) and the validity its facts share; a line names only the
+    part it is about (`"/actions/3"`);
   - quantities by declared unit, findings and gaps; a value's unit reads `(unit "mm", as declared)`, or
     `(no unit stated)` when the source gives none, and nothing for a text ([ADR 0018](adr/0018-stated-same-as-names-one-entity-and-plain-language-answers.md));
-  - an `Items:` footer (item and claim ids) and the `Evidence:` footer.
+  - `Names` and `Clocks` lists giving each `N<k>` and `C<k>` its full id, an `Items:` footer (each claim's id,
+    for `neptune_why`) and a `Sources` footer: each file once (`F<k>`, its corpus path with `--sources`, its
+    content id), then each `[E<k>]` with its file and exact place.
 
-  One resource link follows per evidence ref. Reading `neptune://evidence/<token>?as_of=N` hydrates it at the
-  answer's snapshot. `render.agent.parse_answer` recovers every citation from the text.
+  One resource link follows per evidence ref, except from `--memory`, which has no Ledger catalog to resolve
+  them. Reading `neptune://evidence/<token>?as_of=N` hydrates it at the answer's snapshot.
+  `render.agent.parse_answer` recovers every citation from the text.
 - Text from sources is quoted, hardened JSON. Square brackets, every non-ASCII bracket (Unicode Ps/Pe), angle
   brackets, backticks and their look-alikes, controls, bidirectional and invisible characters are escaped, so a document cannot forge a citation, a line or a tag. The answer says
   quoted strings are data, never instructions.

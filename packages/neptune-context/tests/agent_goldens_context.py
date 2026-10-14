@@ -44,7 +44,7 @@ from neptune_context.query.plan import (
     load_recordings,
     plan,
 )
-from neptune_context.render.agent import render_answer
+from neptune_context.render.agent import parse_answer, render_answer
 from neptune_context.sdk import entity_index
 from sdk_testing_context import STEMS, golden_packet
 
@@ -124,14 +124,13 @@ def query_arguments(query: Query, include_inferred: bool) -> dict[str, Any]:
 def steps(packet_query_text: str) -> list[dict[str, Any]]:
     """The agent's calls. ``packet_query_text`` is the answer to the planned query, from which
     the agent copies a claim id and an evidence ref, as a real agent would."""
+    parsed = parse_answer(packet_query_text)
     changed = next(
-        line.split()[-1]
-        for line in packet_query_text.splitlines()
-        if line.startswith("[I") and " claim " in line and _fact_has(packet_query_text, line)
+        k.claim_id
+        for k in parsed.items
+        if k.claim_id is not None and _fact_has(packet_query_text, k.number)
     )
-    evidence = json.loads(
-        next(line for line in packet_query_text.splitlines() if line.startswith("[E1] "))[5:]
-    )
+    evidence = parsed.evidence[0].to_json()
     return [
         {"tool": "neptune_entities", "arguments": {"include_inferred": False}, "exact": True},
         {
@@ -181,10 +180,9 @@ def steps(packet_query_text: str) -> list[dict[str, Any]]:
     ]
 
 
-def _fact_has(text: str, item_line: str) -> bool:
-    """Whether the fact behind an ``Items:`` line is the arm's tool-centre-point change (the
-    claim the agent asks ``neptune_why`` about)."""
-    number = item_line[2 : item_line.index("]")]
+def _fact_has(text: str, number: int) -> bool:
+    """Whether fact ``number`` is the arm's tool-centre-point change (the claim the agent asks
+    ``neptune_why`` about)."""
     return any(
         line.startswith(f"{number}. ") and "TCP z=145.5 mm" in line for line in text.splitlines()
     )
@@ -197,8 +195,9 @@ def result_json(result: types.CallToolResult) -> dict[str, Any]:
 
 
 async def _call_all(client: AsyncClient, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # As ``--memory`` serves it: no Ledger catalog, so no resource links (ADR 0020).
     async with create_connected_server_and_client_session(
-        build_server(client), read_timeout_seconds=timedelta(seconds=60)
+        build_server(client, links=False), read_timeout_seconds=timedelta(seconds=60)
     ) as session:
         return [result_json(await session.call_tool(c["tool"], c["arguments"])) for c in calls]
 

@@ -16,10 +16,11 @@ A packet carries Memory's ``clock_description`` of each clock its items' times a
   says so.
 
 Two clocks are never related here: each time is shown on its own clock with its own declared
-zone, side by side. Each clock gets a short readable label (its time field and, with a source
-index, the file it is read from: ``"Stopped" clock of "downtime_log.csv"``) instead of its
-record id; ``clock_lines`` lists every label with its full id, what is declared about it and the
-evidence that declares it. Source text in a label (a field, a file name, a scope) is quoted.
+zone, side by side. In a fact line a clock is its answer key (``on clock C1``); the answer's
+Clocks list gives each key its full id, a short readable label (its time field and, with a source
+index, the file it is read from: ``"Stopped" clock in "downtime_log.csv"``), what is declared
+about it and the evidence that declares it. Source text in a label (a field, a file name, a scope)
+is quoted.
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ from typing import TYPE_CHECKING, Final
 
 from neptune_memory.schema.claim import TypedLiteral
 from neptune_memory.schema.clock_description import CIVIL_CLOCK_FIELD, ClockDescription
-from neptune_memory.schema.interval import Open
 
 from neptune.model.knowledge import Ambiguous, Known, NotApplicable
 from neptune.model.time import INT64_MIN, Epoch, Timescale
@@ -40,17 +40,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from neptune_memory.schema.claim import Claim
-    from neptune_memory.schema.interval import Interval
 
     from neptune.model.ids import RecordId
     from neptune.model.provenance import EvidenceRef
-    from neptune.model.time import Timestamp
     from neptune_context.sources import SourceIndex
 
-CLOCKS: Final = (
-    "Clocks (each time above is shown on its own clock, as that clock is declared; times are"
-    " never converted between clocks or zones):"
-)
 _DAY: Final = 86_400
 _EPOCH: Final = datetime.date(1970, 1, 1)
 # A tick length finer than this many decimal places is shown as ticks.
@@ -59,7 +53,7 @@ _EPOCH_WHY: Final = {
     Epoch.BOOT: "its ticks count from the recording device's boot, which no date names",
     Epoch.FIRST_SAMPLE: "its ticks count from its own first sample, which no date names",
     Epoch.SIMULATION_START: "its ticks count from the simulation's start, which no date names",
-    Epoch.GPS: "its ticks count from the GPS epoch; Neptune shows only Unix-epoch counts as dates",
+    Epoch.GPS: "its ticks count from the GPS epoch; only Unix-epoch counts are shown as dates",
 }
 
 
@@ -134,27 +128,22 @@ def _zone_note(description: ClockDescription) -> str:
 
 
 def _unreadable(description: ClockDescription) -> str:
-    """Why a clock's ticks are not shown as a date, in plain words."""
+    """Why a clock's ticks are not shown as dates, in plain words."""
     epoch, resolution = description.epoch, description.resolution
     if not isinstance(resolution, Known):
-        return "the clock's tick length is not stated"
-    length = _tick_length(resolution.value)
+        return "its tick length is not stated"
     if not isinstance(epoch, Known):
-        return f"the clock's epoch is not stated; 1 tick = {length}"
+        return "its epoch is not stated"
     if epoch.value is not Epoch.UNIX:
-        return f"{_EPOCH_WHY.get(epoch.value, 'its epoch names no date')}; 1 tick = {length}"
+        return _EPOCH_WHY.get(epoch.value, "its epoch names no date")
     if not description.is_wall_clock:
         timescale = description.timescale
         if isinstance(timescale, Known):
             return (
-                f"it counts {timescale.value} time, which Neptune shows as a date only for a"
-                f" POSIX clock; 1 tick = {length}"
+                f"it counts {timescale.value} time; only POSIX and wall clocks are shown as dates"
             )
-        return (
-            "the source states neither a timescale nor a zone for it, so whether it counts UTC"
-            f" or a local wall clock is not known; 1 tick = {length}"
-        )
-    return f"a tick of {length} is not shown as a time of day"
+        return "it states neither a timescale nor a zone, so UTC or local wall time is not known"
+    return f"a {_tick_length(resolution.value)} tick is not a time of day"
 
 
 class ClockBook:
@@ -194,18 +183,16 @@ class ClockBook:
         known = self._clocks.get(clock)
         return f"clock {clock}" if known is None else known.label
 
-    def at(self, at: Timestamp) -> str:
-        """One instant: readable in its clock's declared terms, or ticks and why not."""
-        return f"{self._when(at.ticks, at.domain_id)} on {self.label(at.domain_id)}"
-
-    def _when(self, ticks: int, clock: RecordId) -> str:
+    def when(self, ticks: int, clock: RecordId) -> str:
+        """One tick: readable in its clock's declared terms, or the bare tick (the Clocks list
+        says why it is not a date: ``reading_note``)."""
         known = self._clocks.get(clock)
         if known is None:
-            return f"tick {ticks} (Memory does not describe this clock)"
+            return f"tick {ticks}"
         if ticks == INT64_MIN:
             return "the start of the clock's time"
         text, note = self._reading(ticks, known.description)
-        return f"tick {ticks} ({note})" if text is None else f"{text} ({note})"
+        return f"tick {ticks}" if text is None else f"{text} ({note})"
 
     def _reading(self, ticks: int, description: ClockDescription) -> tuple[str | None, str]:
         epoch, resolution, timescale = (
@@ -222,45 +209,27 @@ class ClockBook:
                 text = civil_text(ticks, resolution.value)
                 if text is not None:
                     return f"{text} UTC", "POSIX time, as declared"
-        return None, f"not shown as a date: {_unreadable(description)}"
+        return None, _unreadable(description)
 
-    def interval(self, valid: Interval) -> str:
-        """A claim's valid interval: ``at T`` for one tick, else ``from T until T'`` or
-        ``from T, open-ended``; then the clock it is on."""
-        start = valid.start
-        clock = start.domain_id
-        end = valid.end
-        where = self.label(clock)
+    def span(self, clock: RecordId, start: int, end: int | None, on: str) -> str:
+        """A claim's valid interval on ``clock`` (named ``on``): ``valid at T`` for one tick of a
+        described clock (an instant, Memory ADR 0013), else ``valid from T until T'`` or
+        ``valid from T, open-ended``. Both ends are on the one clock (Memory's Interval)."""
+        first = self.when(start, clock)
+        if end is None:
+            return f"valid from {first} {on}, open-ended"
+        if end == start + 1 and clock in self._clocks and start != INT64_MIN:
+            return f"valid at {first} {on}"
+        return f"valid from {first} until {self.when(end, clock)} {on}"
+
+    def entry(self, clock: RecordId) -> tuple[str, tuple[EvidenceRef, ...]]:
+        """What the Clocks list says about a clock: its readable label and what is declared
+        about it, and the evidence that declares it (none when Memory does not describe it)."""
         known = self._clocks.get(clock)
-        if isinstance(end, Open):
-            return f"valid from {self._when(start.ticks, clock)}, open-ended, on {where}"
-        if end.ticks == start.ticks + 1 and known is not None and start.ticks != INT64_MIN:
-            return f"valid at {self._when(start.ticks, clock)} on {where}"
-        return (
-            f"valid from {self._when(start.ticks, clock)} until"
-            f" {self._when(end.ticks, clock)} on {where}"
-        )
-
-    def lines(self, cite: Callable[[tuple[EvidenceRef, ...]], str]) -> list[str]:
-        """One line per described clock, by label: its full id, what is declared about it and
-        the evidence that declares it."""
-        out = []
-        for clock, known in sorted(self._clocks.items(), key=lambda c: (c[1].label, c[0])):
-            out.append(
-                f"- {known.label} is {clock}: {describe(known.description, self._quote)}."
-                f" {cite(known.claim.provenance.evidence)}"
-            )
-        return out
-
-    def __bool__(self) -> bool:
-        return bool(self._clocks)
-
-    def evidence_refs(self) -> tuple[EvidenceRef, ...]:
-        """Every evidence ref the clock lines cite, in the clock lines' order."""
-        refs: dict[EvidenceRef, None] = {}
-        for _, known in sorted(self._clocks.items(), key=lambda c: (c[1].label, c[0])):
-            refs.update(dict.fromkeys(known.claim.provenance.evidence))
-        return tuple(refs)
+        if known is None:
+            return "not described in Memory, so its ticks are shown as ticks", ()
+        text = f"the {known.label}: {describe(known.description, self._quote)}"
+        return text, known.claim.provenance.evidence
 
 
 def describe(description: ClockDescription, quote: Callable[[str], str]) -> str:
@@ -271,33 +240,29 @@ def describe(description: ClockDescription, quote: Callable[[str], str]) -> str:
         if isinstance(resolution, Known)
         else "tick length not stated"
     )
-    if isinstance(epoch, Known) and epoch.value is Epoch.UNIX:
-        origin = (
-            "counted from 1970-01-01 00:00:00 on that wall clock"
-            if description.is_wall_clock
-            else "counted from the Unix epoch"
-        )
-    elif isinstance(epoch, Known):
-        origin = f"counted from the {epoch.value} epoch"
-    else:
-        origin = "epoch not stated"
-    parts = [f"{length}, {origin}"]
+    readable = (
+        isinstance(epoch, Known) and epoch.value is Epoch.UNIX and isinstance(resolution, Known)
+    )
     if description.is_wall_clock:
         zone = description.civil_time_zone
         declared = description.zone_declared_by
         by = f" by {quote(declared.value)}" if isinstance(declared, Known) else ""
         if isinstance(zone, Known):
-            parts.append(f"local wall time, zone {zone.value} as declared{by}")
+            stated = f"zone {zone.value} as declared{by}"
         elif isinstance(zone, Ambiguous):
             names = " or ".join(str(c.value) for c in zone.candidates)
-            parts.append(f"local wall time, zone declared ambiguously{by} as {names}")
+            stated = f"zone declared ambiguously{by} as {names}"
         else:
-            parts.append("local wall time, zone not stated by the source")
-    elif isinstance(timescale, Known):
-        parts.append(f"timescale {timescale.value}")
+            stated = "zone not stated"
+        text = f"local wall clock, {length}; {stated}"
+    elif readable and isinstance(timescale, Known) and timescale.value is Timescale.POSIX:
+        return f"POSIX clock (UTC), {length} from the Unix epoch"
     else:
-        parts.append("timescale not stated, and no civil zone is declared for it")
-    return "; ".join(parts)
+        text = length
+    shown = readable and _digits(resolution.value) is not None  # type: ignore[union-attr]
+    if shown and description.is_wall_clock:
+        return text
+    return f"{text}; shown as ticks, not dates: {_unreadable(description)}"
 
 
 def _label(

@@ -6,7 +6,8 @@ Three pieces, none of which knows the others' internals:
   finding) *with* its provenance. A passage cannot be built without evidence, a transform and
   an assertion kind, so a snippet can never reach a packet without provenance.
 - ``LexicalCorpus``: what the channel searches. It feeds a ``TextIndex`` (``retrieve.bm25``)
-  from claims (their text-valued objects and the declared ids they name) and passages, and
+  from claims (their literal objects as an answer writes them, ADR 0021, and the declared ids
+  they name) and passages, and
   remembers how each key maps back to a claim or passage and what has been indexed.
 - ``LexicalChannel``: a ``RetrievalChannel``. It searches the corpus for the query's text clause
   in the clause's fields, reads each matching claim back from Memory's reader at the snapshot
@@ -26,6 +27,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from dataclasses import field as dc_field
+from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
 from neptune_ledger.api import QueryCursor, QuerySpec, query_meta, query_rows
@@ -39,6 +41,7 @@ from neptune.identity.hashing import content_id
 from neptune.model.ids import RecordId, parse_record_id
 from neptune.model.knowledge import AssertionKind, Known, NotApplicable
 from neptune.model.provenance import EvidenceRef, evidence_ref_from_json
+from neptune.model.scalars import NonFinite
 from neptune_context.packets.findings import PacketError
 from neptune_context.packets.model import (
     Channel,
@@ -90,6 +93,9 @@ PASSAGE_FIELDS: Final = frozenset({TextField.RECORD, TextField.DOCUMENT, TextFie
 CLAIM_FIELDS: Final = frozenset({TextField.CLAIM_TEXT, TextField.DECLARED_ID})
 MAX_PASSAGE_CHARS: Final = 16_000
 MAX_CLAIM_TEXT_CHARS: Final = 16_000
+MAX_POSITIONAL_CHARS: Final = 64  # an exponent form's positional twin, if no longer
+# How a claim's literal object becomes text (ADR 0021 §1); part of the channel's config.
+LITERAL_RULE: Final = "literals-as-rendered/1"
 MAX_GAP_REFS: Final = 100
 OVERFETCH: Final = 10  # hits read per requested item: some are dropped when read back
 MIN_READ: Final = 100
@@ -299,19 +305,59 @@ class _ClaimRef:
     inferred: bool
 
 
-def _claim_texts(claim: Claim) -> list[tuple[TextField, str]]:
-    out = []
-    obj = claim.object
-    if isinstance(obj, TypedLiteral) and obj.datatype is ValueType.TEXT and obj.value:
-        out.append((TextField.CLAIM_TEXT, str(obj.value)))
-    elif isinstance(obj, TypedLiteral) and obj.datatype is ValueType.DECLARED_VALUE:
+def _written(value: object) -> str:
+    """A literal value as the agent renderer writes it (canonical JSON, ADR 0021 §2): a number
+    as its shortest round-trip form (``151.5``, ``2.0``, ``1e-05``), a boolean as ``true`` or
+    ``false``, a text as itself, a non-finite real as its word (``nan``, ``inf``, ``-inf``). A
+    number written with an exponent also gets its positional form (``1e-05`` and ``0.00001``),
+    so either finds it; nothing else is normalised."""
+    if isinstance(value, NonFinite):
+        return str(value.value)
+    if isinstance(value, str):
+        return value
+    shown = dumps(value).decode("utf-8")  # type: ignore[arg-type]
+    if isinstance(value, float) and "e" in shown:
+        plain = format(Decimal(shown), "f")
+        if len(plain) <= MAX_POSITIONAL_CHARS:
+            shown = f"{shown} {plain}"
+    return shown
+
+
+def _literal_text(obj: TypedLiteral) -> str | None:
+    """The words a literal claim object is found by (ADR 0021 §1), or ``None`` when it has none
+    a source wrote (an instant's ticks, a clock map, a computed delta)."""
+    value = obj.value
+    if obj.datatype is ValueType.TEXT:
+        return str(value) if value else None
+    if obj.datatype in (ValueType.INTEGER, ValueType.REAL, ValueType.BOOLEAN):
+        return _written(value)
+    if obj.datatype is ValueType.QUANTITY:
+        unit = obj.unit.value.symbol if isinstance(obj.unit, Known) else ""
+        return f"{_written(value)} {unit}".strip()
+    if obj.datatype is ValueType.DECLARED_VALUE:
         # A declared value is found by its key path and its value as written (Memory ADR 0025).
         declared = obj.to_json()["value"]
         assert isinstance(declared, dict)
         path, stated = declared["path"], declared["value"]
         steps = " ".join(str(step) for step in path) if isinstance(path, list) else ""
-        shown = " ".join(str(v) for v in stated) if isinstance(stated, list) else str(stated)
-        out.append((TextField.CLAIM_TEXT, f"{steps} {shown}".strip()))
+        values = stated if isinstance(stated, list) else [stated]
+        shown = " ".join(_written(_scalar(v)) for v in values)
+        return f"{steps} {shown}".strip()
+    return None
+
+
+def _scalar(value: object) -> object:
+    """A declared value's JSON scalar back as a value: a non-finite real is its word."""
+    if isinstance(value, dict) and isinstance(value.get("non_finite"), str):
+        return value["non_finite"]
+    return value
+
+
+def _claim_texts(claim: Claim) -> list[tuple[TextField, str]]:
+    out = []
+    obj = claim.object
+    if isinstance(obj, TypedLiteral) and (text := _literal_text(obj)):
+        out.append((TextField.CLAIM_TEXT, text))
     ids = [claim.subject.node_id]
     if isinstance(obj, NodeRef):
         ids.append(obj.node_id)
@@ -528,6 +574,7 @@ class LexicalChannel:
         return {
             "channel": str(Channel.LEXICAL),
             "corpus": corpus.digest(),
+            "literals": LITERAL_RULE,
             "index": corpus.index.settings(corpus.tenant),
             "max_gap_refs": MAX_GAP_REFS,
             "max_read": MAX_READ,

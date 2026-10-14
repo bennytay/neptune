@@ -7,7 +7,7 @@ flowchart LR
   subgraph P["neptune-context"]
     PIN["pins.py + contract suites on stubs"]
     QRY["query/ language + validation (ADR 0002)"]
-    RET["retrieve/ channel interface + graph channel (ADR 0007)"]
+    RET["retrieve/ channel interface + graph and lexical channels (ADR 0007, 0008, 0021)"]
     ENG["engine.py LocalEngine (ADR 0007)"]
     PKT["packets/"]
     RND["render/ agent text renderer (ADR 0009)"]
