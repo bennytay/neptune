@@ -1,16 +1,65 @@
 # Neptune
 
-**A robotics-native ingestion fabric.** Neptune turns the messy evidence robotics teams already produce —
-MCAP and ROS recordings, flight logs, URDF/SDF, calibration, configs, PDFs, images, geometry, site records,
-task briefs — into a canonical, provenance-preserving, multimodal representation that downstream memory,
-retrieval, simulation and training systems can consume without ever re-parsing the raw files.
+**Ask Claude what happened to your robots, and get answers cited to the exact row, page or byte of your own
+files.**
 
-Think of it as a **data compiler for physical AI**: raw sources in, deterministic ingest package + receipt out.
+Neptune compiles the evidence robotics teams already have (MCAP and ROS 2 bags, CMMS work orders, change
+tickets, syslogs, incident PDFs, URDF, calibration and configs) into a cited, provenance-preserving memory.
+Claude Code asks it through an MCP server. Nothing is guessed: a blank stays a blank, two names for one robot
+stay two until a source says they are one, and clock times are shown as declared, never converted.
 
-**Every type of robot.** Manipulators, mobile bases, quadrupeds and other legged platforms, humanoids, drones,
-marine vehicles, autonomous vehicles, industrial automation and multi-robot fleets are all first-class. Flight
-logs are two formats in the catalogue, not the focus; nothing assumes a flight controller, a single vehicle or
-one morphology.
+Every type of robot: arms, mobile bases, legged platforms, humanoids, drones, marine vehicles, autonomous
+vehicles and fleets. Nothing assumes one morphology.
+
+```text
+$ make up SRC=~/site-S-007            # 15 files: work orders, change tickets, runs, an incident PDF, URDFs
+up: green in 4 s; memory holds 199 claims (30 clock, 23 event, 7 machine, 4 run, 8 stream)
+
+> what was work order WO-26-0414?    (what Claude gets back from the neptune MCP server, trimmed)
+
+event named "WO-26-0414" (valid at 2026-04-14 19:30, local wall time, zone not stated):
+1. Stated: involves machine "cmms.asset:AMR-07". [I2][E1][E2][E3]
+2. Stated: stated_cause "Localisation drift after map update". [I3][E2][E5][E3]
+3. Stated: at_site site "cmms.site:S-007". [I4][E6][E2][E3]
+Sources: F1 "cmms/work_orders.csv" ... [E1] F1 row 7, column 3 "Asset ID" ... [E5] F1 row 7, column 6 "Problem"
+```
+
+**Try it:** the [15-minute quickstart](#15-minute-quickstart) runs the demo plant in one paste.
+**Your data:** [`make up SRC=<folder>`](#run-it-on-your-own-folder).
+
+> **What's real, what's not yet (v0.1)**
+>
+> - **Real:** ingest of MCAP, ROS 2 bags, CSV/XLSX, PDF, URDF, YAML configs and more into a deterministic,
+>   cited package; mapping of common CSV exports (CMMS, ServiceNow, Jira, Linear, syslog, registers) by their
+>   columns; the memory graph; Claude Code answers with citations. Linux, tested in CI.
+> - **Not yet:** a CSV whose columns match no shipped preset is ingested but not turned into events; a robot
+>   named differently in two systems stays two ids until you declare aliases in a `neptune.yaml`; no time
+>   zones unless you state them; macOS untested; no hosted service; pre-alpha APIs.
+> - **Want it on your fleet's data?** We are onboarding design partners: open an issue.
+
+## Run it on your own folder
+
+Point it at a folder of your files (MCAP or ROS 2 bags, CSV exports, PDFs, URDF, configs). The folder is
+only read; nothing to write first:
+
+```
+make up SRC=~/my-robot-logs
+cd up/my-robot-logs/claude && claude
+```
+
+It ingests the folder, maps every CSV a shipped Deploy preset fits by its columns (CMMS work orders and
+downtime logs, ServiceNow changes, Jira and Linear tickets, syslogs, asset, risk and zone registers,
+requalification tests) and incident-report PDFs, builds the memory graph and writes a Claude Code folder
+over it. `up/my-robot-logs/up.md` says what each stage did and what memory now holds. Over the demo's S-007
+site folder (15 files, no setup) that is 4 runs, 7 machine ids, 23 events (work orders, changes,
+requalification, the incident) in about 5 s.
+
+- **No `neptune.yaml`:** each CSV's first row is read as its header (`--csv-header none` says not). A
+  machine named in two systems stays two ids until you state they are one: `neptune init-manifest SRC`
+  drafts a commented manifest; fill in its `machines:` aliases to say so.
+- **A CSV no preset fits** is ingested and searchable, but not mapped to events. Copy a preset from
+  `packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/`, rename its columns, and pass a
+  declaration with `make up SRC=... ARGS="--deploy my-deploy.json"` (`harness/acceptance/deploy.json` is one).
 
 ## Status
 
@@ -106,30 +155,6 @@ Claude Desktop does not expand `${…}`, so give absolute paths. Add this to `cl
   }
 }
 ```
-
-## Run it on your own folder
-
-Point it at a folder of your files (MCAP or ROS 2 bags, CSV exports, PDFs, URDF, configs). The folder is
-only read; nothing to write first:
-
-```
-make up SRC=~/my-robot-logs
-cd up/my-robot-logs/claude && claude
-```
-
-It ingests the folder, maps every CSV a shipped Deploy preset fits by its columns (CMMS work orders and
-downtime logs, ServiceNow changes, Jira and Linear tickets, syslogs, asset, risk and zone registers,
-requalification tests) and incident-report PDFs, builds the memory graph and writes a Claude Code folder
-over it. `up/my-robot-logs/up.md` says what each stage did and what memory now holds. Over the demo's S-007
-site folder (15 files, no setup) that is 4 runs, 7 machine ids, 23 events (work orders, changes,
-requalification, the incident) in about 5 s.
-
-- **No `neptune.yaml`:** each CSV's first row is read as its header (`--csv-header none` says not). A
-  machine named in two systems stays two ids until you state they are one: `neptune init-manifest SRC`
-  drafts a manifest whose `machines:` aliases do that.
-- **A CSV no preset fits** is ingested and searchable, but not mapped to events. Copy a preset from
-  `packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/`, rename its columns, and pass a
-  declaration with `make up SRC=... ARGS="--deploy my-deploy.json"` (`harness/acceptance/deploy.json` is one).
 
 ## Principles in one breath
 
