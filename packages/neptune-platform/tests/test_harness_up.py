@@ -3,6 +3,7 @@
 import hashlib
 import json
 import shutil
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -104,6 +105,10 @@ def test_a_folder_with_no_setup_reaches_memory_with_runs_machines_and_events(
     assert args[8] == str((out / "graph.json").resolve())
 
     assert U._refuse(site, out) is None  # an earlier run's output may be rewritten
+    document = json.loads((out / "up.json").read_text(encoding="utf-8"))
+    del document["isolation"]  # as the first version wrote it
+    (out / "up.json").write_text(json.dumps(document), encoding="utf-8")
+    assert U._refuse(site, out) is None
     again = tmp_path / "again"
     assert U.up(site, again, stream=None) == 0
     assert (again / "graph.json").read_bytes() == (out / "graph.json").read_bytes()
@@ -115,6 +120,24 @@ def test_without_the_header_declaration_no_table_maps(site: Path, tmp_path: Path
     document = json.loads((tmp_path / "out" / "up.json").read_text(encoding="utf-8"))
     deploy = next(s for s in document["stages"] if s["stage"] == "deploy")["output"]["cases"][0]
     assert "maintenance_event" not in deploy["records"]
+
+
+def test_off_linux_up_needs_the_unconfined_run_said_explicitly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = tmp_path / "logs"
+    folder.mkdir()
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert U.main([str(folder), "--out", str(tmp_path / "out")]) == 2
+    assert "--isolation in_process" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_an_unconfined_run_says_so(site: Path, tmp_path: Path) -> None:
+    assert U.up(site, tmp_path / "out", isolation="in_process", stream=None) == 0
+    document = json.loads((tmp_path / "out" / "up.json").read_text(encoding="utf-8"))
+    assert document["isolation"] == "in_process"
+    assert "unconfined" in (tmp_path / "out" / "up.md").read_text(encoding="utf-8")
 
 
 def test_make_and_the_readme_name_it() -> None:

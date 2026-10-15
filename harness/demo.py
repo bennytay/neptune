@@ -338,13 +338,24 @@ def demo(
     pin: bool = False,
     owner_tests: bool = False,
     progress: TextIO | None = None,
+    isolation: str | None = None,
 ) -> tuple[int, list[str]]:
-    """Run the demo into ``out``; (exit code, problems). ``progress`` gets one line per stage."""
+    """Run the demo into ``out``; (exit code, problems). ``progress`` gets one line per stage.
+    ``isolation`` is where the compiler runs adapter code (default: confined where the sandbox
+    can run, which is Linux; elsewhere ``in_process``, said on ``progress``: the corpus is the
+    repository's own generated files)."""
     out.mkdir(parents=True, exist_ok=True)
     _clean(out)
     live = Progress(progress, out / "work")
+    if isolation is None and not sys.platform.startswith("linux"):
+        isolation = "in_process"
+        live.say(
+            f"the sandbox needs Linux, not {sys.platform}: adapters run in_process (unconfined)"
+        )
     live.setup()
-    document, code = run.run(out, owner_tests=owner_tests, pin_answers=pin, on_stage=live.stage)
+    document, code = run.run(
+        out, owner_tests=owner_tests, pin_answers=pin, isolation=isolation, on_stage=live.stage
+    )
     problems: list[str] = [] if code == 0 else [f"the harness is red: {run.summary(document)}"]
     work = out / "work"
     ctx_graph = work / "memory" / "graph.json"

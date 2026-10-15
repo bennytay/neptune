@@ -72,6 +72,7 @@ def run(
     corpus_name: str = corpus.ACCEPTANCE,
     stages: Sequence[Stage] = STAGES,
     pin_answers: bool = False,
+    isolation: str | None = None,
     on_stage: Callable[[Stage, int, int, Json | None], None] | None = None,
 ) -> tuple[dict[str, Any], int]:
     """Run everything; returns (report, exit code) and writes the report files.
@@ -88,7 +89,9 @@ def run(
     corpus_doc: Json = {"name": corpus_label, "cases": [case.id for case in cases]}
     if corpus_root is None and corpus_name == corpus.ACCEPTANCE:
         corpus_doc.update(acceptance.lock_status())
-    ctx = Context(registry=registry, work=work, cases=cases, pin_answers=pin_answers)
+    ctx = Context(
+        registry=registry, work=work, cases=cases, pin_answers=pin_answers, isolation=isolation
+    )
     up = not services.unreachable()  # only read when a real stage needs the services
     entries: list[Json] = []
     healthy = True

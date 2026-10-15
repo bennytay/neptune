@@ -24,6 +24,7 @@ import hashlib
 import os
 import re
 import stat
+import sys
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -416,13 +417,22 @@ def _hash(root_fd: int, path: str, size: int, *, keep: bool) -> tuple[str, bytes
 
 
 def _pinned(root_fd: int, path: str, parents: dict[str, int]) -> Path:
-    """A path for the compiler's streaming checks that cannot leave the checked tree.
+    """A path for the compiler's streaming checks that cannot leave the checked tree (on Linux).
 
     The file's directory is opened component by component with ``O_NOFOLLOW`` and held open;
     ``/proc/self/fd/N/<name>`` then names that directory, whatever its path names now, and the
-    compiler opens ``<name>`` itself with ``O_NOFOLLOW``. This needs Linux's ``/proc``.
+    compiler opens ``<name>`` itself with ``O_NOFOLLOW``. This needs Linux's ``/proc``; macOS has
+    none, so there the path is the held directory's own (``F_GETPATH``) as it is at the call: the
+    last component is still opened with ``O_NOFOLLOW``, but a directory renamed, or swapped for a
+    symlink, between this call and the open can lead the read outside the tree
+    (``docs/security.md``, "Off Linux").
     """
     head, _, name = path.rpartition("/")
     if head not in parents:
         parents[head] = _open_dir(root_fd, head)
+    if sys.platform == "darwin":
+        import fcntl
+
+        held = fcntl.fcntl(parents[head], fcntl.F_GETPATH, bytes(1024))
+        return Path(os.fsdecode(held.split(b"\0", 1)[0])) / name
     return Path(f"/proc/self/fd/{parents[head]}") / name
