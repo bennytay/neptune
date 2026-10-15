@@ -22,9 +22,9 @@ skipped:
 import errno
 import hashlib
 import os
-import sys
 import re
 import stat
+import sys
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path

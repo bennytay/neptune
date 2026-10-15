@@ -1,4 +1,5 @@
 """Throwaway: why does the ledger refuse the compiled package on macOS?"""
+
 import os
 import sys
 import traceback
@@ -16,12 +17,17 @@ if checked.package is not None:
             getattr(R, name)(fd, checked.package)
             print(name, "ok")
         except Exception:
-            print(name, "FAILED"); traceback.print_exc()
+            print(name, "FAILED")
+            traceback.print_exc()
 try:
-    R.package_rows(str(checked.package_id), checked.manifest, checked.lines); print("package_rows ok")
+    R.package_rows(str(checked.package_id), checked.manifest, checked.lines)
+    print("package_rows ok")
 except Exception:
-    print("package_rows FAILED"); traceback.print_exc()
+    print("package_rows FAILED")
+    traceback.print_exc()
 try:
-    R.thread_rows(checked.lines); print("thread_rows ok")
+    R.thread_rows(checked.lines)
+    print("thread_rows ok")
 except Exception as exc:
-    print("thread_rows FAILED", getattr(exc, "record_id", ""), getattr(exc, "detail", "")); traceback.print_exc()
+    print("thread_rows FAILED", getattr(exc, "record_id", ""), getattr(exc, "detail", ""))
+    traceback.print_exc()
