@@ -22,6 +22,7 @@ skipped:
 import errno
 import hashlib
 import os
+import sys
 import re
 import stat
 from collections.abc import Iterator, Mapping
@@ -420,9 +421,17 @@ def _pinned(root_fd: int, path: str, parents: dict[str, int]) -> Path:
 
     The file's directory is opened component by component with ``O_NOFOLLOW`` and held open;
     ``/proc/self/fd/N/<name>`` then names that directory, whatever its path names now, and the
-    compiler opens ``<name>`` itself with ``O_NOFOLLOW``. This needs Linux's ``/proc``.
+    compiler opens ``<name>`` itself with ``O_NOFOLLOW``. This needs Linux's ``/proc``; macOS has
+    none, so there the path is the held directory's own (``F_GETPATH``) as it is at the call: the
+    last component is still opened with ``O_NOFOLLOW``, but a directory renamed between this call
+    and the open is not caught.
     """
     head, _, name = path.rpartition("/")
     if head not in parents:
         parents[head] = _open_dir(root_fd, head)
+    if sys.platform == "darwin":
+        import fcntl
+
+        held = fcntl.fcntl(parents[head], fcntl.F_GETPATH, bytes(1024))
+        return Path(os.fsdecode(held.split(b"\0", 1)[0])) / name
     return Path(f"/proc/self/fd/{parents[head]}") / name
