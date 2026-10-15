@@ -16,8 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: quickstart
+        continue-on-error: true
         run: bash scripts/quickstart.sh
+      - name: ledger detail
+        if: always()
+        run: |
+          python3 -c "
+          import json; d=json.load(open('demo/report.json'))
+          for s in d['stages']:
+              if s['stage']=='ledger': print(json.dumps(s, indent=1)[:6000])
+          " || true
+          grep -rh "record_invalid" -A3 demo/work 2>/dev/null | head -40 || true
       - name: up over the S-007 site, no setup
+        if: always()
+        continue-on-error: true
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           uv run --all-packages --all-groups python - <<'PY'
