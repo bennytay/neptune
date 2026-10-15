@@ -27,10 +27,10 @@ jobs:
           root = acceptance.materialise(Path("/tmp/corpus"))
           shutil.copytree(root / "sites" / "S-007", "/tmp/S-007")
           PY
-          uv run --all-packages --all-groups python -m harness.up /tmp/S-007 --out /tmp/up-out
+          uv run --all-packages --all-groups python -m harness.up /tmp/S-007 --out /tmp/up-out --isolation in_process
           cat /tmp/up-out/up.md
       - name: neptune ingest
         if: always()
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          uv run neptune ingest /tmp/S-007 -o /tmp/pkg --no-progress; echo "exit $?"
+          uv run neptune ingest /tmp/S-007 -o /tmp/pkg --no-progress --isolation in_process

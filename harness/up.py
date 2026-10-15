@@ -202,6 +202,7 @@ def up(
     deploy: Path | None = None,
     memory_config: Path | None = None,
     csv_header: str = "first_row",
+    isolation: str | None = None,
     stream: object = sys.stderr,
 ) -> int:
     """Run the folder through the stages into ``out``; the exit code (see the module docstring)."""
@@ -221,7 +222,7 @@ def up(
     name = re.sub(r"[^A-Za-z0-9._-]", "_", source.name) or "folder"
     config = adapter_config(source, csv_header)
     case = Case(name, source, deploy=deploy, memory=memory_config, adapter_config=config)
-    ctx = Context(registry=contracts.registry(), work=work, cases=[case])
+    ctx = Context(registry=contracts.registry(), work=work, cases=[case], isolation=isolation)
     entries: list[Json] = []
     healthy = True
     run = stages()
@@ -282,6 +283,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="first_row",
         help="whether each CSV's first row is its header, when the folder has no manifest",
     )
+    parser.add_argument(
+        "--isolation",
+        choices=("subprocess", "in_process"),
+        help="where adapters run: confined (subprocess, the default; needs Linux) or unconfined"
+        " (in_process, for macOS and folders you trust)",
+    )
     args = parser.parse_args(argv)
     source = args.folder.expanduser().resolve()
     out = (args.out or DEFAULT_ROOT / source.name).expanduser().resolve()
@@ -289,6 +296,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     for given in (args.deploy, args.memory_config):
         if given is not None and not given.is_file():
             refused = refused or f"{given} is not a file"
+    if refused is None and args.isolation is None and not sys.platform.startswith("linux"):
+        refused = (
+            f"the sandbox needs Linux, not {sys.platform}: to run the adapters unconfined over a"
+            " folder you trust, add --isolation in_process"
+        )
     if refused is not None:
         sys.stderr.write(f"up: {refused}\n")
         return 2
@@ -299,6 +311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             deploy=args.deploy.resolve() if args.deploy else None,
             memory_config=args.memory_config.resolve() if args.memory_config else None,
             csv_header=args.csv_header,
+            isolation=args.isolation,
         )
     except demo_folder.Refused as error:
         sys.stderr.write(f"up: {error}\n")

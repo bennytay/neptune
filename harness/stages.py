@@ -58,6 +58,10 @@ class Context:
     # thread membership and Context hydrates evidence through it (Platform ADR 0011). ``close``
     # stops its server.
     ledger_uri: str | None = None
+    # Where the compiler runs adapter code (``neptune.runtime.sandbox.Isolation``): None is the
+    # SDK's default, the confined subprocess; ``in_process`` runs it unconfined, where the sandbox
+    # cannot run (it needs Linux). It is the runtime transform's config, so packages record it.
+    isolation: str | None = None
     # Rewrite the case's pinned agent answers from this run instead of checking them (``make
     # demo-pin``; ADR 0011).
     pin_answers: bool = False
@@ -225,6 +229,7 @@ def compiler_real(ctx: Context) -> Outcome:
     """Ingest every case with the compiler's SDK, read each package back and verify it, and
     validate its manifest and receipt against the registry's package-schema."""
     from neptune.runtime.job import JobOptions
+    from neptune.runtime.sandbox import Isolation
     from neptune.sdk import Neptune, NeptuneError
 
     schema = _PackageSchema.latest(ctx.registry)
@@ -237,7 +242,12 @@ def compiler_real(ctx: Context) -> Outcome:
         cases.append(row)
         destination = ctx.package_root(case.id)
         try:
-            options = JobOptions(config=case.adapter_config) if case.adapter_config else None
+            options = None
+            if case.adapter_config or ctx.isolation:
+                options = JobOptions(
+                    config=case.adapter_config or {},
+                    isolation=Isolation(ctx.isolation or Isolation.SUBPROCESS),
+                )
             client = Neptune(ctx.work / "workspaces" / case.id, options=options)
             result = client.ingest(case.sources, destination)
             if not result.committed:
