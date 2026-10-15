@@ -162,6 +162,30 @@ Claude Desktop does not expand `${…}`, so give absolute paths. Add this to `cl
 }
 ```
 
+## Run it on your own folder
+
+Point it at a folder of your files (MCAP or ROS 2 bags, CSV exports, PDFs, URDF, configs). The folder is
+only read; nothing to write first:
+
+```
+make up SRC=~/my-robot-logs
+cd up/my-robot-logs/claude && claude
+```
+
+It ingests the folder, maps every CSV a shipped Deploy preset fits by its columns (CMMS work orders and
+downtime logs, ServiceNow changes, Jira and Linear tickets, syslogs, asset, risk and zone registers,
+requalification tests) and incident-report PDFs, builds the memory graph and writes a Claude Code folder
+over it. `up/my-robot-logs/up.md` says what each stage did and what memory now holds. Over the demo's S-007
+site folder (15 files, no setup) that is 4 runs, 7 machine ids, 23 events (work orders, changes,
+requalification, the incident) in about 5 s.
+
+- **No `neptune.yaml`:** each CSV's first row is read as its header (`--csv-header none` says not). A
+  machine named in two systems stays two ids until you state they are one: `neptune init-manifest SRC`
+  drafts a manifest whose `machines:` aliases do that.
+- **A CSV no preset fits** is ingested and searchable, but not mapped to events. Copy a preset from
+  `packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/`, rename its columns, and pass a
+  declaration with `make up SRC=... ARGS="--deploy my-deploy.json"` (`harness/acceptance/deploy.json` is one).
+
 ## Principles in one breath
 
 Raw evidence is immutable · every value has provenance · missingness is explicit · no silent assumptions about
