@@ -26,5 +26,7 @@ htmlcov/
 
 # `make demo` output, and what the quickstart wires into Claude Code (scripts/quickstart.sh)
 /demo/
+# `make up` output
+/up/
 /.mcp.json
 /.claude/skills/

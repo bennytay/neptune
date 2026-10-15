@@ -12,9 +12,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from harness import acceptance
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 REPO: Final = Path(__file__).resolve().parents[1]
 WORKED_EXAMPLES: Final = REPO / "tests" / "fixtures" / "model"
@@ -32,7 +35,10 @@ class Case:
     ``deploy`` the Deploy mappings the deploy stage runs over that package (none: none to run).
     ``memory`` is Memory's consolidator declaration for the corpus (``--config``), ``snapshot`` the
     graph Memory committed for it (the memory stage must rebuild it byte for byte), and
-    ``answers`` the pinned agent answers the context stage checks (Platform ADR 0011)."""
+    ``answers`` the pinned agent answers the context stage checks (Platform ADR 0011).
+    ``adapter_config`` is each adapter's options by id for the compiler's job
+    (``JobOptions.config``), for a folder whose own manifest does not state them
+    (``harness.up``)."""
 
     id: str
     sources: Path
@@ -41,6 +47,7 @@ class Case:
     memory: Path | None = None
     snapshot: Path | None = None
     answers: Path | None = None
+    adapter_config: Mapping[str, Mapping[str, str]] | None = None
 
 
 def _cases_in(root: Path) -> list[Case]:
