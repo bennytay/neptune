@@ -47,6 +47,9 @@ make up SRC=~/my-robot-logs
 cd up/my-robot-logs/claude && claude
 ```
 
+Without GNU make 3.82+ (macOS ships 3.81), `make up` is
+`uv run --all-packages --all-groups python -m harness.up ~/my-robot-logs`.
+
 It ingests the folder, maps every CSV a shipped Deploy preset fits by its columns (CMMS work orders and
 downtime logs, ServiceNow changes, Jira and Linear tickets, syslogs, asset, risk and zone registers,
 requalification tests) and incident-report PDFs, builds the memory graph and writes a Claude Code folder
