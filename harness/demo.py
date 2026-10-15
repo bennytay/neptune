@@ -349,7 +349,9 @@ def demo(
     live = Progress(progress, out / "work")
     if isolation is None and not sys.platform.startswith("linux"):
         isolation = "in_process"
-        live.say(f"the sandbox needs Linux, not {sys.platform}: adapters run in_process (unconfined)")
+        live.say(
+            f"the sandbox needs Linux, not {sys.platform}: adapters run in_process (unconfined)"
+        )
     live.setup()
     document, code = run.run(
         out, owner_tests=owner_tests, pin_answers=pin, isolation=isolation, on_stage=live.stage
