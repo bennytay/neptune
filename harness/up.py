@@ -19,7 +19,8 @@ setup:
   it no mapping can name a column.
 
 The folder is only read. Everything lands under ``--out`` (default ``up/<folder name>/``,
-git-ignored), which may not be inside the folder:
+git-ignored), which may not be inside the folder, and must be missing, empty or an earlier run's
+(it holds this tool's ``up.json``): nothing else is ever deleted or overwritten. It gets:
 
 - ``graph.json`` and ``sources.json``: the memory graph and its source index;
 - ``up.json`` and ``up.md``: what each stage did and what memory now holds;
@@ -169,7 +170,20 @@ def _refuse(source: Path, out: Path) -> str | None:
         return f"--out {out} is inside {source}: the folder you ingest is only ever read"
     if source.is_relative_to(out):
         return f"{source} is inside --out {out}, which is rewritten"
+    if out.is_symlink() or (out.exists() and not out.is_dir()):
+        return f"--out {out} is not a directory"
+    if out.is_dir() and any(out.iterdir()) and not _ours(out / "up.json"):
+        return f"--out {out} is not empty and holds no up.json this tool wrote; nothing was changed"
     return None
+
+
+def _ours(path: Path) -> bool:
+    """Whether ``path`` is an ``up.json`` this tool wrote (so its folder may be rewritten)."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(document, dict) and set(document) == {"ok", "source", "stages", "memory"}
 
 
 def up(

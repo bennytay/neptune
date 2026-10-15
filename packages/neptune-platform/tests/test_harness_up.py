@@ -72,6 +72,17 @@ def test_the_output_may_not_sit_inside_the_folder_nor_the_folder_inside_it(tmp_p
     assert not any(folder.iterdir())
 
 
+def test_an_output_folder_this_tool_did_not_write_is_refused_and_untouched(tmp_path: Path) -> None:
+    folder, out = tmp_path / "logs", tmp_path / "home"
+    folder.mkdir()
+    (out / "work").mkdir(parents=True)
+    (out / "work" / "thesis.tex").write_text("mine", encoding="utf-8")
+    assert U.main([str(folder), "--out", str(out)]) == 2
+    assert (out / "work" / "thesis.tex").read_text(encoding="utf-8") == "mine"
+    (out / "up.json").write_text('{"ok": true}', encoding="utf-8")  # not this tool's shape
+    assert U.main([str(folder), "--out", str(out)]) == 2
+
+
 def test_a_folder_with_no_setup_reaches_memory_with_runs_machines_and_events(
     site: Path, tmp_path: Path
 ) -> None:
@@ -92,6 +103,7 @@ def test_a_folder_with_no_setup_reaches_memory_with_runs_machines_and_events(
     args = config["mcpServers"]["neptune"]["args"]
     assert args[8] == str((out / "graph.json").resolve())
 
+    assert U._refuse(site, out) is None  # an earlier run's output may be rewritten
     again = tmp_path / "again"
     assert U.up(site, again, stream=None) == 0
     assert (again / "graph.json").read_bytes() == (out / "graph.json").read_bytes()
