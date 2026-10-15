@@ -26,7 +26,8 @@ jobs:
           for s in d['stages']:
               if s['stage']=='ledger': print(json.dumps(s, indent=1)[:6000])
           " || true
-          grep -rh "record_invalid" -A3 demo/work 2>/dev/null | head -40 || true
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run --all-packages --all-groups python .github/scripts/macos_ledger_probe.py demo/work/packages/acceptance-2.3.0 2>&1 | head -60 || true
       - name: up over the S-007 site, no setup
         if: always()
         continue-on-error: true
