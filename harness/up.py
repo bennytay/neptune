@@ -192,13 +192,9 @@ def _ours(path: Path) -> bool:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return isinstance(document, dict) and set(document) == {
-        "ok",
-        "isolation",
-        "source",
-        "stages",
-        "memory",
-    }
+    # ``isolation`` is optional: an earlier version wrote none.
+    keys = {"ok", "source", "stages", "memory"}
+    return isinstance(document, dict) and set(document) - {"isolation"} == keys
 
 
 def up(

@@ -105,6 +105,10 @@ def test_a_folder_with_no_setup_reaches_memory_with_runs_machines_and_events(
     assert args[8] == str((out / "graph.json").resolve())
 
     assert U._refuse(site, out) is None  # an earlier run's output may be rewritten
+    document = json.loads((out / "up.json").read_text(encoding="utf-8"))
+    del document["isolation"]  # as the first version wrote it
+    (out / "up.json").write_text(json.dumps(document), encoding="utf-8")
+    assert U._refuse(site, out) is None
     again = tmp_path / "again"
     assert U.up(site, again, stream=None) == 0
     assert (again / "graph.json").read_bytes() == (out / "graph.json").read_bytes()

@@ -31,7 +31,7 @@ Sources: F1 "cmms/work_orders.csv" ... [E1] F1 row 7, column 3 "Asset ID" ... [E
 >
 > - **Real:** ingest of MCAP, ROS 2 bags, CSV/XLSX, PDF, URDF, YAML configs and more into a deterministic,
 >   cited package; mapping of common CSV exports (CMMS, ServiceNow, Jira, Linear, syslog, registers) by their
->   columns; the memory graph; Claude Code answers with citations. Linux and macOS, tested in CI.
+>   columns; the memory graph; Claude Code answers with citations. Linux, tested on every PR; macOS, nightly.
 > - **Not yet:** a CSV whose columns match no shipped preset is ingested but not turned into events; a robot
 >   named differently in two systems stays two ids until you declare aliases in a `neptune.yaml`; no time
 >   zones unless you state them; on macOS adapters run without the sandbox (it needs Linux); no hosted
