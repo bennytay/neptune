@@ -73,6 +73,10 @@ _MAPPED_NOTHING: Final = re.compile(
 )
 
 
+# Deploy breaking its own contract (a mapped package that does not verify or validate) stays red.
+_CONTRACT_BROKEN: Final = re.compile(r"does not verify|breaks package-schema")
+
+
 def default_deploy() -> Json:
     """A deploy declaration naming every preset and document template Deploy ships."""
     shipped, _ = _shipped_presets()
@@ -89,6 +93,8 @@ def adapter_config(source: Path, csv_header: str) -> dict[str, dict[str, str]] |
     """``csv_header`` for the tabular adapter, unless the folder's manifest states it (or cannot be
     read, which the compiler reports): its statement wins and nothing is said twice."""
     for name in MANIFEST_NAMES:
+        if (source / name).is_symlink():
+            return None  # the compiler refuses it and says why
         if (source / name).is_file():
             try:
                 manifest = parse_bytes((source / name).read_bytes(), name)
@@ -101,12 +107,15 @@ def adapter_config(source: Path, csv_header: str) -> dict[str, dict[str, str]] |
 
 
 def deploy_lenient(ctx: Context) -> Outcome:
-    """The deploy stage, never red: what maps nothing, or fails to map, is a note, and the
-    compiled package flows on alone (the ledger registers a mapped one only when it was written).
-    """
+    """The deploy stage, lenient: what maps nothing, or fails to map, is a note (printed), and
+    the compiled package flows on alone (the ledger registers a mapped one only when it was
+    written). A mapped package that does not verify or validate is Deploy breaking its contract,
+    so it stays red."""
     outcome = deploy_real(ctx)
-    notes = [p for p in outcome.problems if not _MAPPED_NOTHING.search(p)]
-    return Outcome({**outcome.output, "notes": notes})
+    kept = [p for p in outcome.problems if not _MAPPED_NOTHING.search(p)]
+    broken = tuple(p for p in kept if _CONTRACT_BROKEN.search(p))
+    notes = [p for p in kept if p not in broken]
+    return Outcome({**outcome.output, "notes": notes}, broken)
 
 
 def sources_index(ctx: Context) -> Outcome:
@@ -225,6 +234,8 @@ def up(
             entries.append(entry)
             why = f": {entry['problems'][0]}" if entry["problems"] else ""
             say(f"      {entry['status']} {time.monotonic() - started:.1f} s{why}")
+            for note in entry["output"].get("notes") or []:
+                say(f"      note: {note}")
             healthy = healthy and entry["status"] == "ok"
     finally:
         ctx.close()
