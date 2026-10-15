@@ -4,6 +4,7 @@
 name = "neptune-context"
 version = "0.0.1"
 description = "Neptune Context: query language, retrieval and context packets over Memory and the Ledger."
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # Context is Layer 3: it reads the Ledger's catalog API and Memory's graph schema and writes nothing

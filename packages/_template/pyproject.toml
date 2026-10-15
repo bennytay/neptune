@@ -4,6 +4,7 @@
 name = "__PKG_NAME__"
 version = "0.0.1"
 description = "__PKG_NAME__: a Neptune workspace member."
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = []

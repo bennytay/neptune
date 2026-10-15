@@ -4,6 +4,7 @@
 name = "neptune-ledger"
 version = "0.0.1"
 description = "Neptune Ledger: catalog, entity threads, lakehouse and lineage over compiled Neptune packages."
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # psycopg 3 is the PostgreSQL driver for the catalog (ADR 0002). Pinned; bump deliberately.

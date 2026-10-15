@@ -155,4 +155,4 @@ Working here? Read `AGENTS.md` first, then `docs/architecture.md`.
 
 ## License
 
-Not yet chosen. Until a `LICENSE` file exists, all rights reserved.
+[Apache License 2.0](LICENSE).
