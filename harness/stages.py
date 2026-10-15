@@ -224,6 +224,7 @@ class _PackageSchema:
 def compiler_real(ctx: Context) -> Outcome:
     """Ingest every case with the compiler's SDK, read each package back and verify it, and
     validate its manifest and receipt against the registry's package-schema."""
+    from neptune.runtime.job import JobOptions
     from neptune.sdk import Neptune, NeptuneError
 
     schema = _PackageSchema.latest(ctx.registry)
@@ -236,7 +237,9 @@ def compiler_real(ctx: Context) -> Outcome:
         cases.append(row)
         destination = ctx.package_root(case.id)
         try:
-            result = Neptune(ctx.work / "workspaces" / case.id).ingest(case.sources, destination)
+            options = JobOptions(config=case.adapter_config) if case.adapter_config else None
+            client = Neptune(ctx.work / "workspaces" / case.id, options=options)
+            result = client.ingest(case.sources, destination)
             if not result.committed:
                 row["state"] = str(result.state)
                 problems.append(f"{case.id}: the job ended {result.state}, not committed")

@@ -34,7 +34,7 @@ ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check harness demo demo-pin demo-folder
+  contracts-check harness demo demo-pin demo-folder up
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -102,6 +102,10 @@ demo-pin: ## Re-pin harness/acceptance/answers.json from a demo run (review the 
 demo-folder: ## A clean folder for Claude Code over the demo: make demo-folder DIR=<path>
 > @test -n "$(DIR)" || { echo "usage: make demo-folder DIR=<path>" >&2; exit 2; }
 > $(RUN) python -m harness.demo_folder "$(DIR)" --demo "$(DEMO_DIR)"
+
+up: ## Your own folder -> compiler -> Deploy -> Ledger -> Memory -> a Claude Code folder: make up SRC=<folder>
+> @test -n "$(SRC)" || { echo "usage: make up SRC=<folder> [ARGS='--deploy FILE ...']" >&2; exit 2; }
+> $(RUN) python -m harness.up "$(SRC)" $(ARGS)
 
 # The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
 # A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.
