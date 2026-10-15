@@ -1,0 +1,36 @@
+# Throwaway: does the quickstart and `harness.up` run on macOS? (v0.1.0 launch check)
+name: macos-smoke
+on:
+  push:
+    branches: [benjamintay07/macos-smoke]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: quickstart
+        run: bash scripts/quickstart.sh
+      - name: up over the S-007 site, no setup
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run --all-packages --all-groups python - <<'PY'
+          from pathlib import Path
+          import shutil
+          from harness import acceptance
+          root = acceptance.materialise(Path("/tmp/corpus"))
+          shutil.copytree(root / "sites" / "S-007", "/tmp/S-007")
+          PY
+          uv run --all-packages --all-groups python -m harness.up /tmp/S-007 --out /tmp/up-out
+          cat /tmp/up-out/up.md
+      - name: neptune ingest
+        if: always()
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run neptune ingest /tmp/S-007 -o /tmp/pkg --no-progress; echo "exit $?"
