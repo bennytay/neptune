@@ -192,7 +192,13 @@ def _ours(path: Path) -> bool:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return isinstance(document, dict) and set(document) == {"ok", "source", "stages", "memory"}
+    return isinstance(document, dict) and set(document) == {
+        "ok",
+        "isolation",
+        "source",
+        "stages",
+        "memory",
+    }
 
 
 def up(
@@ -246,6 +252,7 @@ def up(
     claims = len(graph.get("claims", []))
     document = {
         "ok": healthy,
+        "isolation": isolation or "subprocess",
         "source": source.name,
         "stages": entries,
         "memory": {
@@ -257,7 +264,10 @@ def up(
         },
     }
     (out / "up.json").write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", "utf-8")
-    (out / "up.md").write_text(summary_markdown(source, entries, held, claims), encoding="utf-8")
+    markdown = summary_markdown(source, entries, held, claims)
+    if isolation == "in_process":
+        markdown += "\nAdapters ran in_process: unconfined, as `--isolation in_process` asked.\n"
+    (out / "up.md").write_text(markdown, encoding="utf-8")
     if not healthy or not index_file.is_file():
         say(f"up: RED after {time.monotonic() - begun:.0f} s; see {out / 'up.md'}")
         return 1

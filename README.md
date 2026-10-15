@@ -31,10 +31,11 @@ Sources: F1 "cmms/work_orders.csv" ... [E1] F1 row 7, column 3 "Asset ID" ... [E
 >
 > - **Real:** ingest of MCAP, ROS 2 bags, CSV/XLSX, PDF, URDF, YAML configs and more into a deterministic,
 >   cited package; mapping of common CSV exports (CMMS, ServiceNow, Jira, Linear, syslog, registers) by their
->   columns; the memory graph; Claude Code answers with citations. Linux, tested in CI.
+>   columns; the memory graph; Claude Code answers with citations. Linux and macOS, tested in CI.
 > - **Not yet:** a CSV whose columns match no shipped preset is ingested but not turned into events; a robot
 >   named differently in two systems stays two ids until you declare aliases in a `neptune.yaml`; no time
->   zones unless you state them; macOS untested; no hosted service; pre-alpha APIs.
+>   zones unless you state them; on macOS adapters run without the sandbox (it needs Linux); no hosted
+>   service; pre-alpha APIs.
 > - **Want it on your fleet's data?** We are onboarding design partners: open an issue.
 
 ## Run it on your own folder
@@ -47,8 +48,10 @@ make up SRC=~/my-robot-logs
 cd up/my-robot-logs/claude && claude
 ```
 
-Without GNU make 3.82+ (macOS ships 3.81), `make up` is
-`uv run --all-packages --all-groups python -m harness.up ~/my-robot-logs`.
+**On macOS** (make 3.81, and the adapter sandbox needs Linux), run it with `uv` and say the adapters may
+run unconfined over a folder you trust:
+`uv run --all-packages --all-groups python -m harness.up ~/my-robot-logs --isolation in_process`.
+The quickstart's demo does this by itself on macOS, and says so.
 
 It ingests the folder, maps every CSV a shipped Deploy preset fits by its columns (CMMS work orders and
 downtime logs, ServiceNow changes, Jira and Linear tickets, syslogs, asset, risk and zone registers,

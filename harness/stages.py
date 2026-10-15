@@ -60,7 +60,8 @@ class Context:
     ledger_uri: str | None = None
     # Where the compiler runs adapter code (``neptune.runtime.sandbox.Isolation``): None is the
     # SDK's default, the confined subprocess; ``in_process`` runs it unconfined, where the sandbox
-    # cannot run (it needs Linux). It is the runtime transform's config, so packages record it.
+    # cannot run (it needs Linux). It is the runtime transform's config: a package names it where
+    # the runtime records a finding.
     isolation: str | None = None
     # Rewrite the case's pinned agent answers from this run instead of checking them (``make
     # demo-pin``; ADR 0011).
