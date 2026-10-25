@@ -1061,6 +1061,7 @@ def test_archive_members_inside_bzip2_and_xz_streams(lake: Lake) -> None:
 # --- Bounded documents and Parquet --------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_documents_past_the_limit_are_refused_and_parsing_costs_no_tree(lake: Lake) -> None:
     import tracemalloc
 

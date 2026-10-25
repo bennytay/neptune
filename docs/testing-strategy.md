@@ -11,7 +11,9 @@ Status: policy agreed 2026-09-30; suites grow with each milestone.
 | `tests/golden/` | — | serialised canonical packages and receipts compared byte-for-byte |
 | `tests/fixtures/` | — | real small files + generator scripts; organised by format |
 
-`make test-fast` excludes `slow`. CI runs everything.
+`make test-fast` excludes `slow`. Tests run in parallel (pytest-xdist, `PYTEST_WORKERS`, default 4); a test
+that shares state takes an `xdist_group`. PR CI runs `make check` (no `slow` tests); main and the nightly
+run `make check-all`. In CI an unmarked test slower than 60 s fails: mark it `slow`.
 
 Milestone gates run their scenarios as tests too: `tests/integration/test_m2_gate_stress.py` is the
 M2 gate's (`docs/reviews/m2-stress-test.md`), through the real job and sandbox. Scale is measured by
