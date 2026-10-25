@@ -89,6 +89,12 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("note", (), "value", "many"),
         Predicate("finding", (), "value", "many"),  # inferred by site/insights.py
         Predicate("same_as", (), "ref", "many"),
+        # Actions (site/actions.py): a proposal (inferred), its approval (stated, the confirm's
+        # copy), the message as sent, and whether the target's state followed (inferred).
+        Predicate("proposed_action", ("robot", "person"), "value", "many"),
+        Predicate("intent", ("robot", "person"), "value", "many"),
+        Predicate("dispatched", ("robot",), "value", "many"),
+        Predicate("outcome", ("robot",), "value", "many"),
         Predicate("report_interval", ("source",), "value", "one"),
         # An unmapped file (spec §12): its rows or blocks verbatim, and the "not mapped" marker.
         Predicate("text", (), "value", "many"),

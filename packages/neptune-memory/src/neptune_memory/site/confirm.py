@@ -51,7 +51,8 @@ def confirm(
 def stated_from_confirm(proposal_fact: Fact, confirm_entry: LogEntry, seq: int) -> Fact:
     """The stated copy a yes produces: the proposal's citations plus the confirm line.
 
-    ``seq`` is the confirm entry's log position, which names its line in the segment.
+    ``seq`` is the confirm entry's log position, which names its line in the segment. An approved
+    ``proposed_action`` becomes an ``intent`` (site/actions.py).
     """
     assert confirm_entry.confirm is not None
     if confirm_entry.confirm.answer != "yes":
@@ -61,8 +62,12 @@ def stated_from_confirm(proposal_fact: Fact, confirm_entry: LogEntry, seq: int) 
         locator=f"confirm line {(seq - 1) % SEGMENT_SIZE + 1}",
         quote=f"{confirm_entry.confirm.by}: yes",
     )
+    predicate = (
+        "intent" if proposal_fact.predicate == "proposed_action" else proposal_fact.predicate
+    )
     return replace(
         proposal_fact,
+        predicate=predicate,
         kind="stated",
         source="confirm",
         citations=(*proposal_fact.citations, cite),

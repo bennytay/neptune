@@ -8,6 +8,9 @@
   appends ``seen`` and the facts through ``build.Appender``, the same mapper path as ``build``,
   without a rebuild. It also polls ``static/``: when a file appears or changes, ``static/`` is
   ingested again and only the facts the log lacks are appended.
+- Actions (``actions.py``): ``live`` steps a ``Watcher`` that logs each dispatched action's
+  outcome and prints every action event; ``publish`` answers commands to robots like a fleet
+  manager (``Simulator``). Commands (``.../instantActions``, ``.../order``) are never recorded.
 - ``captured`` reads the recording back in arrival order, so ``build`` over it gives the same log
   (``Seam(messages=captured)``).
 - ``broker`` runs a pure-pip MQTT broker (amqtt), so a laptop needs no Docker.
@@ -27,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+from neptune_memory.site.actions import Simulator, Watcher, is_command
 from neptune_memory.site.build import Appender, Seam
 from neptune_memory.site.log import SEGMENT_SIZE
 from neptune_memory.site.replay import FeedMessage, messages, pace
@@ -90,8 +94,14 @@ def publish(
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     """Publish the corpus feed in arrival order: messages before ``start`` at once, then paced
-    at ``speed`` x site time, up to ``until``. Returns how many were published."""
+    at ``speed`` x site time, up to ``until``. Returns how many were published.
+
+    It also answers commands to robots (``actions.Simulator``): a paused AMR reports ``PAUSED``,
+    one sent to a zone drives there."""
+    simulator = Simulator()
     client = _client("neptune-publish")
+    client.on_connect = lambda c, *_: [c.subscribe(t, qos=QOS) for t in simulator.TOPICS]
+    client.on_message = lambda _c, _u, m: simulator.receive(m.topic, m.payload)
     _connect(client, broker)
     client.loop_start()
     count = 0
@@ -99,6 +109,7 @@ def publish(
     info = None
     try:
         for message in _paced(stream, speed, start, sleep):
+            message = simulator.apply(message)
             info = client.publish(message.topic, _envelope(message), qos=QOS)
             count += 1
         if info is not None:
@@ -218,6 +229,7 @@ def live(
             for earlier in captured(site_dir):  # an earlier run's recording comes first
                 log.message(earlier)
             recorder = Recorder(site_dir)
+            watcher = Watcher(site_dir)
             files = _static_files(site_dir)
             say(f"live: static ingested; log at seq {log.log.seq}")
             next_poll = time.monotonic() + poll
@@ -227,10 +239,12 @@ def live(
                 except queue.Empty:
                     pass
                 else:
-                    message = recorder.record(topic, payload)
+                    message = None if is_command(topic) else recorder.record(topic, payload)
                     if message is not None:
                         log.message(message)
                         arrived += 1
+                for event in watcher.step(log.log):  # actions: what was proposed, approved, done
+                    say(f"live: action {event}")
                 if time.monotonic() >= next_poll:
                     next_poll = time.monotonic() + poll
                     now = _static_files(site_dir)

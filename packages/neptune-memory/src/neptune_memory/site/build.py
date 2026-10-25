@@ -134,7 +134,7 @@ class Appender:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        self.log.close()
+        self.log.__exit__(None, None, None)
 
     def static(self) -> None:
         """Ingest ``static/`` and append its facts."""
