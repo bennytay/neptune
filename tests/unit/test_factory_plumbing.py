@@ -220,7 +220,9 @@ def test_factory_merge_asks_for_a_refresh_when_main_changed_what_the_pr_reaches(
         main_files=("src/neptune/model/time.py",),
     )
     assert result.returncode == 1
-    assert "needs a refresh (main changed inputs to neptune)" in result.stderr
+    assert "needs a refresh (main changed inputs to neptune, neptune-context, neptune-memory)" in (
+        result.stderr
+    )
 
 
 @pytest.mark.parametrize(
