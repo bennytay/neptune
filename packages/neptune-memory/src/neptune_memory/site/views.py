@@ -45,6 +45,9 @@ if TYPE_CHECKING:
 STALE_AFTER = 3
 """A source is stale once its last ``seen`` is older than this many report intervals."""
 
+PROPOSALS = ("same_as", "proposed_action")
+"""Inferred predicates a person answers (``confirm``, ``actions.approve``/``reject``)."""
+
 FORWARD = ("feeds",)
 """Topology predicates whose impact flows subject -> object; the rest flow object -> subject
 (a zone's rule, a cell's robot, a robot's task, what depends on a thing)."""
@@ -196,11 +199,11 @@ class SiteModel:
         return fact_id not in self.confirms
 
     def pending(self) -> list[Fact]:
-        """Inferred ``same_as`` proposals nobody has answered yet."""
+        """Inferred ``same_as`` and ``proposed_action`` proposals nobody has answered yet."""
         return [
             f
             for fid, f in self.facts.items()
-            if f.predicate == "same_as" and f.kind == "inferred" and self.live(fid)
+            if f.predicate in PROPOSALS and f.kind == "inferred" and self.live(fid)
         ]
 
     def now(self, subject: str | None = None) -> list[Reading]:

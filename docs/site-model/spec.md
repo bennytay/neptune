@@ -221,7 +221,7 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 **Site `site:p7`, "Plant 7 assembly hall"**
 - **Clock:** `P7 local` (zone `Europe/Berlin`, stated, never applied).
 - **Two shift-A windows:** 2026-10-19 06:00–14:00 (last good shift) and 2026-10-20 06:00–14:00.
-- **Places:** areas `area:inbound`, `area:assembly`; `cell:c3` (arm cell); zones `zone:aisle-a`,
+- **Places:** areas `area:inbound`, `area:assembly`; `cell:c3` (arm cell); zones `zone:aisle-a`, `zone:aisle-b`,
   `zone:c3-fence`, `zone:charging`.
 - **Machines:** conveyor `machine:cv-2` (PLC, Sparkplug-like); arm `robot:arm-c3` (controller log); AMRs
   `robot:amr-01..03` (fleet manager, VDA 5050-like state).
@@ -447,3 +447,26 @@ feeds:                                   # one entry per envelope `source`
   added, so a confirm from the page while `live` runs never reuses a `seq`.
 - An actions panel calls `neptune_memory.site.actions` (`pending`, `approve`, `reject`, #212) when that
   module exists, and is hidden otherwise.
+## 15. Actions (#212)
+
+- **Propose:** `site/actions.py` `propose(site_dir, action, target, reason, cites, zone=None)` and MCP
+  `neptune_site_propose_action` log an **inferred** `<target> proposed_action "<verb> [<zone>]"`, source
+  `neptune.actions`. Verbs: `pause`, `resume`, `send_to` (a known zone), `cancel_task` (robots), `page`
+  (a person). It cites `actions/proposed.jsonl` line N (quote = the reason), then the cited facts' citations.
+- **Approve / reject:** a person only, by `python -m neptune_memory.site approve|reject <site_dir> <id>`
+  or the web view (`approve(site_dir, id, by)`, `reject(...)`, `pending(site_dir)`). No MCP tool approves.
+  Each is a `confirm` entry; the fold turns a yes into a **stated** `intent` (the proposal's citations plus
+  the confirm line).
+- **Dispatch:** an approved robot action goes over MQTT as VDA 5050-style `instantActions`
+  (`startPause`, `stopPause`, `cancelOrder`) or an `order` (one node: the zone) on the target's own topic
+  (its `.../state` topic with the last segment swapped). The message as sent is a line of
+  `actions/dispatched.jsonl`; the log gets an **observed** `dispatched` fact citing it and the approval.
+  `page` is logged only.
+- **Outcome:** `live` follows the log and appends an **inferred** `outcome`: `done` at the first observed
+  change the action asked for (`mode = PAUSED`, `in_zone = <zone>` …), or `not observed within 120 s` of
+  site time. `dispatched` and `outcome` text opens with the proposal id. `neptune_site_actions` lists them.
+- **Simulator:** `publish` answers commands: a paused AMR reports `operatingMode: PAUSED`; `send_to` drives
+  it into the zone 30 site seconds later. Commands are never recorded as feed messages.
+- Actions never touch safety functions; they only go through the fleet manager's protocol.
+- Several processes append to one log (`live`, the MCP server, the CLI): `FactLog` holds
+  `.neptune/log.lock` per append and picks up the others' entries first.

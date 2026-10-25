@@ -109,7 +109,7 @@ WEB_PORT ?= 8765
 SITE_URL = http://127.0.0.1:$(WEB_PORT)/
 site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x from START
 > $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
-> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_READY)"
+> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_DIR)/actions" "$(SITE_READY)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
 > @echo "Web view: $(SITE_URL)"

@@ -33,3 +33,11 @@ or guesswork:
   `python -m neptune_memory.site draft-mapping <site_dir> <file>`, **show the user the draft**, fix
   what they say, save it into `<site_dir>/static/neptune.mappings.yaml` (spec §12), then
   `python -m neptune_memory.site build <site_dir>`. Never save a mapping the user has not seen.
+- **Actions: you propose, a person approves.** `neptune_site_propose_action` (`pause`, `resume`,
+  `send_to` with a `zone`, `cancel_task`, or `page` a person) logs an inferred proposal with your
+  reason and the `fact:` ids behind it. Nothing moves until a person runs
+  `python -m neptune_memory.site approve <site_dir> <id>` (or uses the web view); no tool approves,
+  so never claim an action happened because you proposed it. `neptune_site_actions` shows each one:
+  pending, rejected, intent (approved, by whom), dispatched (the message as sent) and outcome (the
+  observed change, or not observed in time). Actions never touch safety functions (e-stops,
+  protective stops, interlocks, speed limits): they only go through the fleet manager's protocol.
