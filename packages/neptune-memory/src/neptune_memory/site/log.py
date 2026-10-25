@@ -122,3 +122,44 @@ class FactLog:
             self._segment = segment
         assert self._handle is not None
         return self._handle
+
+
+class Tail:
+    """Reads a log as it grows: each ``new()`` returns the complete entries appended since the
+    last call. ``None`` means the log was started again (a fresh ``build``): read it from scratch.
+    """
+
+    def __init__(self, site_dir: Path) -> None:
+        self.root = log_dir(Path(site_dir))
+        self.seq = 0
+        self._segment: Path | None = None
+        self._inode = 0
+        self._offset = 0
+
+    def new(self) -> list[LogEntry] | None:
+        segments = sorted(self.root.glob("segment-*.jsonl"))
+        if self._segment is not None:
+            if self._segment not in segments or self._segment.stat().st_ino != self._inode:
+                return None
+            segments = [s for s in segments if s >= self._segment]
+        out: list[LogEntry] = []
+        for segment in segments:
+            if segment != self._segment:
+                self._segment, self._inode, self._offset = segment, segment.stat().st_ino, 0
+            with segment.open("rb") as handle:
+                handle.seek(self._offset)
+                data = handle.read()
+            if len(data) == 0 and segment.stat().st_size < self._offset:
+                return None
+            complete = data[: data.rfind(b"\n") + 1]
+            for line in complete.splitlines():
+                try:
+                    entry = LogEntry.from_json(json.loads(line))
+                except (ValueError, KeyError):  # read from mid-line: the log was replaced
+                    return None
+                if entry.seq != self.seq + 1:
+                    return None
+                self.seq = entry.seq
+                out.append(entry)
+            self._offset += len(complete)
+        return out

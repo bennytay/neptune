@@ -6,8 +6,9 @@ cited lines and a ``Sources:`` footer. ``python -m neptune_context.mcp --site <s
 them, alone or beside the v2 tools (``--memory`` / ``--packets`` / ``--url``), which stay as they
 are.
 
-The model is folded from ``<site_dir>/.neptune/log`` and folded again whenever a log segment
-grows, so a live replay shows up in the next answer.
+The model is folded from ``<site_dir>/.neptune/log`` once; each tool call then applies the entries
+appended since (``log.Tail``), so a live site (``python -m neptune_memory.site live``) shows up in
+the next answer without a restart. A log started again (a fresh ``build``) is folded from scratch.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from neptune_memory.site import query, views
+from neptune_memory.site import log, query, views
 from neptune_memory.site.render import render
 
 from neptune_context import __version__
@@ -136,30 +137,31 @@ SITE_TOOLS: Final[dict[str, SiteTool]] = {
         {"query": _STR},
         ("query",),
     ),
+    PREFIX + "changes": SiteTool(
+        query.changes,
+        "What changed on the live site since a log seq: every fact appended after since_seq, in "
+        "log order, cited. Each answer's header gives its log seq; pass it back next time.",
+        {"since_seq": {"type": "integer", "minimum": 0}},
+        (),
+    ),
 }
 
 
-def _load_views(site_dir: Path) -> SiteModel:
-    return views.load(site_dir)
-
-
 class SiteTools:
-    """The site tools over one site directory, refolding the log when it grows."""
+    """The site tools over one site directory, applying new log entries before each call."""
 
-    def __init__(self, site_dir: Path, loader: Callable[[Path], SiteModel] = _load_views) -> None:
+    def __init__(self, site_dir: Path) -> None:
         self.site_dir = Path(site_dir)
-        self._loader = loader
-        self._model: SiteModel | None = None
-        self._stamp: tuple[tuple[str, int], ...] | None = None
+        self._tail = log.Tail(self.site_dir)
+        self._model = views.SiteModel.empty()
 
     def model(self) -> SiteModel:
-        stamp = tuple(
-            (p.name, p.stat().st_size)
-            for p in sorted((self.site_dir / ".neptune" / "log").glob("segment-*.jsonl"))
-        )
-        if self._model is None or stamp != self._stamp:
-            self._model, self._stamp = self._loader(self.site_dir), stamp
-        return self._model
+        new = self._tail.new()
+        if new is None:  # the log was started again (a fresh build): fold it from scratch
+            self._tail = log.Tail(self.site_dir)
+            self._model = views.SiteModel.empty()
+            new = self._tail.new() or []
+        return views.fold(new, self._model)
 
     def tools(self) -> list[types.Tool]:
         read_only = types.ToolAnnotations(

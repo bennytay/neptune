@@ -9,6 +9,10 @@ requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = ["neptune"]
 
+# The live site (#202): an MQTT client, and a pure-pip broker so `make site-live` needs no Docker.
+[dependency-groups]
+live = ["amqtt>=0.11", "paho-mqtt>=2.1"]
+
 # `memory consolidate | rebuild | dump` (MVL-132, ADR 0016).
 [project.scripts]
 memory = "neptune_memory.cli:main"
@@ -46,3 +50,8 @@ markers = [
   "integration: exercises multiple components against real fixtures",
   "slow: takes more than a few seconds; excluded by `make test-fast`",
 ]
+
+# amqtt (the live demo's broker, #202) ships no type information.
+[[tool.mypy.overrides]]
+module = ["amqtt", "amqtt.*"]
+ignore_missing_imports = true
