@@ -1,0 +1,128 @@
+{
+  "about": "M1 gold questions (docs/site-model/spec.md §10). Each call is a site query (spec §8); expect lists items the answer must contain (object may be omitted) and the corpus files it must cite. Wording is never checked.",
+  "questions": [
+    {
+      "id": "G1",
+      "question": "What is blocked right now (10:35 on 2026-10-20) and why?",
+      "calls": [
+        {"tool": "impact", "args": {"entity": "machine:cv-2", "at": "2026-10-20T10:35:00"}},
+        {"tool": "state_at", "args": {"entity": "robot:amr-03", "at": "2026-10-20T10:35:00"}}
+      ],
+      "expect": [
+        {"subject": "machine:cv-2", "predicate": "mode", "object": "stopped", "kind": "observed", "state": "known"},
+        {"subject": "machine:cv-2", "predicate": "health", "object": "fault:JAM_PE3", "kind": "observed", "state": "known"},
+        {"subject": "machine:cv-2", "predicate": "feeds", "object": "cell:c3", "kind": "stated", "state": "known"},
+        {"subject": "robot:arm-c3", "predicate": "mode", "object": "idle_starved", "kind": "observed", "state": "known"},
+        {"subject": "task:T-8812", "predicate": "task_state", "object": "waiting", "kind": "observed", "state": "known"},
+        {"subject": "robot:amr-03", "predicate": "battery", "kind": "observed", "state": "stale"}
+      ],
+      "cites": ["feed/plc_cv2.jsonl", "feed/arm_c3.jsonl", "feed/fleet.jsonl", "static/layout.yaml"]
+    },
+    {
+      "id": "G2",
+      "question": "Why did cell C3's output drop between 10:00 and 11:15 on 2026-10-20?",
+      "calls": [
+        {"tool": "timeline", "args": {"entity": "machine:cv-2", "start": "2026-10-20T10:00:00", "end": "2026-10-20T11:15:00"}},
+        {"tool": "timeline", "args": {"entity": "robot:arm-c3", "start": "2026-10-20T10:00:00", "end": "2026-10-20T11:15:00"}},
+        {"tool": "timeline", "args": {"entity": "cell:c3", "start": "2026-10-20T10:00:00", "end": "2026-10-20T11:15:00", "predicates": ["parts_out"]}},
+        {"tool": "find", "args": {"predicate": "work_order", "obj": "work_order:WO-5530"}}
+      ],
+      "expect": [
+        {"subject": "machine:cv-2", "predicate": "health", "object": "fault:JAM_PE3", "kind": "observed"},
+        {"subject": "robot:arm-c3", "predicate": "mode", "object": "idle_starved", "kind": "observed"},
+        {"subject": "robot:arm-c3", "predicate": "mode", "object": "protective_stop", "kind": "observed"},
+        {"subject": "cell:c3", "predicate": "parts_out", "kind": "observed"},
+        {"subject": "work_order:WO-5530", "predicate": "wo_cause", "object": "belt tracking off", "kind": "stated"}
+      ],
+      "cites": ["feed/plc_cv2.jsonl", "feed/arm_c3.jsonl", "static/cmms/work_orders.csv"]
+    },
+    {
+      "id": "G3",
+      "question": "Who is qualified and on shift to reset arm-c3 at 10:41 on 2026-10-20?",
+      "calls": [
+        {"tool": "find", "args": {"predicate": "requires_qualification", "obj": "qualification:arm-reset-c3"}},
+        {"tool": "find", "args": {"predicate": "holds_qualification", "obj": "qualification:arm-reset-c3", "at": "2026-10-20T10:41:00"}},
+        {"tool": "state_at", "args": {"entity": "person:okafor", "at": "2026-10-20T10:41:00"}},
+        {"tool": "state_at", "args": {"entity": "person:lindqvist", "at": "2026-10-20T10:41:00"}}
+      ],
+      "expect": [
+        {"subject": "document:SOP-C3-02", "predicate": "requires_qualification", "object": "qualification:arm-reset-c3", "kind": "stated"},
+        {"subject": "person:okafor", "predicate": "holds_qualification", "object": "qualification:arm-reset-c3", "kind": "stated"},
+        {"subject": "person:okafor", "predicate": "on_break", "kind": "stated", "state": "known"},
+        {"subject": "person:lindqvist", "predicate": "holds_qualification", "object": "qualification:conveyor-lockout", "kind": "stated"}
+      ],
+      "cites": ["static/docs/SOP-C3-02.pdf", "static/roster/qualifications.csv", "static/roster/shift_roster.csv"]
+    },
+    {
+      "id": "G4",
+      "question": "What changed on CV-2, cell C3 and the AMRs since the last good shift (2026-10-19 shift A)?",
+      "calls": [
+        {"tool": "diff", "args": {"start": "2026-10-19T14:00:00", "end": "2026-10-20T06:00:00"}}
+      ],
+      "expect": [
+        {"subject": "machine:cv-2", "predicate": "work_order", "object": "work_order:WO-5521", "kind": "stated"},
+        {"subject": "machine:cv-2", "predicate": "setpoint", "object": 0.95, "kind": "observed"},
+        {"subject": "machine:cv-2", "predicate": "change", "object": "change:CHG-311", "kind": "stated"},
+        {"subject": "robot:amr-03", "predicate": "firmware", "object": "4.2.0", "kind": "observed"}
+      ],
+      "cites": ["static/cmms/work_orders.csv", "static/changes/changes.csv", "feed/plc_cv2.jsonl", "feed/fleet.jsonl"]
+    },
+    {
+      "id": "G5",
+      "question": "Was the CV-2 jam cleared as plant regulation PSR-12 §4.2 requires?",
+      "calls": [
+        {"tool": "state_at", "args": {"entity": "rule:psr-12-4.2"}},
+        {"tool": "state_at", "args": {"entity": "work_order:WO-5530"}},
+        {"tool": "find", "args": {"predicate": "holds_qualification", "obj": "qualification:conveyor-lockout", "at": "2026-10-20T10:20:00"}}
+      ],
+      "expect": [
+        {"subject": "rule:psr-12-4.2", "predicate": "rule_text", "kind": "stated"},
+        {"subject": "rule:psr-12-4.2", "predicate": "requires_qualification", "object": "qualification:conveyor-lockout", "kind": "stated"},
+        {"subject": "work_order:WO-5530", "predicate": "wo_by", "object": "person:lindqvist", "kind": "stated"},
+        {"subject": "work_order:WO-5530", "predicate": "wo_loto", "object": "yes", "kind": "stated"},
+        {"subject": "person:lindqvist", "predicate": "holds_qualification", "object": "qualification:conveyor-lockout", "kind": "stated"}
+      ],
+      "cites": ["static/docs/PSR-12_excerpt.pdf", "static/cmms/work_orders.csv", "static/roster/qualifications.csv"]
+    },
+    {
+      "id": "G6",
+      "question": "What don't we know, or know only stale, at 10:35 on 2026-10-20?",
+      "calls": [
+        {"tool": "gaps", "args": {"at": "2026-10-20T10:35:00"}}
+      ],
+      "expect": [
+        {"subject": "robot:amr-03", "predicate": "battery", "state": "stale"},
+        {"subject": "robot:amr-03", "predicate": "mode", "state": "stale"},
+        {"subject": "robot:amr-02", "predicate": "same_as", "object": "robot:MR-1142", "kind": "inferred", "state": "pending"}
+      ],
+      "cites": ["feed/fleet.jsonl", "static/cmms/assets.csv"]
+    },
+    {
+      "id": "G7",
+      "question": "Is fleet robot amr-02 the same machine as CMMS asset MR-1142? (before and after the operator confirms)",
+      "calls": [
+        {"tool": "resolve", "args": {"name": "MR-1142"}},
+        {"tool": "confirm", "args": {"answer": "yes"}},
+        {"tool": "resolve", "args": {"name": "MR-1142"}}
+      ],
+      "expect": [
+        {"subject": "robot:amr-02", "predicate": "same_as", "object": "robot:MR-1142", "kind": "inferred", "state": "pending"},
+        {"subject": "robot:amr-02", "predicate": "same_as", "object": "robot:MR-1142", "kind": "stated", "state": "known"}
+      ],
+      "cites": ["feed/fleet.jsonl", "static/cmms/assets.csv"]
+    },
+    {
+      "id": "G8",
+      "question": "What does the shift whiteboard say about CV-2, and what does its SOP state for belt tension?",
+      "calls": [
+        {"tool": "state_at", "args": {"entity": "machine:cv-2", "at": "2026-10-20T10:35:00"}},
+        {"tool": "find", "args": {"predicate": "states_limit", "obj": "45–55 N"}}
+      ],
+      "expect": [
+        {"subject": "machine:cv-2", "predicate": "note", "kind": "inferred"},
+        {"subject": "document:SOP-CV-04", "predicate": "states_limit", "object": "45–55 N", "kind": "stated"}
+      ],
+      "cites": ["static/photos/whiteboard_2026-10-20.png", "static/docs/SOP-CV-04_rev-B.pdf"]
+    }
+  ]
+}
