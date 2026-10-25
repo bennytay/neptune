@@ -88,6 +88,9 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("note", (), "value", "many"),
         Predicate("same_as", (), "ref", "many"),
         Predicate("report_interval", ("source",), "value", "one"),
+        # An unmapped file (spec §12): its rows or blocks verbatim, and the "not mapped" marker.
+        Predicate("text", (), "value", "many"),
+        Predicate("unmapped", ("document",), "value", "one"),
     )
 }
 

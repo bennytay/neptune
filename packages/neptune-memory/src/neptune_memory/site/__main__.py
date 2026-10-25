@@ -68,6 +68,13 @@ def _confirm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _draft_mapping(args: argparse.Namespace) -> int:
+    from neptune_memory.site.draft import draft_mapping
+
+    sys.stdout.write(draft_mapping(args.site_dir, args.file))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m neptune_memory.site")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +107,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     confirm.add_argument("--yes-all", action="store_true", help="confirm every pending proposal")
     confirm.add_argument("--by", default="operator")
     confirm.set_defaults(run=_confirm)
+
+    draft = commands.add_parser(
+        "draft-mapping", help="print a draft mapping entry for an unmapped CSV or JSONL file"
+    )
+    draft.add_argument("site_dir", type=Path)
+    draft.add_argument("file", type=Path, help="the file, relative to site_dir or absolute")
+    draft.set_defaults(run=_draft_mapping)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)

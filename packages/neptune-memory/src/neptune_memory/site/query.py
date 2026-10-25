@@ -327,7 +327,8 @@ def diff(model: SiteModel, start: str, end: str, entities: list[str] | None = No
 
 
 def gaps(model: SiteModel, at: str | None = None) -> Answer:
-    """What is stale, unknown or ambiguous at t, and every pending proposal."""
+    """What is stale, unknown or ambiguous at t, every pending proposal, and every file the
+    site's mapping file does not map (spec §12)."""
     t = _at(model, at)
     answer = _new("gaps", model, t)
     for reading in model.state_at(t):
@@ -335,6 +336,10 @@ def gaps(model: SiteModel, at: str | None = None) -> Answer:
             answer.add_cell(reading)
     for fact in model.pending():
         answer.add(fact, "pending")
+    for fact in _live(model):
+        if fact.predicate == "unmapped":
+            answer.add(fact)
+            answer.gaps.append(f"{fact.citations[0].file}: not mapped")
     return answer
 
 

@@ -5,7 +5,8 @@ feed messages. Both start a fresh log: the corpus is the source, ``.neptune/`` i
 
 Static files go first: ``static/`` is ingested by the compiler (in process), the package is read
 back through ``neptune.sdk.read_package`` (memory never imports ``neptune.store``), and each
-record goes through ``mappers.map_record``; then ``static/layout.yaml`` through
+record goes through ``mappers.map_record`` with the site's mapping file
+(``static/neptune.mappings.yaml``, spec §12); then ``static/layout.yaml`` through
 ``mappers.map_layout``. Then the feed: for each ``replay.messages`` message, a ``seen`` entry and
 the facts ``mappers.map_message`` returns. Whenever a new ``serial`` lands, ``identity`` proposes
 any ``same_as`` it now implies (inferred, pending until someone confirms it), so a live replay
@@ -56,17 +57,19 @@ class Seam:
     messages: Callable[[Path], Iterable[Any]]
 
     @staticmethod
-    def default() -> Seam:
-        """``neptune_memory.site.mappers`` and ``neptune_memory.site.replay``.
+    def default(site_dir: Path) -> Seam:
+        """``neptune_memory.site.mappers`` with the site's mapping file, and
+        ``neptune_memory.site.replay``.
 
         ``map_message`` carries one ``last`` state through the build, so feed facts are logged
         only when a value changes for (subject, predicate, source) (spec §4)."""
         mappers: Any = importlib.import_module("neptune_memory.site.mappers")
         replayer: Any = importlib.import_module("neptune_memory.site.replay")
+        mapping = mappers.load_mapping(Path(site_dir))
         return Seam(
             map_layout=mappers.map_layout,
-            map_record=mappers.map_record,
-            map_message=functools.partial(mappers.map_message, last={}),
+            map_record=functools.partial(mappers.map_record, mapping=mapping),
+            map_message=functools.partial(mappers.map_message, mapping=mapping, last={}),
             messages=replayer.messages,
         )
 
@@ -75,7 +78,7 @@ def build(site_dir: Path, *, until: str | None = None, seam: Seam | None = None)
     """Write the site's log: static first, then the feed up to ``until`` (site time, inclusive).
     Returns the log directory."""
     site_dir = Path(site_dir)
-    seam = seam or Seam.default()
+    seam = seam or Seam.default(site_dir)
     with _fresh(site_dir) as log:
         out = _Writer(log)
         _static(site_dir, out, seam)
@@ -94,7 +97,7 @@ def replay(
 ) -> Path:
     """``build``, live: sleep ``Δt / speed`` between feed messages, flushing each as it lands."""
     site_dir = Path(site_dir)
-    seam = seam or Seam.default()
+    seam = seam or Seam.default(site_dir)
     with _fresh(site_dir) as log:
         out = _Writer(log)
         _static(site_dir, out, seam)
@@ -146,7 +149,7 @@ def _append_message(out: _Writer, seam: Seam, message: Message) -> None:
     log = out.log
     log.seen(message.source, message.t)
     robot = _fleet_robot(message)
-    if robot is not None:  # one fleet source reports every AMR; freshness is per robot
+    if robot is not None:  # one fleet source reports every robot; freshness is per robot
         log.seen(f"{message.source}/{robot}", message.t)
     out.emit(seam.map_message(message))
 
@@ -175,8 +178,8 @@ class _Writer:
 
 
 def _fleet_robot(message: Message) -> str | None:
-    """The robot a fleet state message is about: ``uagv/v2/<site>/<robot>/state``."""
+    """The robot a VDA 5050 state message is about: ``uagv/<version>/<site>/<robot>/state``."""
     parts = str(getattr(message, "topic", "")).split("/")
-    if message.source == "fleet" and len(parts) == 5 and parts[0] == "uagv" and parts[4] == "state":
+    if len(parts) == 5 and parts[0] == "uagv" and parts[4] == "state":
         return parts[3]
     return None

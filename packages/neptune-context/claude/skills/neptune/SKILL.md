@@ -20,6 +20,11 @@ what changed, what is unknown) with them, not with the tools below:
 - Each line ends `[S<n>]`; the `Sources:` footer gives the file and line, row or page. Keep the key
   and name the file in your answer. Say `stale`, `unknown`, `ambiguous`, `pending` and `inferred`
   as the line does; a pending proposal is not a fact until an operator confirms it.
+- A file `neptune_site_gaps` lists as `not mapped` is still searchable with
+  `neptune_site_search_evidence`, but none of its rows are facts yet. To map it: run
+  `python -m neptune_memory.site draft-mapping <site_dir> <file>`, **show the user the draft**, fix
+  what they say, save it into `<site_dir>/static/neptune.mappings.yaml` (spec §12), then
+  `python -m neptune_memory.site build <site_dir>`. Never save a mapping the user has not seen.
 
 Neptune holds typed, cited claims about machines of every kind (arms, mobile bases, legged robots,
 drones, vessels, vehicles, fleets), their sites, runs, incidents and configurations. The `neptune`

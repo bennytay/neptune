@@ -1,5 +1,5 @@
-# ruff: noqa: E501
-"""The static half of the Plant 7 corpus: layout, CMMS, change log, roster (spec §9).
+# ruff: noqa: E501, RUF001
+"""The static half of the Plant 7 corpus: layout, mapping file, CMMS, change log, roster (spec §9).
 
 Every file is plain text written verbatim, so the bytes are the same on every host. The
 column headers are the contract with the mappers (#184).
@@ -47,6 +47,114 @@ sources:
   - {id: photos, name: "Shift photos, recorded model extraction"}
 """
 
+MAPPINGS = r"""# How Plant 7's files become facts (spec §12). The mappers know no site; this file does.
+mappings: 1
+
+types:
+  - {contains: robot, type: robot}
+  - {type: machine}
+tags:
+  table: cmms/assets.csv
+  name: Name
+  type: Type
+
+tables:
+  - file: cmms/assets.csv
+    source: cmms
+    subject: "{Type|type}:{Asset}"
+    facts:
+      - {predicate: name, column: Name}
+      - {predicate: serial, column: Serial}
+  - file: cmms/work_orders.csv
+    source: cmms
+    subject: "work_order:{WO}"
+    time: Opened
+    facts:
+      - {subject: "{Equipment|tag}", predicate: work_order, column: Equipment, ref: "work_order:{WO}"}
+      - {predicate: wo_opened, column: Opened}
+      - {predicate: wo_closed, column: Closed}
+      - {predicate: wo_problem, column: Problem}
+      - {predicate: wo_action, column: Action}
+      - {predicate: wo_cause, column: Cause}
+      - {predicate: wo_loto, column: LOTO}
+      - {predicate: wo_note, column: Note}
+      - {predicate: wo_by, column: Done by, ref: "person:{Done by|lower}"}
+  - file: changes/changes.csv
+    source: cmms
+    subject: "change:{Change}"
+    time: When
+    facts:
+      - {subject: "{Equipment|tag}", predicate: change, column: Change, ref: "change:{Change}"}
+      - {predicate: name, column: Parameter}
+      - {predicate: change_from, column: From, unit: "{Unit}"}
+      - {predicate: change_to, column: To, unit: "{Unit}"}
+      - {predicate: change_by, column: Requested by, ref: "person:{Requested by|lower}"}
+      - {predicate: change_reason, column: Reason}
+  - file: roster/shift_roster.csv
+    source: roster
+    subject: "person:{Person|lower}"
+    facts:
+      - {predicate: name, column: Person, once: Person}
+      - {predicate: has_role, column: Role, ref: "role:{Role|slug}", once: Person}
+      - {predicate: on_shift, column: Shift, ref: "shift:{Shift}", time: Start, until: End}
+      - {predicate: on_break, column: Break start, value: break, time: Break start, until: Break end}
+  - file: roster/qualifications.csv
+    source: roster
+    subject: "person:{Person|lower}"
+    time: Granted
+    facts:
+      - {predicate: holds_qualification, column: Qualification, ref: "qualification:{Qualification}"}
+
+documents:
+  - file: docs/*.pdf
+    source: docs
+    id: "document:{stem|until:_}"
+    rule:
+      pattern: '^§?\s*(\d+(?:\.\d+)+)\s+(.+)$'
+      id: "rule:{id|lower}-{1}"
+      text: 2
+    lift:
+      - pattern: '(?<![\w.–-])\d+(?:\.\d+)?\s?[–-]\s?\d+(?:\.\d+)?\s?(?:N|Nm|mm|cm|m|m/s|kg|bar|°C|%)(?![\w/])'
+        predicate: states_limit
+        about: document
+      - terms: {table: roster/qualifications.csv, column: Qualification}
+        predicate: requires_qualification
+        ref: qualification
+        about: rule
+
+extractions:
+  - file: photos/*.extraction.json
+    source: photos
+    predicate: note
+
+feeds:
+  - source: plc.cv2
+    decoder: sparkplug
+    subject: machine:cv-2
+    fields:
+      state: mode
+      alarm: health
+      speed_setpoint: setpoint
+      "*/parts_out": {predicate: parts_out, subject: cell:c3}
+  - source: fleet
+    decoder: vda5050
+    subject: "robot:{topic[-2]}"
+    fields:
+      serialNumber: serial
+      version: firmware
+      operatingMode: mode
+      batteryState.batteryCharge: {predicate: battery, unit: "%"}
+      errors: health
+      zone: {predicate: in_zone, ref: zone}
+      orderId: {predicate: current_task, state: orderState}
+  - source: arm.c3
+    decoder: controller_log
+    subject: robot:arm-c3
+    fields:
+      mode: mode
+      fault: health
+"""
+
 ASSETS = """\
 Asset,Name,Type,Serial,Location
 MR-1141,Conveyor CV-2,conveyor,SN-31107,Assembly hall
@@ -84,6 +192,7 @@ Lindqvist,conveyor-lockout,2025-06-23
 
 FILES: dict[str, str] = {
     "static/layout.yaml": LAYOUT,
+    "static/neptune.mappings.yaml": MAPPINGS,
     "static/cmms/assets.csv": ASSETS,
     "static/cmms/work_orders.csv": WORK_ORDERS,
     "static/changes/changes.csv": CHANGES,
