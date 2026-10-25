@@ -7,7 +7,9 @@ one starts; nothing is rewritten.
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Literal
 
@@ -56,8 +58,9 @@ def last_seq(site_dir: Path) -> int:
 class FactLog:
     """A writer that appends entries to a site's log, numbering them as it goes.
 
-    Use it as a context manager; ``flush`` makes what was appended visible to readers at once
-    (a live replay calls it after each message).
+    Use it as a context manager. Each entry is written and flushed under a lock on the log, and
+    a writer that finds the log grown by another (``live`` running while the web view appends a
+    ``confirm``) numbers on from the log's last ``seq``, so two writers never reuse one.
     """
 
     def __init__(self, site_dir: Path) -> None:
@@ -67,6 +70,8 @@ class FactLog:
         self.seq = last_seq(self.site_dir)
         self._handle: IO[str] | None = None
         self._segment: Path | None = None
+        self._size = 0
+        self._lock = (self.root.parent / "log.lock").open("a")
 
     def __enter__(self) -> FactLog:
         return self
@@ -83,17 +88,32 @@ class FactLog:
         self, entry_type: Literal["fact", "seen", "confirm"], payload: Fact | Seen | Confirm
     ) -> LogEntry:
         """Number ``payload`` with the next ``seq`` and write it as one line."""
-        seq = self.seq + 1
-        entry = LogEntry(
-            seq=seq,
-            type=entry_type,
-            fact=payload if isinstance(payload, Fact) else None,
-            seen=payload if isinstance(payload, Seen) else None,
-            confirm=payload if isinstance(payload, Confirm) else None,
-        )
-        self._writer(seq).write(canonical(entry.to_json()) + "\n")
-        self.seq = seq
+        fcntl.flock(self._lock.fileno(), fcntl.LOCK_EX)
+        try:
+            self._catch_up()
+            seq = self.seq + 1
+            entry = LogEntry(
+                seq=seq,
+                type=entry_type,
+                fact=payload if isinstance(payload, Fact) else None,
+                seen=payload if isinstance(payload, Seen) else None,
+                confirm=payload if isinstance(payload, Confirm) else None,
+            )
+            handle = self._writer(seq)
+            handle.write(canonical(entry.to_json()) + "\n")
+            handle.flush()
+            self._size = os.fstat(handle.fileno()).st_size
+            self.seq = seq
+        finally:
+            fcntl.flock(self._lock.fileno(), fcntl.LOCK_UN)
         return entry
+
+    def _catch_up(self) -> None:
+        """Another writer appended since this one last did: number on from the log's end."""
+        segment = self._segment
+        if segment is None or not segment.exists() or segment.stat().st_size != self._size:
+            self.close()
+            self.seq = last_seq(self.site_dir)
 
     def fact(self, fact: Fact) -> LogEntry:
         return self.append("fact", fact)
@@ -113,6 +133,9 @@ class FactLog:
             self._handle.close()
             self._handle = None
             self._segment = None
+
+    def __del__(self) -> None:
+        self._lock.close()
 
     def _writer(self, seq: int) -> IO[str]:
         segment = segment_path(self.root, seq)
