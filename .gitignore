@@ -30,3 +30,5 @@ htmlcov/
 /up/
 /.mcp.json
 /.claude/skills/
+# `make site-demo` output
+/site-demo/
