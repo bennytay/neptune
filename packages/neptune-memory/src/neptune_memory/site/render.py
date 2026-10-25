@@ -24,7 +24,14 @@ def render(answer: Answer) -> str:
     head.append(f"log seq {answer.as_of_seq}")
     lines = [" · ".join(head)]
     day = (answer.at or "")[:10]
-    lines += [_item(item, day) for item in answer.items]
+    headings: dict[int, list[str]] = {}
+    for index, title in answer.sections:
+        headings.setdefault(index, []).append(title)
+    for index, item in enumerate(answer.items):
+        lines += [f"{title}:" for title in headings.pop(index, [])]
+        lines.append(_item(item, day))
+    for titles in headings.values():  # sections with nothing after them
+        lines += [f"{title}: none" for title in titles]
     if answer.columns:
         lines.append(" | ".join(answer.columns))
         lines += [" | ".join(_cell(v) for v in row) for row in answer.rows]

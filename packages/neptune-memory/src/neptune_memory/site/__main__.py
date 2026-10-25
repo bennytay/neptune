@@ -115,6 +115,17 @@ def _broker(args: argparse.Namespace) -> int:
     return 0
 
 
+def _insights(args: argparse.Namespace) -> int:
+    from neptune_memory.site.insights import append, insights
+    from neptune_memory.site.render import render
+    from neptune_memory.site.views import load
+
+    new = append(args.site_dir)
+    _say(f"{len(new)} new findings appended to the log")
+    sys.stdout.write(render(insights(load(args.site_dir))))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m neptune_memory.site")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -175,6 +186,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     broker = commands.add_parser("broker", help="run a local MQTT broker (amqtt) for the demo")
     broker.add_argument("--broker", default=DEFAULT_BROKER, help="where to listen")
     broker.set_defaults(run=_broker)
+
+    insights = commands.add_parser(
+        "insights", help="append the deterministic findings (inferred) to the log; idempotent"
+    )
+    insights.add_argument("site_dir", type=Path)
+    insights.set_defaults(run=_insights)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)

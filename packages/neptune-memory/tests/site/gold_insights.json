@@ -1,0 +1,44 @@
+{
+  "about": "Insight gold questions for Plant 7 (#203). Each call is insights.insights or insights.shift_report; expect lists items the answers must contain. A finding is matched by its rule (the text it opens with) and the entity refs it names, never by its wording; cites lists the corpus files the answers must cite.",
+  "questions": [
+    {
+      "id": "I1",
+      "question": "What did the CV-2 jam hold up, at 10:10 on 2026-10-20?",
+      "calls": [
+        {"tool": "insights", "args": {"at": "2026-10-20T10:10:00"}}
+      ],
+      "expect": [
+        {"subject": "machine:cv-2", "predicate": "finding", "kind": "inferred", "rule": "starvation chain", "mentions": ["machine:cv-2", "robot:arm-c3", "task:T-8812", "robot:amr-01", "robot:amr-02"]}
+      ],
+      "cites": ["feed/plc_cv2.jsonl", "feed/arm_c3.jsonl", "feed/fleet.jsonl", "static/layout.yaml"]
+    },
+    {
+      "id": "I2",
+      "question": "Could anyone reset arm-c3 after its protective stop at 10:41 on 2026-10-20?",
+      "calls": [
+        {"tool": "insights", "args": {"at": "2026-10-20T10:50:00"}}
+      ],
+      "expect": [
+        {"subject": "robot:arm-c3", "predicate": "finding", "kind": "inferred", "rule": "qualification gap", "mentions": ["qualification:arm-reset-c3", "person:okafor", "on break"]}
+      ],
+      "cites": ["feed/arm_c3.jsonl", "static/docs/SOP-C3-02.pdf", "static/roster/qualifications.csv", "static/roster/shift_roster.csv"]
+    },
+    {
+      "id": "I3",
+      "question": "Give me the shift A handover report for 2026-10-20.",
+      "calls": [
+        {"tool": "shift_report", "args": {"shift_id": "shift:A"}}
+      ],
+      "expect": [
+        {"subject": "machine:cv-2", "predicate": "health", "object": "fault:JAM_PE3", "kind": "observed"},
+        {"subject": "work_order:WO-5530", "predicate": "wo_cause", "object": "belt tracking off", "kind": "stated"},
+        {"subject": "machine:cv-2", "predicate": "finding", "kind": "inferred", "rule": "starvation chain"},
+        {"subject": "robot:arm-c3", "predicate": "finding", "kind": "inferred", "rule": "qualification gap"},
+        {"subject": "robot:amr-03", "predicate": "finding", "kind": "inferred", "rule": "stale source"},
+        {"subject": "machine:cv-2", "predicate": "finding", "kind": "inferred", "rule": "change before fault", "mentions": ["change:CHG-311"]},
+        {"subject": "work_order:WO-5530", "predicate": "finding", "kind": "inferred", "rule": "regulation check", "mentions": ["rule:psr-12-4.2", "person:lindqvist"]}
+      ],
+      "cites": ["feed/plc_cv2.jsonl", "feed/fleet.jsonl", "static/changes/changes.csv", "static/cmms/work_orders.csv", "static/docs/PSR-12_excerpt.pdf", "static/roster/shift_roster.csv"]
+    }
+  ]
+}
