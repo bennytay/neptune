@@ -1,5 +1,8 @@
 # Developer workflow
 
+> **Since 2026-10-25:** work is tracked in GitHub Issues and the demo rules in `AGENTS.md` apply. Where this
+> document describes Linear, MVL-N branches, contract bumps or multi-track coordination, `AGENTS.md` wins.
+
 Status: agreed 2026-09-30; software-factory mode since 2026-10-01 (MVL-74). `AGENTS.md` carries the short
 form; this is the reference.
 
