@@ -121,7 +121,7 @@ def propose(
     if not cites or missing:
         raise ValueError(f"cite at least one fact id from the site model; unknown: {missing}")
     at = model.clock()
-    record = {"action": action, "target": target, "zone": zone, "reason": reason}
+    record: dict[str, Any] = {"action": action, "target": target, "zone": zone, "reason": reason}
     record |= {"cites": cites, "by": by, "at": at}
     support = [c for fid in cites for c in model.facts[fid].citations]
     citations = (_record(site_dir, PROPOSED, record, reason), *dict.fromkeys(support))
@@ -212,7 +212,8 @@ def actions(model: SiteModel, ids: Iterable[str] | None = None) -> Answer:
         if wanted is not None and action.id not in wanted:
             continue
         state: Literal["pending", "known"] = "pending" if action.status == "pending" else "known"
-        answer.add(action.proposal, state, relation=f"proposed, {action.status}")
+        relation = "proposed" if state == "pending" else f"proposed, {action.status}"
+        answer.add(action.proposal, state, relation=relation)
         if action.intent is not None:
             answer.add(action.intent, relation=f"intent, approved by {action.by}")
         if action.dispatched is not None:
@@ -313,7 +314,12 @@ def _message(
     }
     short = action.id.removeprefix("fact:")
     if action.verb == "send_to":
-        node = {"nodeId": action.zone, "sequenceId": 0, "released": True, "actions": []}
+        node: dict[str, Any] = {
+            "nodeId": action.zone,
+            "sequenceId": 0,
+            "released": True,
+            "actions": [],
+        }
         order = {"orderId": f"neptune-{short}", "orderUpdateId": 0, "nodes": [node], "edges": []}
         return f"{base}/order", header | order
     instant = {"actionType": INSTANT[action.verb], "actionId": short, "blockingType": "HARD"}

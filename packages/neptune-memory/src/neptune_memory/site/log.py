@@ -70,6 +70,8 @@ class FactLog:
         self._lock = os.open(self.root.parent / "log.lock", os.O_RDWR | os.O_CREAT, 0o644)
         self._handle: IO[str] | None = None
         self._segment: Path | None = None
+        self.seq = 0
+        self._end = 0
         self._sync()
 
     def __enter__(self) -> FactLog:

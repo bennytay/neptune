@@ -143,7 +143,7 @@ START ?= 2026-10-20T09:55:00
 SITE_READY = $(SITE_DIR)/.neptune/live.ready
 site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x from START
 > $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
-> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_READY)"
+> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_DIR)/actions" "$(SITE_READY)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
 > @$(SITE_CMD) broker --broker "$(BROKER)" & b=$$!; \
