@@ -137,5 +137,16 @@ def _feed(site_dir: Path, seam: Seam, until: str | None) -> Iterable[Message]:
 
 def _append_message(log: FactLog, seam: Seam, message: Message) -> None:
     log.seen(message.source, message.t)
+    robot = _fleet_robot(message)
+    if robot is not None:  # one fleet source reports every AMR; freshness is per robot
+        log.seen(f"{message.source}/{robot}", message.t)
     for fact in seam.map_message(message):
         log.fact(fact)
+
+
+def _fleet_robot(message: Message) -> str | None:
+    """The robot a fleet state message is about: ``uagv/v2/<site>/<robot>/state``."""
+    parts = str(getattr(message, "topic", "")).split("/")
+    if message.source == "fleet" and len(parts) == 5 and parts[0] == "uagv" and parts[4] == "state":
+        return parts[3]
+    return None

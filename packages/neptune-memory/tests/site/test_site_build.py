@@ -106,3 +106,10 @@ def test_site_replay_paces_and_matches_build(tmp_path: Path) -> None:
     replay(live, speed=2.0, seam=SEAM, sleep=sleeps.append)
     assert sleeps == [1.0, 14.0]
     assert _log_bytes(live) == _log_bytes(built)
+
+
+def test_site_build_fleet_messages_are_seen_per_robot() -> None:
+    from neptune_memory.site.build import _fleet_robot
+
+    assert _fleet_robot(StubMessage("t", "fleet", "uagv/v2/p7/amr-03/state")) == "amr-03"
+    assert _fleet_robot(StubMessage("t", "plc.cv2", "spBv1.0/P7/DDATA/cv2-edge/cv2")) is None
