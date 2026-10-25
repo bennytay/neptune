@@ -87,6 +87,7 @@ neptune confirm (yes/no) ──────────────────�
 | `wo_action`, `wo_cause`, `wo_by`, `wo_loto` | work_order → text/person | one | stated (CMMS) |
 | `change` | machine/robot → change | many | stated (change log) |
 | `note` | any → text | many | inferred (photo) until confirmed |
+| `finding` | any → text | many | inferred (insight rules, §8a) |
 | `same_as` | any → same type | many | inferred proposal → stated on confirm |
 | `report_interval` | source → value seconds | one | stated (layout) |
 
@@ -181,6 +182,33 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
     mirrors the Python arguments and returns `render(answer)`.
   - They are enabled by `python -m neptune_context.mcp --site <site_dir>`.
   - v2 tools stay as they are.
+
+## 8a. Insights (`site/insights.py`, #203)
+
+- **Rules, not a model.** Each rule reads the views through the generic vocabulary and topology, never a
+  site's ids, and writes **inferred** facts: predicate `finding`, `source="neptune.insights"`, `model=None`.
+  A finding's text opens with its rule, and it cites the citations of the facts that support it.
+  - **starvation chain:** a `fault:` health, then something downstream (topology, robots in a reached zone,
+    their tasks) goes idle, starved, waiting or blocked within 120 s.
+  - **qualification gap:** during a fault, no on-shift, not-on-break person holds a qualification that a
+    document or rule requires. The document or rule must name the entity (one of its stated names) or cover
+    its zone.
+  - **stale source:** a source, or one fleet device, is silent for more than 3 × `report_interval` while
+    other sources keep reporting.
+  - **change before fault:** a `change`, `work_order`, `setpoint` or `firmware` change on the same entity in
+    the 24 h before a fault. This is a correlation, never a cause.
+  - **regulation check:** a work order against a rule clause that shares its words. It checks lockout (when
+    the clause names it) and the qualification of the person who did the work.
+- `findings(model, at)` reads only what was true by `at`. `insights(model, at)` and
+  `shift_report(model, shift_id | start, end)` return `Answer`s. The report sets `Answer.sections`, and
+  `render` prints those as headings.
+- `python -m neptune_memory.site insights <site_dir>` appends the findings the log does not hold yet. It is
+  idempotent.
+- `sql` also has `downtime(entity, state, start, "end", seconds, cause, work_order, fact_id)`,
+  `utilisation(robot, mode, seconds)` (only time the source was reporting) and
+  `fault_clear_time(entity, fault, start, "end", seconds, fact_id)`.
+- **MCP:** `neptune_site_insights {at}` and `neptune_site_shift_report {shift_id | start, end}`. Gold:
+  `tests/site/gold_insights.json`.
 
 ## 9. The live-site corpus (`site/corpus/`, `site/replay.py`, #182)
 

@@ -121,10 +121,11 @@ SITE_DIR ?= site-demo
 SPEED ?= 60
 SITE := $(RUN) python -m neptune_memory.site
 SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
-site-demo: ## Site model: generate the Plant 7 corpus, build the fact log, confirm, print the MCP command
+site-demo: ## Site model: generate the Plant 7 corpus, build the fact log, confirm, log insights, print the MCP command
 > $(SITE) generate "$(SITE_DIR)"
 > $(SITE) build "$(SITE_DIR)"
 > $(SITE) confirm "$(SITE_DIR)" --yes-all --by demo-operator
+> $(SITE) insights "$(SITE_DIR)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
 
