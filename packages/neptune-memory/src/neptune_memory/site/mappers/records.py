@@ -24,6 +24,7 @@ file (its path under ``static/``) picks the mapping entry; this module knows no 
 
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -62,18 +63,20 @@ def map_record(record: Any, package: Any, mapping: Mapping) -> list[Fact]:
         if entry is None:
             return _unmapped_row(path, record, row) if path.endswith(TABLE_SUFFIXES) else []
         return [] if row is None else _table(entry, row, index, mapping)
+    if isinstance(record, DocumentBlock | ConfigurationSnapshot) and record.id in index.json_rows:
+        table = mapping.match("tables", path)  # a JSON table, read as configuration or as text
+        out: list[Fact] = []
+        for row in index.json_rows[record.id] if table is not None else []:
+            out.extend(_table(table or {}, row, index, mapping))
+        return out
     if isinstance(record, DocumentBlock):
+        if mapping.match("tables", path) is not None:
+            return []
         entry = mapping.match("documents", path)
         if entry is None:
             return _unmapped_block(path, record, index)
         return _document_block(entry, path, record, index, mapping)
     if isinstance(record, ConfigurationSnapshot):
-        table = mapping.match("tables", path)
-        if table is not None:
-            out: list[Fact] = []
-            for row in index.json_rows.get(record.id, []):
-                out.extend(_table(table, row, index, mapping))
-            return out
         entry = mapping.match("extractions", path)
         if entry is not None:
             return _extraction(entry, path, index.config.get(record.id, []), index, mapping)
@@ -91,7 +94,7 @@ class _Index:
     blocks: dict[str, tuple[int, int]] = field(default_factory=dict)  # block id -> page, block
     config: dict[str, list[ConfigurationValue]] = field(default_factory=dict)
     rows: dict[str, list[_Row]] = field(default_factory=dict)  # path -> data rows, in order
-    json_rows: dict[str, list[_Row]] = field(default_factory=dict)  # snapshot id -> its rows
+    json_rows: dict[str, list[_Row]] = field(default_factory=dict)  # record id -> JSON rows
     register: tuple[tuple[str, str], ...] = ()  # (name, type) per `tags` register row
     _first: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
 
@@ -155,15 +158,33 @@ def _index(package: Any, mapping: Mapping) -> _Index:
         if path is not None and row is not None:
             index.rows.setdefault(path, []).append(row)
     tags = mapping.tags
-    for snapshot in snapshots:  # JSON tables: the compiler reads them as configuration
-        path = index.paths.get(str(snapshot.provenance.evidence.source))
+
+    def json_table(record: Any, leaves: Iterable[tuple[tuple[Any, ...], str]]) -> None:
+        path = index.paths.get(str(record.provenance.evidence.source))
         entry = None if path is None else mapping.match("tables", path)
         if path is not None and (entry is not None or tags.get("table") == path):
             rows_path = (entry or {}).get("rows") or (tags.get("rows") if entry is None else None)
-            values = index.config.get(snapshot.id, [])
-            rows = _json_rows(f"{STATIC}/{path}", values, rows_path)
-            index.json_rows[snapshot.id] = rows
+            rows = _json_rows(f"{STATIC}/{path}", leaves, rows_path)
+            index.json_rows[record.id] = rows
             index.rows.setdefault(path, []).extend(rows)
+
+    # A JSON table reaches the package as configuration values, or as one text document.
+    for snapshot in snapshots:
+        values = index.config.get(snapshot.id, [])
+        json_table(snapshot, [(v.path, v.text.value) for v in values if isinstance(v.text, Known)])
+    documents: dict[str, list[DocumentBlock]] = defaultdict(list)
+    for (document, _), blocks in sorted(pages.items()):
+        documents[document].extend(sorted(blocks, key=lambda b: b.order))
+    for blocks in documents.values():
+        path = index.paths.get(str(blocks[0].provenance.evidence.source), "")
+        if path.endswith(".json"):
+            text = "\n".join(b.text.value for b in blocks if isinstance(b.text, Known))
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                continue
+            first = min(blocks, key=lambda b: b.order)
+            json_table(first, _leaves(parsed, ()))
     if "table" in tags:
         names = index.column(str(tags["table"]), str(tags["name"]))
         types = index.column(str(tags["table"]), str(tags["type"]))
@@ -271,22 +292,31 @@ class _Row:
         return Fact(subject, predicate, obj, valid_from, valid_to, kind, source, (cite,))
 
 
-def _json_rows(file: str, values: Iterable[ConfigurationValue], rows_path: Any) -> list[_Row]:
+def _leaves(value: Any, path: tuple[Any, ...]) -> list[tuple[tuple[Any, ...], str]]:
+    """Every scalar in parsed JSON with its path; text as is, other scalars as JSON."""
+    if isinstance(value, dict):
+        return [leaf for key, item in value.items() for leaf in _leaves(item, (*path, key))]
+    if isinstance(value, list):
+        return [leaf for i, item in enumerate(value) for leaf in _leaves(item, (*path, i))]
+    return [(path, value if isinstance(value, str) else json.dumps(value))]
+
+
+def _json_rows(
+    file: str, leaves: Iterable[tuple[tuple[Any, ...], str]], rows_path: Any
+) -> list[_Row]:
     """A JSON file's rows: the objects of the array at dotted ``rows_path`` (or the top-level
     array, or the whole object as one row); columns are dotted paths, cited ``json <pointer>``."""
     prefix = tuple(str(rows_path).split(".")) if rows_path else ()
     rows: dict[int, list[tuple[str, str, str]]] = {}
-    for value in values:
-        path = value.path
-        head = tuple(str(p) for p in path[: len(prefix)])
-        if head != prefix or not isinstance(value.text, Known):
+    for path, text in leaves:
+        if tuple(str(p) for p in path[: len(prefix)]) != prefix:
             continue
         rest = path[len(prefix) :]
         index, column = (rest[0], rest[1:]) if rest and isinstance(rest[0], int) else (0, rest)
         if column:
             pointer = "/" + "/".join(str(p) for p in path)
             name = ".".join(str(p) for p in column)
-            rows.setdefault(index, []).append((name, str(value.text.value), f"json {pointer}"))
+            rows.setdefault(index, []).append((name, str(text), f"json {pointer}"))
     return [_Row(file, i + 1, "json", cells) for i, cells in sorted(rows.items())]
 
 

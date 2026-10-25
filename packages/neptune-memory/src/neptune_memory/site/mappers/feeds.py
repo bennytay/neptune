@@ -180,14 +180,8 @@ def _fault(value: Any) -> str:
     return str(value or "")
 
 
-def _readings(msg: FeedMessage, entry: dict[str, Any], mapping: Mapping) -> list[_Reading]:
-    fields: dict[str, Any] = {
-        str(name): spec if isinstance(spec, dict) else {"predicate": spec}
-        for name, spec in (entry.get("fields") or {}).items()
-    }
-    decode = DECODERS[str(entry.get("decoder", "json"))]
-
-    extra: dict[str, str] = {}
+def _lookup(msg: FeedMessage, extra: dict[str, str]) -> Callable[[str], str]:
+    """Template names in a feed: ``source``, ``topic``, ``topic[N]``, ``payload.a.b``, extras."""
 
     def lookup(name: str) -> str:
         if name in extra:
@@ -202,6 +196,28 @@ def _readings(msg: FeedMessage, entry: dict[str, Any], mapping: Mapping) -> list
             return str(_path(msg.payload, name.removeprefix("payload.")))
         raise KeyError(name)
 
+    return lookup
+
+
+def device(msg: FeedMessage, mapping: Mapping) -> str | None:
+    """The device one message reports for, when its feed names it per message
+    (``robot:{topic[-2]}`` -> ``amr-01``): freshness is then per device. ``None`` otherwise."""
+    entry = mapping.feed(msg.source)
+    subject = str((entry or {}).get("subject", ""))
+    if "{" not in subject:
+        return None
+    return render(subject, _lookup(msg, {}), mapping).split(":", 1)[-1]
+
+
+def _readings(msg: FeedMessage, entry: dict[str, Any], mapping: Mapping) -> list[_Reading]:
+    fields: dict[str, Any] = {
+        str(name): spec if isinstance(spec, dict) else {"predicate": spec}
+        for name, spec in (entry.get("fields") or {}).items()
+    }
+    decode = DECODERS[str(entry.get("decoder", "json"))]
+
+    extra: dict[str, str] = {}
+    lookup = _lookup(msg, extra)
     default = render(entry.get("subject", ""), lookup, mapping)
     out: list[_Reading] = []
     for name, value, sent_unit, quote, names in decode(msg, list(fields)):

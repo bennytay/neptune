@@ -55,6 +55,8 @@ class Seam:
     map_record: Callable[[Any, Any], Iterable[Fact]]  # (record, IngestPackage)
     map_message: Callable[[Any], Iterable[Fact]]
     messages: Callable[[Path], Iterable[Any]]
+    device: Callable[[Any], str | None] = lambda message: None
+    """The device a message reports for, if its feed names one per message (spec §12)."""
 
     @staticmethod
     def default(site_dir: Path) -> Seam:
@@ -71,6 +73,7 @@ class Seam:
             map_record=functools.partial(mappers.map_record, mapping=mapping),
             map_message=functools.partial(mappers.map_message, mapping=mapping, last={}),
             messages=replayer.messages,
+            device=functools.partial(mappers.device, mapping=mapping),
         )
 
 
@@ -148,9 +151,9 @@ def _feed(site_dir: Path, seam: Seam, until: str | None) -> Iterable[Message]:
 def _append_message(out: _Writer, seam: Seam, message: Message) -> None:
     log = out.log
     log.seen(message.source, message.t)
-    robot = _fleet_robot(message)
-    if robot is not None:  # one fleet source reports every robot; freshness is per robot
-        log.seen(f"{message.source}/{robot}", message.t)
+    device = seam.device(message)
+    if device is not None:  # one source reports for many devices; freshness is per device
+        log.seen(f"{message.source}/{device}", message.t)
     out.emit(seam.map_message(message))
 
 
@@ -175,11 +178,3 @@ class _Writer:
                 if proposal.id not in self.proposed:
                     self.proposed.add(proposal.id)
                     self.log.fact(proposal)
-
-
-def _fleet_robot(message: Message) -> str | None:
-    """The robot a VDA 5050 state message is about: ``uagv/<version>/<site>/<robot>/state``."""
-    parts = str(getattr(message, "topic", "")).split("/")
-    if len(parts) == 5 and parts[0] == "uagv" and parts[4] == "state":
-        return parts[3]
-    return None
