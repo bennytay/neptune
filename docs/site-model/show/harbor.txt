@@ -1,8 +1,8 @@
 
 === Neptune site-show: Harbor DC, live at SPEED x (3-minute demo) ===
 
-0:00  Open the web view (URL below). The feed starts at 10:02 site time: humanoids and the sorter
-      in the sort hall, goods-to-person robots in the pick aisle, a legged inspector on its dock.
+0:00  Open the web view (URL below). The feed starts at 10:02 site time: the sorter and two humanoids
+      in the sortation hall, goods-to-person robots in storage, a legged inspector on patrol.
       SORT-1, INSP-1 and AMR-17 sit under the map as "records only" (CMMS ids). Under "Pending
       confirmation", click "Yes, same" on AMR-17 / gtp-03 and they become one glyph.
 0:45  At about 10:12 site time SORT-1 trips on overtemp (red); hum-01 and hum-02 go idle, then the

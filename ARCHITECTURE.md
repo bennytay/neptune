@@ -32,6 +32,7 @@ flowchart LR
     INS["Insights<br/>deterministic rules"]
     QRY["neptune-site MCP<br/>neptune_site_* tools · SQL"]
     WEB["Live web view<br/>map · timeline · cited sources"]
+    ACT["Actions<br/>Claude proposes · a person approves"]
   end
   USE["Agents · LLMs<br/>analysis · insights"]
 
@@ -66,6 +67,10 @@ flowchart LR
   VIEWS --> QRY --> USE
   QRY --> WEB
   WEB -->|yes / no| CONF
+  QRY -->|propose| ACT
+  WEB -->|approve| ACT
+  ACT -->|VDA 5050 order| FEED
+  ACT -->|intent · dispatched · outcome| LOG
 
   subgraph KEY[" "]
     K1["built"]
@@ -85,7 +90,7 @@ flowchart LR
   class SDK,CLI built
   class DEV ext
   class RAW,FEED,USE ext
-  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB built
+  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB,ACT built
   style N fill:#8b949e0f,stroke:#8b949e
   style S fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none
