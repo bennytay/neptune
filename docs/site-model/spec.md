@@ -273,6 +273,10 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   cited files.
 - They pass since #188 (no xfail). Tests call the §8 API. The answers must cite the files
   listed; wording is never checked.
+- Harbor DC (`generate --site harbor`, #201) has five more (`tests/site/harbor_gold_questions.json`), and
+  insights have three for Plant 7 (`gold_insights.json`) and two for Harbor (`harbor_gold_insights.json`:
+  the sorter's starvation chain, Reyes on break). All pass since #204, through the same code: the two sites
+  differ only in their `static/neptune.mappings.yaml` and `layout.yaml`.
 
 ## 11. Lane ownership
 
