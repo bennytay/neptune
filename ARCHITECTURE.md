@@ -22,11 +22,16 @@ flowchart LR
     MAN["Optional manifest<br/>neptune.yaml · init-manifest"]
   end
 
-  subgraph D["Downstream, not Neptune"]
-    MEM["World memory"]
-    RET["Retrieval / context"]
-    USE["Agents · VLAs · sim · evals"]
+  FEED["Live site feeds<br/>fleet managers · PLCs<br/>CMMS · rosters"]
+  subgraph S["Neptune site model (M1)"]
+    CAPT["Record-first capture<br/>replayed site feed"]
+    LOG[("Fact log<br/>seq = when we knew")]
+    CONF["Confirm queue<br/>identities · doc facts"]
+    VIEWS["Site views<br/>now · history · topology"]
+    V2["Memory v2 claim graph<br/>frozen until the gate"]
+    QRY["Query layer<br/>MCP tools · SQL"]
   end
+  USE["Agents · LLMs<br/>analysis · insights"]
 
   RAW --> DISC --> RT
   DEV -->|ingest · dry run| SDK -->|runs jobs| RT
@@ -50,8 +55,12 @@ flowchart LR
   CLI -->|init-manifest| MAN
   MAN -->|stated declarations| RT
   DER <-->|derived tables · stated run assemblies| PKG
-  PKG ==> MEM --> RET --> USE
-  DER -.-> MEM
+  FEED --> CAPT --> RT
+  PKG ==> LOG
+  DER -.->|inferred| LOG
+  CONF -->|stated| LOG
+  LOG --> VIEWS --> QRY --> USE
+  PKG -.-> V2 -.-> QRY
 
   subgraph KEY[" "]
     K1["built"]
@@ -70,9 +79,11 @@ flowchart LR
   class SB built
   class SDK,CLI built
   class DEV ext
-  class RAW,MEM,RET,USE ext
+  class RAW,FEED,USE ext
+  class CAPT,LOG,CONF,VIEWS todo
+  class V2,QRY built
   style N fill:#8b949e0f,stroke:#8b949e
-  style D fill:none,stroke:#8b949e,stroke-dasharray:2 3
+  style S fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none
   linkStyle default stroke:#8b949e
 ```

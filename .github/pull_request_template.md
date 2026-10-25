@@ -1,4 +1,4 @@
-Closes MVL-
+Closes #
 
 **TL;DR:** <!-- one line: what now exists that didn't before -->
 
@@ -7,7 +7,7 @@ Closes MVL-
      maintainer to choose. -->
 -
 
-**Progress:** <!-- e.g. M1 3/9 · next: MVL-40 -->
+**Progress:** <!-- e.g. M1 3/10 · next: #183 -->
 
 <!-- Only if the PR changes ARCHITECTURE.md (a box, an arrow, an owner, a box's status); otherwise delete.
 **Architecture change**
@@ -30,5 +30,5 @@ Closes MVL-
 </details>
 
 <!-- Rules: visible part ≤12 lines, no paragraphs. Depth lives in ADRs/docs, linked, not pasted.
-     Implementers: do not merge. The coordinator merges after an independent reviewer returns MERGE
-     and CI is green (`scripts/factory-merge.sh`). -->
+     Open as a draft; mark ready when done. Implementers do not merge: the coordinator merges on green
+     CI (`scripts/factory-merge.sh`), after one quick review for core PRs. -->

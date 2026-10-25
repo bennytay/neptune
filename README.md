@@ -36,7 +36,8 @@ Sources: F1 "cmms/work_orders.csv" ... [E1] F1 row 7, column 3 "Asset ID" ... [E
 >   named differently in two systems stays two ids until you declare aliases in a `neptune.yaml`; no time
 >   zones unless you state them; on macOS adapters run without the sandbox (it needs Linux); no hosted
 >   service; pre-alpha APIs.
-> - **Want it on your fleet's data?** We are onboarding design partners: open an issue.
+> - **Next (M1, in progress):** a live model of a whole site (robots, machines, people by role and shift,
+>   work, rules) kept current as evidence arrives; design in `docs/site-model/`. Neptune is a demo project.
 
 ## Run it on your own folder
 

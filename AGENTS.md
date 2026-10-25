@@ -1,146 +1,90 @@
 # AGENTS.md — how to work in this repository
 
 Single source of truth for coding agents (Claude Code, Codex) and humans. `CLAUDE.md` imports this file.
-Keep it under ~150 lines; detail lives in `docs/`.
+Keep it short; detail lives in `docs/`. Package `AGENTS.md` files predate the reframe: where they ask for
+edge-case, security, versioning or ADR work beyond what is below, this file wins.
 
 ## What Neptune is
 
-A robotics-native ingestion fabric — a "data compiler" that turns messy robotics evidence (MCAP, ROS bags,
-flight logs, URDF, calibration, configs, PDFs, images, geometry, site records, task briefs) into a canonical,
-provenance-preserving, multimodal representation that later memory / retrieval / training systems consume
-without ever re-parsing raw data.
-Neptune serves **every type of robot**: manipulators, mobile bases, legged platforms, humanoids, aerial, marine,
-autonomous vehicles and multi-robot fleets. Never assume a flight controller, a single vehicle or one morphology;
-keep fixtures and worked examples spread across embodiments.
+A **live, cited model of a whole site**: every robot, machine, person (by role and shift), task, zone,
+document and rule, built from the evidence a site already has (robot logs and bags, fleet-manager and PLC
+feeds, CMMS work orders, rosters, manuals, SOPs, whiteboard photos, regulations) and kept current as new
+evidence arrives. AI agents query it over MCP and run analysis on top; Neptune does not build the LLM, the
+chat UI, dashboards or robot control.
 
-This project builds ONLY ingestion + canonical representation. Do not build the memory learner, retrieval,
-capability reasoning, eval generation, simulation orchestration, or fine-tuning. Do not turn Neptune into
-"RAG for MCAP", a document chunker, a vector-DB wrapper, or a dashboard.
+Neptune serves **every type of robot** (arms, mobile bases, legged, humanoids, aerial, marine, vehicles) and
+the machines and people around them. Never assume one morphology or a single vehicle.
 
-Read `docs/architecture.md` before writing code. Before touching `src/neptune/model/`, read
-`docs/canonical-data-model.md` and the ADRs in `docs/adr/`.
+**This is a demo project.** No customers are onboarded. Build what makes the demo convincing, fast.
+Start with `docs/site-model/README.md` for the current milestone (M1, the site model).
 
-## Non-negotiables
+## Rules (what the demo must visibly show)
 
-1. **Raw sources are immutable.** Never rewrite, normalise in place, or delete source bytes.
-2. **Everything has provenance.** Each normalised value carries source id, locator, transform
-   (adapter id + version + config hash) and `assertion_kind` (observed / stated / inferred).
-3. **Missingness is explicit.** `Known / KnownAbsent / Unknown / NotCovered / NotApplicable / Ambiguous`.
-   A blank never becomes a fact.
-4. **No silent assumptions** about units, clocks, frames, identities, or versions. Store as declared;
-   normalise only as a provenanced derivative.
-5. **Deterministic.** Same source + adapter version + config ⇒ byte-identical output. No wall-clock,
-   randomness, or network inside adapters.
-6. **Parser upgrades create new lineage**; they never mutate historical records.
-7. **Partial success.** One corrupt artifact produces `IngestFinding`s, not a failed job.
-8. **Evidence ≠ interpretation.** Anything `inferred` lives under `src/neptune/derived/`, never in `model/`.
-9. **All input is hostile.** Path traversal, symlinks, archive bombs, truncation are first-class test fixtures.
-10. **Deterministic first.** If something can be extracted without a model, extract it without a model.
+1. **Cited.** Every fact and every answer names the file, row, page or byte it came from.
+2. **Labelled.** Each fact is `observed`, `stated` or `inferred`. Inferred facts never pose as stated.
+3. **No guessing.** A blank stays a blank; answers say `unknown` or `stale` instead of a value.
+4. **Same input, same model.** The model is a pure function of the fact log; one replay test checks it.
+5. **Raw sources are read-only.**
 
-## Repository map (target layout; packages appear as their issues land)
+## Not worth time (demo rules)
+
+- Hostile-input, malformed, boundary, property or scale tests for new code; security or sandbox work.
+- Contract versions, schema bumps, migrations, compatibility shims. v3 replaces v2 at the M1 gate.
+- An ADR per decision. The spec decides; write an ADR only for a real fork in the road.
+- Existing robustness code stays as it is; don't spend time removing it unless it blocks the demo.
+
+## Repository map
 
 ```
-src/neptune/
-  model/       canonical IR: entities, Knowledge[T], TimestampDomain, FrameRef, EvidenceRef, Provenance,
-               IngestFinding, IngestReceipt. Imports nothing from adapters/ or runtime/.
-  identity/    streaming + chunked sha256, canonical JSON, three-tier id derivation
-  discovery/   Source interface, walking, fingerprinting, probe orchestration, grouping v0
-  adapters/    contract + registry; one subpackage per format (adapters never import each other)
-  runtime/     job phases, chunk scheduling, resume, cache, sandbox boundary, receipt assembly
-  store/       ingest package on disk: CAS blobs, Parquet, JSON Lines tables, manifest
-  validate/    cross-source integrity checks (runs over the store, not inside adapters)
-  derived/     model-generated or inferred annotations; separate base type from model/
-  manifest/    optional user override schema
-  cli/
-tests/         unit/  integration/  golden/  fixtures/  (real small files; generators for synthetic formats)
-docs/          architecture, pipeline, data model, provenance, adapter contract, workflow, testing, security,
-               adr/ (decisions), reviews/ (milestone gates), audit-*.md
+src/neptune/            compiler: discovery, adapters (MCAP, ROS bags, PDF, CSV/XLSX, images, URDF, ...),
+                        runtime, canonical records, ingest package
+packages/neptune-memory memory: v2 claim graph (frozen) and v3 site model in neptune_memory/site/ (M1)
+packages/neptune-context query layer and the `neptune` MCP server
+packages/neptune-deploy  connectors, lifecycle mappers, evidence packs
+packages/neptune-ledger  catalog over ingest packages (off the M1 critical path)
+packages/neptune-platform harness, acceptance corpus, demo
+harness/  docs/  tests/  contracts/  scripts/
 ```
 
 ## Commands
 
 ```
-make setup      install everything into .venv (uv)
-make check      lint + type + test — must pass before opening a PR; CI runs exactly this
-make test-fast  tests excluding @slow
+make setup      install everything into .venv (uv) and the pre-commit hooks
+make check      lint + types + fast tests, in parallel; what PR CI runs
+make check-all  everything, including slow tests; what the nightly runs
+make test-fast  fast tests only (PKG=<name> for one package)
 make fmt        format and auto-fix
 ```
 
-## Workflow: one Linear issue → one branch → one PR
+## Workflow: one GitHub issue → one branch → one PR
 
-Linear project: **Neptune — Robotics Ingestion Fabric** (`P-MVL-11`, team `MVL`). Issues carry
-dependencies as `blockedBy`; start an issue only when its blockers are Done, or when a blocker's PR is
-CI-green and In Review (then branch from that PR). A coordinator agent runs the loop; implementers do 1–8.
+Work is tracked in **GitHub Issues** on `bennytay/neptune`, grouped by milestone (M1 Site model, ...).
+Order comes from each issue's "blocked by" links. Status is never set by hand:
+open with no linked PR = todo · draft PR = in progress · ready PR = in review · merged = done.
 
-1. Read the full issue, its scope notes, and its blockers' PRs. Read the relevant `docs/`.
-2. Move the issue to **In Progress**. Create the branch using the issue's `gitBranchName`
-   (`benjamintay07/mvl-N-slug`) from `origin/main`, or from the blocker's PR branch if it is still open.
-3. Write a short plan in the issue as a comment if the work is non-trivial. Identify any decision that
-   needs an ADR before implementing it. Make every decision yourself with your best judgement and record
-   it; never hand one back to the maintainer.
-4. Implement. Separate parsing from normalisation. Errors are structured findings, not exceptions.
-5. Tests: unit + malformed input + boundary + idempotence/determinism. Prefer real small fixtures over mocks.
-6. `make check` green. Update docs whose contracts changed. Add/supersede ADRs for decisions.
-7. Open a PR using the template, BLUF style: `Closes MVL-N`, a one-line **TL;DR**, ≤5 **Decided**
-   bullets, a **Progress** line. Everything else sits in the collapsed details block. Visible part
-   ≤12 lines, no paragraphs; depth goes in ADRs/docs, linked. No "Your call" list: state decisions.
-   If the PR materially changes the architecture (a box, an arrow, an owner, or a box's built/partial state),
-   update `ARCHITECTURE.md` in the same PR and fill the template's **Architecture change** section.
-   Otherwise leave both untouched.
-8. Move the issue to **In Review** only when every acceptance criterion is demonstrably met and CI is green.
-9. **Stop at In Review; implementers never merge.** The coordinator merges with
-   `scripts/factory-merge.sh <pr> <head-sha>` once an independent reviewer agent returns MERGE and CI is
-   green. **Done** happens on merge, never on "code exists"; the coordinator comments the merge SHA on the issue.
+1. Read the issue, `docs/site-model/README.md` and the spec. Nothing else unless the issue names it.
+2. Branch from `origin/main`: `gh issue develop N --name N-short-slug --base main`. No stacked branches.
+3. Implement. Happy-path tests plus the issue's acceptance tests; gold demo tests flip from xfail as they pass.
+4. `make check PKG=<package>` green locally, then push. Open a **draft** PR early; mark it ready when done.
+5. PR title = issue title; body starts `Closes #N`, then a one-line **TL;DR**, ≤5 **Decided** bullets and a
+   **Progress** line, all within 12 visible lines. State decisions; never hand one back to the maintainer.
+   If the PR changes a box, arrow or status in `ARCHITECTURE.md`, update it and fill **Architecture change**.
+6. Implementers never merge. The coordinator merges with `scripts/factory-merge.sh <pr> <head-sha>` when CI is
+   green and, for core PRs (fact log, live updates), after one quick review (`Review: MERGE @ <sha>`).
 
-**Picking the next issue** (the coordinator runs several at once, one worktree each: at most 3 implementers
-during M2, 5 once the MVL-57 gate is Done; see `docs/developer-workflow.md` § Software factory):
-1. Resume any **In Progress** issue that has no live implementer before starting a new one.
-2. Otherwise, consider **Todo** issues whose `blockedBy` issues are all **Done**, or whose blocker's PR is
-   CI-green and **In Review** (branch from that PR). The previous milestone's gate issue must be Done.
-3. Take the lowest milestone first. Within a milestone, follow the order in `docs/audit-2026-09-30.md` §7.
-4. If nothing qualifies, say which PRs or issues are in the way. If there is still a tie, pick one with your
-   best judgement and say why.
-5. Name the chosen issue before starting work.
+The coordinator runs at most 3 implementers at once, one worktree each, and picks the lowest-milestone open
+issue that is not blocked.
 
 ## Git
 
 - `main` is protected: PR required, CI green, linear history, no force-push. Never commit to `main`.
-- Branch per issue (name above). PR title = issue title. Refresh with `git merge origin/main` only when
-  `scripts/factory-merge.sh` says the PR needs it; never rebase or force-push a branch that has been pushed.
-- Implementers never merge, approve, or enable auto-merge; the coordinator squash-merges.
-- Conventional commits with package scope: `feat(model): add TimestampDomain`, `docs(adr): 0005 timestamps`,
-  `test(identity): chunked hash determinism`. Trailer line: `Refs: MVL-N`.
-- Never rewrite `main` history.
-- ADR numbers: take the next free number after checking `main` and every open PR; the coordinator renumbers
-  on conflict.
-- One issue per PR. If an issue is too big for one reviewable PR, split it into Linear sub-issues first.
-- Commit only when asked or when the workflow step calls for it; never commit secrets, fixtures > 512 KB,
-  or ingest output.
+- Conventional commits with package scope (`feat(memory): fact log`), trailer `Refs: #N`.
+- Refresh with `git merge origin/main` only when `scripts/factory-merge.sh` says so; never rebase a pushed branch.
+- Never commit secrets, fixtures > 512 KB, or ingest output.
 
-## Documentation and ADRs
+## Docs
 
-- Docs describe the system as it is; if a PR changes a contract, the same PR updates the doc.
-- `ARCHITECTURE.md` is one evolving Mermaid diagram and nothing else: no tables, lists or prose. Build
-  status is box styling plus the in-diagram key. Keep the soft palette (translucent fills, muted borders,
-  grey edges) so it reads in light and dark mode. `docs/architecture.md` holds the engineering detail.
-- Architecture decisions go in `docs/adr/NNNN-title.md` using `docs/adr/0000-template.md`.
-  Decisions are superseded by a new ADR, never edited in place.
-- Milestone gates (`docs/reviews/`) stop feature work: no M(n+1) issue starts before the M(n) gate is Done.
-- Do not write docs for ceremony. Write what a fresh engineer or agent needs and would not derive from code.
-
-## Testing rules
-
-- Every substantial component: unit tests, malformed-input tests, boundary tests, determinism tests.
-- Fixtures grow with the milestone that needs them; security fixtures land with `MVL-10`, format-corruption
-  fixtures with each adapter. See `docs/testing-strategy.md`.
-- Golden outputs are compatibility-sensitive: a changed golden file needs an explanation in the PR.
-- No mocks where a real small fixture works.
-
-## Things not to do
-
-- Do not auto-merge identities (two identical URDFs are not the same robot).
-- Do not convert timestamps to UTC or units to SI at parse time.
-- Do not put inferred semantics on canonical entities.
-- Do not add an abstraction that does not solve a concrete, present problem.
-- Do not edit `AGENTS.md`, `docs/architecture.md`, or any ADR in a feature PR unless the issue says so;
-  propose changes in a dedicated PR.
+- Docs describe the system as it is. `docs/site-model/spec.md` is the design for M1.
+- `ARCHITECTURE.md` is one evolving Mermaid diagram and nothing else, in the soft palette.
+- Tests have no `__init__.py`: test and fixture basenames must be unique across the repository.
+- Golden files are fine to regenerate; say so in the PR.
