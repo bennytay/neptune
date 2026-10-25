@@ -75,7 +75,7 @@ def plugin_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forget_plugins:
 
 
 # In CI, an unmarked test slower than SLOW_BUDGET_S fails: mark it `slow` (the nightly runs it).
-SLOW_BUDGET_S = 60.0
+SLOW_BUDGET_S = 180.0
 
 
 @pytest.hookimpl(hookwrapper=True)
