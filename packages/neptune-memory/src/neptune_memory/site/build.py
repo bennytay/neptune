@@ -185,6 +185,11 @@ def _package_dir(site_dir: Path) -> Path:
     return site_dir / ".neptune" / "package"
 
 
+def static_package(site_dir: Path) -> Any:
+    """The compiler's package of ``static/`` as the last build left it (the web view's sources)."""
+    return read_package(_package_dir(Path(site_dir)))
+
+
 def _static(site_dir: Path, out: _Writer | _Fresh, seam: Seam) -> None:
     package_dir = _package_dir(site_dir)
     if package_dir.exists():  # a live re-ingest; build and replay start without one

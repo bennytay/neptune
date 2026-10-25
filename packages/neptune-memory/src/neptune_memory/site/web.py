@@ -183,7 +183,7 @@ class Site:
             return {}
         stamp = manifest.stat().st_mtime
         if self._package is None or self._package[0] != stamp:
-            self._package = (stamp, _read_package(manifest.parent))
+            self._package = (stamp, _read_package(self.site_dir))
         return self._package[1]
 
     # -- the actions placeholder (#212) --------------------------------------------------------
@@ -490,14 +490,14 @@ def _png_size(path: Path) -> list[int] | None:
     return [width, height]
 
 
-def _read_package(package_dir: Path) -> dict[str, Any]:
+def _read_package(site_dir: Path) -> dict[str, Any]:
     from neptune.model.knowledge import Known
     from neptune.model.provenance import Page
     from neptune.model.source import LocalPath, SourceRevision
     from neptune.model.world import DocumentBlock, StructuredRecord
-    from neptune.sdk import read_package
+    from neptune_memory.site.build import static_package
 
-    package = read_package(package_dir)
+    package = static_package(site_dir)
     paths: dict[str, str] = {}
     tables: dict[str, list[StructuredRecord]] = {}
     blocks: dict[str, list[tuple[int, int, str]]] = {}
