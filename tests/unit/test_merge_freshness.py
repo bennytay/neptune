@@ -105,16 +105,23 @@ ADAPTER_IMPORT = re.compile(
 )
 
 
+# The site model's build ingests a site's static files through ``neptune.sdk`` (docs/site-model
+# spec §5). CI already runs Memory's job on any adapter change (its snapshot, platform ADR 0009).
+INGESTING_FILES = frozenset({"packages/neptune-memory/src/neptune_memory/site/build.py"})
+
+
 def test_no_member_imports_a_format_adapter_or_runs_ingestion() -> None:
     """ci_plan and merge_freshness rely on it: adapter changes do not reach members' jobs.
 
-    The platform is exempt: its harness ingests, and adapter changes select its job.
+    The platform is exempt: its harness ingests, and adapter changes select its job. So is the
+    site model's build (``INGESTING_FILES``).
     """
     offenders = [
         str(path.relative_to(ROOT))
         for path in sorted((ROOT / "packages").glob("*/*/**/*.py"))
         if path.parts[len(ROOT.parts) + 2] in ("src", "tests")
         and path.parts[len(ROOT.parts) + 1] not in ("neptune-platform", "_template")
+        and path.relative_to(ROOT).as_posix() not in INGESTING_FILES
         and ADAPTER_IMPORT.search(path.read_text(encoding="utf-8"))
     ]
     assert offenders == []
