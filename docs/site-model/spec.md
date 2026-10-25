@@ -54,7 +54,8 @@ neptune confirm (yes/no) ──────────────────�
 ## 4. Vocabulary (`site/vocab.py`, #184)
 
 **Entity types:** `site`, `area`, `cell`, `zone`, `robot`, `machine`, `person`, `role`, `qualification`,
-`shift`, `task`, `work_order`, `change`, `document`, `rule`, `source`.
+`shift`, `task`, `work_order`, `change`, `document`, `rule`, `source`, `component` (a joint, a gripper:
+it carries `health` and `temperature`; #211).
 
 | Predicate | Subject → object | Card. | Kind in corpus |
 |---|---|---|---|
@@ -73,6 +74,7 @@ neptune confirm (yes/no) ──────────────────�
 | `battery` | robot → value % | one | observed (state interval) |
 | `setpoint` | machine → value (unit) | one | observed |
 | `firmware` | robot/machine → text | one | observed |
+| `cycle` | robot/machine → value (a controller's cycle counter) | one | observed |
 | `parts_out` | cell → value (count, cumulative) | one | observed |
 | `task_state` | task → text | one | observed |
 | `has_role` | person → role | many | stated (roster) |
@@ -275,6 +277,8 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   insights have three for Plant 7 (`gold_insights.json`) and two for Harbor (`harbor_gold_insights.json`:
   the sorter's starvation chain, Reyes on break). All pass since #204, through the same code: the two sites
   differ only in their `static/neptune.mappings.yaml` and `layout.yaml`.
+- Real public data (#211, [`real-data.md`](real-data.md)) has five (`public_gold_questions.json`), `slow`
+  and skipped until `scripts/fetch_public_site.sh site-public` has run; CI's non-PR runs fetch it first.
 
 ## 11. Lane ownership
 
@@ -298,7 +302,8 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 - The file sits in `static/`, so it is ingested and citable like everything else, but it maps to no facts.
   A site with no mapping file maps only `layout.yaml`; everything else is unmapped (below).
 - **Templates** (`"robot:{topic[-2]}"`) fill each `{name}`, then apply `|filters` left to right:
-  - `lower`; `slug` (spaces → `-`); `until:<c>` (the text before the first `<c>`);
+  - `lower`; `slug` (spaces → `-`); `until:<c>` (the text before the first `<c>`); `strip:<c>` (trim
+    `<c>` from both ends; whitespace when empty);
   - `type`: free text → entity type, through `types`;
   - `tag`: an equipment tag (`CV-2`) → `<type>:<tag lowercased>`, through `tags`.
 - Names: in a table, `{Column}` is a cell as written (column names match case-blind, spaces = `_`). In a feed,
@@ -346,6 +351,15 @@ tables:                                  # CSV/XLSX rows (header = row 1), JSONL
     time: When
     facts:
       - {predicate: change_to, column: To, unit: "{Unit}"}  # a unit template; blank = none
+  - file: ur3/dataset_02052023.xlsx      # a machine's own export, one row per sample (#211)
+    source: ur3
+    kind: observed
+    changes: true                        # state a value only when it differs from the last row's
+    subject: robot:ur3
+    time: '{Timestamp|strip:"|until:.}'  # 2022-10-26T08:17:21.847Z -> 2022-10-26T08:17:21
+    facts:
+      - {predicate: health, column: Robot_ProtectiveStop,
+         values: {"False": ok, "True": "fault:protective_stop"}}  # cell as written -> value
 
 documents:                               # PDF blocks, cited `page P block B`
   - file: docs/*.pdf
@@ -408,7 +422,7 @@ feeds:                                   # one entry per envelope `source`
   `document:<path under static/>` gets `unmapped = "not mapped"` citing the file, plus one stated `text` fact
   per row or block, verbatim. So `search_evidence` finds them and `gaps` lists them as not mapped.
 - **`python -m neptune_memory.site draft-mapping <site_dir> <file>`** prints a draft `tables:` entry (CSV or
-  JSONL rows) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
+  JSONL rows; any other table, e.g. XLSX, read back from the last `build`) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
   heuristics. The skill says: draft → show the user → save into the mapping file → `build`.
 - Plant 7's full file is `MAPPINGS` in `site/corpus/static.py`.
 

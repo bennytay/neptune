@@ -30,3 +30,4 @@ htmlcov/
 # `make site-demo` output
 /site-demo/
 /site-harbor/
+/site-public/

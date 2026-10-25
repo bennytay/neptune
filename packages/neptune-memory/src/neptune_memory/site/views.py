@@ -191,8 +191,13 @@ class SiteModel:
     # -- reading ---------------------------------------------------------------------------
 
     def clock(self) -> str | None:
-        """The latest site time any source reported: what ``now`` means."""
-        return max((times[-1] for times in self.seen.values() if times), default=None)
+        """The latest site time any source reported: what ``now`` means. A site with no feed (a
+        machine's export, mapped as a table) has no ``seen``: then its latest observed fact."""
+        seen = max((times[-1] for times in self.seen.values() if times), default=None)
+        if seen is not None:
+            return seen
+        observed = (f.valid_from for f in self.facts.values() if f.kind == "observed")
+        return max((t for t in observed if t), default=None)
 
     def live(self, fact_id: str) -> bool:
         """False once a proposal is answered: yes swaps in its stated copy, no drops it."""

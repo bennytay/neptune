@@ -81,14 +81,16 @@ examples: ## Regenerate the worked examples and their golden package documents
 
 # Site model v3 (docs/site-model/spec.md §9): a demo corpus -> fact log -> the MCP command.
 # SITE=p7 (Plant 7, default) or SITE=harbor (Harbor DC). site-demo confirms the identity proposals
-# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would (spec §7).
+# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would (spec §7). SITE=public fetches real public
+# robot data instead of generating a corpus (docs/site-model/real-data.md).
 SITE ?= p7
 SITE_DIR ?= $(if $(filter p7,$(SITE)),site-demo,site-$(SITE))
 SPEED ?= 60
 SITE_CMD := $(RUN) python -m neptune_memory.site
 SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
-site-demo: ## Site model: generate the SITE corpus (p7 | harbor), build the fact log, confirm, log insights, print the MCP command
-> $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
+SITE_SOURCE = $(if $(filter public,$(SITE)),scripts/fetch_public_site.sh "$(SITE_DIR)",$(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)")
+site-demo: ## Site model: generate the SITE corpus (p7 | harbor) or fetch it (public), build, confirm, log insights, print the MCP command
+> $(SITE_SOURCE)
 > $(SITE_CMD) build "$(SITE_DIR)"
 > $(SITE_CMD) confirm "$(SITE_DIR)" --yes-all --by demo-operator
 > $(SITE_CMD) insights "$(SITE_DIR)"

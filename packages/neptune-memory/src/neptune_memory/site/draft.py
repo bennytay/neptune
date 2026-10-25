@@ -1,9 +1,11 @@
 """Draft a mapping entry for an unmapped file (spec §12): ``draft-mapping <site_dir> <file>``.
 
 Deterministic heuristics over the file's header and first rows: a CSV or JSONL table becomes a
-``tables:`` entry, a file of feed envelopes (``t``, ``source``, ``topic``, ``payload``) a ``feeds:``
-entry. Columns or fields whose predicate cannot be guessed are left as comments. The draft is for a
-person to read and fix before it is saved into ``static/neptune.mappings.yaml``.
+``tables:`` entry, and so does any other table the compiler reads (an XLSX workbook's data sheet,
+read back from the site's last ``build``); a file of feed envelopes (``t``, ``source``, ``topic``,
+``payload``) becomes a ``feeds:`` entry. Columns or fields whose predicate cannot be guessed are
+left as comments. The draft is for a person to read and fix before it is saved into
+``static/neptune.mappings.yaml``.
 """
 
 from __future__ import annotations
@@ -16,16 +18,18 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 SAMPLE = 5
-_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?$")
+_TIME = re.compile(r'^"?\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z?)?"?$')
 
 # Words in a column or field name -> the vocabulary predicate it most likely is (first match wins).
 _PREDICATES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("serial",), "serial"),
     (("firmware", "version"), "firmware"),
     (("battery", "charge", "soc"), "battery"),
-    (("alarm", "fault", "error"), "health"),
+    (("alarm", "fault", "error", "stop"), "health"),
     (("mode", "state", "status"), "mode"),
     (("setpoint",), "setpoint"),
+    (("temperature", "temp"), "temperature"),
+    (("cycle",), "cycle"),
     (("zone", "location", "area"), "in_zone"),
     (("order", "task", "job", "mission"), "current_task"),
     (("parts", "count", "output"), "parts_out"),
@@ -54,11 +58,14 @@ _REF_TYPES = {
 def draft_mapping(site_dir: Path, file: Path) -> str:
     """A draft mapping entry (YAML text) for ``file``, a path under ``site_dir`` or absolute."""
     path = file if file.is_absolute() else Path(site_dir) / file
-    text = path.read_text(encoding="utf-8")
     try:
         rel = path.resolve().relative_to((Path(site_dir) / "static").resolve()).as_posix()
     except ValueError:
         rel = path.name
+    if path.suffix not in (".jsonl", ".csv", ".tsv"):
+        header, samples = _package_table(Path(site_dir), rel)
+        return _table(rel, header, samples)
+    text = path.read_text(encoding="utf-8")
     if path.suffix == ".jsonl":
         rows = [json.loads(line) for line in text.splitlines() if line.strip()][:SAMPLE]
         if rows and all({"t", "source", "topic", "payload"} <= set(r) for r in rows):
@@ -73,6 +80,38 @@ def draft_mapping(site_dir: Path, file: Path) -> str:
         dict(zip(header, row, strict=False)) for _, row in zip(range(SAMPLE), reader, strict=False)
     ]
     return _table(rel, header, samples)
+
+
+def _package_table(site_dir: Path, rel: str) -> tuple[list[str], list[dict[str, str]]]:
+    """The header and first rows of the largest table the compiler read from ``static/<rel>``
+    (an XLSX workbook's data sheet, not its workbook properties). Needs a ``build`` first."""
+    from neptune.model.knowledge import Known
+    from neptune.model.source import LocalPath, SourceRevision
+    from neptune.model.world import StructuredRecord
+    from neptune.sdk import read_package
+
+    package_dir = site_dir / ".neptune" / "package"
+    if not package_dir.exists():
+        raise SystemExit(f"no package in {package_dir}: run `build` first, then draft {rel}")
+    package = read_package(package_dir)
+    ids = {
+        r.content_id
+        for r in package.records
+        if isinstance(r, SourceRevision)
+        and isinstance(r.location, LocalPath)
+        and r.location.path == rel
+    }
+    tables: dict[str, dict[int, list[str]]] = {}
+    for r in package.records:
+        if isinstance(r, StructuredRecord) and str(r.provenance.evidence.source) in ids:
+            cells = [str(c.value) if isinstance(c, Known) else "" for c in r.cells]
+            tables.setdefault(r.table, {})[r.row] = cells
+    if not tables:
+        raise SystemExit(f"the compiler read no table from static/{rel}")
+    rows = max(tables.values(), key=len)
+    header = rows.get(0, [])
+    samples = [dict(zip(header, rows[i], strict=False)) for i in sorted(rows)[1 : SAMPLE + 1]]
+    return [h for h in header if h], samples
 
 
 def _words(name: str) -> list[str]:
