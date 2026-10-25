@@ -34,7 +34,7 @@ ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check harness demo demo-pin demo-folder up
+  contracts-check harness demo demo-pin demo-folder up site-demo site-replay
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -106,6 +106,22 @@ demo-folder: ## A clean folder for Claude Code over the demo: make demo-folder D
 up: ## Your own folder -> compiler -> Deploy -> Ledger -> Memory -> a Claude Code folder: make up SRC=<folder>
 > @test -n "$(SRC)" || { echo "usage: make up SRC=<folder> [ARGS='--deploy FILE ...']" >&2; exit 2; }
 > $(RUN) python -m harness.up "$(SRC)" $(ARGS)
+
+# Site model v3 (docs/site-model/spec.md §9): the Plant 7 corpus -> fact log -> the MCP command.
+# `build`/`replay` land with #183; until then these stop after generating.
+SITE_DIR ?= site-demo
+SPEED ?= 60
+SITE := $(RUN) python -m neptune_memory.site
+SITE_MCP := python -m neptune_context.mcp --site "$(SITE_DIR)"
+site-demo: ## Site model: generate the Plant 7 corpus, build the fact log, print the MCP command
+> $(SITE) generate "$(SITE_DIR)"
+> @if $(SITE) build --help >/dev/null 2>&1; then $(SITE) build "$(SITE_DIR)" && echo "MCP: $(SITE_MCP)"; \
+  else echo "note: 'build' lands with #183; stopped after generating $(SITE_DIR)"; fi
+
+site-replay: ## Site model: the same, live (SPEED=60 is 60x real time)
+> $(SITE) generate "$(SITE_DIR)"
+> @if $(SITE) replay --help >/dev/null 2>&1; then echo "MCP: $(SITE_MCP)"; $(SITE) replay "$(SITE_DIR)" --speed "$(SPEED)"; \
+  else echo "note: 'replay' lands with #183; stopped after generating $(SITE_DIR)"; fi
 
 # The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
 # A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.
