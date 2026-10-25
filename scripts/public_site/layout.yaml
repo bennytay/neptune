@@ -1,0 +1,19 @@
+# The declared site for the public UR3 CobotOps data (UCI dataset 963, CC BY 4.0).
+# The dataset is one UR3 cobot's controller export; these are the parts its columns name.
+site: {id: site:ur3-cobotops, name: UR3 CobotOps test cell (UCI dataset 963)}
+clock: {name: UR3 export time, zone: UTC}  # the timestamps end in Z; stated, never applied
+robots:
+  - id: robot:ur3
+    name: UR3 cobot
+    depends_on: [component:ur3-j0, component:ur3-j1, component:ur3-j2, component:ur3-j3,
+                 component:ur3-j4, component:ur3-j5, component:ur3-gripper]
+components:
+  - {id: component:ur3-j0, name: UR3 joint J0}
+  - {id: component:ur3-j1, name: UR3 joint J1}
+  - {id: component:ur3-j2, name: UR3 joint J2}
+  - {id: component:ur3-j3, name: UR3 joint J3}
+  - {id: component:ur3-j4, name: UR3 joint J4}
+  - {id: component:ur3-j5, name: UR3 joint J5}
+  - {id: component:ur3-gripper, name: UR3 gripper}
+sources:
+  - {id: ur3, name: UR3 controller export (dataset_02052023.xlsx)}
