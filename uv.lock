@@ -1771,6 +1771,11 @@ dependencies = [
     { name = "neptune" },
 ]
 
+[package.optional-dependencies]
+anthropic = [
+    { name = "anthropic" },
+]
+
 [package.dev-dependencies]
 live = [
     { name = "amqtt" },
@@ -1778,7 +1783,11 @@ live = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "neptune", editable = "." }]
+requires-dist = [
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1.0" },
+    { name = "neptune", editable = "." },
+]
+provides-extras = ["anthropic"]
 
 [package.metadata.requires-dev]
 live = [

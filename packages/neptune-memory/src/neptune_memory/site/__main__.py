@@ -19,8 +19,26 @@ if TYPE_CHECKING:
 def _generate(args: argparse.Namespace) -> int:
     from neptune_memory.site import corpus
 
-    corpus.generate(Path(args.out))
-    sys.stdout.write(f"generated the Plant 7 corpus in {args.out}\n")
+    corpus.generate(Path(args.out), site=args.site)
+    sys.stdout.write(f"generated the {corpus.SITES[args.site]} corpus in {args.out}\n")
+    return 0
+
+
+def _extract_photos(args: argparse.Namespace) -> int:
+    import os
+
+    from neptune_memory.site.derived.photos import extract_photos
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.stdout.write("ANTHROPIC_API_KEY is not set: keeping the recorded extractions\n")
+        return 0
+    try:
+        written = extract_photos(args.site_dir)
+    except ImportError:
+        sys.stdout.write("the anthropic SDK is missing: uv sync --extra anthropic\n")
+        return 1
+    for path in written:
+        sys.stdout.write(f"recorded {path}\n")
     return 0
 
 
@@ -130,7 +148,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m neptune_memory.site")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    generate = commands.add_parser("generate", help="write the deterministic Plant 7 corpus")
+    generate = commands.add_parser("generate", help="write a deterministic demo corpus")
+    generate.add_argument("--site", choices=("p7", "harbor"), default="p7")
     generate.add_argument("out", help="output directory (static/ and feed/ go under it)")
     generate.set_defaults(run=_generate)
 
@@ -192,6 +211,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     insights.add_argument("site_dir", type=Path)
     insights.set_defaults(run=_insights)
+
+    photos = commands.add_parser(
+        "extract-photos", help="send each photo to Claude and record its .extraction.json"
+    )
+    photos.add_argument("site_dir", type=Path)
+    photos.set_defaults(run=_extract_photos)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)
