@@ -31,6 +31,7 @@ flowchart LR
     VIEWS["Site views<br/>now · history · topology"]
     INS["Insights<br/>deterministic rules"]
     QRY["neptune-site MCP<br/>neptune_site_* tools · SQL"]
+    WEB["Live web view<br/>map · timeline · cited sources"]
   end
   USE["Agents · LLMs<br/>analysis · insights"]
 
@@ -63,6 +64,8 @@ flowchart LR
   LOG --> VIEWS --> INS
   INS -.->|inferred| LOG
   VIEWS --> QRY --> USE
+  QRY --> WEB
+  WEB -->|yes / no| CONF
 
   subgraph KEY[" "]
     K1["built"]
@@ -82,7 +85,7 @@ flowchart LR
   class SDK,CLI built
   class DEV ext
   class RAW,FEED,USE ext
-  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY built
+  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB built
   style N fill:#8b949e0f,stroke:#8b949e
   style S fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

@@ -54,3 +54,12 @@ def test_site_log_rolls_segments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     names = sorted(p.name for p in log_dir(tmp_path).iterdir())
     assert names == ["segment-000001.jsonl", "segment-000002.jsonl", "segment-000003.jsonl"]
     assert [e.seq for e in read(tmp_path)] == [1, 2, 3, 4, 5]
+
+
+def test_site_log_two_writers_never_reuse_a_seq(tmp_path: Path) -> None:
+    # `live` holds a writer open while the web view appends a confirm through another.
+    with FactLog(tmp_path) as live, FactLog(tmp_path) as web:
+        live.seen("fleet", "2026-10-20T10:00:00")
+        web.seen("web", "2026-10-20T10:00:01")
+        live.seen("fleet", "2026-10-20T10:00:05")
+    assert [e.seq for e in read(tmp_path)] == [1, 2, 3]

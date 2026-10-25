@@ -26,7 +26,7 @@ EACH = set -ef; for p in $(SELECTED); do \
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  check-all site-demo site-replay site-live
+  check-all site-demo site-replay site-live site-web
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -105,15 +105,24 @@ site-replay: ## Site model: the same, live (SPEED=60 is 60x real time)
 BROKER ?= mqtt://127.0.0.1:1883
 START ?= 2026-10-20T09:55:00
 SITE_READY = $(SITE_DIR)/.neptune/live.ready
+WEB_PORT ?= 8765
+SITE_URL = http://127.0.0.1:$(WEB_PORT)/
 site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x from START
 > $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
 > rm -rf "$(SITE_DIR)/feed/live" "$(SITE_READY)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
+> @echo "Web view: $(SITE_URL)"
 > @$(SITE_CMD) broker --broker "$(BROKER)" & b=$$!; \
   $(SITE_CMD) live "$(SITE_DIR)" --broker "$(BROKER)" & l=$$!; \
-  trap 'kill $$l $$b 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
+  $(SITE_CMD) web "$(SITE_DIR)" --port "$(WEB_PORT)" & w=$$!; \
+  trap 'kill $$l $$b $$w 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
   until [ -f "$(SITE_READY)" ]; do kill -0 $$l 2>/dev/null || exit 1; sleep 0.2; done; \
   $(SITE_CMD) publish "$(SITE_DIR)" --broker "$(BROKER)" --speed "$(SPEED)" --start "$(START)"; \
   echo "live keeps running; drop a file into $(SITE_DIR)/static/ to see it ingested. Ctrl-C stops."; \
   wait
+
+# site-web (#210): the live web view of SITE_DIR (map, states, timeline, findings, cited sources).
+site-web: ## Site model: serve the web view of SITE_DIR at WEB_PORT and open it (run site-demo first)
+> @test -d "$(SITE_DIR)/.neptune/log" || { echo "no fact log in $(SITE_DIR): run make site-demo first" >&2; exit 2; }
+> $(SITE_CMD) web "$(SITE_DIR)" --port "$(WEB_PORT)" --open
