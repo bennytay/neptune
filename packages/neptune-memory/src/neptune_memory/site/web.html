@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Neptune site model</title>
 <style>
-:root {
+:root { color-scheme: light dark;
   --bg: #f6f7f9; --panel: rgba(255,255,255,.75); --ink: #1f2933; --muted: #6b7680;
   --line: rgba(31,41,51,.12); --accent: #5b7fa6; --mark: rgba(240,190,60,.45);
   --ok: rgba(88,166,120,.22);   --ok-b: #6a9f80;
@@ -58,6 +58,7 @@ table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nu
 th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 500; font-size: 12px; }
 td.v { cursor: pointer; white-space: nowrap; }
+a { color: var(--accent); text-decoration: none; white-space: nowrap; }
 td.v:hover, .row:hover { background: var(--hit); }
 .stale { color: var(--muted); font-style: italic; }
 .unknown { color: var(--muted); }
@@ -79,6 +80,7 @@ td.v:hover, .row:hover { background: var(--hit); }
 #drawer.open { transform: none; }
 #drawer h3 { margin: 0 0 10px; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
 .src { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; overflow: hidden; }
+.src .body { max-height: 280px; overflow: auto; position: relative; }
 .src .head { padding: 5px 8px; background: var(--place); font-family: ui-monospace, monospace; font-size: 12px; }
 .src pre { margin: 0; padding: 6px 8px; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap;
   word-break: break-all; }
@@ -260,9 +262,9 @@ function drawMap() {
   if (unplaced.length) { boxes.push({ id: "unplaced", x: P, y: height + 14, w: W - 2 * P, h: 64, floor: true }); height += 14 + 64; }
   height += P;
   for (const b of boxes) {
-    const here = inBox(b.id), per = Math.max(1, Math.floor((b.w - 12) / 56));
+    const here = inBox(b.id), per = Math.max(1, Math.floor((b.w - 16) / 74));
     here.forEach((a, k) => {
-      pos[a.id] = { x: b.x + 30 + (k % per) * 56, y: b.y + (b.floor ? 34 : 50) + Math.floor(k / per) * 46 };
+      pos[a.id] = { x: b.x + 40 + (k % per) * 74, y: b.y + (b.floor ? 34 : 56) + Math.floor(k / per) * 50 };
     });
     pos[b.id] = { x: b.x + b.w / 2, y: b.y + b.h / 2, box: b };
   }
@@ -306,7 +308,7 @@ function drawMap() {
       : `<rect x="${p.x - 22}" y="${p.y - 13}" width="44" height="26" rx="6" fill="var(--${s})" stroke="var(--${s}-b)" stroke-width="1.6" ${dash}/>`;
     const mode = st.mode ? value(st.mode) : "";
     out += `<g class="asset" data-entity="${esc(a.id)}">${glyph}<text x="${p.x}" y="${p.y + 4}" text-anchor="middle" font-size="10" font-weight="600">${esc(short(a.id).slice(0, 7))}</text>`;
-    out += `<text x="${p.x}" y="${p.y + 27}" text-anchor="middle" class="small">${esc(mode.slice(0, 14))}</text><title>${esc(tip)}</title></g>`;
+    out += `<text x="${p.x}" y="${p.y + 27}" text-anchor="middle" class="small">${esc(mode.length > 10 ? mode.slice(0, 9) + "…" : mode)}</text><title>${esc(tip)}</title></g>`;
   }
   svg.setAttribute("viewBox", `0 0 ${W} ${height}`);
   svg.innerHTML = out;
@@ -389,7 +391,8 @@ document.addEventListener("click", async (e) => {
     refresh();
   } else if (t.dataset.finding) {
     const it = snap.findings.items[+t.dataset.finding];
-    showAnswer(it.value.split(":")[0], { items: [{ ...it, relation: "finding" }], sources: snap.findings.sources, gaps: snap.findings.gaps.slice(-1) });
+    const sources = Object.fromEntries(it.cite.map((k) => [k, snap.findings.sources[k]]));
+    showAnswer(it.value.split(":")[0], { items: [{ ...it, relation: "finding" }], sources, gaps: snap.findings.gaps.slice(-1) });
   } else if (t.dataset.entity) {
     openEntity(t.dataset.entity);
   } else if (t.dataset.fact && t.dataset.fact !== "null") {
@@ -436,7 +439,10 @@ function loadSources(a) {
     fetch(`/api/source?file=${encodeURIComponent(s.file)}&locator=${encodeURIComponent(s.locator)}`)
       .then((r) => r.json()).then((x) => {
         const el = document.querySelector(`#src-${k} .body`);
-        if (el) { el.innerHTML = excerpt(x, s.quote); const hit = el.querySelector(".hit,.hitline,mark"); if (hit) hit.scrollIntoView({ block: "nearest" }); }
+        if (!el) return;
+        el.innerHTML = excerpt(x, s.quote);
+        const hit = el.querySelector("tr.hit,.hitline,p.hit,mark");
+        if (hit) el.scrollTop = Math.max(0, hit.offsetTop - 40);  // the cited span, inside its own box
       });
   }
 }
@@ -452,7 +458,12 @@ function excerpt(x, quote) {
   return `<pre>${esc(x.message || "")}</pre>`;
 }
 
-refresh().then(connect);
+refresh().then(() => {
+  connect();
+  const [kind, id] = decodeURIComponent(location.hash.slice(1)).split("=");  // #fact=... or #entity=...
+  if (kind === "fact" && id) openFact(id);
+  if (kind === "entity" && id) openEntity(id);
+});
 </script>
 </body>
 </html>

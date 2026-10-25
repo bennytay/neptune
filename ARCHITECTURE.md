@@ -30,6 +30,7 @@ flowchart LR
     VIEWS["Site views<br/>now · history · topology"]
     V2["Memory v2 claim graph<br/>frozen until the gate"]
     QRY["Query layer<br/>MCP tools · SQL"]
+    WEB["Live web view<br/>map · timeline · cited sources"]
   end
   USE["Agents · LLMs<br/>analysis · insights"]
 
@@ -60,6 +61,8 @@ flowchart LR
   DER -.->|inferred| LOG
   CONF -->|stated| LOG
   LOG --> VIEWS --> QRY --> USE
+  QRY --> WEB
+  WEB -->|yes / no| CONF
   PKG -.-> V2 -.-> QRY
 
   subgraph KEY[" "]
@@ -81,7 +84,7 @@ flowchart LR
   class DEV ext
   class RAW,FEED,USE ext
   class CAPT,LOG,CONF,VIEWS todo
-  class V2,QRY built
+  class V2,QRY,WEB built
   style N fill:#8b949e0f,stroke:#8b949e
   style S fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

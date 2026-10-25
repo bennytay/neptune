@@ -62,6 +62,8 @@ TIMELINE = ("mode", "health", "in_zone")
 TIMELINE_LIMIT = 120
 CONTEXT = 4
 """Lines or rows shown either side of a cited one."""
+LONG_LINE = 160
+"""Past this many characters a cited line keeps only one neighbour on each side."""
 ACTIONS = "neptune_memory.site.actions"
 
 
@@ -349,6 +351,7 @@ def _asset(
 FAULT = re.compile(r"fault|error|estop|e-stop|alarm", re.IGNORECASE)
 WARN = re.compile(r"starv|wait|block|stop|protect|pause|hold|jam", re.IGNORECASE)
 IDLE = re.compile(r"idle|dock|charg|park", re.IGNORECASE)
+IDLE_TASK = re.compile(r"none|done|finish|complete|cancel|fail", re.IGNORECASE)
 
 
 def _status(state: dict[str, dict[str, Any]], task_state: str | None) -> str:
@@ -364,7 +367,8 @@ def _status(state: dict[str, dict[str, Any]], task_state: str | None) -> str:
     if WARN.search(str(mode["value"])) or WARN.search(task_state or ""):
         return "warn"
     if IDLE.search(str(mode["value"])):
-        return "idle"
+        busy = task_state is not None and not IDLE_TASK.search(task_state)
+        return "warn" if busy else "idle"  # idle on an open task: waiting for something
     return "ok"
 
 
@@ -453,6 +457,9 @@ def _lines(path: Path, line: int) -> dict[str, Any]:
     lo = max(1, line - CONTEXT)
     with path.open(encoding="utf-8", errors="replace") as handle:
         rows = list(islice(handle, lo - 1, line + CONTEXT))
+    if any(len(r) > LONG_LINE for r in rows):  # feed lines: the cited one and its neighbours
+        start = max(0, line - lo - 1)
+        rows, lo = rows[start : line - lo + 2], lo + start
     return {
         "kind": "lines",
         "hit": line,

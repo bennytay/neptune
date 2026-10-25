@@ -428,3 +428,24 @@ feeds:                                   # one entry per envelope `source`
   `neptune_site_changes(since_seq)` (`query.changes`) lists facts appended after a seq.
 - `make site-live` runs `broker` (amqtt, anonymous), `live` and `publish` (`START=2026-10-20T09:55:00`,
   earlier messages at once). No auth, TLS or reconnect handling.
+
+## 14. Web view (#210)
+
+- `python -m neptune_memory.site web <site_dir> [--port 8765] [--open]` serves one page (`site/web.html`:
+  vanilla JS and SVG, no build step) over stdlib `http.server`. `make site-web` opens it for `SITE_DIR`;
+  `make site-live` serves it beside `live` and prints its URL.
+- **Panels:** a site map, the live state table, a timeline of mode/health/zone changes, the findings
+  (inferred), the pending-confirm queue (yes/no appends a `confirm` entry), and a source viewer.
+- **Map:** layouts state no coordinates, so it is laid out from `part_of` (areas hold cells and zones),
+  `located_in` and the live `in_zone`; a machine with neither sits on its area's floor beside what it
+  `feeds`. Colour reads mode, health and the current task's state; stale is grey and dashed. A stated
+  `same_as` group is one glyph. `feeds` edges out of a faulted or waiting node flow in the fault colour.
+- **API** (JSON, read through `query.py` / `insights.py`): `/api/snapshot?at=T|seq=N` (the time slider
+  sets `at` or `as_of_seq`), `/api/why?fact=ID`, `/api/source?file=&locator=` (lines of a text file, a
+  CSV/XLSX row, a PDF page's blocks from the compiler's package, a JSON object, an image region),
+  `POST /api/confirm`, and `/events` (server-sent events each time the log grows; the model tails it
+  with `log.Tail`). `#fact=ID` or `#entity=REF` in the URL opens a fact or an entity.
+- `FactLog` appends under a lock (`.neptune/log.lock`) and numbers on from any entries another writer
+  added, so a confirm from the page while `live` runs never reuses a `seq`.
+- An actions panel calls `neptune_memory.site.actions` (`pending`, `approve`, `reject`, #212) when that
+  module exists, and is hidden otherwise.
