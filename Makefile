@@ -143,9 +143,9 @@ site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x fro
 > rm -rf "$(SITE_DIR)/feed/live" "$(SITE_READY)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
-> @trap 'kill 0' INT TERM EXIT; \
-  $(SITE) broker --broker "$(BROKER)" & \
+> @$(SITE) broker --broker "$(BROKER)" & b=$$!; \
   $(SITE) live "$(SITE_DIR)" --broker "$(BROKER)" & l=$$!; \
+  trap 'kill $$l $$b 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
   until [ -f "$(SITE_READY)" ]; do kill -0 $$l 2>/dev/null || exit 1; sleep 0.2; done; \
   $(SITE) publish "$(SITE_DIR)" --broker "$(BROKER)" --speed "$(SPEED)" --start "$(START)"; \
   echo "live keeps running; drop a file into $(SITE_DIR)/static/ to see it ingested. Ctrl-C stops."; \

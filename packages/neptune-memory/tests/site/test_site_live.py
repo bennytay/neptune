@@ -53,8 +53,7 @@ def test_site_live_log_equals_build_over_the_capture(tmp_path: Path) -> None:
         _wait(lambda: any("subscribed" in line for line in lines))
         sent = publish(site_dir, url, speed=1e9, until=UNTIL, sleep=lambda _s: None)
         assert sent > 100
-        logged = lambda: sum(1 for e in read(site_dir) if e.seen and e.seen.source in SOURCES)  # noqa: E731
-        _wait(lambda: logged() == sent)
+        _wait(lambda: _reports(site_dir) == sent)
     finally:
         stop_live.set()
         runner.join(10)
@@ -72,6 +71,11 @@ def test_site_live_log_equals_build_over_the_capture(tmp_path: Path) -> None:
 
 
 SOURCES = {"plc.cv2", "fleet", "arm.c3"}
+
+
+def _reports(site_dir: Path) -> int:
+    """``seen`` entries of the three feed sources: one per message logged."""
+    return sum(1 for e in read(site_dir) if e.seen is not None and e.seen.source in SOURCES)
 
 
 def test_site_live_static_change_appends_only_new_facts(tmp_path: Path) -> None:

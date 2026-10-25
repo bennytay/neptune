@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import signal
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -76,14 +77,23 @@ DEFAULT_BROKER = "mqtt://127.0.0.1:1883"  # live.DEFAULT_BROKER, without importi
 def _publish(args: argparse.Namespace) -> int:
     from neptune_memory.site.live import publish
 
-    n = publish(args.site_dir, args.broker, speed=args.speed, start=args.start, until=args.until)
-    _say(f"published {n} messages to {args.broker}")
+    with contextlib.suppress(KeyboardInterrupt):
+        n = publish(
+            args.site_dir, args.broker, speed=args.speed, start=args.start, until=args.until
+        )
+        _say(f"published {n} messages to {args.broker}")
     return 0
+
+
+def _interruptible() -> None:
+    """Ctrl-C stops a command even when a shell started it with ``&`` (which ignores SIGINT)."""
+    signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
 def _live(args: argparse.Namespace) -> int:
     from neptune_memory.site.live import live
 
+    _interruptible()
     live(args.site_dir, args.broker)
     return 0
 
@@ -91,6 +101,7 @@ def _live(args: argparse.Namespace) -> int:
 def _broker(args: argparse.Namespace) -> int:
     from neptune_memory.site.live import broker
 
+    _interruptible()
     _say(f"broker: {args.broker} (amqtt, anonymous; Ctrl-C stops it)")
     with contextlib.suppress(KeyboardInterrupt):
         broker(args.broker)
