@@ -34,13 +34,18 @@ ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
+<<<<<<< HEAD
   contracts-check harness demo demo-pin demo-folder up site-demo site-replay
+=======
+  contracts-check harness demo demo-pin demo-folder up check-all
+>>>>>>> origin/main
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
 
-setup: ## Install the compiler, every workspace member and the dev tools into .venv
+setup: ## Install the compiler, every workspace member and the dev tools into .venv, plus git hooks
 > $(UV) sync --all-packages --all-groups
+> @if git rev-parse --git-dir >/dev/null 2>&1; then $(UV) run pre-commit install >/dev/null || true; fi
 
 fmt: adr-index ## Format code, auto-fix lint findings and regenerate the ADR index
 > $(UV) run ruff format .
@@ -53,13 +58,20 @@ lint: adr-index-check ## Formatting, lint and ADR-index check without modifying 
 type: ## Static type check (mypy --strict)
 > @$(EACH) $(RUN) mypy; done
 
-test: ## Full test suite
-> @$(EACH) $(RUN) pytest; done
+# Tests run in parallel (pytest-xdist). PYTEST_WORKERS caps the workers (CI sets `auto`); tests
+# that share state carry an `xdist_group` and stay on one worker. PYTEST_ARGS adds flags.
+PYTEST_WORKERS ?= 4
+PYTEST = $(RUN) pytest -n $(PYTEST_WORKERS) --dist loadgroup $(PYTEST_ARGS)
+
+test: ## Full test suite, slow tests included
+> @$(EACH) $(PYTEST); done
 
 test-fast: ## Test suite excluding tests marked slow
-> @$(EACH) $(RUN) pytest -m "not slow"; done
+> @$(EACH) $(PYTEST) -m "not slow"; done
 
-check: lint type test ## Everything CI runs; must pass before opening a PR (PKG=<name> for one)
+check: lint type test-fast ## What PR CI runs: lint, types, fast tests; must pass before a PR (PKG=<name> for one)
+
+check-all: lint type test ## Everything, slow tests included; main and the nightly run it (PKG=<name> for one)
 
 adr-index: ## Regenerate docs/adr/README.md (compiler and each member); `make fmt` runs it
 > $(if $(strip $(COMPILER_ADR) $(ADR_DIRS)),python3 .github/scripts/adr_index.py $(COMPILER_ADR) $(ADR_DIRS),@true)
@@ -132,4 +144,5 @@ docs: ## Build the documentation site, warnings as errors (platform ADR 0012)
 
 ifeq ($(PKG),)
 check: docs
+check-all: docs
 endif
