@@ -1,0 +1,77 @@
+{
+  "about": "Gold questions over real public data (issue #211): UCI dataset 963 'UR3 CobotOps' (CC BY 4.0), one UR3 cobot's controller export, fetched by scripts/fetch_public_site.sh. Every expected value was read from the raw workbook, not from a story. Each call is a site query (docs/site-model/spec.md §8); expect lists items the answer must contain, rows the first columns of sql rows, locators citations that must appear, cites the files. Wording is never checked.",
+  "questions": [
+    {
+      "id": "P1",
+      "question": "When did the UR3 first go into a protective stop, and how long until it cleared?",
+      "calls": [
+        {"tool": "sql", "args": {"query": "SELECT entity, fault, start, \"end\", seconds, fact_id FROM fault_clear_time WHERE entity = 'robot:ur3' ORDER BY start LIMIT 1"}}
+      ],
+      "expect": [
+        {"subject": "robot:ur3", "predicate": "health", "object": "fault:protective_stop", "kind": "observed", "state": "known"}
+      ],
+      "rows": [["robot:ur3", "fault:protective_stop", "2022-10-26T08:17:40", "2022-10-26T08:17:46", 6.0]],
+      "locators": ["row 21 col \"Robot_ProtectiveStop\""],
+      "cites": ["static/ur3/dataset_02052023.xlsx"]
+    },
+    {
+      "id": "P2",
+      "question": "How many protective stops and grip losses does the export record?",
+      "calls": [
+        {"tool": "sql", "args": {"query": "SELECT entity, fault, count(*) AS stops, min(start) AS first, fact_id FROM fault_clear_time GROUP BY entity, fault ORDER BY entity"}}
+      ],
+      "expect": [
+        {"subject": "component:ur3-gripper", "predicate": "health", "object": "fault:grip_lost", "kind": "observed"},
+        {"subject": "robot:ur3", "predicate": "health", "object": "fault:protective_stop", "kind": "observed"}
+      ],
+      "rows": [["component:ur3-gripper", "fault:grip_lost", 77, "2022-10-26T08:18:05"], ["robot:ur3", "fault:protective_stop", 108, "2022-10-26T08:17:40"]],
+      "locators": ["row 45 col \"grip_lost\"", "row 21 col \"Robot_ProtectiveStop\""],
+      "cites": ["static/ur3/dataset_02052023.xlsx"]
+    },
+    {
+      "id": "P3",
+      "question": "What state was the UR3 in at 14:30:00, and what can't the data say?",
+      "calls": [
+        {"tool": "state_at", "args": {"entity": "robot:ur3", "at": "2022-10-26T14:30:00"}}
+      ],
+      "expect": [
+        {"subject": "robot:ur3", "predicate": "health", "object": "ok", "kind": "observed", "state": "known"},
+        {"subject": "robot:ur3", "predicate": "cycle", "object": "126", "kind": "observed", "state": "known"},
+        {"subject": "robot:ur3", "predicate": "mode", "state": "unknown"},
+        {"subject": "robot:ur3", "predicate": "battery", "state": "unknown"}
+      ],
+      "rows": [],
+      "locators": ["row 3252 col \"Robot_ProtectiveStop\"", "row 3455 col \"cycle \""],
+      "cites": ["static/ur3/dataset_02052023.xlsx"]
+    },
+    {
+      "id": "P4",
+      "question": "Which joint ran hottest, and when did it first reach that?",
+      "calls": [
+        {"tool": "sql", "args": {"query": "SELECT subject, object, valid_from, fact_id FROM facts WHERE predicate = 'temperature' AND CAST(object AS REAL) = (SELECT max(CAST(object AS REAL)) FROM facts WHERE predicate = 'temperature') ORDER BY valid_from LIMIT 1"}}
+      ],
+      "expect": [
+        {"subject": "component:ur3-j4", "predicate": "temperature", "object": "45.375", "kind": "observed", "state": "known"}
+      ],
+      "rows": [["component:ur3-j4", "45.375", "2022-10-26T15:15:39"]],
+      "locators": ["row 6190 col \"Temperature_J4\""],
+      "cites": ["static/ur3/dataset_02052023.xlsx"]
+    },
+    {
+      "id": "P5",
+      "question": "The gripper lost its grip at 08:18:05: what does that touch, and how long did it last?",
+      "calls": [
+        {"tool": "impact", "args": {"entity": "component:ur3-gripper", "at": "2022-10-26T08:18:06"}},
+        {"tool": "timeline", "args": {"entity": "component:ur3-gripper", "start": "2022-10-26T08:18:00", "end": "2022-10-26T08:18:10", "predicates": ["health"]}}
+      ],
+      "expect": [
+        {"subject": "component:ur3-gripper", "predicate": "health", "object": "fault:grip_lost", "kind": "observed", "state": "known"},
+        {"subject": "robot:ur3", "predicate": "depends_on", "object": "component:ur3-gripper", "kind": "stated", "state": "known"},
+        {"subject": "component:ur3-gripper", "predicate": "health", "object": "ok", "kind": "observed"}
+      ],
+      "rows": [],
+      "locators": ["row 45 col \"grip_lost\"", "row 47 col \"grip_lost\""],
+      "cites": ["static/ur3/dataset_02052023.xlsx", "static/layout.yaml"]
+    }
+  ]
+}

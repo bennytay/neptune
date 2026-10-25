@@ -92,6 +92,9 @@ jobs:
         run: uv python install
       - name: Install workspace and dev tools
         run: make setup
+      - name: Fetch the public site (#211's gold questions; they skip without it)
+        if: github.event_name != 'pull_request' && matrix.package == 'neptune-memory'
+        run: scripts/fetch_public_site.sh site-public
       - name: Lint, type-check, test
         env:
           PACKAGE: ${{ matrix.package }}
