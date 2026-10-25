@@ -34,11 +34,7 @@ ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-<<<<<<< HEAD
-  contracts-check harness demo demo-pin demo-folder up site-demo site-replay
-=======
-  contracts-check harness demo demo-pin demo-folder up check-all
->>>>>>> origin/main
+  contracts-check harness demo demo-pin demo-folder up check-all site-demo site-replay
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
