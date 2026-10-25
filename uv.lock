@@ -1675,8 +1675,17 @@ dependencies = [
     { name = "neptune" },
 ]
 
+[package.optional-dependencies]
+anthropic = [
+    { name = "anthropic" },
+]
+
 [package.metadata]
-requires-dist = [{ name = "neptune", editable = "." }]
+requires-dist = [
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1.0" },
+    { name = "neptune", editable = "." },
+]
+provides-extras = ["anthropic"]
 
 [[package]]
 name = "neptune-platform"
