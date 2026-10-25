@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Mappings from config, not code (spec §12): a second-shaped site maps from its mapping file
 alone, unmapped files stay searchable and show in ``gaps``, and the mappers hold no Plant 7."""
 
@@ -42,7 +43,27 @@ tables:
     time: since
     facts:
       - {predicate: holds_qualification, column: cert, ref: "qualification:{cert}"}
+  - file: eam/work_orders.json
+    rows: data.orders
+    source: eam
+    subject: "work_order:{id}"
+    time: opened
+    facts:
+      - {subject: "robot:{asset.tag|lower}", predicate: work_order, column: asset.tag, ref: "work_order:{id}"}
+      - {predicate: wo_cause, column: cause}
+  - file: hr/crew.csv
+    source: hr
+    subject: "person:{Name|lower}"
+    facts:
+      - {predicate: holds_qualification, column: Certs, split: "|", ref: "qualification:{item}"}
+      - {predicate: on_shift, column: Crew, ref: "shift:{Crew}", time: "{Day}T{In}", until: "{Day}T{Out}"}
 feeds:
+  - source: diag
+    decoder: ros2_diagnostics
+    subject: robot:fl-7
+    fields:
+      "fl7/drive/level": health
+      "*/max_temp_c": {predicate: temperature, subject: "machine:{hardware_id}", unit: "°C"}
   - source: telemetry
     decoder: json
     subject: "robot:{topic[1]}"
@@ -59,6 +80,32 @@ CERTS = (
     '{"person": "Ito", "cert": "cold-store-ppe", "since": "2025-02-01"}\n'
 )
 TEMPS = "Probe,Reading C,At\nP-4,-18.5,2026-10-20T08:00:00\nP-5,-17.9,2026-10-20T08:00:00\n"
+WORK_ORDERS = {
+    "data": {
+        "orders": [
+            {
+                "id": "W-1",
+                "asset": {"tag": "FL-7"},
+                "opened": "2026-10-20T07:00:00",
+                "cause": "mast",
+            }
+        ]
+    }
+}
+CREW = "Name,Crew,Day,In,Out,Certs\nIto,B,2026-10-20,06:00:00,14:00:00,reach-truck|first-aid\n"
+DIAG = {
+    "t": "2026-10-20T08:00:05",
+    "source": "diag",
+    "topic": "/diagnostics",
+    "payload": {
+        "status": [
+            {"level": 1, "name": "fl7/drive", "message": "drive hot", "hardware_id": "fl-7",
+             "values": []},
+            {"level": 0, "name": "fl7/scan", "message": "ok", "hardware_id": "chiller-2",
+             "values": [{"key": "max_temp_c", "value": "4.5"}]},
+        ]
+    },
+}  # fmt: skip
 
 
 def _envelope(t: str, payload: dict[str, object]) -> str:
@@ -83,6 +130,9 @@ def site(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "static/hr/certs.jsonl": CERTS,
         "static/temps.csv": TEMPS,
         "feed/telemetry.jsonl": "\n".join(FEED) + "\n",
+        "static/eam/work_orders.json": json.dumps(WORK_ORDERS, indent=2),
+        "static/hr/crew.csv": CREW,
+        "feed/diag.jsonl": json.dumps(DIAG) + "\n",
     }
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +169,23 @@ def test_feed_maps_from_config(facts: list[Fact]) -> None:
     fault = _one(facts, "robot:fl-7", "health", Value("fault:E42"))
     assert fault.citations[0].locator == "line 3"
     assert len([f for f in facts if f.predicate == "mode"]) == 2  # only on change
+
+
+def test_json_rows_split_cells_templated_times_and_diagnostics(facts: list[Fact]) -> None:
+    cause = _one(facts, "work_order:W-1", "wo_cause", Value("mast"))
+    assert (cause.valid_from, cause.citations[0].locator) == (
+        "2026-10-20T07:00:00",
+        "json /data/orders/0/cause",
+    )
+    _one(facts, "robot:fl-7", "work_order", Ref("work_order:W-1"))
+    for held in ("reach-truck", "first-aid"):
+        _one(facts, "person:ito", "holds_qualification", Ref(f"qualification:{held}"))
+    shift = _one(facts, "person:ito", "on_shift", Ref("shift:B"))
+    assert (shift.valid_from, shift.valid_to) == ("2026-10-20T06:00:00", "2026-10-20T14:00:00")
+    assert (
+        _one(facts, "robot:fl-7", "health", Value("fault:WARN")).citations[0].quote == "drive hot"
+    )
+    _one(facts, "machine:chiller-2", "temperature", Value("4.5", "°C"))
 
 
 def test_unmapped_file_is_searchable_and_a_gap(site: Path) -> None:

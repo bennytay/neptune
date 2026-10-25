@@ -287,23 +287,29 @@ tags:                                    # `|tag`: the register row whose `name`
   name: Name                             #   no such row: machine
   type: Type
 
-tables:                                  # CSV rows (header = row 1) or JSONL lines (keys = columns)
+tables:                                  # CSV/XLSX rows (header = row 1), JSONL lines, JSON arrays
   - file: cmms/work_orders.csv           # glob under static/; the first matching entry wins
     source: cmms                         # the facts' source id (layout.yaml `sources`)
     kind: stated                         # stated (default) | observed
     subject: "work_order:{WO}"           # the default subject of every fact below
-    time: Opened                         # valid_from column (a blank cell = not stated); optional
-    until: Closed                        # valid_to column; optional
+    time: Opened                         # valid_from: a column, or a template; optional
     facts:                               # in order; a fact whose `column` cell is blank is skipped
       - {subject: "{Equipment|tag}", predicate: work_order, column: Equipment, ref: "work_order:{WO}"}
       - {predicate: wo_problem, column: Problem}          # object = the cell as written
       - {predicate: wo_by, column: Done by, ref: "person:{Done by|lower}"}
+  - file: cmms/work_orders.json          # a JSON table: `rows` is the dotted path of its array
+    rows: workOrders                     #   (none: a top-level array, or the object as one row)
+    source: cmms
+    subject: "work_order:{id}"           # columns are dotted paths (`asset.tag`), cited `json /workOrders/1/cause`
+    time: opened
   - file: roster/shift_roster.csv
     source: roster
     subject: "person:{Person|lower}"
     facts:
       - {predicate: has_role, column: Role, ref: "role:{Role|slug}", once: Person}  # first row per Person
-      - {predicate: on_break, column: Break start, value: break, time: Break start, until: Break end}
+      - {predicate: holds_qualification, column: Certs, split: "|", ref: "qualification:{item}"}  # one per item
+      - {predicate: on_break, column: Break start, value: break,
+         time: "{Date}T{Break start}", until: "{Date}T{Break end}"}  # a template; None if a cell is blank
   - file: changes/changes.csv
     source: cmms
     subject: "change:{Change}"
@@ -322,6 +328,7 @@ documents:                               # PDF blocks, cited `page P block B`
     lift:                                # values stated verbatim in a block
       - {pattern: '\d+\s?[–-]\s?\d+\s?N\b', predicate: states_limit, about: document}  # group 1 if any, else the match
       - {terms: {table: roster/qualifications.csv, column: Qualification},          # each term named in the block
+                                                                    # (terms may `split: "|"` a cell)
          predicate: requires_qualification, ref: qualification, about: rule}         # (case-blind, `-` or space)
                                          # about: document | rule (the block's clause, else the document)
 extractions:                             # recorded model output (§7)
@@ -348,17 +355,28 @@ feeds:                                   # one entry per envelope `source`
     decoder: controller_log              # as `json`; the quote is the line's `text`, except on `event: heartbeat`
     subject: robot:arm-c3
     fields: {mode: mode, fault: health}
+  - source: ros.insp1
+    decoder: ros2_diagnostics            # status[] as `<status name>/<key>` and `<status name>/level`
+    subject: robot:insp-1
+    fields:
+      "insp1/thermal_scan */max_temp_c": {predicate: temperature, subject: "machine:{hardware_id}", unit: "°C"}
 ```
 
-- **Decoders:** `sparkplug`, `json` (any JSON object payload), `vda5050` (= `json`), `controller_log`. A new one
-  is a function registered by name in `site/mappers/feeds.py`.
+- **Decoders:** `sparkplug` (`metrics[]`), `opcua` (`nodes[]`: `name`, `value`, `eu` = unit), `json` (any JSON
+  object payload), `vda5050` (= `json`), `controller_log`, `ros2_diagnostics` (a `DiagnosticArray`; level 0 =
+  no fault code, else `WARN`/`ERROR`/`STALE`, quoting the status message; `{hardware_id}` names the status's
+  device). A new one is a function registered by name in `DECODERS`, `site/mappers/feeds.py`.
 - **Feed fields** are emitted when present and not null, and only on change (§4). `health` reads a fault code:
   `""` or `[]` = `ok`, else `fault:<code>` (a list's first `errorType`). `current_task` makes `task:<value>`,
-  its `assigned_to` back, and `task_state` from the `state` field; a blank value is `none`. A VDA 5050 topic
-  (`uagv/<v>/<site>/<robot>/state`) also logs `seen` per robot, so freshness is per robot.
-- **Unmapped files** (a table or document no entry matches) are still logged: `document:<path under static/>`
-  gets `unmapped = "not mapped"` citing the file, plus one stated `text` fact per row or block, verbatim. So
-  `search_evidence` finds them and `gaps` lists them as not mapped.
+  its `assigned_to` back, and `task_state` from the `state` field; a blank value is `none`.
+- **Freshness per device:** when a feed's `subject` is a template (`robot:{topic[-2]}`), each message also logs
+  `seen` for `<source>/<id>`, so one silent robot turns stale while its fleet still reports.
+- **`time` / `until`** state when a fact holds. Leave `until` off for facts that stay true after the row's end
+  (a work order's cause does not stop being its cause when it closes): views read a fact past its `until` as over.
+- **YAML 1.1 reads a bare `on` key as `true`**; write `about:` (`on:` is accepted as an alias).
+- **Unmapped files** (a CSV/TSV/JSONL/XLSX table or a document no entry matches) are still logged:
+  `document:<path under static/>` gets `unmapped = "not mapped"` citing the file, plus one stated `text` fact
+  per row or block, verbatim. So `search_evidence` finds them and `gaps` lists them as not mapped.
 - **`python -m neptune_memory.site draft-mapping <site_dir> <file>`** prints a draft `tables:` entry (CSV or
   JSONL rows) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
   heuristics. The skill says: draft → show the user → save into the mapping file → `build`.
