@@ -320,10 +320,10 @@ documents:                               # PDF blocks, cited `page P block B`
       id: "rule:{id|lower}-{1}"
       text: 2
     lift:                                # values stated verbatim in a block
-      - {pattern: '\d+\s?[–-]\s?\d+\s?N\b', predicate: states_limit, on: document}  # group 1 if any, else the match
+      - {pattern: '\d+\s?[–-]\s?\d+\s?N\b', predicate: states_limit, about: document}  # group 1 if any, else the match
       - {terms: {table: roster/qualifications.csv, column: Qualification},          # each term named in the block
-         predicate: requires_qualification, ref: qualification, on: rule}           # (case-blind, `-` or space)
-                                         # on: document | rule (the block's clause, else the document)
+         predicate: requires_qualification, ref: qualification, about: rule}         # (case-blind, `-` or space)
+                                         # about: document | rule (the block's clause, else the document)
 extractions:                             # recorded model output (§7)
   - file: photos/*.extraction.json
     source: photos
