@@ -13,21 +13,11 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 from neptune_memory.site.log import FactLog
 
-from context_packet_goldens import PACKETS
 from neptune_context.mcp.site import SITE_TOOLS, SiteTools, build_site_server
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-V2_TOOLS = [
-    "neptune_query",
-    "neptune_why",
-    "neptune_diff",
-    "neptune_compare_runs",
-    "neptune_hydrate",
-    "neptune_plan",
-    "neptune_entities",
-]
 SITE_NAMES = [
     "neptune_site_resolve",
     "neptune_site_state_at",
@@ -61,12 +51,8 @@ def _list(args: list[str]) -> list[str]:
     return asyncio.run(session())
 
 
-def test_site_flag_alone_lists_the_site_tools(tmp_path: Path) -> None:
+def test_site_flag_lists_the_site_tools(tmp_path: Path) -> None:
     assert _list(["--site", str(tmp_path)]) == SITE_NAMES == list(SITE_TOOLS)
-
-
-def test_site_flag_adds_the_site_tools_beside_the_v2_tools(tmp_path: Path) -> None:
-    assert _list(["--packets", str(PACKETS), "--site", str(tmp_path)]) == V2_TOOLS + SITE_NAMES
 
 
 STOPPED = Fact(

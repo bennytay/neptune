@@ -20,8 +20,7 @@ neptune confirm (yes/no) ──────────────────�
 
 ## 2. Where the code lives
 
-- v3 lives in `packages/neptune-memory/src/neptune_memory/site/`, beside v2. **Don't touch v2** (`schema/`,
-  `consolidate/`, `store/` …) or Demo v1. M1's gate (#188) switches over and deletes v2.
+- v3 lives in `packages/neptune-memory/src/neptune_memory/site/` (v2 and Demo v1 were deleted in #213).
 - Tests go in `packages/neptune-memory/tests/site/`. There is no `__init__.py`, so basenames must be unique
   repo-wide: prefix them `test_site_` (helpers: `site_`).
 - `site/facts.py` holds the shared types and is **frozen by this PR**. Lanes import it; changing it needs a
@@ -182,7 +181,6 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   - The server gains tools `neptune_site_<name>` for each function above, each with a JSON object input that
     mirrors the Python arguments and returns `render(answer)`.
   - They are enabled by `python -m neptune_context.mcp --site <site_dir>`.
-  - v2 tools stay as they are.
 
 ## 8a. Insights (`site/insights.py`, #203)
 

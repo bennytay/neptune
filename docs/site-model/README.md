@@ -3,7 +3,7 @@
 Neptune is being rebuilt as a **live, cited model of a whole site**: robots, machines, people (by role), work,
 rules, and what feeds what. Claude queries it over MCP. This folder is the entry point for every M1 lane.
 
-**Read only these:** this file, [`spec.md`](spec.md), and your GitHub issue. Don't read the v2 ADRs.
+**Read only these:** this file, [`spec.md`](spec.md), and your GitHub issue.
 
 ## Demo rules (this is a demo, not a product)
 
@@ -13,7 +13,6 @@ rules, and what feeds what. Claude queries it over MCP. This folder is the entry
   versions, contracts and migrations; ADRs, unless you take a real fork from the spec (then one paragraph in
   the PR).
 - **Tests:** a happy path per module, plus the gold questions (`packages/neptune-memory/tests/site/`).
-- **Don't touch v2** (`neptune_memory/schema|consolidate|store|...`) or Demo v1. #188 deletes them.
 
 ## Lanes
 

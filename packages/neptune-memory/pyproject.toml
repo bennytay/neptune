@@ -1,9 +1,9 @@
-# Workspace member generated from packages/_template by scripts/new-package.sh.
+# Workspace member: the site model, neptune_memory.site (docs/site-model/).
 # Dev tools (ruff, mypy, pytest) come from the root project's `dev` group; `make setup` installs them.
 [project]
 name = "neptune-memory"
 version = "0.0.1"
-description = "Neptune Memory: provenance-preserving claim graph consolidated from Ledger packages."
+description = "Neptune Memory: the site model (neptune_memory.site), a cited fact log of one robot site."
 license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
@@ -17,10 +17,6 @@ live = ["amqtt>=0.11", "paho-mqtt>=2.1"]
 # extraction and never calls a model; `uv sync --extra anthropic` to re-record from real photos.
 [project.optional-dependencies]
 anthropic = ["anthropic>=1.0"]
-
-# `memory consolidate | rebuild | dump` (MVL-132, ADR 0016).
-[project.scripts]
-memory = "neptune_memory.cli:main"
 
 [build-system]
 requires = ["hatchling"]

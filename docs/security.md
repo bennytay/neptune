@@ -130,10 +130,5 @@ scratch, no network, no processes, limits), so a memory-safety bug in one reache
 compromised Python parser already could: the files the user can read, into its own reply.
 
 **Off Linux (macOS)** the sandbox cannot run: the job refuses unless asked for `isolation =
-in_process`, which runs adapters unconfined in the job's process. The demo (`harness.demo`) asks for
-it by itself off Linux, and says so, because its corpus is the repository's own generated files;
-`harness.up` asks only when `--isolation in_process` is given and records it in `up.json`. On
-macOS the Ledger's pinned reads (`catalog/check.py` `_pinned`) name the held directory by its
-`F_GETPATH` path, not `/proc/self/fd`: a directory swapped for a symlink between that call and the
-compiler's open can make it read a file outside the checked tree. That needs a local writer racing
-the registration; macOS is a development platform, not a deployment one.
+in_process`, which runs adapters unconfined in the job's process. The site model's build
+(`python -m neptune_memory.site build`) asks for it on every platform.

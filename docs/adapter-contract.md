@@ -326,12 +326,12 @@ fifteen bespoke checkpoint formats — was judged worse.
 
 ## Adapters from other distributions (ADR 0058)
 
-A distribution outside the compiler (a workspace member such as `neptune-deploy`, or a third party)
+A distribution outside the compiler (a workspace member or a third party)
 registers adapters as entry points instead of a line in `builtin.py`:
 
 ```toml
 [project.entry-points."neptune.adapters"]
-deploy_lifecycle = "neptune_deploy.adapters.lifecycle:LifecycleAdapter"   # name = the adapter id
+acme_tally = "neptune_acme.adapters.tally:TallyAdapter"                    # name = the adapter id
 [project.entry-points."neptune.sources"]                                    # connectors (MVL-153)
 ```
 

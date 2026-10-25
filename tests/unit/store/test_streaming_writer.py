@@ -30,7 +30,7 @@ def load_generator(path: Path) -> ModuleType:
 
 
 GOLDEN: Final = ROOT / "tests" / "golden" / "packages"
-ARCHETYPES: Final = ROOT / "packages" / "neptune-deploy" / "tests" / "fixtures" / "archetypes"
+ARCHETYPES: Final = ROOT / "tests" / "fixtures" / "store" / "archetypes"
 SCALE: Final = load_generator(ROOT / "tests" / "fixtures" / "store" / "make_scale_package.py")
 EXAMPLES: Final = load_generator(GOLDEN / "make_packages.py")
 TINY: Final = 4096  # a budget that spills every few records, so every path through the merge runs
@@ -67,9 +67,9 @@ def test_each_worked_example_streams_to_its_golden_documents(name: str, tmp_path
 def test_a_whole_package_with_series_and_derived_tables_streams_byte_for_byte(
     name: str, tmp_path: Path
 ) -> None:
-    """Deploy's committed archetype packages, made by the compiler before ADR 0065: every file,
+    """The committed archetype packages, made by the compiler before ADR 0065: every file,
     series and derived tables included, is written again byte for byte."""
-    committed = ARCHETYPES / "packages" / name
+    committed = ARCHETYPES / name
     if not committed.is_dir():
         pytest.skip(f"no committed archetype package {name}")
     package = read_package(committed)

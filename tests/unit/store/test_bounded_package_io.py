@@ -40,9 +40,7 @@ from neptune.validate.engine import Bounds, Context, Inputs
 from neptune.validate.rules import dangling_reference
 
 ROOT: Final = Path(__file__).resolve().parents[3]
-ARCHETYPE: Final = (
-    ROOT / "packages" / "neptune-deploy" / "tests" / "fixtures" / "archetypes" / "packages"
-)
+ARCHETYPE: Final = ROOT / "tests" / "fixtures" / "store" / "archetypes"
 MODEL: Final = ROOT / "tests" / "fixtures" / "model"
 TINY: Final = 4096
 
@@ -67,7 +65,7 @@ def files_of(root: Path) -> dict[str, bytes]:
 
 
 def archetype() -> IngestPackage:
-    """A committed package with series and derived tables (Deploy's warehouse fleet)."""
+    """A committed package with series and derived tables (the warehouse fleet archetype)."""
     committed = ARCHETYPE / "warehouse_amr_fleet"
     if not committed.is_dir():
         pytest.skip("no committed archetype package")

@@ -98,7 +98,7 @@ questions, Harbor 5/5 and 2 insight questions, each checked by its cited facts, 
 
 ```bash
 make setup   # uv-managed venv with dev tools
-make check   # lint + mypy --strict + tests (what CI runs); PKG=<name> for one package
+make check   # lint + mypy --strict + tests (what CI runs); PKG=neptune-memory for one package
 ```
 
 Working here? Read `AGENTS.md`, then [`docs/site-model/README.md`](docs/site-model/README.md) and
@@ -116,40 +116,8 @@ rewritten, every value carries provenance, blanks stay blank, and the same input
 | `docs/developer-workflow.md` | Git, issue and PR workflow |
 | `docs/adr/` | Architecture Decision Records |
 
-## Earlier: robot-incident demo
-
-Before the site model, Neptune answered questions about one robot incident from a two-site hand-over
-(Demo v1: an arm cell, an AMR fleet, a legged inspector). It still runs, and CI still checks it.
-
-- **Your own folder:** `make up SRC=~/my-robot-logs`, then `cd up/my-robot-logs/claude && claude`. It ingests
-  the folder, maps every CSV a Deploy preset fits by its columns, builds the memory graph and writes a Claude
-  Code folder over it. On macOS run `uv run --all-packages --all-groups python -m harness.up <folder>
-  --isolation in_process`.
-- **A clean folder for recording:** `make demo-folder DIR=~/neptune-demo`.
-
-### Status
-
-Demo v1 asks nine gold questions through the `neptune` MCP tools, every answer cited
-(22 of 46 gold claims supported). 11 gold claims are cited only through statements about something else
-(`co_cited`) and 13 are gaps; each is pinned with its reason in `harness/acceptance/answers.json`.
-
-### 15-minute quickstart
-
-On a laptop with `git` and `curl` (CI runs the same lines as `scripts/quickstart.sh` on a clean machine):
-
-```bash
-command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"; }
-[ -f harness/acceptance/gold.json ] || { [ -d neptune/.git ] || git clone https://github.com/bennytay/neptune.git; cd neptune; }
-uv sync --all-packages --all-groups
-uv run --all-packages --all-groups python -m harness.demo --out demo
-ls demo/*.pdf
-cp packages/neptune-context/claude/mcp.sample.json .mcp.json
-mkdir -p .claude/skills/neptune && cp -R packages/neptune-context/claude/skills/neptune/. .claude/skills/neptune/
-export NEPTUNE_MEMORY_GRAPH=demo/graph.json NEPTUNE_SOURCES=demo/sources.json
-```
-Then open `demo/incident-timeline-INC-C3-0011.pdf`, or run `claude` in the same folder and ask **"Why did the
-arm-cell incident INC-C3-0011 happen?"** No Ledger catalog is attached on this path, so `neptune_hydrate`
-answers `unavailable` with the file's corpus path; `make demo` hydrates through the Ledger.
+Demo v1 (one robot incident through Ledger, Memory v2 and Context v2) was removed in #213; it lives in the
+history before that PR.
 
 ## License
 

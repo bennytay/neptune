@@ -22,14 +22,15 @@ flowchart LR
     MAN["Optional manifest<br/>neptune.yaml · init-manifest"]
   end
 
-  FEED["Live site feeds<br/>fleet managers · PLCs<br/>CMMS · rosters"]
-  subgraph S["Neptune site model (M1)"]
-    CAPT["Record-first capture<br/>replayed site feed"]
+  FEED["Live site feeds<br/>fleet managers · PLCs<br/>MQTT · recorded JSONL"]
+  subgraph S["Neptune site model · neptune_memory.site"]
+    CAPT["Record-first capture<br/>live · replay"]
+    MAP["Mappers<br/>one mapping file per site<br/>draft-mapping"]
     LOG[("Fact log<br/>seq = when we knew")]
     CONF["Confirm queue<br/>identities · doc facts"]
     VIEWS["Site views<br/>now · history · topology"]
-    V2["Memory v2 claim graph<br/>frozen until the gate"]
-    QRY["Query layer<br/>MCP tools · SQL"]
+    INS["Insights<br/>deterministic rules"]
+    QRY["neptune-site MCP<br/>neptune_site_* tools · SQL"]
   end
   USE["Agents · LLMs<br/>analysis · insights"]
 
@@ -55,12 +56,13 @@ flowchart LR
   CLI -->|init-manifest| MAN
   MAN -->|stated declarations| RT
   DER <-->|derived tables · stated run assemblies| PKG
-  FEED --> CAPT --> RT
-  PKG ==> LOG
-  DER -.->|inferred| LOG
+  FEED --> CAPT --> MAP
+  PKG ==>|cited rows · blocks| MAP
+  MAP -->|observed · stated| LOG
   CONF -->|stated| LOG
-  LOG --> VIEWS --> QRY --> USE
-  PKG -.-> V2 -.-> QRY
+  LOG --> VIEWS --> INS
+  INS -.->|inferred| LOG
+  VIEWS --> QRY --> USE
 
   subgraph KEY[" "]
     K1["built"]
@@ -80,8 +82,7 @@ flowchart LR
   class SDK,CLI built
   class DEV ext
   class RAW,FEED,USE ext
-  class CAPT,LOG,CONF,VIEWS todo
-  class V2,QRY built
+  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY built
   style N fill:#8b949e0f,stroke:#8b949e
   style S fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

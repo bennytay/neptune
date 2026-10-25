@@ -1,3 +1,5 @@
+# Committed ingest packages are byte-exact fixtures (tests/unit/store): no hook may touch them.
+exclude: ^tests/fixtures/store/archetypes/
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

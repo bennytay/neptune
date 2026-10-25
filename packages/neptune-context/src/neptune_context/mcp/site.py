@@ -3,8 +3,7 @@
 One read-only MCP tool per function of ``neptune_memory.site.query``. Each takes a JSON object that
 mirrors the Python arguments and answers ``neptune_memory.site.render.render(answer)``: compact
 cited lines and a ``Sources:`` footer. ``python -m neptune_context.mcp --site <site_dir>`` serves
-them, alone or beside the v2 tools (``--memory`` / ``--packets`` / ``--url``), which stay as they
-are.
+them.
 
 The model is folded from ``<site_dir>/.neptune/log`` once; each tool call then applies the entries
 appended since (``log.Tail``), so a live site (``python -m neptune_memory.site live``) shows up in

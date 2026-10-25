@@ -137,7 +137,7 @@ client = Neptune(
 
 With no `adapters`, a client uses the built-ins plus every plugin adapter installed distributions
 register (`neptune.adapters` entry points, ADR 0058). `plugins=False` reads none,
-`plugins=PluginPolicy(allow=("neptune-deploy",))` only those distributions; `client.plugins` holds
+`plugins=PluginPolicy(allow=("neptune-acme",))` only those distributions; `client.plugins` holds
 what was admitted and the findings about what was refused (a broken or duplicate plugin) or what a
 plugin printed, which every job of the client records; the package names the admitted plugins (the
 `neptune.plugins` transform's libraries). An allowlist name that registers no installed plugin is a
