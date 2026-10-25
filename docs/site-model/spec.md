@@ -106,7 +106,8 @@ neptune confirm (yes/no) ──────────────────�
 - **Static files**, in `build(site_dir)`:
   1. `neptune.sdk.ingest(site_dir / "static", site_dir / ".neptune/package", isolation="in_process")`;
      then `neptune.store.package.read_package(...)`.
-  2. Hand each record to `mappers.map_record(record, package) -> list[Fact]`. Records arrive in package order
+  2. Hand each record to `mappers.map_record(record, package, mapping) -> list[Fact]`, where `mapping` is the
+     site's declared mapping file (§12). Records arrive in package order
      (stable), and citations come from each record's `provenance` evidence locator.
   3. `layout.yaml` is read directly by `mappers.map_layout(path)`. It is the declared site, so its facts are
      stated.
@@ -208,6 +209,7 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 | Path | What | Becomes |
 |---|---|---|
 | `static/layout.yaml` | site, areas, zones, machines, topology, sources and `report_interval`, clock | stated facts (`map_layout`) |
+| `static/neptune.mappings.yaml` | how every file below becomes facts (§12) | nothing itself |
 | `static/cmms/assets.csv` | asset register: `MR-1141..1143` with serials (`SN-88412` = MR-1142) | `serial`, `name` (stated) |
 | `static/cmms/work_orders.csv` | WO-5521 (10-19 15:20, CV-2 belt replaced, "tension per SOP-CV-04 rev B"); WO-5530 (10-20 10:08–10:41, cleared jam at PE3, by Lindqvist, LOTO yes, cause "belt tracking off") | work-order facts (stated) |
 | `static/changes/changes.csv` | CHG-311: CV-2 speed setpoint 0.80 → 0.95 m/s, 10-20 05:40 | `change` (stated) |
@@ -257,3 +259,107 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 | #188 gate | flips the gold xfails, adds one replay test, `make site-demo` end to end; v2 stays (Context and Demo v1 still import it) | all |
 
 - Shared files (`site/__main__.py`, `Makefile`): add your subcommand or target only; don't reorder the others.
+
+## 12. Mappings: config, not code (`static/neptune.mappings.yaml`, #200)
+
+- Every site-specific id, path, column and topic lives in **one file per site**,
+  `<site_dir>/static/neptune.mappings.yaml`. `site/mappers/` holds only the generic machinery: a new site with
+  new exports needs a mapping file, never code. `layout.yaml` stays the declared site; it is not a mapping.
+- The file sits in `static/`, so it is ingested and citable like everything else, but it maps to no facts.
+  A site with no mapping file maps only `layout.yaml`; everything else is unmapped (below).
+- **Templates** (`"robot:{topic[-2]}"`) fill each `{name}`, then apply `|filters` left to right:
+  - `lower`; `slug` (spaces → `-`); `until:<c>` (the text before the first `<c>`);
+  - `type`: free text → entity type, through `types`;
+  - `tag`: an equipment tag (`CV-2`) → `<type>:<tag lowercased>`, through `tags`.
+- Names: in a table, `{Column}` is a cell as written (column names match case-blind, spaces = `_`). In a feed,
+  `{source}`, `{topic}`, `{topic[N]}` (the `/`-split segment, negative from the end) and `{payload.a.b}`. In a
+  document, `{stem}` (file name without extension), `{id}` (the document id without its type) and `{1}`, `{2}`
+  … (the rule pattern's groups).
+
+```yaml
+mappings: 1                              # format version
+
+types:                                   # `|type`: the first rule whose word the text contains
+  - {contains: robot, type: robot}
+  - {type: machine}                      # no `contains`: the fallback
+tags:                                    # `|tag`: the register row whose `name` cell holds the tag as a word
+  table: cmms/assets.csv                 #   gives the type (its `type` cell, through `types`);
+  name: Name                             #   no such row: machine
+  type: Type
+
+tables:                                  # CSV rows (header = row 1) or JSONL lines (keys = columns)
+  - file: cmms/work_orders.csv           # glob under static/; the first matching entry wins
+    source: cmms                         # the facts' source id (layout.yaml `sources`)
+    kind: stated                         # stated (default) | observed
+    subject: "work_order:{WO}"           # the default subject of every fact below
+    time: Opened                         # valid_from column (a blank cell = not stated); optional
+    until: Closed                        # valid_to column; optional
+    facts:                               # in order; a fact whose `column` cell is blank is skipped
+      - {subject: "{Equipment|tag}", predicate: work_order, column: Equipment, ref: "work_order:{WO}"}
+      - {predicate: wo_problem, column: Problem}          # object = the cell as written
+      - {predicate: wo_by, column: Done by, ref: "person:{Done by|lower}"}
+  - file: roster/shift_roster.csv
+    source: roster
+    subject: "person:{Person|lower}"
+    facts:
+      - {predicate: has_role, column: Role, ref: "role:{Role|slug}", once: Person}  # first row per Person
+      - {predicate: on_break, column: Break start, value: break, time: Break start, until: Break end}
+  - file: changes/changes.csv
+    source: cmms
+    subject: "change:{Change}"
+    time: When
+    facts:
+      - {predicate: change_to, column: To, unit: "{Unit}"}  # a unit template; blank = none
+
+documents:                               # PDF blocks, cited `page P block B`
+  - file: docs/*.pdf
+    source: docs
+    id: "document:{stem|until:_}"        # the first block's text is the document's `name`
+    rule:                                # a block matching `pattern` is a clause: `id` gets rule_text = group `text`
+      pattern: '^§?\s*(\d+(?:\.\d+)+)\s+(.+)$'
+      id: "rule:{id|lower}-{1}"
+      text: 2
+    lift:                                # values stated verbatim in a block
+      - {pattern: '\d+\s?[–-]\s?\d+\s?N\b', predicate: states_limit, on: document}  # group 1 if any, else the match
+      - {terms: {table: roster/qualifications.csv, column: Qualification},          # each term named in the block
+         predicate: requires_qualification, ref: qualification, on: rule}           # (case-blind, `-` or space)
+                                         # on: document | rule (the block's clause, else the document)
+extractions:                             # recorded model output (§7)
+  - file: photos/*.extraction.json
+    source: photos
+    predicate: note                      # subject: a `<tag>:` text prefix (through `tags`), else the image
+
+feeds:                                   # one entry per envelope `source`
+  - source: plc.cv2
+    decoder: sparkplug                   # payload.metrics[]: {name, value, unit}; the metric's unit is kept
+    subject: machine:cv-2
+    fields:                              # name (glob) -> predicate, or {predicate, subject, unit, ref, state}
+      state: mode
+      alarm: health
+      "*/parts_out": {predicate: parts_out, subject: cell:c3}
+  - source: fleet
+    decoder: vda5050                     # payload fields by dotted path (same as `json`)
+    subject: "robot:{topic[-2]}"
+    fields:
+      batteryState.batteryCharge: {predicate: battery, unit: "%"}
+      zone: {predicate: in_zone, ref: zone}                    # ref: <type> prefixes a bare id
+      orderId: {predicate: current_task, state: orderState}
+  - source: arm.c3
+    decoder: controller_log              # as `json`; the quote is the line's `text`, except on `event: heartbeat`
+    subject: robot:arm-c3
+    fields: {mode: mode, fault: health}
+```
+
+- **Decoders:** `sparkplug`, `json` (any JSON object payload), `vda5050` (= `json`), `controller_log`. A new one
+  is a function registered by name in `site/mappers/feeds.py`.
+- **Feed fields** are emitted when present and not null, and only on change (§4). `health` reads a fault code:
+  `""` or `[]` = `ok`, else `fault:<code>` (a list's first `errorType`). `current_task` makes `task:<value>`,
+  its `assigned_to` back, and `task_state` from the `state` field; a blank value is `none`. A VDA 5050 topic
+  (`uagv/<v>/<site>/<robot>/state`) also logs `seen` per robot, so freshness is per robot.
+- **Unmapped files** (a table or document no entry matches) are still logged: `document:<path under static/>`
+  gets `unmapped = "not mapped"` citing the file, plus one stated `text` fact per row or block, verbatim. So
+  `search_evidence` finds them and `gaps` lists them as not mapped.
+- **`python -m neptune_memory.site draft-mapping <site_dir> <file>`** prints a draft `tables:` entry (CSV or
+  JSONL rows) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
+  heuristics. The skill says: draft → show the user → save into the mapping file → `build`.
+- Plant 7's full file is `MAPPINGS` in `site/corpus/static.py`.
