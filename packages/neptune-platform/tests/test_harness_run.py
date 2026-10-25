@@ -98,6 +98,7 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
     assert packet["id"].startswith("packet:sha256:") and packet["items"] > 0
 
 
+@pytest.mark.slow
 def test_two_runs_give_byte_identical_reports_with_no_path_in_them(tmp_path: Path) -> None:
     run(tmp_path / "a", owner_tests=False, corpus_name=WORKED)
     run(tmp_path / "elsewhere" / "b", owner_tests=False, corpus_name=WORKED)
@@ -111,6 +112,7 @@ def test_two_runs_give_byte_identical_reports_with_no_path_in_them(tmp_path: Pat
     assert text.endswith("}\n") and list(json.loads(text)) == sorted(json.loads(text))
 
 
+@pytest.mark.slow
 def test_a_rerun_clears_its_own_scratch_directory_only(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run(run_dir, owner_tests=False, corpus_name=WORKED)
