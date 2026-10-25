@@ -12,7 +12,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "neptune_context"
 # derived annotators, episodes/spatial helpers, ledger seam and CLI are Memory's to write with.
 ALLOWED = {
     "neptune_ledger": ("neptune_ledger.api",),
-    "neptune_memory": ("neptune_memory.schema",),
+    "neptune_memory": ("neptune_memory.schema", "neptune_memory.site"),
 }
 # From the compiler Context may use only the canonical model and identity; its store, runtime and
 # adapters write or parse packages, and Context reads packages only via the Ledger.

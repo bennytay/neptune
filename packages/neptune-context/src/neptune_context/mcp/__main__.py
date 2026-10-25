@@ -4,6 +4,7 @@
     python -m neptune_context.mcp --memory graph.json[.gz]        # the local engine (ADR 0007)
     python -m neptune_context.mcp --packets tests/golden/packets  # fixtures: recorded answers only
     ... --sources sources.json   # with any of them: name each cited source's file (ADR 0016)
+    python -m neptune_context.mcp --site site-demo   # the neptune_site_* tools over a live site
 
 Claude Code: ``claude mcp add neptune -- python -m neptune_context.mcp --memory graph.json``, or
 the sample ``.mcp.json`` and skill in ``packages/neptune-context/claude/`` (ADR 0009 §6).
@@ -20,6 +21,8 @@ implementation itself, so without one, series windows, frames and ``neptune_hydr
 ``--sources FILE`` reads a source index (``neptune_context.sources``, written by ``make demo``
 from the Ledger's catalog): each answer then lists every cited source's corpus path and place, and
 an unavailable ``neptune_hydrate`` says where the source is. Without it answers are as before.
+``--site DIR`` adds the ``neptune_site_*`` tools over the site model folded from ``DIR``'s fact
+log (``mcp.site``, site model v3); given alone, the server offers only those.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from mcp.server.stdio import stdio_server
 from neptune_context.engine import LocalEngine, read_graph_document
 from neptune_context.explain.history import IndexedReader
 from neptune_context.mcp.server import build_server
+from neptune_context.mcp.site import SiteTools, build_site_server
 from neptune_context.query.model import Budget, Caller
 from neptune_context.query.plan import (
     AnthropicClient,
@@ -98,9 +102,17 @@ def local_client(
 
 
 async def serve(
-    client: AsyncClient, sources: SourceIndex | None = None, *, links: bool = True
+    client: AsyncClient | None,
+    sources: SourceIndex | None = None,
+    *,
+    links: bool = True,
+    site: SiteTools | None = None,
 ) -> None:
-    server = build_server(client, sources=sources, links=links)
+    if client is None:
+        assert site is not None
+        server = build_site_server(site)
+    else:
+        server = build_server(client, sources=sources, links=links, site=site)
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
 
@@ -118,12 +130,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="neptune_context.mcp", description=(__doc__ or "Neptune MCP server").split("\n")[0]
     )
-    where = parser.add_mutually_exclusive_group(required=True)
+    where = parser.add_mutually_exclusive_group()
     where.add_argument("--url", help="base URL of a Neptune engine (https, or loopback http)")
     where.add_argument(
         "--memory", type=Path, help="Memory graph document (JSON, or .json.gz) to answer over"
     )
     where.add_argument("--packets", type=Path, help="directory of recorded packet JSON (fixtures)")
+    parser.add_argument(
+        "--site",
+        type=Path,
+        help="site directory whose fact log the neptune_site_* tools answer over (site model v3)",
+    )
     parser.add_argument(
         "--sources",
         type=Path,
@@ -147,11 +164,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.url is None and args.memory is None and args.packets is None and args.site is None:
+        parser.error("one of the arguments --url --memory --packets --site is required")
     if args.memory is None and (args.planner != "none" or args.planner_recordings is not None):
         parser.error("--planner and --planner-recordings need --memory (the planner's names)")
+    site = None if args.site is None else SiteTools(args.site)
+    client: AsyncClient | None = None
     try:
         sources = None if args.sources is None else read_source_index(args.sources)
-        if args.url is not None:
+        if args.url is None and args.memory is None and args.packets is None:
+            pass  # --site alone
+        elif args.url is not None:
             client = AsyncClient(args.url, token=os.environ.get(TOKEN_ENV) or None)
         elif args.memory is not None:
             client = local_client(read_graph_document(args.memory), model=_model(args))
@@ -162,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     # ``--memory`` attaches no Ledger catalog, so a resource link could only answer that the
     # source is unavailable: its answers carry none (ADR 0020).
-    anyio.run(partial(serve, client, sources, links=args.memory is None))
+    anyio.run(partial(serve, client, sources, links=args.memory is None, site=site))
     return 0
 
 
