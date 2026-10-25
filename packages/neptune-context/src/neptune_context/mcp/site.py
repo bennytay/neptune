@@ -12,14 +12,13 @@ grows, so a live replay shows up in the next answer.
 
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from neptune_memory.site import query
+from neptune_memory.site import query, views
 from neptune_memory.site.render import render
 
 from neptune_context import __version__
@@ -27,7 +26,8 @@ from neptune_context import __version__
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from neptune_memory.site.query import Answer, SiteModel
+    from neptune_memory.site.query import Answer
+    from neptune_memory.site.views import SiteModel
 
 PREFIX: Final = "neptune_site_"
 SITE_SERVER_NAME: Final = "neptune-site"
@@ -140,9 +140,7 @@ SITE_TOOLS: Final[dict[str, SiteTool]] = {
 
 
 def _load_views(site_dir: Path) -> SiteModel:
-    # views (#185) folds the log; imported by name so this module stands before it lands.
-    model: SiteModel = importlib.import_module("neptune_memory.site.views").load(site_dir)
-    return model
+    return views.load(site_dir)
 
 
 class SiteTools:

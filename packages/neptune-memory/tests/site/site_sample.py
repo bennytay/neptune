@@ -1,39 +1,12 @@
-"""A small hand-built site model for the query tests: a slice of Plant 7 on 2026-10-20 (spec §9).
+"""A small hand-built slice of Plant 7 on 2026-10-20 (spec §9) for the query tests.
 
-``FakeModel`` offers what ``neptune_memory.site.query.SiteModel`` reads, folded naively from a
-list of facts, so the query tests do not wait on the real views (#185).
+``sample()`` folds these facts and ``seen`` entries with the real views (#185), in memory.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
-
-from neptune_memory.site.facts import KIND_RANK, Citation, Fact, Kind, Ref, Seen, State, Value
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
-
-ONE = {"mode", "health", "battery", "in_zone", "current_task", "setpoint", "task_state", "serial"}
-TOPOLOGY = {"feeds", "depends_on", "located_in", "part_of", "assigned_to", "covers_zone"}
-EXPECTED = {"machine": ("belt_tension",)}
-REPORT_INTERVAL = 5  # seconds, every feed source
-
-
-@dataclass(frozen=True)
-class FakeCell:
-    subject: str
-    predicate: str
-    state: State
-    facts: tuple[Fact, ...]
-
-
-@dataclass(frozen=True)
-class FakeInterval:
-    fact: Fact
-    start: str | None
-    end: str | None
+from neptune_memory.site.facts import Citation, Fact, Kind, LogEntry, Ref, Seen, Value
+from neptune_memory.site.views import SiteModel, fold
 
 
 def _day(t: str | None) -> str | None:
@@ -221,7 +194,7 @@ FACTS: tuple[Fact, ...] = (
         22,
         "09:40:05",
         "observed",
-        "fleet.amr-03",
+        "fleet",
         FLEET,
         "line 4410",
         '"batteryCharge": 22',
@@ -332,109 +305,34 @@ FACTS: tuple[Fact, ...] = (
     ),
 )
 
+INTERVALS: tuple[Fact, ...] = tuple(
+    fact(
+        f"source:{name}",
+        "report_interval",
+        5,
+        None,
+        "stated",
+        "layout",
+        LAYOUT,
+        "line 9",
+        "5",
+        unit="s",
+    )
+    for name in ("plc.cv2", "arm.c3", "fleet")
+)
+
 SEEN: tuple[Seen, ...] = (
-    Seen("fleet.amr-03", "2026-10-20T09:40:05"),
+    Seen("fleet/amr-03", "2026-10-20T09:40:05"),
     Seen("plc.cv2", "2026-10-20T10:35:00"),
     Seen("arm.c3", "2026-10-20T10:35:00"),
-    Seen("fleet", "2026-10-20T10:35:00"),
+    Seen("fleet/amr-01", "2026-10-20T10:35:00"),
+    Seen("fleet/amr-02", "2026-10-20T10:35:00"),
     Seen("plc.cv2", "2026-10-20T11:15:00"),
 )
 
 
-def _seconds(a: str, b: str) -> float:
-    return (datetime.fromisoformat(b) - datetime.fromisoformat(a)) / timedelta(seconds=1)
-
-
-class FakeModel:
-    """A naive fold of ``FACTS`` and ``SEEN``: the spec §6 views, small and slow."""
-
-    def __init__(self, facts: Iterable[Fact] = FACTS, seen: Iterable[Seen] = SEEN) -> None:
-        self._facts = {f.id: f for f in facts}
-        self._seen = tuple(seen)
-
-    @property
-    def as_of_seq(self) -> int:
-        return len(self._facts) + len(self._seen)
-
-    @property
-    def facts(self) -> Mapping[str, Fact]:
-        return self._facts
-
-    @property
-    def seen(self) -> Sequence[Seen]:
-        return self._seen
-
-    def _current(self, t: str) -> list[Fact]:
-        return [
-            f
-            for f in self._facts.values()
-            if (f.valid_from is None or f.valid_from <= t)
-            and (f.valid_to is None or t < f.valid_to)
-        ]
-
-    def _stale(self, f: Fact, t: str) -> bool:
-        last = max((s.t for s in self._seen if s.source == f.source and s.t <= t), default=None)
-        return last is not None and _seconds(last, t) > 3 * REPORT_INTERVAL
-
-    def state_at(self, t: str) -> list[FakeCell]:
-        cells: list[FakeCell] = []
-        latest: dict[tuple[str, str], list[Fact]] = {}
-        for f in self._current(t):
-            if f.predicate not in ONE:
-                cells.append(FakeCell(f.subject, f.predicate, "known", (f,)))
-                continue
-            held = latest.setdefault((f.subject, f.predicate), [])
-            if held and (held[0].valid_from or "") < (f.valid_from or ""):
-                held.clear()
-            if not held or held[0].valid_from == f.valid_from:
-                held.append(f)
-        for (subject, predicate), held in latest.items():
-            top = max(KIND_RANK[f.kind] for f in held)
-            winners = tuple(f for f in held if KIND_RANK[f.kind] == top)
-            state: State = "ambiguous" if len({w.object for w in winners}) > 1 else "known"
-            if state == "known" and self._stale(winners[0], t):
-                state = "stale"
-            cells.append(
-                FakeCell(
-                    subject, predicate, state, winners[:1] if state != "ambiguous" else winners
-                )
-            )
-        for entity in {f.subject for f in self._facts.values()}:
-            for predicate in EXPECTED.get(entity.split(":", 1)[0], ()):
-                if (entity, predicate) not in latest:
-                    cells.append(FakeCell(entity, predicate, "unknown", ()))
-        return cells
-
-    def history(self, subject: str) -> list[FakeInterval]:
-        out: list[FakeInterval] = []
-        mine = sorted(
-            (f for f in self._facts.values() if f.subject == subject),
-            key=lambda f: (f.predicate, f.valid_from or ""),
-        )
-        for i, f in enumerate(mine):
-            nxt = mine[i + 1] if i + 1 < len(mine) else None
-            end = f.valid_to
-            if f.predicate in ONE and nxt is not None and nxt.predicate == f.predicate:
-                end = nxt.valid_from
-            out.append(FakeInterval(f, f.valid_from, end))
-        return sorted(out, key=lambda i: i.start or "")
-
-    def topology(self) -> list[Fact]:
-        return [f for f in self._facts.values() if f.predicate in TOPOLOGY]
-
-    def identity(self, entity: str) -> frozenset[str]:
-        group = {entity}
-        for f in self._facts.values():
-            if (
-                f.predicate == "same_as"
-                and f.kind != "inferred"
-                and isinstance(f.object, Ref)
-                and (f.subject in group or f.object.ref in group)
-            ):
-                group |= {f.subject, f.object.ref}
-        return frozenset(group)
-
-    def pending(self) -> list[Fact]:
-        return [
-            f for f in self._facts.values() if f.kind == "inferred" and f.predicate == "same_as"
-        ]
+def sample() -> SiteModel:
+    """The real views folded over ``INTERVALS``, ``FACTS`` and then ``SEEN``."""
+    entries = [LogEntry(n, "fact", fact=f) for n, f in enumerate(INTERVALS + FACTS, start=1)]
+    entries += [LogEntry(len(entries) + n, "seen", seen=s) for n, s in enumerate(SEEN, start=1)]
+    return fold(entries)

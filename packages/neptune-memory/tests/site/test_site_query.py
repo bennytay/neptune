@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from site_fake import FakeModel
+from site_sample import sample
 
 from neptune_memory.site import query
 from neptune_memory.site.facts import Ref
@@ -13,7 +13,7 @@ from neptune_memory.site.render import render
 if TYPE_CHECKING:
     from neptune_memory.site.query import Answer, Item
 
-MODEL = FakeModel()
+MODEL = sample()
 T = "2026-10-20T10:35:00"
 
 

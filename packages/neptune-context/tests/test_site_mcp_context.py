@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import sys
 from datetime import timedelta
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 from mcp.shared.memory import create_connected_server_and_client_session
-from neptune_memory.site.facts import Citation, Fact, Seen, Value
+from neptune_memory.site.facts import Citation, Fact, LogEntry, Seen, Value
+from neptune_memory.site.views import fold
 
 from context_packet_goldens import PACKETS
 from neptune_context.mcp.site import SITE_TOOLS, SiteTools, build_site_server
@@ -18,7 +19,7 @@ from neptune_context.mcp.site import SITE_TOOLS, SiteTools, build_site_server
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from neptune_memory.site.query import SiteModel
+    from neptune_memory.site.views import SiteModel
 
 V2_TOOLS = [
     "neptune_query",
@@ -67,48 +68,22 @@ def test_site_flag_adds_the_site_tools_beside_the_v2_tools(tmp_path: Path) -> No
     assert _list(["--packets", str(PACKETS), "--site", str(tmp_path)]) == V2_TOOLS + SITE_NAMES
 
 
-class _OneFact:
-    """The smallest site model: one observed mode."""
-
-    stopped = Fact(
-        subject="machine:cv-2",
-        predicate="mode",
-        object=Value("stopped"),
-        valid_from="2026-10-20T10:05:02",
-        valid_to=None,
-        kind="observed",
-        source="plc.cv2",
-        citations=(Citation("feed/plc_cv2.jsonl", "line 812", '"state": "stopped"'),),
-    )
-    as_of_seq = 2
-    facts: ClassVar[dict[str, Fact]] = {stopped.id: stopped}
-    seen = (Seen("plc.cv2", "2026-10-20T10:05:02"),)
-
-    def state_at(self, t: str) -> list[object]:
-        from types import SimpleNamespace
-
-        return [
-            SimpleNamespace(
-                subject="machine:cv-2", predicate="mode", state="known", facts=(self.stopped,)
-            )
-        ]
-
-    def history(self, subject: str) -> list[object]:
-        return []
-
-    def topology(self) -> list[Fact]:
-        return []
-
-    def identity(self, entity: str) -> frozenset[str]:
-        return frozenset({entity})
-
-    def pending(self) -> list[Fact]:
-        return []
+STOPPED = Fact(
+    subject="machine:cv-2",
+    predicate="mode",
+    object=Value("stopped"),
+    valid_from="2026-10-20T10:05:02",
+    valid_to=None,
+    kind="observed",
+    source="plc.cv2",
+    citations=(Citation("feed/plc_cv2.jsonl", "line 812", '"state": "stopped"'),),
+)
 
 
 def _one_fact(site_dir: Path) -> SiteModel:
-    model: SiteModel = _OneFact()  # type: ignore[assignment]
-    return model
+    """The smallest site model: one observed mode, folded by the real views."""
+    seen = Seen("plc.cv2", "2026-10-20T10:05:02")
+    return fold([LogEntry(1, "seen", seen=seen), LogEntry(2, "fact", fact=STOPPED)])
 
 
 def test_site_tool_answers_with_cited_lines(tmp_path: Path) -> None:

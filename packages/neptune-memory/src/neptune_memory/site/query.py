@@ -4,9 +4,9 @@ Every function takes the model views (#185) fold from the log and returns an ``A
 point at numbered sources (``S1`` ...), in order of first use. Times are site-clock strings,
 compared as strings and never converted; ``at=None`` means the latest ``seen`` time in the log.
 
-What this module needs from a model is the ``SiteModel`` protocol below: the spec §6 views
-(``state_at``, ``history``, ``topology``, ``identity``) plus the log's facts, ``seen`` entries and
-pending proposals. It reads them and never folds anything itself.
+It reads the views (``state_at``, ``history``, ``topology``, ``same_as``, ``pending``) and the
+model's facts and ``seen`` times, and never folds anything itself. A proposal someone has answered
+is no longer live: its stated copy (on yes) speaks for it.
 """
 
 from __future__ import annotations
@@ -15,81 +15,14 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
-from neptune_memory.site.facts import Citation, Fact, Kind, Ref, Seen, State, Value
+from neptune_memory.site.facts import KIND_RANK, Citation, Fact, Kind, Ref, State, Value
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable
 
-# --- What a model must offer (spec §6) ---------------------------------------------------------
-
-
-class Cell(Protocol):
-    """One (subject, predicate) at a time ``t``. ``facts`` holds the winning fact, the tied facts
-    when ``ambiguous``, the last fact when ``stale`` and nothing when ``unknown``. A ``many``
-    predicate gives one known cell per current fact."""
-
-    @property
-    def subject(self) -> str: ...
-    @property
-    def predicate(self) -> str: ...
-    @property
-    def state(self) -> State: ...
-    @property
-    def facts(self) -> tuple[Fact, ...]: ...
-
-
-class Interval(Protocol):
-    """One history interval: ``fact`` held over ``[start, end)``; ``end`` is ``None`` while open."""
-
-    @property
-    def fact(self) -> Fact: ...
-    @property
-    def start(self) -> str | None: ...
-    @property
-    def end(self) -> str | None: ...
-
-
-class SiteModel(Protocol):
-    """The folded site model (spec §6) as the query API reads it."""
-
-    @property
-    def as_of_seq(self) -> int:
-        """The last log ``seq`` folded in."""
-        ...
-
-    @property
-    def facts(self) -> Mapping[str, Fact]:
-        """Every fact in the log by id, in log order (proposals and confirmed copies included)."""
-        ...
-
-    @property
-    def seen(self) -> Sequence[Seen]:
-        """Every ``seen`` entry, in log order."""
-        ...
-
-    def state_at(self, t: str) -> Iterable[Cell]:
-        """Every (subject, predicate) cell at ``t``, and ``unknown`` ones the vocabulary expects."""
-        ...
-
-    def history(self, subject: str) -> Iterable[Interval]:
-        """Every interval of every predicate of ``subject``, in site-clock order."""
-        ...
-
-    def topology(self) -> Iterable[Fact]:
-        """The edge facts (``feeds``, ``depends_on``, ``located_in``, ``part_of``,
-        ``assigned_to``, ``covers_zone``)."""
-        ...
-
-    def identity(self, entity: str) -> frozenset[str]:
-        """``entity`` and every entity a stated ``same_as`` joins it to."""
-        ...
-
-    def pending(self) -> Sequence[Fact]:
-        """Inferred proposals nobody has answered yet."""
-        ...
-
+    from neptune_memory.site.views import Reading, SiteModel
 
 # --- Answers -----------------------------------------------------------------------------------
 
@@ -153,7 +86,7 @@ class Answer:
         self.items.append(item)
         return item
 
-    def add_cell(self, cell: Cell) -> None:
+    def add_cell(self, cell: Reading) -> None:
         if not cell.facts:
             self.items.append(
                 Item(None, cell.subject, cell.predicate, None, None, None, None, cell.state, ())
@@ -163,10 +96,9 @@ class Answer:
         for fact in cell.facts:
             self.add(fact, cell.state)
         if cell.state == "stale":
-            last = cell.facts[0]
             self.gaps.append(
-                f"{cell.subject} {cell.predicate}: stale, {last.source} has gone quiet; "
-                f"the last value holds since {last.valid_from}"
+                f"{cell.subject} {cell.predicate}: stale, {cell.facts[0].source} last reported "
+                f"at {cell.last_seen}; the last value holds since {cell.since}"
             )
         elif cell.state == "ambiguous":
             self.gaps.append(f"{cell.subject} {cell.predicate}: ambiguous, sources disagree")
@@ -181,31 +113,23 @@ STATUS = frozenset(
 
 
 def _at(model: SiteModel, at: str | None) -> str:
-    if at is not None:
-        return at
-    return max((s.t for s in model.seen), default=_FAR_FUTURE)
+    return at if at is not None else (model.clock() or _FAR_FUTURE)
 
 
 def _new(tool: str, model: SiteModel, at: str | None) -> Answer:
-    return Answer(tool=tool, at=at, as_of_seq=model.as_of_seq)
+    return Answer(tool=tool, at=at, as_of_seq=model.seq)
 
 
 def _text(obj: Ref | Value) -> str:
     return obj.ref if isinstance(obj, Ref) else str(obj.value)
 
 
-def _entities(model: SiteModel) -> list[str]:
-    seen: dict[str, None] = {}
-    for fact in model.facts.values():
-        seen.setdefault(fact.subject)
-        if isinstance(fact.object, Ref):
-            seen.setdefault(fact.object.ref)
-    return list(seen)
+def _live(model: SiteModel) -> list[Fact]:
+    return [f for fid, f in model.facts.items() if model.live(fid)]
 
 
-def _cells(model: SiteModel, at: str, entities: Iterable[str]) -> list[Cell]:
-    wanted = set(entities)
-    return [c for c in model.state_at(at) if c.subject in wanted]
+def _state(model: SiteModel, fact: Fact, pending: set[str]) -> State:
+    return "pending" if fact.id in pending else "known"
 
 
 # --- The ten questions -------------------------------------------------------------------------
@@ -215,26 +139,25 @@ def resolve(model: SiteModel, name: str) -> Answer:
     """Names and ids to entities: stated ``same_as`` joined, pending proposals listed."""
     answer = _new("resolve", model, None)
     needle = name.strip().casefold()
-    matched: list[str] = []
-    for entity in _entities(model):
-        if needle in (entity.casefold(), entity.split(":", 1)[-1].casefold()):
-            matched.append(entity)
-    for fact in model.facts.values():
-        if fact.predicate == "name" and str(_text(fact.object)).casefold() == needle:
-            matched.append(fact.subject)
+    matched = [
+        e
+        for e in sorted(model.entities)
+        if needle in (e.casefold(), e.split(":", 1)[-1].casefold())
+    ]
+    live = _live(model)
+    matched += [
+        f.subject for f in live if f.predicate == "name" and _text(f.object).casefold() == needle
+    ]
     group: set[str] = set()
     for entity in matched:
-        group |= model.identity(entity)
+        group.update(model.same_as(entity))
     pending = {f.id for f in model.pending()}
-    for fact in model.facts.values():
+    for fact in live:
         touches = fact.subject in group or (
             isinstance(fact.object, Ref) and fact.object.ref in group
         )
         if fact.predicate == "same_as" and touches:
-            if fact.id in pending:
-                answer.add(fact, "pending")
-            elif fact.kind != "inferred":
-                answer.add(fact)
+            answer.add(fact, _state(model, fact, pending))
         elif fact.subject in group and fact.predicate in ("name", "serial"):
             answer.add(fact)
     if not group:
@@ -246,8 +169,9 @@ def state_at(model: SiteModel, entity: str, at: str | None = None) -> Answer:
     """Every predicate's state for ``entity`` (and what a stated ``same_as`` joins it to) at t."""
     t = _at(model, at)
     answer = _new("state_at", model, t)
-    for cell in _cells(model, t, model.identity(entity)):
-        answer.add_cell(cell)
+    for subject in model.same_as(entity):
+        for reading in model.state_at(t, subject):
+            answer.add_cell(reading)
     return answer
 
 
@@ -256,14 +180,12 @@ def find(model: SiteModel, predicate: str, obj: str, at: str | None = None) -> A
     when ``obj`` is an entity, what is known about it then."""
     t = _at(model, at)
     answer = _new("find", model, t)
-    cells = list(model.state_at(t))
-    for cell in cells:
-        if cell.predicate == predicate and any(_text(f.object) == obj for f in cell.facts):
-            answer.add_cell(cell)
-    if ":" in obj:
-        for cell in cells:
-            if cell.subject == obj:
-                answer.add_cell(cell)
+    for reading in model.state_at(t):
+        if reading.predicate == predicate and any(_text(f.object) == obj for f in reading.facts):
+            answer.add_cell(reading)
+    if obj in model.entities:
+        for reading in model.state_at(t, obj):
+            answer.add_cell(reading)
     if not answer.items:
         answer.gaps.append(f"nothing has {predicate} = {obj!r} at {t}")
     return answer
@@ -278,13 +200,13 @@ def timeline(
 ) -> Answer:
     """Every interval of ``entity`` that overlaps ``[start, end]``, in site-clock order."""
     answer = _new("timeline", model, end)
-    for interval in model.history(entity):
+    intervals = [
+        i
+        for i in model.history(entity, start=start, end=end)
+        if predicates is None or i.fact.predicate in predicates
+    ]
+    for interval in sorted(intervals, key=lambda i: i.start or ""):
         fact = interval.fact
-        if predicates is not None and fact.predicate not in predicates:
-            continue
-        begins = interval.start or ""
-        if begins > end or (interval.end is not None and interval.end <= start):
-            continue
         answer.items.append(
             Item(
                 fact_id=fact.id,
@@ -311,8 +233,9 @@ def why(model: SiteModel, fact_id: str) -> Answer:
         answer.gaps.append(f"no fact {fact_id} in the log")
         return answer
     pending = {f.id for f in model.pending()}
-    answer.add(fact, "pending" if fact.id in pending else "known", relation="asked")
-    intervals = [i for i in model.history(fact.subject) if i.fact.predicate == fact.predicate]
+    asked = "asked" if model.live(fact_id) else "asked; answered by an operator"
+    answer.add(fact, _state(model, fact, pending), relation=asked)
+    intervals = list(model.history(fact.subject, fact.predicate))
     ids = [i.fact.id for i in intervals]
     if fact.id in ids:
         index = ids.index(fact.id)
@@ -320,24 +243,21 @@ def why(model: SiteModel, fact_id: str) -> Answer:
             answer.add(intervals[index - 1].fact, relation="replaced")
         if index + 1 < len(intervals):
             answer.add(intervals[index + 1].fact, relation="replaced by")
-    for other in model.facts.values():
+    for other in _live(model):
         if (
             other.id != fact.id
-            and other.subject == fact.subject
-            and other.predicate == fact.predicate
+            and (other.subject, other.predicate) == (fact.subject, fact.predicate)
             and other.valid_from == fact.valid_from
             and other.object != fact.object
         ):
-            relation = _contest(fact, other)
-            answer.add(other, "pending" if other.id in pending else "known", relation=relation)
+            answer.add(other, _state(model, other, pending), relation=_contest(fact, other))
     return answer
 
 
 def _contest(fact: Fact, other: Fact) -> str:
-    rank = {"observed": 1, "stated": 1, "inferred": 0}
-    if rank[fact.kind] > rank[other.kind]:
+    if KIND_RANK[fact.kind] > KIND_RANK[other.kind]:
         return "beaten"
-    if rank[fact.kind] < rank[other.kind]:
+    if KIND_RANK[fact.kind] < KIND_RANK[other.kind]:
         return "beats it"
     return "ties"
 
@@ -345,18 +265,13 @@ def _contest(fact: Fact, other: Fact) -> str:
 def diff(model: SiteModel, start: str, end: str, entities: list[str] | None = None) -> Answer:
     """Facts that began in ``(start, end]``, optionally only about ``entities``."""
     answer = _new("diff", model, end)
-    wanted: set[str] | None = None
-    if entities is not None:
-        wanted = set()
-        for entity in entities:
-            wanted |= model.identity(entity)
+    wanted = None if entities is None else {s for e in entities for s in model.same_as(e)}
     pending = {f.id for f in model.pending()}
-    for fact in model.facts.values():
+    for fact in _live(model):
         if fact.valid_from is None or not start < fact.valid_from <= end:
             continue
-        if wanted is not None and fact.subject not in wanted:
-            continue
-        answer.add(fact, "pending" if fact.id in pending else "known")
+        if wanted is None or fact.subject in wanted:
+            answer.add(fact, _state(model, fact, pending))
     if not answer.items:
         answer.gaps.append(f"no fact began between {start} and {end}")
     return answer
@@ -366,79 +281,45 @@ def gaps(model: SiteModel, at: str | None = None) -> Answer:
     """What is stale, unknown or ambiguous at t, and every pending proposal."""
     t = _at(model, at)
     answer = _new("gaps", model, t)
-    for cell in model.state_at(t):
-        if cell.state in ("stale", "unknown", "ambiguous"):
-            answer.add_cell(cell)
+    for reading in model.state_at(t):
+        if reading.state in ("stale", "unknown", "ambiguous"):
+            answer.add_cell(reading)
     for fact in model.pending():
         answer.add(fact, "pending")
     return answer
 
 
 def impact(model: SiteModel, entity: str, at: str | None = None, depth: int = 3) -> Answer:
-    """What lies downstream of ``entity`` at t, with the state of each.
+    """What lies downstream of ``entity`` at t (the topology view), with the state of each.
 
-    A hop follows ``feeds`` forward or ``depends_on`` backward. Each place reached also brings
-    what sits in it (``located_in``, ``in_zone``) and those robots' tasks (``current_task``,
-    ``assigned_to``), at no extra depth.
+    Each robot whose current zone was reached comes too, with its tasks (``current_task``,
+    ``assigned_to``), at no extra depth: a zone's robots and their orders are what wait on it.
     """
     t = _at(model, at)
     answer = _new("impact", model, t)
-    cells = list(model.state_at(t))
-    edges = list(model.topology())
-    occupants: dict[str, list[Fact]] = {}
-    for fact in edges:
-        if fact.predicate == "located_in" and isinstance(fact.object, Ref):
-            occupants.setdefault(fact.object.ref, []).append(fact)
-        if fact.predicate == "assigned_to" and isinstance(fact.object, Ref):
-            occupants.setdefault(fact.object.ref, []).append(fact)
-    for cell in cells:
-        if cell.state == "known" and cell.predicate == "in_zone":
-            for fact in cell.facts:
-                if isinstance(fact.object, Ref):
-                    occupants.setdefault(fact.object.ref, []).append(fact)
-    reached: dict[str, None] = {}
-    edge_items: list[Fact] = []
-
-    def attach(node: str) -> None:
-        if node in reached:
-            return
-        reached[node] = None
-        for fact in occupants.get(node, []):
-            edge_items.append(fact)
-            attach(fact.subject)
-        for cell in cells:
-            if cell.subject == node and cell.predicate == "current_task" and cell.facts:
-                obj = cell.facts[0].object
-                if isinstance(obj, Ref):
-                    attach(obj.ref)
-
-    frontier = [entity]
-    attach(entity)
-    for _ in range(depth):
-        following: list[str] = []
-        for node in frontier:
-            for fact in edges:
-                target = None
-                if fact.predicate == "feeds" and fact.subject == node:
-                    target = fact.object.ref if isinstance(fact.object, Ref) else None
-                elif (
-                    fact.predicate == "depends_on"
-                    and isinstance(fact.object, Ref)
-                    and fact.object.ref == node
-                ):
-                    target = fact.subject
-                if target is None:
-                    continue
-                edge_items.append(fact)
-                if target not in reached:
-                    attach(target)
-                    following.append(target)
-        frontier = following
-    for fact in dict.fromkeys(edge_items):
+    topology = model.topology(t)
+    hops = topology.downstream(entity, depth)
+    reached = {entity, *(h.entity for h in hops)}
+    edges = [h.edge for h in hops]
+    for reading in model.state_at(t):
+        objects = {_text(f.object) for f in reading.facts}
+        if reading.predicate == "in_zone" and objects & reached and reading.subject not in reached:
+            reached.add(reading.subject)
+            edges += reading.facts
+    for reading in model.state_at(t):
+        if reading.predicate == "current_task" and reading.subject in reached:
+            reached |= {_text(f.object) for f in reading.facts}
+            edges += reading.facts
+    for edge in topology.edges:
+        if edge.predicate == "assigned_to" and _text(edge.object) in reached:
+            reached.add(edge.subject)
+            edges.append(edge)
+    for fact in dict.fromkeys(edges):
         answer.add(fact)
-    for cell in cells:
-        if cell.subject in reached and cell.predicate in STATUS:
-            answer.add_cell(cell)
+    for subject in sorted(reached):
+        for reading in model.state_at(t, subject):
+            if reading.predicate in STATUS:
+                answer.add_cell(reading)
     return answer
 
 
@@ -447,17 +328,16 @@ def search_evidence(model: SiteModel, text: str, limit: int = 20) -> Answer:
     answer = _new("search_evidence", model, None)
     words = [w for w in re.split(r"\s+", text.casefold()) if w]
     scored: list[tuple[int, int, Fact]] = []
-    for order, fact in enumerate(model.facts.values()):
+    for order, fact in enumerate(_live(model)):
         haystack = " ".join(
             [*(c.quote or "" for c in fact.citations), *(c.file for c in fact.citations)]
             + ([str(fact.object.value)] if isinstance(fact.object, Value) else [])
         ).casefold()
-        hits = sum(1 for w in words if w in haystack)
-        if words and hits == len(words):
+        if words and all(w in haystack for w in words):
             scored.append((-haystack.count(words[0]), order, fact))
     pending = {f.id for f in model.pending()}
     for _, _, fact in sorted(scored)[:limit]:
-        answer.add(fact, "pending" if fact.id in pending else "known")
+        answer.add(fact, _state(model, fact, pending))
     if not answer.items:
         answer.gaps.append(f"no cited text holds {text!r}")
     return answer
@@ -523,12 +403,12 @@ def _database(model: SiteModel) -> sqlite3.Connection:
                 f.id in pending,
                 json.dumps([[c.file, c.locator, c.quote] for c in f.citations]),
             )
-            for f in model.facts.values()
+            for f in _live(model)
         ],
     )
-    entities = _entities(model)
+    entities = sorted(model.entities)
     names: dict[str, list[str]] = {}
-    for fact in model.facts.values():
+    for fact in _live(model):
         if fact.predicate == "name":
             names.setdefault(fact.subject, []).append(_text(fact.object))
     db.executemany(
@@ -554,7 +434,10 @@ def _database(model: SiteModel) -> sqlite3.Connection:
             for i in model.history(e)
         ],
     )
-    db.executemany("INSERT INTO seen VALUES (?,?)", [(s.source, s.t) for s in model.seen])
+    db.executemany(
+        "INSERT INTO seen VALUES (?,?)",
+        [(source, t) for source, times in model.seen.items() for t in times],
+    )
     db.commit()
     db.execute("PRAGMA query_only = ON")
     return db
