@@ -15,6 +15,7 @@ can hand in their own.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import shutil
 import time
@@ -53,13 +54,16 @@ class Seam:
 
     @staticmethod
     def default() -> Seam:
-        """``neptune_memory.site.mappers`` and ``neptune_memory.site.replay``."""
+        """``neptune_memory.site.mappers`` and ``neptune_memory.site.replay``.
+
+        ``map_message`` carries one ``last`` state through the build, so feed facts are logged
+        only when a value changes for (subject, predicate, source) (spec §4)."""
         mappers: Any = importlib.import_module("neptune_memory.site.mappers")
         replayer: Any = importlib.import_module("neptune_memory.site.replay")
         return Seam(
             map_layout=mappers.map_layout,
             map_record=mappers.map_record,
-            map_message=mappers.map_message,
+            map_message=functools.partial(mappers.map_message, last={}),
             messages=replayer.messages,
         )
 

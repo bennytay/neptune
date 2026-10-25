@@ -1,16 +1,19 @@
-"""``layout.yaml``, the declared site, becomes stated facts citing its lines (spec §5).
+"""``layout.yaml``, the declared site, becomes stated facts citing its lines (spec §5, §9).
 
-The file::
+The file (``site/corpus/static.py`` writes it)::
 
     site: {id: site:p7, name: Plant 7 assembly hall}
     clock: {name: P7 local, zone: Europe/Berlin}      # stated, never applied
-    entities:
-      - id: machine:cv-2
-        name: Conveyor CV-2
-        located_in: cell:c3                          # part_of / located_in: one ref
-        feeds: [cell:c3]                             # feeds / depends_on / covers_zone: ref or list
+    areas:                                           # also cells, zones, machines, robots
+      - {id: area:assembly, name: Assembly, part_of: site:p7}
+      - {id: robot:arm-c3, name: Arm C3, located_in: cell:c3}
+    topology:                                        # feeds / depends_on edges, one per item
+      - {subject: machine:cv-2, predicate: feeds, object: cell:c3}
     sources:
-      - {id: plc.cv2, file: feed/plc_cv2.jsonl, report_interval: 5}
+      - {id: plc.cv2, name: CV-2 PLC edge node, report_interval: 5}
+
+Every list of mappings with an ``id`` is a list of entities; ``part_of`` / ``located_in`` are one
+ref, ``feeds`` / ``depends_on`` / ``covers_zone`` a ref or a list of refs.
 """
 
 from __future__ import annotations
@@ -54,17 +57,30 @@ def map_layout(path: Path) -> list[Fact]:
             out.append(
                 fact(_scalar(site["id"]), "name", Value(_scalar(site["name"])), site["name"])
             )
-    for entity in _items(top.get("entities")):
-        fields = _mapping(entity)
-        subject = _scalar(fields["id"])
-        for key, node in fields.items():
-            if key == "name":
-                out.append(fact(subject, "name", Value(_scalar(node)), node))
-            elif key in _ONE:
-                out.append(fact(subject, key, Ref(_scalar(node)), node))
-            elif key in _MANY:
-                for item in _items(node) if isinstance(node, yaml.SequenceNode) else [node]:
-                    out.append(fact(subject, key, Ref(_scalar(item)), item))
+    for section, node in top.items():
+        if section in ("site", "clock", "sources", "topology"):
+            continue
+        if not isinstance(node, yaml.SequenceNode):
+            continue
+        for entity in _items(node):
+            fields = _mapping(entity)
+            if "id" not in fields:
+                continue
+            subject = _scalar(fields["id"])
+            for key, value in fields.items():
+                if key == "name":
+                    out.append(fact(subject, "name", Value(_scalar(value)), value))
+                elif key in _ONE:
+                    out.append(fact(subject, key, Ref(_scalar(value)), value))
+                elif key in _MANY:
+                    items = _items(value) if isinstance(value, yaml.SequenceNode) else [value]
+                    out.extend(fact(subject, key, Ref(_scalar(item)), item) for item in items)
+    for edge in _items(top.get("topology")):
+        fields = _mapping(edge)
+        predicate = _scalar(fields["predicate"])
+        if predicate in _ONE or predicate in _MANY:
+            obj = Ref(_scalar(fields["object"]))
+            out.append(fact(_scalar(fields["subject"]), predicate, obj, edge))
     for source in _items(top.get("sources")):
         fields = _mapping(source)
         if "report_interval" in fields:

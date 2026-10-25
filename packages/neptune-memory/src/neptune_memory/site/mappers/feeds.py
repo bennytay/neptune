@@ -11,14 +11,16 @@ Payloads, per source:
 
 - ``plc.cv2`` (Sparkplug-like DDATA): ``{"metrics": [{"name": ..., "value": ..., "unit": ...}]}``;
   ``state`` -> ``mode``, ``alarm`` -> ``health`` (``""`` = ``ok``, else ``fault:<alarm>``),
-  ``speed_setpoint`` -> ``setpoint``, all on ``machine:cv-2``; ``parts_out`` -> ``cell:c3``.
+  ``speed_setpoint`` -> ``setpoint``, all on ``machine:cv-2``; ``cell_c3/parts_out`` (any
+  ``.../parts_out``) -> ``parts_out`` on ``cell:c3``.
 - ``fleet`` (VDA 5050-like ``state``), topic ``.../<robot>/state``: ``operatingMode`` -> ``mode``,
   ``batteryState.batteryCharge`` -> ``battery`` (%), ``errors`` -> ``health``, ``orderId`` ->
   ``current_task`` (``"none"`` when empty) and ``assigned_to``, ``orderState`` -> the task's
-  ``task_state``, ``zone`` -> ``in_zone``, ``serialNumber`` -> ``serial``, ``version`` ->
-  ``firmware``.
-- ``arm.c3`` (controller log): ``{"event": "mode"|"protective_stop"|"reset", "mode": ...,
-  "user": ..., "msg": ...}`` -> ``mode`` and ``health`` on ``robot:arm-c3``.
+  ``task_state``, ``zone`` (``zone:aisle-a``, or a bare id) -> ``in_zone``, ``serialNumber`` ->
+  ``serial``, ``version`` -> ``firmware``.
+- ``arm.c3`` (controller log): ``{"event": "heartbeat"|"mode_change"|"protective_stop"|"reset",
+  "mode": ..., "fault": "" | code, "user": ..., "text": ...}`` -> ``mode``, and ``health``
+  (``ok`` or ``fault:<code>``) on ``robot:arm-c3``; an event's quote is its ``text``.
 """
 
 from __future__ import annotations
@@ -95,8 +97,8 @@ def _plc(msg: FeedMessage) -> list[_Reading]:
             out.append((machine, "health", _health(value), value))
         elif name == "speed_setpoint":
             out.append((machine, "setpoint", Value(value, metric.get("unit")), value))
-        elif name == "parts_out":
-            out.append((cell, "parts_out", Value(value), value))
+        elif name.rsplit("/", 1)[-1] == "parts_out":
+            out.append((cell, "parts_out", Value(value, metric.get("unit")), value))
     return out
 
 
@@ -117,7 +119,8 @@ def _fleet(msg: FeedMessage) -> list[_Reading]:
         code = p["errors"][0].get("errorType", "error") if p["errors"] else ""
         out.append((robot, "health", _health(code), code or "[]"))
     if "zone" in p:
-        out.append((robot, "in_zone", Ref(f"zone:{p['zone']}"), p["zone"]))
+        zone = p["zone"] if p["zone"].startswith("zone:") else f"zone:{p['zone']}"
+        out.append((robot, "in_zone", Ref(zone), p["zone"]))
     if "orderId" in p:
         order = p["orderId"]
         if order:
@@ -134,15 +137,13 @@ def _fleet(msg: FeedMessage) -> list[_Reading]:
 def _arm(msg: FeedMessage) -> list[_Reading]:
     robot = ARM_SUBJECTS[msg.source]
     p = msg.payload
-    quote = p.get("msg", p.get("event", ""))
     event = p.get("event")
     out: list[_Reading] = []
-    if event == "protective_stop":
-        out.append((robot, "mode", Value("protective_stop"), quote))
-        out.append((robot, "health", Value("fault:protective_stop"), quote))
-    elif event in ("mode", "reset"):
-        if event == "reset":
-            out.append((robot, "health", Value("ok"), quote))
-        if p.get("mode"):
-            out.append((robot, "mode", Value(p["mode"]), quote))
+    if p.get("mode"):
+        quote = p["mode"] if event == "heartbeat" else p.get("text", p["mode"])
+        out.append((robot, "mode", Value(p["mode"]), quote))
+    if "fault" in p:
+        fault = p["fault"] or ""
+        quote = (fault or '""') if event == "heartbeat" else p.get("text", fault)
+        out.append((robot, "health", _health(fault), quote))
     return out

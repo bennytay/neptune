@@ -3,36 +3,47 @@
 ``map_record(record, package)`` is called once per record, in package order. Each corpus file is
 recognised by its path under ``static/``; anything else maps to nothing.
 
-Tabular files (the compiler's ``StructuredRecord`` rows; row 1 is the header), all values verbatim,
-citing ``row N col "<column>"`` with ``N`` counted as a spreadsheet does (header = row 1):
+Tabular files (the compiler's ``StructuredRecord`` rows, as ``site/corpus/static.py`` writes
+them; row 1 is the header), all values verbatim, citing ``row N col "<column as written>"`` with
+``N`` counted as a spreadsheet does (header = row 1). Columns are matched case-blind, spaces as
+``_``. An equipment (header = row 1). Columns are matched case-blind, spaces as ``_``. An equipment
+tag (``CV-2``) names ``<type>:<tag lowercased>``, the type from the asset register row whose name
+carries the tag (``conveyor`` -> ``machine``, ``... robot ...`` -> ``robot``). A person is
+``person:<name lowercased>``.
 
-- ``cmms/assets.csv``: ``asset,type,name,serial`` -> ``serial``, ``name`` on ``<type>:<asset>``.
-- ``cmms/work_orders.csv``: ``wo,asset_type,asset,opened,closed,action,cause,by,loto`` ->
-  ``work_order`` on the asset, ``wo_*`` on ``work_order:<wo>``; ``valid_from`` = ``opened``.
-- ``changes/changes.csv``: ``change,asset_type,asset,at,description`` -> ``change`` on the asset,
-  ``name`` (the description) on ``change:<change>``; ``valid_from`` = ``at``.
-- ``roster/shift_roster.csv``: ``person,name,role,shift,start,end,break_start,break_end`` ->
-  ``name``, ``has_role``, ``on_shift`` [start, end) and ``on_break`` [break_start, break_end).
-- ``roster/qualifications.csv``: ``person,qualification,granted`` -> ``holds_qualification``
-  (``valid_from`` = ``granted``, blank = not stated).
+- ``cmms/assets.csv``: ``Asset,Name,Type,Serial,Location`` -> ``serial``, ``name`` on
+  ``<type>:<Asset>``, the CMMS id (``robot:MR-1142``).
+- ``cmms/work_orders.csv``: ``WO,Asset,Equipment,Opened,Closed,Problem,Action,Cause,Done by,LOTO,
+  Note`` -> ``work_order`` on the equipment, ``wo_*`` on ``work_order:<WO>``; ``valid_from`` =
+  ``Opened``.
+- ``changes/changes.csv``: ``Change,Equipment,Parameter,From,To,Unit,When,Requested by,Reason`` ->
+  ``change`` on the equipment; ``name`` (the parameter), ``change_from`` / ``change_to`` (with
+  ``Unit``), ``change_by`` and ``change_reason`` on ``change:<Change>``; ``valid_from`` = ``When``;
+  source ``cmms`` (the change log is a maintenance-system export).
+- ``roster/shift_roster.csv``: ``Person,Role,Shift,Start,End,Break start,Break end`` -> ``name`` and
+  ``has_role`` (``role:<role, spaces as ->``) from a person's first row; per row ``on_shift``
+  ``shift:<Shift>`` [Start, End) and ``on_break`` [Break start, Break end).
+- ``roster/qualifications.csv``: ``Person,Qualification,Granted`` -> ``holds_qualification``
+  (``valid_from`` = ``Granted`` as written).
 
 PDFs under ``docs/`` (``DocumentBlock``s): ``document:<file stem up to "_">``. A value is stated
 only where it is in a block verbatim, citing ``page P block B`` (``B`` counted within the page)
-and the block text as the quote. A block's first text is the document's ``name``;
-``§4.2 <clause>`` makes ``rule:<document id lowercased>-4.2`` with ``rule_text`` = the clause; a
-range with a unit (``45-55 N``, hyphen or en dash) is ``states_limit``; a qualification held in
-``roster/qualifications.csv`` named in the block (``conveyor-lockout`` or ``conveyor lockout``) is
-``requires_qualification`` of the rule, or of the document outside a rule.
+and the block text as the quote. A block's first text is the document's ``name``; a clause
+``4.2 <text>`` (``§`` optional) makes ``rule:<document id lowercased>-4.2`` with ``rule_text`` =
+the text; a range with a unit (``45-55 N``, hyphen or en dash) is ``states_limit``; a qualification
+held in ``roster/qualifications.csv`` named in the block (``conveyor-lockout`` or
+``conveyor lockout``) is ``requires_qualification`` of the rule, or of the document outside a rule.
 
 Recorded model output, ``photos/<name>.extraction.json`` (read through the compiler's configuration
 records)::
 
-    {"image": "<name>.png", "model": "<model id>", "prompt_sha256": "<hex>",
-     "taken": "2026-10-20T06:15:00", "regions": [{"box": [x0, y0, x1, y1],
-     "subject": "machine:cv-2", "text": "CV-2: PE3 dirty — clean every shift"}]}
+    {"image": "<name>.png", "model": "<model id>", "prompt": "...", "prompt_sha256": "<hex>",
+     "regions": [{"id": 1, "box": [x0, y0, x1, y1], "text": "CV-2: PE3 dirty — clean every shift"}]}
 
 Each region is an inferred ``note`` with ``model`` = ``<model id>@<prompt sha256[:12]>``, citing
-``region x0,y0,x1,y1`` of the image (no quote).
+``region x0,y0,x1,y1`` of the image (no quote). It is about the equipment its text starts with
+(``CV-2:`` -> ``machine:cv-2``), else about the image as a document; ``taken``, when present, is
+``valid_from``.
 """
 
 from __future__ import annotations
@@ -54,12 +65,15 @@ from neptune_memory.site.mappers.layout import STATIC
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-_RULE = re.compile(r"^§\s*(\d+(?:\.\d+)*)\s+(.+)$", re.DOTALL)
+_RULE = re.compile(r"^§?\s*(\d+(?:\.\d+)+)\s+(.+)$", re.DOTALL)
 _DASH = "\N{EN DASH}-"  # en dash first: a trailing "-" stays literal in a class
 _LIMIT = re.compile(
     rf"(?<![\w.{_DASH}])\d+(?:\.\d+)?\s?[{_DASH}]\s?\d+(?:\.\d+)?\s?"
     r"(?:N|Nm|mm|cm|m|m/s|kg|bar|°C|%)(?![\w/])"
 )
+_ASSETS = "cmms/assets.csv"
+_ROSTER = "roster/shift_roster.csv"
+_QUALIFICATIONS = "roster/qualifications.csv"
 
 
 def map_record(record: Any, package: Any) -> list[Fact]:
@@ -75,11 +89,11 @@ def map_record(record: Any, package: Any) -> list[Fact]:
         tabular = _TABLES.get(path)
         if tabular is None or record.row == 0:
             return []
-        return tabular(_Row(f"{STATIC}/{path}", record, index.headers[record.table]))
+        return tabular(_Row(f"{STATIC}/{path}", record, index.headers[record.table]), index)
     if isinstance(record, DocumentBlock) and path.startswith("docs/"):
         return _document_block(path, record, index)
     if isinstance(record, ConfigurationSnapshot) and path.endswith(".extraction.json"):
-        return _extraction(path, index.config.get(record.id, []))
+        return _extraction(path, index.config.get(record.id, []), index)
     return []
 
 
@@ -93,6 +107,8 @@ class _Index:
     blocks: dict[str, tuple[int, int]] = field(default_factory=dict)  # block id -> page, block
     config: dict[str, list[ConfigurationValue]] = field(default_factory=dict)
     qualifications: tuple[str, ...] = ()
+    assets: tuple[tuple[str, str], ...] = ()  # (name, type) per asset register row
+    first_row: dict[str, int] = field(default_factory=dict)  # roster person -> first data row
 
 
 _CACHE: dict[str, _Index] = {}
@@ -121,12 +137,20 @@ def _index(package: Any) -> _Index:
         for number, block in enumerate(sorted(blocks, key=lambda b: b.order), start=1):
             index.blocks[block.id] = (page + 1, number)
     held: set[str] = set()
-    for row in rows:
-        if index.paths.get(str(row.provenance.evidence.source)) == "roster/qualifications.csv":
-            header = index.headers[row.table]
-            if row.row > 0 and "qualification" in header:
-                held.add(_text(row.cells[header.index("qualification")]))
+    assets: list[tuple[str, str]] = []
+    for record in sorted(rows, key=lambda r: r.row):
+        path = index.paths.get(str(record.provenance.evidence.source))
+        if record.row == 0 or path not in (_ASSETS, _ROSTER, _QUALIFICATIONS):
+            continue
+        row = _Row(f"{STATIC}/{path}", record, index.headers[record.table])
+        if path == _QUALIFICATIONS:
+            held.add(row["qualification"])
+        elif path == _ASSETS:
+            assets.append((row["name"], row["type"]))
+        else:
+            index.first_row.setdefault(row["person"].lower(), row.number)
     index.qualifications = tuple(sorted(q for q in held if q))
+    index.assets = tuple(assets)
     _CACHE.clear()
     _CACHE[package.id] = index
     return index
@@ -143,15 +167,39 @@ def _page(block: DocumentBlock) -> int:
     return 0
 
 
+def _kind_of(asset_type: str) -> str:
+    """The site entity type of an asset register ``Type``."""
+    return "robot" if "robot" in asset_type.lower() else "machine"
+
+
+def _equipment(tag: str, index: _Index) -> str:
+    """``CV-2`` -> ``machine:cv-2``: typed by the asset whose name carries the tag."""
+    for name, asset_type in index.assets:
+        if tag in name.split():
+            return f"{_kind_of(asset_type)}:{tag.lower()}"
+    return f"machine:{tag.lower()}"
+
+
+def _person(name: str) -> str:
+    return f"person:{name.lower()}"
+
+
 # --- Tables -----------------------------------------------------------------------------------
 
 
+def _key(column: str) -> str:
+    return column.strip().lower().replace(" ", "_")
+
+
 class _Row:
-    """One data row: cells by column name, and the facts it states, each citing its cell."""
+    """One data row: cells by column key, and the facts it states, each citing its cell."""
 
     def __init__(self, file: str, record: StructuredRecord, header: tuple[str, ...]) -> None:
         self.file, self.number = file, record.row + 1
-        self.cells = {name: _text(cell) for name, cell in zip(header, record.cells, strict=False)}
+        self.columns = {_key(name): name for name in header}
+        self.cells = {
+            _key(name): _text(cell) for name, cell in zip(header, record.cells, strict=False)
+        }
 
     def __getitem__(self, column: str) -> str:
         return self.cells.get(column, "")
@@ -166,7 +214,8 @@ class _Row:
         valid_from: str | None = None,
         valid_to: str | None = None,
     ) -> Fact:
-        cite = Citation(self.file, f'row {self.number} col "{column}"', self[column])
+        written = self.columns.get(column, column)
+        cite = Citation(self.file, f'row {self.number} col "{written}"', self[column])
         value = obj if obj is not None else Value(self[column])
         return Fact(subject, predicate, value, valid_from, valid_to, "stated", source, (cite,))
 
@@ -175,49 +224,63 @@ def _or_none(text: str) -> str | None:
     return text or None
 
 
-def _assets(row: _Row) -> list[Fact]:
-    asset = f"{row['type']}:{row['asset']}"
+def _assets(row: _Row, index: _Index) -> list[Fact]:
+    asset = f"{_kind_of(row['type'])}:{row['asset']}"
     return [
-        row.fact("cmms", asset, predicate, column)
-        for predicate, column in (("name", "name"), ("serial", "serial"))
-        if row[column]
+        row.fact("cmms", asset, predicate, predicate)
+        for predicate in ("name", "serial")
+        if row[predicate]
     ]
 
 
-def _work_orders(row: _Row) -> list[Fact]:
+def _work_orders(row: _Row, index: _Index) -> list[Fact]:
     wo, opened = f"work_order:{row['wo']}", _or_none(row["opened"])
-    asset = f"{row['asset_type']}:{row['asset']}"
-    out = [row.fact("cmms", asset, "work_order", "asset", Ref(wo), opened)]
+    asset = _equipment(row["equipment"], index)
+    out = [row.fact("cmms", asset, "work_order", "equipment", Ref(wo), opened)]
     for predicate, column in (
         ("wo_opened", "opened"),
         ("wo_closed", "closed"),
+        ("wo_problem", "problem"),
         ("wo_action", "action"),
         ("wo_cause", "cause"),
         ("wo_loto", "loto"),
+        ("wo_note", "note"),
     ):
         if row[column]:
             out.append(row.fact("cmms", wo, predicate, column, valid_from=opened))
-    if row["by"]:
-        out.append(row.fact("cmms", wo, "wo_by", "by", Ref(f"person:{row['by']}"), opened))
+    if row["done_by"]:
+        by = Ref(_person(row["done_by"]))
+        out.append(row.fact("cmms", wo, "wo_by", "done_by", by, opened))
     return out
 
 
-def _changes(row: _Row) -> list[Fact]:
-    change, at = f"change:{row['change']}", _or_none(row["at"])
-    asset = f"{row['asset_type']}:{row['asset']}"
-    out = [row.fact("changes", asset, "change", "asset", Ref(change), at)]
-    if row["description"]:
-        out.append(row.fact("changes", change, "name", "description", valid_from=at))
+def _changes(row: _Row, index: _Index) -> list[Fact]:
+    change, at = f"change:{row['change']}", _or_none(row["when"])
+    asset = _equipment(row["equipment"], index)
+    unit = _or_none(row["unit"])
+    out = [row.fact("cmms", asset, "change", "change", Ref(change), at)]
+    if row["parameter"]:
+        out.append(row.fact("cmms", change, "name", "parameter", valid_from=at))
+    for predicate, column in (("change_from", "from"), ("change_to", "to")):
+        if row[column]:
+            value = Value(row[column], unit)
+            out.append(row.fact("cmms", change, predicate, column, value, at))
+    if row["requested_by"]:
+        by = Ref(_person(row["requested_by"]))
+        out.append(row.fact("cmms", change, "change_by", "requested_by", by, at))
+    if row["reason"]:
+        out.append(row.fact("cmms", change, "change_reason", "reason", valid_from=at))
     return out
 
 
-def _roster(row: _Row) -> list[Fact]:
-    person = f"person:{row['person']}"
+def _roster(row: _Row, index: _Index) -> list[Fact]:
+    person = _person(row["person"])
     out: list[Fact] = []
-    if row["name"]:
-        out.append(row.fact("roster", person, "name", "name"))
-    if row["role"]:
-        out.append(row.fact("roster", person, "has_role", "role", Ref(f"role:{row['role']}")))
+    if index.first_row.get(row["person"].lower()) == row.number:
+        out.append(row.fact("roster", person, "name", "person"))
+        if row["role"]:
+            role = Ref("role:" + row["role"].replace(" ", "-"))
+            out.append(row.fact("roster", person, "has_role", "role", role))
     if row["shift"]:
         shift = Ref(f"shift:{row['shift']}")
         start, end = _or_none(row["start"]), _or_none(row["end"])
@@ -229,21 +292,21 @@ def _roster(row: _Row) -> list[Fact]:
     return out
 
 
-def _qualifications(row: _Row) -> list[Fact]:
+def _qualifications(row: _Row, index: _Index) -> list[Fact]:
     qualification = Ref(f"qualification:{row['qualification']}")
     granted = _or_none(row["granted"])
-    person = f"person:{row['person']}"
+    person = _person(row["person"])
     return [
         row.fact("roster", person, "holds_qualification", "qualification", qualification, granted)
     ]
 
 
-_TABLES: dict[str, Callable[[_Row], list[Fact]]] = {
-    "cmms/assets.csv": _assets,
+_TABLES: dict[str, Callable[[_Row, _Index], list[Fact]]] = {
+    _ASSETS: _assets,
     "cmms/work_orders.csv": _work_orders,
     "changes/changes.csv": _changes,
-    "roster/shift_roster.csv": _roster,
-    "roster/qualifications.csv": _qualifications,
+    _ROSTER: _roster,
+    _QUALIFICATIONS: _qualifications,
 }
 
 
@@ -281,19 +344,20 @@ def _document_block(path: str, block: DocumentBlock, index: _Index) -> list[Fact
 # --- Recorded model output --------------------------------------------------------------------
 
 
-def _extraction(path: str, values: Iterable[ConfigurationValue]) -> list[Fact]:
+def _extraction(path: str, values: Iterable[ConfigurationValue], index: _Index) -> list[Fact]:
     scalars = {v.path: v.text.value for v in values if isinstance(v.text, Known)}
     model = f"{scalars[('model',)]}@{scalars[('prompt_sha256',)][:12]}"
-    image = str(PurePosixPath(STATIC, path).parent / scalars[("image",)])
+    image = PurePosixPath(STATIC, path).parent / scalars[("image",)]
     taken = scalars.get(("taken",))
     kind: Kind = "inferred"
     out: list[Fact] = []
     region = 0
     while ("regions", region, "text") in scalars:
         box = ",".join(scalars[("regions", region, "box", i)] for i in range(4))
-        cite = Citation(image, f"region {box}", None)
-        subject = scalars[("regions", region, "subject")]
-        note = Value(scalars[("regions", region, "text")])
-        out.append(Fact(subject, "note", note, taken, None, kind, "photos", (cite,), model))
+        cite = Citation(str(image), f"region {box}", None)
+        text = scalars[("regions", region, "text")]
+        tag, colon, _ = text.partition(":")
+        subject = _equipment(tag.strip(), index) if colon else f"document:{image.stem}"
+        out.append(Fact(subject, "note", Value(text), taken, None, kind, "photos", (cite,), model))
         region += 1
     return out

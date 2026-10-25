@@ -44,7 +44,7 @@ sources:
   - {id: cmms, name: Maintenance system export}
   - {id: roster, name: Shift roster and qualifications}
   - {id: docs, name: Controlled documents}
-  - {id: photos, name: Shift photos, recorded model extraction}
+  - {id: photos, name: "Shift photos, recorded model extraction"}
 """
 
 ASSETS = """\
