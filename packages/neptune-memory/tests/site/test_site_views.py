@@ -136,4 +136,4 @@ def test_site_views_confirmed_same_as_joins(tmp_path: Path) -> None:
         "stated",
         "confirm",
     )
-    assert joined.facts[0].citations[-1].locator == "line 2"
+    assert joined.facts[0].citations[-1].locator == "confirm line 2"

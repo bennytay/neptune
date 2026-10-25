@@ -1,7 +1,9 @@
 """Identity proposals (spec §7): "these two names may be one thing", never merged on their own.
 
 Two entities of the same type that carry the same ``serial`` from different sources get one inferred
-``same_as`` fact citing both. Only a ``confirm`` yes (``confirm.py``) makes it a stated fact.
+``same_as`` fact citing both; the subject is the first of the two refs ignoring case
+(``robot:amr-02 same_as robot:MR-1142``). Only a ``confirm`` yes (``confirm.py``) makes it a
+stated fact.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ def propose_same_as(facts: Iterable[Fact]) -> list[Fact]:
 
     proposals: list[Fact] = []
     for serial in sorted(by_serial):
-        subjects = sorted(by_serial[serial])
+        subjects = sorted(by_serial[serial], key=lambda ref: (ref.casefold(), ref))
         for i, left in enumerate(subjects):
             for right in subjects[i + 1 :]:
                 a, b = by_serial[serial][left], by_serial[serial][right]

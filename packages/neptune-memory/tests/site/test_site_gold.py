@@ -3,7 +3,6 @@
 Each test generates the corpus, builds the fact log, runs its calls through the site query API
 (spec §8) and checks that the expected items are in the answers and that the answers cite the
 expected files.
-They are expected to fail until #188 removes the xfail marker.
 """
 
 import importlib
@@ -15,9 +14,6 @@ import pytest
 
 GOLD = json.loads((Path(__file__).parent / "gold_questions.json").read_text(encoding="utf-8"))
 QUESTIONS = {q["id"]: q for q in GOLD["questions"]}
-UNTIL_M1 = pytest.mark.xfail(
-    strict=True, reason="site model lands in M1 (#182-#187); #188 flips it"
-)
 
 
 def _site(name: str) -> Any:
@@ -34,6 +30,8 @@ def site_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def _object(item: Any) -> Any:
     obj = item.object
+    if obj is None:  # an unknown reading has no value
+        return None
     return obj.ref if hasattr(obj, "ref") else obj.value
 
 
@@ -62,7 +60,6 @@ def _ask(site_dir: Path, question: dict[str, Any]) -> list[Any]:
     return answers
 
 
-@UNTIL_M1
 @pytest.mark.parametrize("qid", sorted(QUESTIONS))
 def test_site_gold_question(site_dir: Path, qid: str) -> None:
     question = QUESTIONS[qid]
@@ -78,3 +75,29 @@ def test_site_gold_questions_are_well_formed() -> None:
     assert len(QUESTIONS) == 8
     for question in QUESTIONS.values():
         assert question["calls"] and question["expect"] and question["cites"]
+
+
+def _log_bytes(site: Path) -> bytes:
+    segments = sorted((site / ".neptune" / "log").glob("segment-*.jsonl"))
+    return b"".join(segment.read_bytes() for segment in segments)
+
+
+def test_site_gold_replay_same_corpus_same_model(tmp_path: Path) -> None:
+    """Spec §1: the same corpus builds the same log, and folds to the same model, live or not."""
+    site = tmp_path / "site"
+    _site("corpus").generate(site)
+    build, views = _site("build"), _site("views")
+
+    build.build(site)
+    first, first_model = _log_bytes(site), views.load(site)
+    build.build(site)
+    assert _log_bytes(site) == first
+    assert views.load(site) == first_model
+
+    build.replay(site, speed=1e9, sleep=lambda _: None)
+    assert _log_bytes(site) == first
+    live = views.SiteModel.empty()
+    for entry in _site("log").read(site):  # one entry at a time, as a live reader folds it
+        live = live.apply(entry)
+    assert live == first_model
+    assert first_model.pending(), "the amr-02/MR-1142 proposal is in the log"

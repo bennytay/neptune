@@ -116,20 +116,22 @@ up: ## Your own folder -> compiler -> Deploy -> Ledger -> Memory -> a Claude Cod
 > $(RUN) python -m harness.up "$(SRC)" $(ARGS)
 
 # Site model v3 (docs/site-model/spec.md §9): the Plant 7 corpus -> fact log -> the MCP command.
-# `build`/`replay` land with #183; until then these stop after generating.
+# site-demo confirms the amr-02 / MR-1142 identity proposal as the operator would (spec §7).
 SITE_DIR ?= site-demo
 SPEED ?= 60
 SITE := $(RUN) python -m neptune_memory.site
-SITE_MCP := python -m neptune_context.mcp --site "$(SITE_DIR)"
-site-demo: ## Site model: generate the Plant 7 corpus, build the fact log, print the MCP command
+SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
+site-demo: ## Site model: generate the Plant 7 corpus, build the fact log, confirm, print the MCP command
 > $(SITE) generate "$(SITE_DIR)"
-> @if $(SITE) build --help >/dev/null 2>&1; then $(SITE) build "$(SITE_DIR)" && echo "MCP: $(SITE_MCP)"; \
-  else echo "note: 'build' lands with #183; stopped after generating $(SITE_DIR)"; fi
+> $(SITE) build "$(SITE_DIR)"
+> $(SITE) confirm "$(SITE_DIR)" --yes-all --by demo-operator
+> @echo "MCP: $(SITE_MCP)"
+> @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
 
 site-replay: ## Site model: the same, live (SPEED=60 is 60x real time)
 > $(SITE) generate "$(SITE_DIR)"
-> @if $(SITE) replay --help >/dev/null 2>&1; then echo "MCP: $(SITE_MCP)"; $(SITE) replay "$(SITE_DIR)" --speed "$(SPEED)"; \
-  else echo "note: 'replay' lands with #183; stopped after generating $(SITE_DIR)"; fi
+> @echo "MCP: $(SITE_MCP)"
+> $(SITE) replay "$(SITE_DIR)" --speed "$(SPEED)"
 
 # The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
 # A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.

@@ -116,6 +116,8 @@ neptune confirm (yes/no) ──────────────────�
   - `build(site_dir, *, until=None) -> Path` does static first, then the feed up to `until` (site time).
   - `replay(site_dir, *, speed=60.0, until=None)` does the same live: it sleeps `Δt/speed` between messages
     and appends as it goes.
+- **Identity proposals:** after a batch of facts holding a new `serial`, the build appends the `same_as`
+  proposals it now implies (§7), so a live replay shows a proposal as soon as its second serial lands.
 - **Recorded model output:** the whiteboard extraction is a file in the corpus (§8), so the log never calls a
   model.
 
@@ -185,8 +187,9 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 - `python -m neptune_memory.site generate <out>` (Python: `neptune_memory.site.corpus.generate(out: Path)`) writes the corpus. It is deterministic: same code, same
   bytes. PDFs reuse the writer in `tests/fixtures/pdf/make_pdfs.py`, loaded by path, as Deploy's document
   fixtures do.
-- `make site-demo` = generate into `site-demo/` → `build` → print the MCP command.
-  `make site-replay SPEED=60` = the same, live.
+- `make site-demo` = generate into `site-demo/` → `build` → `confirm --yes-all` (the amr-02/MR-1142 proposal, as
+  the operator would) → print the MCP command.
+  `make site-replay SPEED=60` = generate, then build live (the proposal stays pending).
 
 **Site `site:p7`, "Plant 7 assembly hall"**
 - **Clock:** `P7 local` (zone `Europe/Berlin`, stated, never applied).
@@ -238,7 +241,7 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 
 - There are eight, each with an expected item set (subject, predicate, object, kind, state) and the expected
   cited files.
-- They are `xfail(strict=True)` until #188 flips them. Tests call the §8 API. The answers must cite the files
+- They pass since #188 (no xfail). Tests call the §8 API. The answers must cite the files
   listed; wording is never checked.
 
 ## 11. Lane ownership
@@ -251,6 +254,6 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 | #185 views | `site/views.py` | #183, #184 |
 | #186 identity + confirm | `site/identity.py`, `site/confirm.py`, `__main__` `confirm` | #184 (and #185 to show merges) |
 | #187 query + MCP | `site/query.py`, `site/render.py`, `neptune_context/mcp/site.py`, `--site` flag, the skill text | #185 |
-| #188 gate | flips the gold xfails, adds one replay test, `make site-demo` end to end, deletes v2 | all |
+| #188 gate | flips the gold xfails, adds one replay test, `make site-demo` end to end; v2 stays (Context and Demo v1 still import it) | all |
 
 - Shared files (`site/__main__.py`, `Makefile`): add your subcommand or target only; don't reorder the others.

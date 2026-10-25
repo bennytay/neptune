@@ -27,9 +27,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from neptune_memory.site import log as fact_log
+from neptune_memory.site.confirm import stated_from_confirm
 from neptune_memory.site.facts import (
     KIND_RANK,
-    Citation,
     Confirm,
     Fact,
     LogEntry,
@@ -169,20 +169,8 @@ class SiteModel:
         proposal = self.facts.get(confirm.proposal)
         if confirm.answer != "yes" or proposal is None:
             return
-        segment = fact_log.segment_path(Path(".neptune/log"), seq).as_posix()
-        line = (seq - 1) % fact_log.SEGMENT_SIZE + 1
-        cite = Citation(segment, f"line {line}", f"{confirm.answer} by {confirm.by}")
-        stated = Fact(
-            subject=proposal.subject,
-            predicate=proposal.predicate,
-            object=proposal.object,
-            valid_from=proposal.valid_from,
-            valid_to=proposal.valid_to,
-            kind="stated",
-            source="confirm",
-            citations=(*proposal.citations, cite),
-        )
-        self._add(stated, seq)
+        entry = LogEntry(seq=seq, type="confirm", confirm=confirm)
+        self._add(stated_from_confirm(proposal, entry, seq), seq)
 
     def _find(self, entity: str) -> str:
         while self.parent.get(entity, entity) != entity:
@@ -329,14 +317,25 @@ class SiteModel:
         return out
 
     def topology(self, t: str | None = None) -> Topology:
-        """The topology edges current at ``t`` (``None`` = every live edge)."""
+        """The topology edges current at ``t`` (``None`` = every live edge).
+
+        A fleet never says an order ended, only that a robot moved on to the next: an
+        ``assigned_to`` edge counts only while its robot's ``current_task`` is that task."""
         edges = [
             f
             for (subject, predicate) in sorted(self.by_key)
             if predicate in TOPOLOGY
             for f in self._current(subject, predicate, t)
+            if predicate != "assigned_to" or self._on_task(f, t)
         ]
         return Topology(tuple(edges))
+
+    def _on_task(self, assigned: Fact, t: str | None) -> bool:
+        robot = _ref(assigned)
+        if (robot, "current_task") not in self.by_key:
+            return True
+        current = {_ref(f) for r in self._readings(robot, "current_task", t) for f in r.facts}
+        return assigned.subject in current
 
     def same_as(self, entity: str) -> tuple[str, ...]:
         """``entity`` and every entity stated (or confirmed) to be the same, sorted."""

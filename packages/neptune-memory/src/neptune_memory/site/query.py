@@ -59,6 +59,9 @@ class Answer:
     columns: list[str] = field(default_factory=list)
     rows: list[tuple[Any, ...]] = field(default_factory=list)
     omitted: int = 0
+    _stale: dict[tuple[str, str, str | None], tuple[int, list[str]]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     def cite(self, citations: Iterable[Citation]) -> tuple[str, ...]:
         """Number ``citations`` in order of first use and return their keys."""
@@ -106,20 +109,26 @@ class Answer:
         )
 
     def add_cell(self, cell: Reading) -> None:
-        if not cell.facts:
-            if not self.full():
+        if not cell.facts:  # the item says "unknown"; a gap line only when it did not fit
+            if self.full():
+                self.gaps.append(f"{cell.subject} {cell.predicate}: {cell.state}, no source says")
+            else:
                 self.items.append(
                     Item(None, cell.subject, cell.predicate, None, None, None, None, cell.state, ())
                 )
-            self.gaps.append(f"{cell.subject} {cell.predicate}: {cell.state}, no source states it")
             return
         for fact in cell.facts:
             self.add(fact, cell.state)
-        if cell.state == "stale":
-            self.gaps.append(
-                f"{cell.subject} {cell.predicate}: stale, {cell.facts[0].source} last reported "
-                f"at {cell.last_seen}; the last value holds since {cell.since}"
-            )
+        if cell.state == "stale":  # one line per subject and source: "a, b: stale, ..."
+            key = (cell.subject, cell.facts[0].source, cell.last_seen)
+            tail = f": stale, {key[1]} last reported at {cell.last_seen}"
+            if key in self._stale:
+                index, names = self._stale[key]
+                names.append(cell.predicate)
+                self.gaps[index] = f"{cell.subject} {', '.join(names)}{tail}"
+            else:
+                self._stale[key] = (len(self.gaps), [cell.predicate])
+                self.gaps.append(f"{cell.subject} {cell.predicate}{tail}")
         elif cell.state == "ambiguous":
             self.gaps.append(f"{cell.subject} {cell.predicate}: ambiguous, sources disagree")
 
@@ -159,7 +168,8 @@ def _state(model: SiteModel, fact: Fact, pending: set[str]) -> State:
 
 
 def resolve(model: SiteModel, name: str) -> Answer:
-    """Names and ids to entities: stated ``same_as`` joined, pending proposals listed."""
+    """Names and ids to entities (a name matches on any part of it, "Plant 7" finds "Plant 7
+    assembly hall"): stated ``same_as`` joined, pending proposals listed."""
     answer = _new("resolve", model, None)
     needle = name.strip().casefold()
     matched = [
@@ -169,7 +179,7 @@ def resolve(model: SiteModel, name: str) -> Answer:
     ]
     live = _live(model)
     matched += [
-        f.subject for f in live if f.predicate == "name" and _text(f.object).casefold() == needle
+        f.subject for f in live if f.predicate == "name" and needle in _text(f.object).casefold()
     ]
     group: set[str] = set()
     for entity in matched:
@@ -292,6 +302,13 @@ def diff(model: SiteModel, start: str, end: str, entities: list[str] | None = No
     series: dict[tuple[str, str], list[Interval]] = {}
     for interval in began:
         series.setdefault((interval.fact.subject, interval.fact.predicate), []).append(interval)
+    tasks = sorted({subject for subject, _ in series if subject.startswith("task:")})
+    if entities is None and len(tasks) > SERIES_LIMIT:  # fleet order churn: count, don't list
+        answer.gaps.append(
+            f"{len(tasks)} tasks began ({tasks[0]} to {tasks[-1]}); "
+            "state_at or timeline on one gives its detail"
+        )
+        series = {key: v for key, v in series.items() if not key[0].startswith("task:")}
     shown: list[Interval] = []
     for (subject, predicate), changes in series.items():
         if len(changes) > SERIES_LIMIT:  # a battery or counter: its first and last change
@@ -346,12 +363,16 @@ def impact(model: SiteModel, entity: str, at: str | None = None, depth: int = 3)
         if edge.predicate == "assigned_to" and _text(edge.object) in reached:
             reached.add(edge.subject)
             edges.append(edge)
-    for fact in dict.fromkeys(edges):
+    shown = dict.fromkeys(edges)
+    for fact in shown:
         answer.add(fact)
     for subject in sorted(reached):
         for reading in model.state_at(t, subject):
-            if reading.predicate in STATUS:
-                answer.add_cell(reading)
+            if reading.predicate not in STATUS:
+                continue
+            if reading.state == "known" and all(f in shown for f in reading.facts):
+                continue  # already listed as an edge
+            answer.add_cell(reading)
     return answer
 
 

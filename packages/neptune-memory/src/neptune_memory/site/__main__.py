@@ -24,8 +24,10 @@ def _generate(args: argparse.Namespace) -> int:
 
 def _build(args: argparse.Namespace) -> int:
     from neptune_memory.site.build import build
+    from neptune_memory.site.log import last_seq
 
-    build(args.site_dir, until=args.until)
+    log = build(args.site_dir, until=args.until)
+    sys.stdout.write(f"built {log} ({last_seq(args.site_dir)} entries)\n")
     return 0
 
 
@@ -43,21 +45,26 @@ def _say(line: str) -> None:
 def _confirm(args: argparse.Namespace) -> int:
     from neptune_memory.site import confirm as queue
     from neptune_memory.site.identity import propose
+    from neptune_memory.site.log import SEGMENT_SIZE, segment_path
 
     propose(args.site_dir)
-    if args.yes:
-        entry = queue.confirm(args.site_dir, args.yes, "yes", by=args.by)
-        _say(f"{args.yes}: yes (log seq {entry.seq})")
-    if args.no:
-        entry = queue.confirm(args.site_dir, args.no, "no", by=args.by)
-        _say(f"{args.no}: no (log seq {entry.seq})")
     pending = queue.pending(args.site_dir)
     _say(f"{len(pending)} pending")
     for fact in pending:
         other = getattr(fact.object, "ref", fact.object)
-        _say(f"  {fact.id}  {fact.subject} same_as {other}")
+        _say(f"  {fact.id}  {fact.subject} same_as {other} · {fact.kind}")
         for cite in fact.citations:
             _say(f"    {cite.file} {cite.locator}: {cite.quote}")
+    answers = [(pid, "yes") for pid in args.yes or []] + [(pid, "no") for pid in args.no or []]
+    if args.yes_all:
+        answers += [(fact.id, "yes") for fact in pending]
+    for pid, answer in answers:
+        entry = queue.confirm(args.site_dir, pid, answer, by=args.by)  # type: ignore[arg-type]
+        where = segment_path(Path(".neptune/log"), entry.seq).as_posix()
+        line = (entry.seq - 1) % SEGMENT_SIZE + 1
+        _say(f"{pid}: {answer} by {args.by} (log seq {entry.seq}, {where} confirm line {line})")
+    if answers:
+        _say(f"{len(queue.pending(args.site_dir))} pending")
     return 0
 
 
@@ -88,8 +95,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "confirm", help="list pending identity proposals; --yes ID / --no ID answers one"
     )
     confirm.add_argument("site_dir", type=Path)
-    confirm.add_argument("--yes", metavar="ID", help="proposal id to confirm")
-    confirm.add_argument("--no", metavar="ID", help="proposal id to reject")
+    confirm.add_argument("--yes", metavar="ID", action="append", help="proposal id to confirm")
+    confirm.add_argument("--no", metavar="ID", action="append", help="proposal id to reject")
+    confirm.add_argument("--yes-all", action="store_true", help="confirm every pending proposal")
     confirm.add_argument("--by", default="operator")
     confirm.set_defaults(run=_confirm)
 
