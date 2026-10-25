@@ -114,8 +114,8 @@ def test_neptune_ingest_probes_and_runs_an_installed_plugin_adapter(
     libraries = {t["adapter_id"]: t["libraries"] for t in receipt["transforms"]}
     assert libraries["tally"] == {"neptune-test-tally": "1.0.0"}
     assert libraries["framelog"] == {"neptune-test-framelog": "2.0.0"}
-    # The loader names every plugin the job could use, sorted (ADR 0058 §5): these, and any the
-    # workspace itself installs (neptune-deploy).
+    # The loader names every plugin the job could use, sorted (ADR 0058 §5): these, and any other
+    # installed in the environment.
     loaded = libraries[PLUGINS_ID]
     assert list(loaded) == sorted(loaded)
     assert {
@@ -225,51 +225,6 @@ def test_contradictory_or_bad_plugin_flags_are_refused(run_folder: Path) -> None
     code, result, _ = cli("ingest", str(run_folder), "--dry-run", "--plugin", "not a name")
     assert result["error"]["code"] == "invalid_configuration"
     assert code == exit_codes.for_code("invalid_configuration")
-
-
-def test_neptune_deploy_installed_its_adapter_is_probed_on_every_source(
-    run_folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The workspace member Neptune Deploy registers ``deploy_lifecycle`` (Deploy ADR 0001).
-
-    ``neptune ingest`` registers it and asks its probe about every source. It reads no format
-    yet and claims nothing (Deploy ADR 0001 §6), so every record is the one a job without plugins
-    makes; only an unread file's ``unsupported`` finding lists its decline too. Skipped until the
-    member is installed in this environment.
-    """
-    pytest.importorskip("neptune_deploy")
-    (run_folder / "commissioning.csv").write_text(
-        "cell,test,result\nCELL-3,e-stop latency,pass\n", encoding="utf-8"
-    )
-    monkeypatch.chdir(tmp_path)
-    out, err = io.StringIO(), io.StringIO()
-    argv = ["ingest", str(run_folder), "--explain", "--json", "-w", "ws"]
-    code = run(argv, stdout=out, stderr=err)
-    assert code == exit_codes.OK
-    (explanation,) = [
-        json.loads(line)["explanation"]
-        for line in out.getvalue().splitlines()
-        if json.loads(line)["type"] == "explanation"
-    ]
-    assert "deploy_lifecycle" in {adapter["id"] for adapter in explanation["adapters"]}
-    for source in explanation["sources"]:
-        (verdict,) = [v for v in source["verdicts"] if v["adapter"] == "deploy_lifecycle"]
-        assert verdict["verdict"] == "declined"
-        assert [r["code"] for r in verdict["reasons"]] == ["deploy_lifecycle.no_reader"]
-    packages = []
-    for flags in ((), ("--no-plugins",)):
-        code, result, _ = cli(
-            "ingest", str(run_folder), "--out", f"pkg{len(flags)}", "-w", "ws", *flags
-        )
-        assert code == exit_codes.OK and result["state"] == "committed"
-        packages.append(package_bytes(tmp_path / f"pkg{len(flags)}"))
-    findings = "records/ingest_finding.jsonl"
-    differ = {name for name in packages[0] if packages[0][name] != packages[1].get(name)}
-    transforms = "records/transform_record.jsonl"
-    assert differ == {"manifest.json", "receipt.json", "receipt.md", findings, transforms}
-    assert b"neptune-deploy" in packages[0][transforms]  # the loaded plugin, in the package
-    assert b"deploy_lifecycle.no_reader" in packages[0][findings]  # the frame log's decline
-    assert b"deploy_lifecycle" not in packages[1][findings]
 
 
 def test_the_package_names_the_loaded_plugins_even_when_none_reads_a_file(

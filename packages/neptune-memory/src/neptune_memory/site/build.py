@@ -134,7 +134,7 @@ class Appender:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        self.log.close()
+        self.log.__exit__(None, None, None)
 
     def static(self) -> None:
         """Ingest ``static/`` and append its facts."""
@@ -183,6 +183,11 @@ def _fresh(site_dir: Path) -> FactLog:
 
 def _package_dir(site_dir: Path) -> Path:
     return site_dir / ".neptune" / "package"
+
+
+def static_package(site_dir: Path) -> Any:
+    """The compiler's package of ``static/`` as the last build left it (the web view's sources)."""
+    return read_package(_package_dir(Path(site_dir)))
 
 
 def _static(site_dir: Path, out: _Writer | _Fresh, seam: Seam) -> None:

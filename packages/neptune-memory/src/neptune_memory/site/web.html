@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neptune site model</title>
+<style>
+:root { color-scheme: light dark;
+  --bg: #f6f7f9; --panel: rgba(255,255,255,.75); --ink: #1f2933; --muted: #6b7680;
+  --line: rgba(31,41,51,.12); --accent: #5b7fa6; --mark: rgba(240,190,60,.45);
+  --ok: rgba(88,166,120,.22);   --ok-b: #6a9f80;
+  --warn: rgba(222,160,60,.26); --warn-b: #c49446;
+  --fault: rgba(214,96,86,.28); --fault-b: #c0645b;
+  --idle: rgba(98,140,200,.22); --idle-b: #7393bd;
+  --stale: rgba(140,146,152,.14); --stale-b: #9aa1a8;
+  --place: rgba(91,127,166,.06); --place-b: rgba(91,127,166,.35);
+  --area: rgba(91,127,166,.03); --hit: rgba(91,127,166,.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15191e; --panel: rgba(32,38,45,.8); --ink: #dde3e8; --muted: #8d98a3;
+    --line: rgba(221,227,232,.12); --accent: #8fb0d6; --mark: rgba(240,190,60,.35);
+    --ok: rgba(110,190,140,.2); --ok-b: #79b08f;
+    --warn: rgba(232,176,80,.22); --warn-b: #c9a25a;
+    --fault: rgba(230,110,100,.26); --fault-b: #d07a70;
+    --idle: rgba(120,160,220,.2); --idle-b: #86a3cc;
+    --stale: rgba(160,166,172,.1); --stale-b: #7d858c;
+    --place: rgba(143,176,214,.06); --place-b: rgba(143,176,214,.3);
+    --area: rgba(143,176,214,.03); --hit: rgba(143,176,214,.16);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--stale-b);
+  margin-right: 5px; vertical-align: 1px; }
+.dot.on { background: var(--ok-b); box-shadow: 0 0 0 3px var(--ok); }
+.slider { display: flex; gap: 8px; align-items: center; flex: 1; min-width: 320px; }
+.slider input[type=range] { flex: 1; accent-color: var(--accent); }
+button, select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { background: var(--hit); border-color: var(--accent); }
+main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 12px; padding: 12px 16px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+  min-width: 0; }
+section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+  margin: 0 0 8px; font-weight: 600; display: flex; justify-content: space-between; }
+#map svg { width: 100%; height: auto; display: block; }
+.records { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.records a { margin-left: 8px; }
+.side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.wide { grid-column: 1 / -1; }
+.cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.v { cursor: pointer; white-space: nowrap; }
+a { color: var(--accent); text-decoration: none; white-space: nowrap; }
+td.v:hover, .row:hover { background: var(--hit); }
+.stale { color: var(--muted); font-style: italic; }
+.unknown { color: var(--muted); }
+.ambiguous { color: var(--warn-b); }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line);
+  color: var(--muted); margin-left: 4px; }
+.badge.inferred { border-color: var(--idle-b); color: var(--idle-b); }
+.badge.stale, .badge.pending { border-style: dashed; }
+.row { padding: 5px 6px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 4px; }
+.row .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.row.fault { background: var(--fault); }
+.scroll { max-height: 330px; overflow: auto; }
+.finding b { font-weight: 600; }
+.empty { color: var(--muted); padding: 4px 0; }
+.btns { margin-top: 4px; display: flex; gap: 6px; }
+#drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 96vw); background: var(--bg);
+  border-left: 1px solid var(--line); box-shadow: -8px 0 30px rgba(0,0,0,.12); padding: 14px 16px; overflow: auto;
+  transform: translateX(105%); transition: transform .18s ease; z-index: 5; }
+#drawer.open { transform: none; }
+#drawer h3 { margin: 0 0 10px; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+.src { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; overflow: hidden; }
+.src .body { max-height: 280px; overflow: auto; position: relative; }
+.src .head { padding: 5px 8px; background: var(--place); font-family: ui-monospace, monospace; font-size: 12px; }
+.src pre { margin: 0; padding: 6px 8px; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap;
+  word-break: break-all; }
+.src .ln { color: var(--muted); display: inline-block; min-width: 3.5em; user-select: none; }
+.src .hitline { background: var(--hit); display: block; }
+.src p { margin: 4px 8px; padding: 3px 6px; border-radius: 4px; }
+.src p.hit { background: var(--hit); }
+.src table td.hit { background: var(--mark); }
+.src tr.hit td { background: var(--hit); }
+mark { background: var(--mark); color: inherit; border-radius: 2px; }
+.item { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.item .rel { color: var(--muted); font-size: 12px; }
+svg text { fill: var(--ink); font-family: system-ui, sans-serif; }
+svg .label { font-size: 12px; font-weight: 600; fill: var(--muted); }
+svg .small { font-size: 10px; fill: var(--muted); }
+svg .asset { cursor: pointer; }
+svg .asset:hover > :first-child { stroke-width: 2.5; }
+@keyframes flow { to { stroke-dashoffset: -20; } }
+svg .hot { animation: flow 0.8s linear infinite; stroke-dasharray: 6 4; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; font-weight: 400;
+  text-transform: none; letter-spacing: 0; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px;
+  vertical-align: -1px; border: 1.5px solid; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Neptune site model</h1>
+  <span class="meta"><span class="dot" id="livedot"></span><span id="status">connecting…</span></span>
+  <div class="slider">
+    <select id="mode" title="Slide over site time (at) or over what the log knew (as_of_seq)">
+      <option value="at">site time</option><option value="seq">log seq</option>
+    </select>
+    <input type="range" id="range" min="0" max="1" value="1">
+    <span class="meta" id="pos"></span>
+    <button id="live" class="on" title="Follow the log as it grows">Live</button>
+  </div>
+</header>
+<main>
+  <section id="map"><h2><span>Site map</span><span class="legend">
+    <span><i style="background:var(--ok);border-color:var(--ok-b)"></i>running</span>
+    <span><i style="background:var(--warn);border-color:var(--warn-b)"></i>waiting / starved / stopped</span>
+    <span><i style="background:var(--fault);border-color:var(--fault-b)"></i>fault</span>
+    <span><i style="background:var(--idle);border-color:var(--idle-b)"></i>idle / docked</span>
+    <span><i style="background:var(--stale);border-color:var(--stale-b);border-style:dashed"></i>stale / unknown</span>
+  </span></h2><svg id="svg" viewBox="0 0 1000 600"></svg><div id="records" class="records"></div></section>
+  <div class="side">
+    <section><h2><span>Findings</span><span class="badge inferred">inferred</span></h2><div id="findings" class="scroll"></div></section>
+    <section><h2><span>Pending confirmation</span></h2><div id="pending"></div></section>
+    <section id="actions-panel"><h2><span>Actions</span><span class="legend">Claude proposes · you approve</span></h2><div id="actions"></div></section>
+  </div>
+  <div class="wide cols">
+    <section><h2><span>Live state</span><span id="state-at" class="legend"></span></h2><div class="scroll" id="table"></div></section>
+    <section><h2><span>Timeline</span><span class="legend">mode · health · zone</span></h2><div class="scroll" id="timeline"></div></section>
+  </div>
+</main>
+<aside id="drawer"><h3><span id="d-title"></span><button id="d-close">Close</button></h3><div id="d-body"></div></aside>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const short = (ref) => String(ref ?? "").split(":").slice(1).join(":") || ref;
+const clock = (t) => (t ? String(t).replace("T", " ") : "");
+const hms = (t, day) => (t && day && t.startsWith(day) ? t.slice(11) : clock(t));
+const secs = (t) => Date.parse(t + "Z") / 1000;
+const iso = (s) => new Date(s * 1000).toISOString().slice(0, 19);
+let snap = null, head = null, live = true, busy = false, dirty = false;
+
+function mark(text, quote) {
+  const t = esc(text);
+  if (!quote) return t;
+  const q = esc(quote), i = t.indexOf(q), j = i < 0 ? t.toLowerCase().indexOf(q.toLowerCase()) : i;
+  return j < 0 ? t : t.slice(0, j) + "<mark>" + t.slice(j, j + q.length) + "</mark>" + t.slice(j + q.length);
+}
+function value(r) {
+  if (!r || r.value == null) return r && r.state === "unknown" ? "unknown" : "";
+  const v = r.value.includes(":") && !r.value.startsWith("fault") ? short(r.value) : r.value;
+  return r.unit ? `${v} ${r.unit}` : v;
+}
+
+// ---- data -----------------------------------------------------------------------------------
+async function refresh() {
+  if (busy) { dirty = true; return; }
+  busy = true;
+  try {
+    const q = new URLSearchParams();
+    if (!live) q.set($("mode").value, $("range").value);
+    if (!live && $("mode").value === "at") q.set("at", iso(+$("range").value));
+    const res = await fetch("/api/snapshot?" + q);
+    snap = await res.json();
+    render();
+    loadActions();
+  } finally {
+    busy = false;
+    if (dirty) { dirty = false; refresh(); }
+  }
+}
+function connect() {
+  const events = new EventSource("/events");
+  events.onmessage = (e) => {
+    head = JSON.parse(e.data);
+    $("livedot").classList.add("on");
+    if (live) refresh(); else status();
+  };
+  events.onerror = () => { $("livedot").classList.remove("on"); $("status").textContent = "reconnecting…"; };
+}
+
+// ---- header and slider ----------------------------------------------------------------------
+function status() {
+  if (!snap) return;
+  const knows = head ? head.seq : snap.live_seq;
+  $("status").textContent = `${live ? "live" : "paused"} · site clock ${clock(snap.clock)} · log seq ${knows}`;
+}
+function slider() {
+  const r = $("range");
+  if ($("mode").value === "seq") {
+    r.min = 1; r.max = snap.live_seq; r.step = 1;
+    if (live) r.value = snap.live_seq;
+    $("pos").textContent = `as_of_seq ${r.value}` + (snap.seq < snap.live_seq ? ` · ${clock(snap.at)}` : "");
+  } else if (snap.first && snap.clock) {
+    r.min = secs(snap.first); r.max = secs(snap.clock); r.step = 5;
+    if (live) r.value = r.max;
+    $("pos").textContent = `at ${clock(snap.at)}`;
+  }
+}
+let timer = null;
+$("range").addEventListener("input", () => {
+  live = +$("range").value >= +$("range").max;
+  $("live").classList.toggle("on", live);
+  $("pos").textContent = $("mode").value === "seq" ? `as_of_seq ${$("range").value}` : `at ${clock(iso(+$("range").value))}`;
+  clearTimeout(timer); timer = setTimeout(refresh, 120);
+});
+$("mode").addEventListener("change", () => { live = true; $("live").classList.add("on"); refresh(); });
+$("live").addEventListener("click", () => { live = true; $("live").classList.add("on"); refresh(); });
+
+// ---- render ---------------------------------------------------------------------------------
+function render() {
+  document.title = `Neptune · ${snap.site.name || snap.site.id || "site"}`;
+  $("title").textContent = `Neptune · ${snap.site.name || snap.site.id || "site"}`;
+  status(); slider(); drawMap(); drawTable(); drawTimeline(); drawFindings(); drawPending();
+  $("state-at").textContent = `at ${clock(snap.at)}`;
+}
+
+function drawMap() {
+  // an asset only the records name (a CMMS row: no zone, location or live state) is listed, not drawn
+  const recordsOnly = (a) => !a.place && a.status === "unknown";
+  const records = snap.assets.filter(recordsOnly);
+  $("records").innerHTML = records.length
+    ? `Records only (no location or live state):${records.map((a) => `<a href="#" data-entity="${esc(a.id)}" title="${esc(a.name)}">${esc(short(a.id))}</a>`).join("")}`
+    : "";
+  const svg = $("svg"), W = 1000, P = 14, BOX = 116, places = snap.places, assets = snap.assets.filter((a) => !recordsOnly(a));
+  const byId = Object.fromEntries(places.map((p) => [p.id, p]));
+  const areas = places.filter((p) => p.type === "area");
+  const kids = (id) => places.filter((p) => p.parent === id && p.type !== "area");
+  const orphans = places.filter((p) => p.type !== "area" && !byId[p.parent]);
+  const cols = [...areas.map((a) => ({ area: a, kids: kids(a.id) }))];
+  if (orphans.length) cols.push({ area: { id: "", name: "Other places" }, kids: orphans });
+  const areaOf = (pid) => (byId[pid] && byId[pid].type === "area" ? pid : byId[pid] ? byId[pid].parent || "" : null);
+  // which box each asset sits in: a place, an area's floor, or the unplaced strip
+  const where = {};
+  for (const a of assets) {
+    if (!a.place) where[a.id] = "unplaced";
+    else if (a.placed_by === "feeds" || (byId[a.place] && byId[a.place].type === "area")) where[a.id] = "floor:" + areaOf(a.place);
+    else where[a.id] = a.place;
+  }
+  const inBox = (key) => assets.filter((a) => where[a.id] === key);
+  const n = Math.max(cols.length, 1), cw = (W - P * (n + 1)) / n, inner = Math.max(1, Math.floor((cw - P) / 170));
+  const pos = {}, boxes = [], top = 40;
+  let height = top;
+  cols.forEach((c, i) => {
+    const x = P + i * (cw + P);
+    let y = top + 26;
+    const floor = inBox("floor:" + c.area.id);
+    if (floor.length) { boxes.push({ id: "floor:" + c.area.id, x: x + 8, y, w: cw - 16, h: 64, floor: true }); y += 64 + 8; }
+    const kw = (cw - 16 - 8 * (inner - 1)) / inner;
+    c.kids.forEach((k, j) => {
+      const row = Math.floor(j / inner), col = j % inner;
+      boxes.push({ id: k.id, place: k, x: x + 8 + col * (kw + 8), y: y + row * (BOX + 8), w: kw, h: BOX });
+    });
+    y += Math.ceil(c.kids.length / inner) * (BOX + 8);
+    c.x = x; c.w = cw; c.h = y - top + 4;
+    height = Math.max(height, y + 4);
+  });
+  const unplaced = inBox("unplaced");
+  if (unplaced.length) { boxes.push({ id: "unplaced", x: P, y: height + 14, w: W - 2 * P, h: 64, floor: true }); height += 14 + 64; }
+  height += P;
+  for (const b of boxes) {
+    const here = inBox(b.id), per = Math.max(1, Math.floor((b.w - 16) / 74));
+    here.forEach((a, k) => {
+      pos[a.id] = { x: b.x + 40 + (k % per) * 74, y: b.y + (b.floor ? 34 : 56) + Math.floor(k / per) * 50 };
+    });
+    pos[b.id] = { x: b.x + b.w / 2, y: b.y + b.h / 2, box: b };
+  }
+  const statusOf = Object.fromEntries(assets.map((a) => [a.id, a.status]));
+  const worst = (id) => {
+    const s = inBox(id).map((a) => a.status).concat(statusOf[id] ? [statusOf[id]] : []);
+    return s.includes("fault") ? "fault" : s.includes("warn") ? "warn" : null;
+  };
+  let out = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--muted)"/></marker>
+    <marker id="arrow-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--fault-b)"/></marker></defs>`;
+  out += `<rect x="2" y="2" width="${W - 4}" height="${height - 4}" rx="14" fill="var(--area)" stroke="var(--place-b)"/>`;
+  out += `<text x="${P + 4}" y="26" class="label">${esc(snap.site.name || snap.site.id || "")}</text>`;
+  for (const c of cols) {
+    out += `<rect x="${c.x}" y="${top}" width="${c.w}" height="${c.h}" rx="10" fill="var(--place)" stroke="var(--place-b)"/>`;
+    out += `<text x="${c.x + 10}" y="${top + 17}" class="label">${esc(c.area.name)}</text>`;
+  }
+  for (const b of boxes) {
+    const hot = worst(b.id), stroke = hot ? `var(--${hot}-b)` : "var(--place-b)";
+    if (b.floor) {
+      const label = b.id === "unplaced" ? "not placed (no zone or location stated)" : "floor";
+      out += `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="8" fill="none" stroke="var(--place-b)" stroke-dasharray="3 3"/>`;
+      out += `<text x="${b.x + 8}" y="${b.y + 13}" class="small">${label}</text>`;
+    } else {
+      out += `<g class="asset" data-entity="${esc(b.id)}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="8" fill="${hot ? `var(--${hot})` : "var(--place)"}" fill-opacity="${hot ? 0.5 : 1}" stroke="${stroke}"/>`;
+      out += `<text x="${b.x + 8}" y="${b.y + 16}" class="label">${esc(b.place.name)}</text><text x="${b.x + 8}" y="${b.y + 29}" class="small">${esc(b.id)}</text></g>`;
+    }
+  }
+  for (const e of snap.edges.filter((e) => e.predicate === "feeds" && pos[e.from] && pos[e.to])) {
+    const a = pos[e.from], b = pos[e.to], hot = statusOf[e.from] ? ["fault", "warn"].includes(statusOf[e.from]) : !!worst(e.from);
+    const ax = a.box ? clampToBox(a.box, b) : a, bx = b.box ? clampToBox(b.box, a) : b;
+    const mx = (ax.x + bx.x) / 2, my = Math.min(ax.y, bx.y) - 30;
+    out += `<path d="M${ax.x},${ax.y} Q${mx},${my} ${bx.x},${bx.y}" fill="none" stroke="${hot ? "var(--fault-b)" : "var(--muted)"}" stroke-width="${hot ? 2.2 : 1.4}" opacity="${hot ? 0.9 : 0.55}" class="${hot ? "hot" : ""}" marker-end="url(#${hot ? "arrow-hot" : "arrow"})"><title>${esc(e.from)} feeds ${esc(e.to)}</title></path>`;
+  }
+  for (const a of assets) {
+    const p = pos[a.id];
+    if (!p) continue;
+    const s = a.status === "unknown" ? "stale" : a.status, dash = s === "stale" ? `stroke-dasharray="4 3"` : "";
+    const st = a.state, tip = [a.name, a.id, ...["mode", "health", "battery", "in_zone", "current_task"].filter((k) => st[k]).map((k) => `${k}: ${value(st[k])}${st[k].state !== "known" ? " (" + st[k].state + ")" : ""}`), a.task_state ? `task_state: ${a.task_state}` : "", (a.aliases || []).length ? `same as: ${a.aliases.join(", ")}` : ""].filter(Boolean).join("\n");
+    const glyph = a.type === "robot"
+      ? `<circle cx="${p.x}" cy="${p.y}" r="15" fill="var(--${s})" stroke="var(--${s}-b)" stroke-width="1.6" ${dash}/>`
+      : `<rect x="${p.x - 22}" y="${p.y - 13}" width="44" height="26" rx="6" fill="var(--${s})" stroke="var(--${s}-b)" stroke-width="1.6" ${dash}/>`;
+    const mode = st.mode ? value(st.mode) : "";
+    out += `<g class="asset" data-entity="${esc(a.id)}">${glyph}<text x="${p.x}" y="${p.y + 4}" text-anchor="middle" font-size="10" font-weight="600">${esc(short(a.id).slice(0, 7))}</text>`;
+    out += `<text x="${p.x}" y="${p.y + 27}" text-anchor="middle" class="small">${esc(mode.length > 10 ? mode.slice(0, 9) + "…" : mode)}</text><title>${esc(tip)}</title></g>`;
+  }
+  svg.setAttribute("viewBox", `0 0 ${W} ${height}`);
+  svg.innerHTML = out;
+}
+function clampToBox(b, toward) {
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2, dx = toward.x - cx, dy = toward.y - cy;
+  const t = Math.min(Math.abs((b.w / 2) / (dx || 1e-9)), Math.abs((b.h / 2) / (dy || 1e-9)));
+  return { x: cx + dx * Math.min(t, 1), y: cy + dy * Math.min(t, 1) };
+}
+$("svg").addEventListener("click", (e) => {
+  const g = e.target.closest("[data-entity]");
+  if (g) openEntity(g.dataset.entity);
+});
+
+function drawTable() {
+  const preds = ["mode", "health", "battery", "in_zone", "current_task", "parts_out", "setpoint", "temperature", "belt_tension", "firmware"]
+    .filter((p) => snap.table.some((r) => r.predicate === p));
+  const rows = {};
+  for (const r of snap.table) (rows[r.subject] ||= {})[r.predicate] = r;
+  let html = `<table><tr><th>entity</th>${preds.map((p) => `<th>${p}</th>`).join("")}</tr>`;
+  for (const [s, r] of Object.entries(rows)) {
+    html += `<tr><td><a href="#" data-entity="${esc(s)}">${esc(s)}</a></td>`;
+    for (const p of preds) {
+      const c = r[p];
+      if (!c) { html += "<td></td>"; continue; }
+      const title = c.fact ? `${c.state} · ${c.kind} · since ${clock(c.since)}${c.state === "stale" ? " · last report " + clock(c.last_seen) : ""}` : "no source states it";
+      html += `<td class="v ${c.state}" ${c.fact ? `data-fact="${c.fact}"` : ""} title="${esc(title)}">${esc(value(c))}${c.state !== "known" && c.state !== "unknown" ? ` <span class="badge ${c.state}">${c.state}</span>` : ""}</td>`;
+    }
+    html += "</tr>";
+  }
+  $("table").innerHTML = html + "</table>";
+}
+
+function drawTimeline() {
+  const day = (snap.at || "").slice(0, 10);
+  $("timeline").innerHTML = snap.timeline.map((r) =>
+    `<div class="row ${r.fault ? "fault" : ""}" data-fact="${r.fact}"><span class="t">${esc(hms(r.t, day))}</span>${esc(r.subject)} <b>${esc(r.predicate)}</b> → ${esc(r.value.includes(":") && !r.fault ? short(r.value) : r.value)} <span class="badge">${r.kind}</span></div>`
+  ).join("") || `<div class="empty">no changes yet</div>`;
+}
+
+function drawFindings() {
+  const f = snap.findings, day = (snap.at || "").slice(0, 10);
+  $("findings").innerHTML = f.items.map((it, i) => {
+    const text = it.value || "", k = text.indexOf(":");
+    return `<div class="row finding" data-finding="${i}"><span class="t">${esc(hms(it.valid_from, day))}</span><b>${esc(text.slice(0, k))}</b>${esc(text.slice(k))} <span class="badge inferred">inferred</span></div>`;
+  }).join("") || `<div class="empty">${esc(f.gaps[0] || "no findings")}</div>`;
+}
+
+function drawPending() {
+  const p = snap.pending;
+  $("pending").innerHTML = p.items.map((it) =>
+    `<div class="item"><div class="row" data-fact="${it.fact}">${esc(it.subject)} <b>same_as</b> ${esc(it.value)} <span class="badge inferred">inferred</span><span class="badge pending">pending</span></div>
+     <div class="rel">${it.cite.map((k) => esc(`${p.sources[k].file} ${p.sources[k].locator}: ${p.sources[k].quote ?? ""}`)).join("<br>")}</div>
+     <div class="btns"><button data-confirm="${it.fact}" data-answer="yes">Yes, same</button><button data-confirm="${it.fact}" data-answer="no">No</button></div></div>`
+  ).join("") || `<div class="empty">nothing waits for a person</div>`;
+}
+
+let actionError = "";
+async function loadActions() {
+  const a = await (await fetch("/api/actions")).json();
+  const what = (it) => `${esc(short(it.target))} <b>${esc(it.verb.replace("_", " "))}</b>${it.zone ? " " + esc(short(it.zone)) : ""}`;
+  const pending = a.items.map((it) =>
+    `<div class="item"><div class="row" data-fact="${esc(it.id)}">${what(it)} <span class="badge inferred">proposed</span><span class="badge pending">pending</span></div>
+     <div class="rel">${esc(it.reason)}</div>
+     <div class="btns"><button data-act="approve" data-id="${esc(it.id)}">Approve</button><button data-act="reject" data-id="${esc(it.id)}">Reject</button></div></div>`
+  ).join("") || `<div class="empty">nothing proposed; ask Claude to propose an action</div>`;
+  const recent = a.recent.map((it) =>
+    `<div class="item"><div class="row" data-fact="${esc(it.id)}">${what(it)} <span class="badge">${esc(it.status)}</span>${it.by ? `<span class="badge">by ${esc(it.by)}</span>` : ""}</div>
+     <div class="rel">${[it.dispatched, it.outcome].filter(Boolean).map(esc).join("<br>")}</div></div>`
+  ).join("");
+  $("actions").innerHTML = (actionError ? `<div class="empty">${esc(actionError)}</div>` : "") + pending + recent;
+}
+
+// ---- clicks ---------------------------------------------------------------------------------
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-fact],[data-finding],[data-confirm],[data-act],a[data-entity]");
+  if (!t || t.closest("#svg")) return;
+  e.preventDefault();
+  if (t.dataset.confirm) {
+    t.disabled = true;
+    await post("/api/confirm", { proposal: t.dataset.confirm, answer: t.dataset.answer });
+    refresh();
+  } else if (t.dataset.act) {
+    t.disabled = true;
+    const res = await post(`/api/actions/${t.dataset.act}`, { id: t.dataset.id });
+    actionError = res.ok ? "" : (await res.json()).error;
+    refresh();
+  } else if (t.dataset.finding) {
+    const it = snap.findings.items[+t.dataset.finding];
+    const sources = Object.fromEntries(it.cite.map((k) => [k, snap.findings.sources[k]]));
+    showAnswer(it.value.split(":")[0], { items: [{ ...it, relation: "finding" }], sources, gaps: snap.findings.gaps.slice(-1) });
+  } else if (t.dataset.entity) {
+    openEntity(t.dataset.entity);
+  } else if (t.dataset.fact && t.dataset.fact !== "null") {
+    openFact(t.dataset.fact);
+  }
+});
+$("d-close").onclick = () => $("drawer").classList.remove("open");
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("drawer").classList.remove("open"); });
+const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+async function openFact(id) {
+  const why = await (await fetch("/api/why?fact=" + encodeURIComponent(id))).json();
+  const it = why.items[0];
+  showAnswer(it ? `${it.subject} ${it.predicate}` : id, why);
+}
+function openEntity(id) {
+  const rows = snap.table.filter((r) => r.subject === id);
+  const a = snap.assets.find((x) => x.id === id);
+  const main = rows.find((r) => r.predicate === "health" && r.value && r.value.startsWith("fault")) || rows.find((r) => r.predicate === "mode" && r.fact) || rows.find((r) => r.fact);
+  let html = `<table>${rows.map((r) => `<tr><td>${r.predicate}</td><td class="v ${r.state}" ${r.fact ? `data-fact="${r.fact}"` : ""}>${esc(value(r))} <span class="badge">${r.state}</span>${r.kind ? `<span class="badge">${r.kind}</span>` : ""}</td><td class="rel">${r.since ? "since " + esc(clock(r.since)) : ""}</td></tr>`).join("")}</table>`;
+  if (a && a.task_state) html += `<div class="rel">current task state: ${esc(a.task_state)}</div>`;
+  if (a && (a.aliases || []).length) html += `<div class="rel">same as (stated): ${esc(a.aliases.join(", "))}</div>`;
+  $("d-title").textContent = (a && a.name ? a.name + " · " : "") + id;
+  $("d-body").innerHTML = html + `<div id="d-why"></div>`;
+  $("drawer").classList.add("open");
+  if (main) fetch("/api/why?fact=" + main.fact).then((r) => r.json()).then((why) => { $("d-why").innerHTML = answerHtml(why); loadSources(why); });
+}
+function showAnswer(title, answer) {
+  $("d-title").textContent = title;
+  $("d-body").innerHTML = answerHtml(answer);
+  $("drawer").classList.add("open");
+  loadSources(answer);
+}
+function answerHtml(a) {
+  let html = a.items.map((it) => `<div class="item"><span class="rel">${esc(it.relation || "")}</span> ${esc(it.subject)} <b>${esc(it.predicate)}</b> = ${esc(it.value)}${it.unit ? " " + esc(it.unit) : ""}
+    <span class="badge ${it.kind}">${it.kind}</span>${it.state !== "known" ? `<span class="badge ${it.state}">${it.state}</span>` : ""}
+    <div class="rel">${it.valid_from ? "since " + esc(clock(it.valid_from)) : ""}${it.valid_to ? " until " + esc(clock(it.valid_to)) : ""} ${it.cite.map((k) => `[${k}]`).join("")} ${it.fact ? esc(it.fact) : ""}</div></div>`).join("");
+  html += (a.gaps || []).map((g) => `<div class="rel">! ${esc(g)}</div>`).join("");
+  html += Object.entries(a.sources).map(([k, s]) => `<div class="src" id="src-${k}"><div class="head">[${k}] ${esc(s.file)} · ${esc(s.locator)}</div><div class="body"><pre>${mark(s.quote ?? "", "")}</pre></div></div>`).join("");
+  return html;
+}
+function loadSources(a) {
+  for (const [k, s] of Object.entries(a.sources)) {
+    fetch(`/api/source?file=${encodeURIComponent(s.file)}&locator=${encodeURIComponent(s.locator)}`)
+      .then((r) => r.json()).then((x) => {
+        const el = document.querySelector(`#src-${k} .body`);
+        if (!el) return;
+        el.innerHTML = excerpt(x, s.quote);
+        const hit = el.querySelector("tr.hit,.hitline,p.hit,mark");
+        if (hit) el.scrollTop = Math.max(0, hit.offsetTop - 40);  // the cited span, inside its own box
+      });
+  }
+}
+function excerpt(x, quote) {
+  if (x.kind === "lines") return `<pre>${x.lines.map((l) => l.n === x.hit ? `<span class="hitline"><span class="ln">${l.n}</span>${mark(l.text, quote)}</span>` : `<span class="ln">${l.n}</span>${esc(l.text)}\n`).join("")}</pre>`;
+  if (x.kind === "table") return `<table><tr><th>row</th>${x.header.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${x.rows.map((r) => `<tr class="${r.n === x.hit_row ? "hit" : ""}"><td>${r.n}</td>${r.cells.map((c, i) => `<td class="${r.n === x.hit_row && i === x.hit_col ? "hit" : ""}">${esc(c)}</td>`).join("")}</tr>`).join("")}</table>`;
+  if (x.kind === "page") return `<div class="rel" style="margin:4px 8px">page ${x.page} of ${x.pages}</div>` + x.blocks.map((b) => `<p class="${b.n === x.hit ? "hit" : ""}">${b.n === x.hit ? mark(b.text, quote) : esc(b.text)}</p>`).join("");
+  if (x.kind === "json") return `<pre>${mark(x.text, quote)}</pre>`;
+  if (x.kind === "image") {
+    const [w, h] = x.size || [800, 600], [x0, y0, x1, y1] = x.box;
+    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;display:block"><image href="${esc(x.url)}" width="${w}" height="${h}"/><rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="rgba(240,190,60,.25)" stroke="#d9a520" stroke-width="3" rx="4"/></svg>`;
+  }
+  return `<pre>${esc(x.message || "")}</pre>`;
+}
+
+refresh().then(() => {
+  connect();
+  const [kind, id] = decodeURIComponent(location.hash.slice(1)).split("=");  // #fact=... or #entity=...
+  if (kind === "fact" && id) openFact(id);
+  if (kind === "entity" && id) openEntity(id);
+});
+</script>
+</body>
+</html>

@@ -5,7 +5,10 @@ file (its path under ``static/``) picks the mapping entry; this module knows no 
 
 - **Tables** (``StructuredRecord`` rows): a CSV's row 1 is its header, cited
   ``row N col "<column as written>"``; a JSONL line's keys are its columns, cited
-  ``line N col "<key>"``. Each declared fact cites its ``column`` cell, verbatim.
+  ``line N col "<key>"``. Each declared fact cites its ``column`` cell, verbatim. A fact's
+  ``values`` maps a cell as written (case-blind) to the value to state; an entry with
+  ``changes: true`` (a machine's export, one row per sample) states a value only when it differs
+  from the previous row's, so a row-per-second log becomes state intervals.
 - **Documents** (``DocumentBlock``): cited ``page P block B`` (``B`` counted within the page) with
   the block text as the quote. The first block is the document's ``name``; a block matching the
   ``rule`` pattern is a clause; ``lift`` states values found in a block verbatim.
@@ -39,6 +42,7 @@ from neptune.model.world import DocumentBlock, StructuredRecord, StructuredTable
 from neptune_memory.site.facts import Citation, Fact, Kind, Ref, Value
 from neptune_memory.site.mappers.config import Mapping, render, tag_ref
 from neptune_memory.site.mappers.layout import STATIC
+from neptune_memory.site.vocab import PREDICATES
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -62,7 +66,11 @@ def map_record(record: Any, package: Any, mapping: Mapping) -> list[Fact]:
         entry = mapping.match("tables", path)
         if entry is None:
             return _unmapped_row(path, record, row) if path.endswith(TABLE_SUFFIXES) else []
-        return [] if row is None else _table(entry, row, index, mapping)
+        if row is None:
+            return []
+        if entry.get("changes"):
+            return index.changed(record.table, entry, mapping).get(row.number, [])
+        return _table(entry, row, index, mapping)
     if isinstance(record, DocumentBlock | ConfigurationSnapshot) and record.id in index.json_rows:
         table = mapping.match("tables", path)  # a JSON table, read as configuration or as text
         out: list[Fact] = []
@@ -94,9 +102,11 @@ class _Index:
     blocks: dict[str, tuple[int, int]] = field(default_factory=dict)  # block id -> page, block
     config: dict[str, list[ConfigurationValue]] = field(default_factory=dict)
     rows: dict[str, list[_Row]] = field(default_factory=dict)  # path -> data rows, in order
+    tables: dict[str, list[_Row]] = field(default_factory=dict)  # table id -> data rows, in order
     json_rows: dict[str, list[_Row]] = field(default_factory=dict)  # record id -> JSON rows
     register: tuple[tuple[str, str], ...] = ()  # (name, type) per `tags` register row
     _first: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+    _changed: dict[tuple[str, int], dict[int, list[Fact]]] = field(default_factory=dict)
 
     def row(self, path: str, record: StructuredRecord) -> _Row | None:
         """``record`` as a data row of ``path``; ``None`` for a header row."""
@@ -119,6 +129,27 @@ class _Index:
                 first.setdefault(row[column].lower(), row.number)
             self._first[(path, column)] = first
         return self._first[(path, column)].get(value.lower())
+
+    def changed(self, table: str, entry: dict[str, Any], mapping: Mapping) -> dict[int, list[Fact]]:
+        """``changes: true``: per row number, the facts whose value differs from the previous row's
+        for (subject, predicate), as a feed logs state intervals (spec §4). Rows reach
+        ``map_record`` in package order, so the whole table is walked once, in row order."""
+        key = (table, id(entry))
+        if key not in self._changed:
+            last: dict[tuple[str, ...], Ref | Value] = {}
+            out: dict[int, list[Fact]] = {}
+            for row in self.tables.get(table, []):
+                for fact in _table(entry, row, self, mapping):
+                    spec = PREDICATES.get(fact.predicate)
+                    k: tuple[str, ...] = (fact.subject, fact.predicate)
+                    if spec is not None and spec.cardinality == "many":
+                        k += (str(fact.object),)
+                    if k in last and last[k] == fact.object:
+                        continue
+                    last[k] = fact.object
+                    out.setdefault(row.number, []).append(fact)
+            self._changed[key] = out
+        return self._changed[key]
 
 
 _CACHE: dict[tuple[str, int], _Index] = {}
@@ -157,6 +188,7 @@ def _index(package: Any, mapping: Mapping) -> _Index:
         row = None if path is None else index.row(path, record)
         if path is not None and row is not None:
             index.rows.setdefault(path, []).append(row)
+            index.tables.setdefault(record.table, []).append(row)
     tags = mapping.tags
 
     def json_table(record: Any, leaves: Iterable[tuple[tuple[Any, ...], str]]) -> None:
@@ -333,6 +365,7 @@ def _table(entry: dict[str, Any], row: _Row, index: _Index, mapping: Mapping) ->
             continue
         times = [row.when(spec.get(w, entry.get(w)), index, mapping) for w in ("time", "until")]
         items = [row[column]]
+        values = {str(k).lower(): v for k, v in (spec.get("values") or {}).items()}
         if "split" in spec:
             items = [item.strip() for item in row[column].split(spec["split"]) if item.strip()]
         for item in items:
@@ -346,6 +379,8 @@ def _table(entry: dict[str, Any], row: _Row, index: _Index, mapping: Mapping) ->
                 value = item
                 if "value" in spec:
                     value = row.render(spec["value"], index, mapping, extra)
+                elif item.lower() in values:
+                    value = str(values[item.lower()])
                 unit = row.render(spec["unit"], index, mapping, extra) if "unit" in spec else ""
                 obj = Value(value, unit or None)
             out.append(row.fact(source, kind, subject, spec["predicate"], column, obj, *times))

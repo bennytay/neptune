@@ -1,6 +1,6 @@
 """Factory plumbing without the network: factory-merge's verdict and architecture-section filters
 (``scripts/factory-merge.jq``, and the script itself against a fake ``gh``), the exit status of the
-Makefile lint loop, and new-package's reserved names."""
+Makefile lint loop."""
 
 import json
 import os
@@ -202,7 +202,7 @@ def test_factory_merge_merges_a_behind_pr_when_main_changed_elsewhere(tmp_path: 
         [_comment("OWNER", "MERGE")],
         files=("src/neptune/adapters/mcap/adapter.py",),
         behind=3,
-        main_files=("packages/neptune-ledger/src/x.py", "packages/neptune-memory/src/y.py"),
+        main_files=("docs/site-model/spec.md",),
     )
     assert result.returncode == 0, result.stderr
     assert "3 commit(s) behind main" in result.stderr
@@ -220,7 +220,9 @@ def test_factory_merge_asks_for_a_refresh_when_main_changed_what_the_pr_reaches(
         main_files=("src/neptune/model/time.py",),
     )
     assert result.returncode == 1
-    assert "needs a refresh (main changed inputs to neptune)" in result.stderr
+    assert "needs a refresh (main changed inputs to neptune, neptune-context, neptune-memory)" in (
+        result.stderr
+    )
 
 
 @pytest.mark.parametrize(
@@ -261,7 +263,7 @@ def _make(
     tmp_path: Path, target: str, pkg: str = "", fail_format_in: str = ""
 ) -> tuple[int, list[str]]:
     workspace = tmp_path / "ws"
-    for member in ("_template", "alpha", "neptune-platform"):
+    for member in ("alpha", "beta"):
         (workspace / "packages" / member).mkdir(parents=True)
         (workspace / "packages" / member / "pyproject.toml").write_text("")
     shutil.copy(ROOT / "Makefile", workspace / "Makefile")
@@ -278,7 +280,6 @@ def _make(
             str(workspace),
             target,
             f"UV={tmp_path / 'uv'}",
-            "ADR_DIRS=",
             "COMPILER_ADR=",
             f"PKG={pkg}",
         ],
@@ -300,82 +301,5 @@ def test_make_lint_stops_when_an_earlier_package_fails_format(tmp_path: Path) ->
 def test_make_lint_runs_every_package_when_all_pass(tmp_path: Path) -> None:
     status, calls = _make_lint(tmp_path, fail_format_in="")
     assert status == 0
-    assert len(calls) == 6  # format + check for the compiler, alpha and neptune-platform
+    assert len(calls) == 6  # format + check for the compiler, alpha and beta
     assert sum(c.split(" ", 1)[0].endswith("/packages/alpha") for c in calls) == 2
-
-
-def test_make_lint_gives_harness_to_the_platform_not_the_compiler(tmp_path: Path) -> None:
-    status, calls = _make(tmp_path, "lint")
-    assert status == 0
-    harness = str((tmp_path / "ws").resolve() / "harness")
-    docsite = str((tmp_path / "ws").resolve() / "docsite")  # the docs site (platform ADR 0012)
-    by_dir = {c.split(" ", 1)[0].rsplit("/", 1)[-1]: c for c in calls if " format " in c}
-    assert by_dir["neptune-platform"].endswith(f"ruff format --check . {harness} {docsite}")
-    for name, path in (("harness", harness), ("docsite", docsite)):
-        assert f"--extend-exclude {name}" in by_dir["ws"] and path not in by_dir["ws"]
-    assert not by_dir["alpha"].endswith(("harness", "docsite"))
-
-
-def _contracts_calls(calls: list[str]) -> list[str]:
-    return [c.split("scripts/contracts.py ", 1)[1] for c in calls if "scripts/contracts.py" in c]
-
-
-def test_make_contracts_check_runs_one_consumer_check_and_the_matrix(tmp_path: Path) -> None:
-    """Without PKG: the owner rule per package, then one `check` (so each owner's contract tests
-    run once) and the matrix freshness check."""
-    status, calls = _make(tmp_path, "contracts-check")
-    assert status == 0
-    assert _contracts_calls(calls) == [
-        "check-owner --package neptune",
-        "check-owner --package alpha",
-        "check-owner --package neptune-platform",
-        "check --all --package alpha --package neptune-platform",
-        "matrix --check",
-    ]
-
-
-@pytest.mark.parametrize(
-    ("pkg", "expected"),
-    [
-        ("neptune", ["check-owner --package neptune", "matrix --check"]),
-        ("alpha", ["check-owner --package alpha", "check --package alpha", "matrix --check"]),
-    ],
-)
-def test_make_contracts_check_for_one_package(
-    tmp_path: Path, pkg: str, expected: list[str]
-) -> None:
-    status, calls = _make(tmp_path, "contracts-check", pkg=pkg)
-    assert status == 0
-    assert [" ".join(c.split()) for c in _contracts_calls(calls)] == expected
-
-
-# --- new-package.sh: reserved names ------------------------------------------------------------
-
-
-def _new_package(tmp_path: Path, name: str) -> subprocess.CompletedProcess[str]:
-    (tmp_path / "scripts").mkdir(exist_ok=True)
-    shutil.copy(SCRIPTS / "new-package.sh", tmp_path / "scripts" / "new-package.sh")
-    template = tmp_path / "packages" / "_template"
-    template.mkdir(parents=True, exist_ok=True)
-    (template / "pyproject.toml").write_text('name = "__PKG_NAME__"\n')
-    return subprocess.run(
-        ["bash", str(tmp_path / "scripts" / "new-package.sh"), name],
-        env={**os.environ, "UV": "true"},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-@pytest.mark.parametrize("name", ["check", "plan", "template", "neptune"])
-def test_new_package_rejects_reserved_names(tmp_path: Path, name: str) -> None:
-    result = _new_package(tmp_path, name)
-    assert result.returncode == 1
-    assert sorted(p.name for p in (tmp_path / "packages").iterdir()) == ["_template"]
-
-
-def test_new_package_creates_an_ordinary_name(tmp_path: Path) -> None:
-    result = _new_package(tmp_path, "neptune-widget")
-    assert result.returncode == 0, result.stderr
-    created = tmp_path / "packages" / "neptune-widget" / "pyproject.toml"
-    assert created.read_text() == 'name = "neptune-widget"\n'

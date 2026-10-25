@@ -8,7 +8,7 @@
 UV ?= uv
 
 COMPILER := neptune
-MEMBERS := $(sort $(patsubst packages/%/pyproject.toml,%,$(filter-out packages/_template/%,$(wildcard packages/*/pyproject.toml))))
+MEMBERS := $(sort $(patsubst packages/%/pyproject.toml,%,$(wildcard packages/*/pyproject.toml)))
 PKG ?=
 ifneq ($(PKG),)
 ifeq ($(filter $(PKG),$(COMPILER) $(MEMBERS)),)
@@ -16,25 +16,17 @@ $(error PKG=$(PKG) is not a workspace package; choose one of: $(COMPILER) $(MEMB
 endif
 endif
 SELECTED := $(if $(PKG),$(PKG),$(COMPILER) $(MEMBERS))
-SELECTED_MEMBERS := $(filter $(MEMBERS),$(SELECTED))
 # Every tool runs against the whole workspace environment, from the package's own directory so its
 # own ruff / mypy / pytest configuration applies. Members are linted only by their own job.
-# MEMBER_DIRS (<member>:<root dir>) are root directories whose tests live in a member: that member
-# lints them (`$$d`) and the compiler does not; .github/scripts/ci_plan.py routes them the same way.
 RUN := $(UV) run --all-packages --all-groups
-MEMBER_DIRS := neptune-platform:harness neptune-platform:docsite
-EACH = set -ef; for p in $(SELECTED); do d=""; \
-  if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; \
-    x="--extend-exclude packages/*$(foreach m,$(MEMBER_DIRS), --extend-exclude $(word 2,$(subst :, ,$(m))))"; \
-  else cd "$(CURDIR)/packages/$$p"; x=""; \
-    for m in $(MEMBER_DIRS); do if [ "$${m%%:*}" = "$$p" ]; then d="$$d $(CURDIR)/$${m\#*:}"; fi; done; \
-  fi; echo "--- $$p" >&2;
-# The compiler's own index (repository-wide numbers) is generated too; members' are local to the package.
-ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
+EACH = set -ef; for p in $(SELECTED); do \
+  if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; x="--extend-exclude packages/*"; \
+  else cd "$(CURDIR)/packages/$$p"; x=""; fi; echo "--- $$p" >&2;
+# The compiler's ADR index (docs/adr/README.md); members keep no ADRs.
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check harness demo demo-pin demo-folder up check-all site-demo site-replay site-live
+  check-all site-demo site-replay site-live site-web site-show
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -49,7 +41,7 @@ fmt: adr-index ## Format code, auto-fix lint findings and regenerate the ADR ind
 
 lint: adr-index-check ## Formatting, lint and ADR-index check without modifying files
 # `set -e` ignores a failure on the left of `&&`, so each step exits explicitly.
-> @$(EACH) $(RUN) ruff format --check $$x . $$d || exit 1; $(RUN) ruff check $$x . $$d || exit 1; done
+> @$(EACH) $(RUN) ruff format --check $$x . || exit 1; $(RUN) ruff check $$x . || exit 1; done
 
 type: ## Static type check (mypy --strict)
 > @$(EACH) $(RUN) mypy; done
@@ -69,11 +61,11 @@ check: lint type test-fast ## What PR CI runs: lint, types, fast tests; must pas
 
 check-all: lint type test ## Everything, slow tests included; main and the nightly run it (PKG=<name> for one)
 
-adr-index: ## Regenerate docs/adr/README.md (compiler and each member); `make fmt` runs it
-> $(if $(strip $(COMPILER_ADR) $(ADR_DIRS)),python3 .github/scripts/adr_index.py $(COMPILER_ADR) $(ADR_DIRS),@true)
+adr-index: ## Regenerate docs/adr/README.md; `make fmt` runs it
+> $(if $(COMPILER_ADR),python3 .github/scripts/adr_index.py $(COMPILER_ADR),@true)
 
-adr-index-check: ## Fail if an ADR index is stale
-> $(if $(strip $(COMPILER_ADR) $(ADR_DIRS)),python3 .github/scripts/adr_index.py --check $(COMPILER_ADR) $(ADR_DIRS),@true)
+adr-index-check: ## Fail if the ADR index is stale
+> $(if $(COMPILER_ADR),python3 .github/scripts/adr_index.py --check $(COMPILER_ADR),@true)
 
 schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 > $(UV) run python -m neptune.model.schema docs/schema/canonical.schema.json
@@ -87,44 +79,18 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/golden/urdf/make_urdf_golden.py
 > $(UV) run python tests/golden/manifest/make_manifest_golden.py
 
-# One `check` call covers every selected member (and, without PKG, every package in lock.toml), so
-# each upstream owner's contract tests run once; the matrix must match the registry.
-CONTRACT_CONSUMERS = $(if $(PKG),,--all) $(SELECTED_MEMBERS:%=--package %)
-contracts-check: ## Owner rule, lock + upstream contract tests, matrix freshness (PKG=<name> for one)
-> @set -e; for p in $(SELECTED); do echo "--- contracts $$p" >&2; \
-  $(RUN) python scripts/contracts.py check-owner --package "$$p"; done
-> $(if $(strip $(CONTRACT_CONSUMERS)),$(RUN) python scripts/contracts.py check $(CONTRACT_CONSUMERS),@true)
-> $(RUN) python scripts/contracts.py matrix --check
-
-HARNESS_RUN_DIR ?= harness/.run
-harness: ## Integration harness: contracts check, corpus through the stages, smoke query, report
-> $(RUN) python -m harness --run-dir "$(HARNESS_RUN_DIR)" $(HARNESS_ARGS)
-
-DEMO_DIR ?= demo
-demo: ## Demo v1: corpus -> compiler -> Deploy -> Ledger -> Memory -> cited MCP answers + PDFs in demo/
-> $(RUN) python -m harness.demo --out "$(DEMO_DIR)"
-
-demo-pin: ## Re-pin harness/acceptance/answers.json from a demo run (review the diff)
-> $(RUN) python -m harness.demo --out "$(DEMO_DIR)" --pin
-
-demo-folder: ## A clean folder for Claude Code over the demo: make demo-folder DIR=<path>
-> @test -n "$(DIR)" || { echo "usage: make demo-folder DIR=<path>" >&2; exit 2; }
-> $(RUN) python -m harness.demo_folder "$(DIR)" --demo "$(DEMO_DIR)"
-
-up: ## Your own folder -> compiler -> Deploy -> Ledger -> Memory -> a Claude Code folder: make up SRC=<folder>
-> @test -n "$(SRC)" || { echo "usage: make up SRC=<folder> [ARGS='--deploy FILE ...']" >&2; exit 2; }
-> $(RUN) python -m harness.up "$(SRC)" $(ARGS)
-
 # Site model v3 (docs/site-model/spec.md §9): a demo corpus -> fact log -> the MCP command.
 # SITE=p7 (Plant 7, default) or SITE=harbor (Harbor DC). site-demo confirms the identity proposals
-# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would (spec §7).
+# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would (spec §7). SITE=public fetches real public
+# robot data instead of generating a corpus (docs/site-model/real-data.md).
 SITE ?= p7
 SITE_DIR ?= $(if $(filter p7,$(SITE)),site-demo,site-$(SITE))
 SPEED ?= 60
 SITE_CMD := $(RUN) python -m neptune_memory.site
 SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
-site-demo: ## Site model: generate the SITE corpus (p7 | harbor), build the fact log, confirm, log insights, print the MCP command
-> $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
+SITE_SOURCE = $(if $(filter public,$(SITE)),scripts/fetch_public_site.sh "$(SITE_DIR)",$(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)")
+site-demo: ## Site model: generate the SITE corpus (p7 | harbor) or fetch it (public), build, confirm, log insights, print the MCP command
+> $(SITE_SOURCE)
 > $(SITE_CMD) build "$(SITE_DIR)"
 > $(SITE_CMD) confirm "$(SITE_DIR)" --yes-all --by demo-operator
 > $(SITE_CMD) insights "$(SITE_DIR)"
@@ -139,29 +105,36 @@ site-replay: ## Site model: the same, live (SPEED=60 is 60x real time)
 # site-live (#202): a local MQTT broker, `live` subscribed to it, then `publish` at SPEED x from START
 # (earlier messages go at once). Ctrl-C stops all three. The MCP server tails the log as it grows.
 BROKER ?= mqtt://127.0.0.1:1883
-START ?= 2026-10-20T09:55:00
+START ?= $(if $(filter harbor,$(SITE)),2026-11-04T10:02:00,2026-10-20T09:55:00)
 SITE_READY = $(SITE_DIR)/.neptune/live.ready
+WEB_PORT ?= 8765
+SITE_URL = http://127.0.0.1:$(WEB_PORT)/
 site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x from START
 > $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
-> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_READY)"
+> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_DIR)/actions" "$(SITE_READY)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
+> @echo "Web view: $(SITE_URL)"
 > @$(SITE_CMD) broker --broker "$(BROKER)" & b=$$!; \
   $(SITE_CMD) live "$(SITE_DIR)" --broker "$(BROKER)" & l=$$!; \
-  trap 'kill $$l $$b 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
+  $(SITE_CMD) web "$(SITE_DIR)" --port "$(WEB_PORT)" --broker "$(BROKER)" $(WEB_OPEN) & w=$$!; \
+  trap 'kill $$l $$b $$w 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
   until [ -f "$(SITE_READY)" ]; do kill -0 $$l 2>/dev/null || exit 1; sleep 0.2; done; \
   $(SITE_CMD) publish "$(SITE_DIR)" --broker "$(BROKER)" --speed "$(SPEED)" --start "$(START)"; \
   echo "live keeps running; drop a file into $(SITE_DIR)/static/ to see it ingested. Ctrl-C stops."; \
   wait
 
-# The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
-# A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.
-.PHONY: docs
-DOCS_OUT ?= build/docs
-docs: ## Build the documentation site, warnings as errors (platform ADR 0012)
-> $(RUN) python -m docsite "$(DOCS_OUT)"
+# site-web (#210): the live web view of SITE_DIR (map, states, timeline, findings, cited sources).
+site-web: ## Site model: serve the web view of SITE_DIR at WEB_PORT and open it (run site-demo first)
+> @test -d "$(SITE_DIR)/.neptune/log" || { echo "no fact log in $(SITE_DIR): run make site-demo first" >&2; exit 2; }
+> $(SITE_CMD) web "$(SITE_DIR)" --port "$(WEB_PORT)" --open
 
-ifeq ($(PKG),)
-check: docs
-check-all: docs
-endif
+# site-show (#214): the demo in one command. site-live at a demo-friendly SPEED (10: the Plant 7
+# story runs about ten minutes instead of 95 s) with the web view opened, after a 3-minute script.
+SHOW_SCRIPT = docs/site-model/show/$(SITE).txt
+SHOW_OPEN ?= --open
+site-show: SPEED = 10
+site-show: ## Site model demo: live site + web view at SPEED=10, prints a 3-minute script (SITE=p7 | harbor)
+> @test -f "$(SHOW_SCRIPT)" || { echo "site-show runs SITE=p7 or SITE=harbor" >&2; exit 2; }
+> @sed 's/SPEED x/$(SPEED)x/' "$(SHOW_SCRIPT)"
+> @$(MAKE) --no-print-directory site-live SITE="$(SITE)" SPEED="$(SPEED)" WEB_OPEN="$(SHOW_OPEN)"

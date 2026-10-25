@@ -21,6 +21,7 @@ cells:
   - {id: cell:c3, name: Cell C3, part_of: area:assembly}
 zones:
   - {id: zone:aisle-a, name: Aisle A, part_of: area:assembly}
+  - {id: zone:aisle-b, name: Aisle B, part_of: area:assembly}
   - {id: zone:c3-fence, name: Cell C3 fence, part_of: area:assembly}
   - {id: zone:charging, name: Charging bay, part_of: area:inbound}
 machines:

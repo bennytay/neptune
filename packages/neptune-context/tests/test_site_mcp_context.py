@@ -13,21 +13,11 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 from neptune_memory.site.log import FactLog
 
-from context_packet_goldens import PACKETS
 from neptune_context.mcp.site import SITE_TOOLS, SiteTools, build_site_server
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-V2_TOOLS = [
-    "neptune_query",
-    "neptune_why",
-    "neptune_diff",
-    "neptune_compare_runs",
-    "neptune_hydrate",
-    "neptune_plan",
-    "neptune_entities",
-]
 SITE_NAMES = [
     "neptune_site_resolve",
     "neptune_site_state_at",
@@ -42,6 +32,8 @@ SITE_NAMES = [
     "neptune_site_changes",
     "neptune_site_insights",
     "neptune_site_shift_report",
+    "neptune_site_propose_action",
+    "neptune_site_actions",
 ]
 
 
@@ -61,12 +53,8 @@ def _list(args: list[str]) -> list[str]:
     return asyncio.run(session())
 
 
-def test_site_flag_alone_lists_the_site_tools(tmp_path: Path) -> None:
+def test_site_flag_lists_the_site_tools(tmp_path: Path) -> None:
     assert _list(["--site", str(tmp_path)]) == SITE_NAMES == list(SITE_TOOLS)
-
-
-def test_site_flag_adds_the_site_tools_beside_the_v2_tools(tmp_path: Path) -> None:
-    assert _list(["--packets", str(PACKETS), "--site", str(tmp_path)]) == V2_TOOLS + SITE_NAMES
 
 
 STOPPED = Fact(
@@ -168,3 +156,43 @@ def test_site_insight_tools_answer_findings_and_a_report(tmp_path: Path) -> None
     assert "· inferred [S" in texts[0]
     assert "Chains (inferred):" in texts[1]
     assert "What happened:" in texts[1]
+
+
+def test_site_propose_action_logs_a_pending_proposal_and_nothing_approves(tmp_path: Path) -> None:
+    with FactLog(tmp_path) as log:
+        log.seen("fleet", "2026-10-20T10:06:00")
+        log.fact(STOPPED)
+        log.fact(
+            Fact(
+                "robot:amr-01",
+                "in_zone",
+                Ref("zone:aisle-a"),
+                "2026-10-20T10:06:00",
+                None,
+                "observed",
+                "fleet",
+                (Citation("feed/fleet.jsonl", "line 9", "zone:aisle-a"),),
+            )
+        )
+        log.fact(
+            Fact(
+                "zone:aisle-b",
+                "name",
+                Value("Aisle B"),
+                None,
+                None,
+                "stated",
+                "layout",
+                (Citation("static/layout.yaml", "line 22", "Aisle B"),),
+            )
+        )
+    site = SiteTools(tmp_path)
+    args: dict[str, object] = {"action": "send_to", "target": "robot:amr-01"}
+    args |= {"zone": "zone:aisle-b"}
+    args |= {"reason": "cv-2 is stopped", "cites": [STOPPED.id]}
+    text = _text(site.call("neptune_site_propose_action", args))
+    assert '- robot:amr-01 proposed_action = "send_to zone:aisle-b"' in text
+    assert "· inferred, pending, proposed [S1][S2]" in text
+    assert '[S1] actions/proposed.jsonl line 1 "cv-2 is stopped"' in text
+    assert "waiting for a person" in _text(site.call("neptune_site_actions", {}))
+    assert not any("approve" in name or "reject" in name for name in SITE_TOOLS)

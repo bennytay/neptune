@@ -11,7 +11,7 @@
 # ARCHITECTURE.md, its body's **Architecture change** section has content, not just the heading.
 # The JSON filters live in scripts/factory-merge.jq.
 # Being up to date with main is not required (there is no merge queue on a personal-account repo,
-# packages/neptune-platform/docs/adr/0005-merge-without-a-queue.md). Instead, holding a machine-wide
+# so freshness is decided per PR). Instead, holding a machine-wide
 # lock so coordinators merge one at a time, it refuses while the latest `check` on main failed (unless
 # the PR carries the `fix-main` label), and, when the PR is behind main, asks scripts/merge_freshness.py
 # whether anything main changed since the merge base could change the jobs that tested the PR; if so it
@@ -21,8 +21,7 @@
 # Then runs `gh pr merge --squash --auto --match-head-commit <head>` with the PR title (#N) as the
 # commit title and the PR body as the commit message, so the queue merges it. If GitHub rejects
 # auto-merge (no queue and auto-merge disabled, or the PR is already mergeable), falls back to the
-# REST merge pinned to the head, which needs mergeable_state "clean". See packages/neptune-platform/
-# docs/adr/0001-monorepo-workspace-and-merge-queue.md.
+# REST merge pinned to the head, which needs mergeable_state "clean".
 #
 # Waits for the merge and prints the merge SHA (WAIT=0 returns once queued; MERGE_TIMEOUT seconds,
 # default 3600, bounds the wait; exit 3 on timeout). DRY_RUN=1 runs every check and merges nothing.

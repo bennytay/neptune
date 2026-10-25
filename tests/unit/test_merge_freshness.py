@@ -1,7 +1,6 @@
 """scripts/merge_freshness.py: when a PR behind main may merge without a refresh."""
 
 import importlib.util
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,27 +24,22 @@ def _load() -> ModuleType:
 mf = _load()
 
 MEMBERS = {
-    "neptune-ledger": frozenset({"neptune"}),
-    "neptune-memory": frozenset({"neptune", "neptune-ledger"}),
-    "neptune-platform": frozenset(),
+    "neptune-memory": frozenset({"neptune"}),
+    "neptune-context": frozenset({"mcp", "neptune-memory"}),
     "neptune-other": frozenset(),
 }
 MCAP = "src/neptune/adapters/mcap/adapter.py"
-URDF = "src/neptune/adapters/urdf/adapter.py"
 CORE = "src/neptune/model/time.py"
-LEDGER = "packages/neptune-ledger/src/neptune_ledger/catalog.py"
-MEMORY = "packages/neptune-memory/src/neptune_memory/claims.py"
-PLATFORM = "packages/neptune-platform/src/neptune_platform/x.py"
+MEMORY = "packages/neptune-memory/src/neptune_memory/site/query.py"
+CONTEXT = "packages/neptune-context/src/neptune_context/mcp/site.py"
 OTHER = "packages/neptune-other/src/neptune_other/x.py"
 
 
 @pytest.mark.parametrize(
     ("pr", "main"),
     [
-        ([MCAP], [LEDGER, MEMORY]),  # no member imports an adapter
-        ([LEDGER], [OTHER]),  # unrelated members
-        ([LEDGER], [PLATFORM]),  # the harness overlap is left to main's push run
-        (["harness/stages.py"], [CORE]),  # likewise
+        ([CONTEXT], [OTHER]),  # unrelated members
+        ([MEMORY], ["docs/site-model/spec.md"]),  # docs only
         ([MEMORY], []),  # not behind
     ],
 )
@@ -56,18 +50,11 @@ def test_fresh(pr: list[str], main: list[str]) -> None:
 @pytest.mark.parametrize(
     ("pr", "main", "shared"),
     [
-        ([MCAP], [CORE], "neptune"),
-        ([MCAP], [URDF], "neptune"),  # discovery probes every adapter against every file
-        ([MEMORY], [LEDGER], "neptune-memory"),
-        ([LEDGER], [CORE], "neptune-ledger, neptune-memory"),
-        ([MCAP], ["src/neptune/adapters/contract.py"], "neptune"),
+        ([MCAP], [CORE], "neptune, neptune-context, neptune-memory"),
+        ([CONTEXT], [MEMORY], "neptune-context"),
+        ([CONTEXT], [CORE], "neptune-context"),  # the site model ingests through the compiler
         ([OTHER], ["uv.lock"], "neptune-other"),
-        ([OTHER], ["scripts/contracts.py"], "neptune-other"),  # every job runs contracts.py
         ([OTHER], [".github/workflows/ci.yml"], "neptune-other"),
-        (["packages/_template/AGENTS.md"], ["scripts/new-package.sh"], "template"),
-        (["harness/stages.py"], ["harness/run.py"], "neptune-platform"),  # both edit the platform
-        ([PLATFORM], ["harness/run.py"], "neptune-platform"),
-        ([".github/workflows/harness.yml"], ["harness/stages.py"], "neptune-platform"),
     ],
 )
 def test_refresh(pr: list[str], main: list[str], shared: str) -> None:
@@ -76,76 +63,16 @@ def test_refresh(pr: list[str], main: list[str], shared: str) -> None:
 
 def test_cli_reports_and_exits(tmp_path: Path) -> None:
     pr, main = tmp_path / "pr", tmp_path / "main"
-    pr.write_text(f"{MCAP}\n")
-    main.write_text("packages/neptune-ledger/README.md\n")
+    pr.write_text(f"{CONTEXT}\n")
+    main.write_text("docs/site-model/README.md\n")
     run = [sys.executable, str(SCRIPT), str(pr), str(main), "HEAD"]
     ok = subprocess.run(run, capture_output=True, text=True, check=False)
     assert (ok.returncode, ok.stdout) == (0, "fresh\n")
     main.write_text(f"{CORE}\n")
     stale = subprocess.run(run, capture_output=True, text=True, check=False)
     assert stale.returncode == 1
-    assert stale.stdout.startswith("refresh: main changed inputs to neptune")
+    assert stale.stdout.startswith("refresh: main changed inputs to neptune-context")
 
 
 def test_members_are_read_at_a_git_ref() -> None:
-    members = mf.members_at("HEAD")
-    assert "neptune-platform" in members
-    assert "_template" not in members
-
-
-# ``conformance`` (with the ``harness`` and ``check`` it runs) imports no format subpackage, and a
-# change to it is outside ci_plan's ADAPTER_DIR, so it reaches every member's job. It also imports
-# ``neptune.discovery.reader`` (for ``BytesReader``), which members may not import directly; the
-# reader runs no ingestion, and test_conformance_reaches_no_format_subpackage pins all of this.
-ADAPTER_IMPORT = re.compile(
-    r"neptune\.adapters\.(?!contract\b|registry\b|conformance\b)\w+"
-    r"|from\s+neptune\.adapters\s+import\s+(?!contract\b|registry\b|conformance\b)"
-    r"|neptune\.(sdk|runtime|discovery)\b"
-    r"|from\s+neptune\s+import\s+[^\n]*\b(sdk|runtime|discovery|adapters)\b"
-)
-
-
-# The site model's build ingests a site's static files through ``neptune.sdk`` (docs/site-model
-# spec §5). CI already runs Memory's job on any adapter change (its snapshot, platform ADR 0009).
-INGESTING_FILES = frozenset({"packages/neptune-memory/src/neptune_memory/site/build.py"})
-
-
-def test_no_member_imports_a_format_adapter_or_runs_ingestion() -> None:
-    """ci_plan and merge_freshness rely on it: adapter changes do not reach members' jobs.
-
-    The platform is exempt: its harness ingests, and adapter changes select its job. So is the
-    site model's build (``INGESTING_FILES``).
-    """
-    offenders = [
-        str(path.relative_to(ROOT))
-        for path in sorted((ROOT / "packages").glob("*/*/**/*.py"))
-        if path.parts[len(ROOT.parts) + 2] in ("src", "tests")
-        and path.parts[len(ROOT.parts) + 1] not in ("neptune-platform", "_template")
-        and path.relative_to(ROOT).as_posix() not in INGESTING_FILES
-        and ADAPTER_IMPORT.search(path.read_text(encoding="utf-8"))
-    ]
-    assert offenders == []
-
-
-# What ``neptune.adapters.conformance`` may load from ``neptune.adapters``: the package itself and
-# the contract machinery, never a format subpackage or ``builtin`` (which imports them all).
-CONFORMANCE_ADAPTER_MODULES = frozenset(
-    {"neptune.adapters"}
-    | {
-        f"neptune.adapters.{name}"
-        for name in ("check", "conformance", "contract", "harness", "registry")
-    }
-)
-
-
-def test_conformance_reaches_no_format_subpackage() -> None:
-    """Members import ``conformance``; its transitive imports must not reach a format adapter."""
-    probe = (
-        "import sys, neptune.adapters.conformance; "
-        "print('\\n'.join(sorted(m for m in sys.modules if m.startswith('neptune.'))))"
-    )
-    run = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
-    loaded = set(run.stdout.split())
-    adapters = {m for m in loaded if m == "neptune.adapters" or m.startswith("neptune.adapters.")}
-    assert adapters <= CONFORMANCE_ADAPTER_MODULES, sorted(adapters - CONFORMANCE_ADAPTER_MODULES)
-    assert not {m for m in loaded if m.startswith(("neptune.runtime", "neptune.sdk"))}
+    assert "neptune-memory" in mf.members_at("HEAD")

@@ -1,8 +1,7 @@
 # AGENTS.md — how to work in this repository
 
 Single source of truth for coding agents (Claude Code, Codex) and humans. `CLAUDE.md` imports this file.
-Keep it short; detail lives in `docs/`. Package `AGENTS.md` files predate the reframe: where they ask for
-edge-case, security, versioning or ADR work beyond what is below, this file wins.
+Keep it short; detail lives in `docs/`.
 
 ## What Neptune is
 
@@ -29,21 +28,20 @@ Start with `docs/site-model/README.md` for the current milestone (M1, the site m
 ## Not worth time (demo rules)
 
 - Hostile-input, malformed, boundary, property or scale tests for new code; security or sandbox work.
-- Contract versions, schema bumps, migrations, compatibility shims. v3 replaces v2 at the M1 gate.
+- Contract versions, schema bumps, migrations, compatibility shims.
 - An ADR per decision. The spec decides; write an ADR only for a real fork in the road.
 - Existing robustness code stays as it is; don't spend time removing it unless it blocks the demo.
 
 ## Repository map
 
 ```
-src/neptune/            compiler: discovery, adapters (MCAP, ROS bags, PDF, CSV/XLSX, images, URDF, ...),
-                        runtime, canonical records, ingest package
-packages/neptune-memory memory: v2 claim graph (frozen) and v3 site model in neptune_memory/site/ (M1)
-packages/neptune-context query layer and the `neptune` MCP server
-packages/neptune-deploy  connectors, lifecycle mappers, evidence packs
-packages/neptune-ledger  catalog over ingest packages (off the M1 critical path)
-packages/neptune-platform harness, acceptance corpus, demo
-harness/  docs/  tests/  contracts/  scripts/
+src/neptune/             compiler: discovery, adapters (MCAP, ROS bags, PDF, CSV/XLSX, images, URDF, ...),
+                         runtime, canonical records, ingest package
+packages/neptune-memory  the site model, neptune_memory/site/: corpus, mappers, fact log, views,
+                         identity, query, insights, live (python -m neptune_memory.site)
+packages/neptune-context the `neptune-site` MCP server: neptune_context/mcp/site.py (--site <dir>)
+docs/site-model/         the spec and the lane map; docs/ also holds the compiler's docs and ADRs
+tests/  scripts/         compiler tests; factory-merge.sh for the coordinator
 ```
 
 ## Commands

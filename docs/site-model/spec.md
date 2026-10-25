@@ -20,8 +20,7 @@ neptune confirm (yes/no) ──────────────────�
 
 ## 2. Where the code lives
 
-- v3 lives in `packages/neptune-memory/src/neptune_memory/site/`, beside v2. **Don't touch v2** (`schema/`,
-  `consolidate/`, `store/` …) or Demo v1. M1's gate (#188) switches over and deletes v2.
+- v3 lives in `packages/neptune-memory/src/neptune_memory/site/` (v2 and Demo v1 were deleted in #213).
 - Tests go in `packages/neptune-memory/tests/site/`. There is no `__init__.py`, so basenames must be unique
   repo-wide: prefix them `test_site_` (helpers: `site_`).
 - `site/facts.py` holds the shared types and is **frozen by this PR**. Lanes import it; changing it needs a
@@ -55,7 +54,8 @@ neptune confirm (yes/no) ──────────────────�
 ## 4. Vocabulary (`site/vocab.py`, #184)
 
 **Entity types:** `site`, `area`, `cell`, `zone`, `robot`, `machine`, `person`, `role`, `qualification`,
-`shift`, `task`, `work_order`, `change`, `document`, `rule`, `source`.
+`shift`, `task`, `work_order`, `change`, `document`, `rule`, `source`, `component` (a joint, a gripper:
+it carries `health` and `temperature`; #211).
 
 | Predicate | Subject → object | Card. | Kind in corpus |
 |---|---|---|---|
@@ -74,6 +74,7 @@ neptune confirm (yes/no) ──────────────────�
 | `battery` | robot → value % | one | observed (state interval) |
 | `setpoint` | machine → value (unit) | one | observed |
 | `firmware` | robot/machine → text | one | observed |
+| `cycle` | robot/machine → value (a controller's cycle counter) | one | observed |
 | `parts_out` | cell → value (count, cumulative) | one | observed |
 | `task_state` | task → text | one | observed |
 | `has_role` | person → role | many | stated (roster) |
@@ -182,7 +183,6 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   - The server gains tools `neptune_site_<name>` for each function above, each with a JSON object input that
     mirrors the Python arguments and returns `render(answer)`.
   - They are enabled by `python -m neptune_context.mcp --site <site_dir>`.
-  - v2 tools stay as they are.
 
 ## 8a. Insights (`site/insights.py`, #203)
 
@@ -223,7 +223,7 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 **Site `site:p7`, "Plant 7 assembly hall"**
 - **Clock:** `P7 local` (zone `Europe/Berlin`, stated, never applied).
 - **Two shift-A windows:** 2026-10-19 06:00–14:00 (last good shift) and 2026-10-20 06:00–14:00.
-- **Places:** areas `area:inbound`, `area:assembly`; `cell:c3` (arm cell); zones `zone:aisle-a`,
+- **Places:** areas `area:inbound`, `area:assembly`; `cell:c3` (arm cell); zones `zone:aisle-a`, `zone:aisle-b`,
   `zone:c3-fence`, `zone:charging`.
 - **Machines:** conveyor `machine:cv-2` (PLC, Sparkplug-like); arm `robot:arm-c3` (controller log); AMRs
   `robot:amr-01..03` (fleet manager, VDA 5050-like state).
@@ -277,6 +277,8 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   insights have three for Plant 7 (`gold_insights.json`) and two for Harbor (`harbor_gold_insights.json`:
   the sorter's starvation chain, Reyes on break). All pass since #204, through the same code: the two sites
   differ only in their `static/neptune.mappings.yaml` and `layout.yaml`.
+- Real public data (#211, [`real-data.md`](real-data.md)) has five (`public_gold_questions.json`), `slow`
+  and skipped until `scripts/fetch_public_site.sh site-public` has run; CI's non-PR runs fetch it first.
 
 ## 11. Lane ownership
 
@@ -300,7 +302,8 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 - The file sits in `static/`, so it is ingested and citable like everything else, but it maps to no facts.
   A site with no mapping file maps only `layout.yaml`; everything else is unmapped (below).
 - **Templates** (`"robot:{topic[-2]}"`) fill each `{name}`, then apply `|filters` left to right:
-  - `lower`; `slug` (spaces → `-`); `until:<c>` (the text before the first `<c>`);
+  - `lower`; `slug` (spaces → `-`); `until:<c>` (the text before the first `<c>`); `strip:<c>` (trim
+    `<c>` from both ends; whitespace when empty);
   - `type`: free text → entity type, through `types`;
   - `tag`: an equipment tag (`CV-2`) → `<type>:<tag lowercased>`, through `tags`.
 - Names: in a table, `{Column}` is a cell as written (column names match case-blind, spaces = `_`). In a feed,
@@ -348,6 +351,15 @@ tables:                                  # CSV/XLSX rows (header = row 1), JSONL
     time: When
     facts:
       - {predicate: change_to, column: To, unit: "{Unit}"}  # a unit template; blank = none
+  - file: ur3/dataset_02052023.xlsx      # a machine's own export, one row per sample (#211)
+    source: ur3
+    kind: observed
+    changes: true                        # state a value only when it differs from the last row's
+    subject: robot:ur3
+    time: '{Timestamp|strip:"|until:.}'  # 2022-10-26T08:17:21.847Z -> 2022-10-26T08:17:21
+    facts:
+      - {predicate: health, column: Robot_ProtectiveStop,
+         values: {"False": ok, "True": "fault:protective_stop"}}  # cell as written -> value
 
 documents:                               # PDF blocks, cited `page P block B`
   - file: docs/*.pdf
@@ -410,7 +422,7 @@ feeds:                                   # one entry per envelope `source`
   `document:<path under static/>` gets `unmapped = "not mapped"` citing the file, plus one stated `text` fact
   per row or block, verbatim. So `search_evidence` finds them and `gaps` lists them as not mapped.
 - **`python -m neptune_memory.site draft-mapping <site_dir> <file>`** prints a draft `tables:` entry (CSV or
-  JSONL rows) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
+  JSONL rows; any other table, e.g. XLSX, read back from the last `build`) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
   heuristics. The skill says: draft → show the user → save into the mapping file → `build`.
 - Plant 7's full file is `MAPPINGS` in `site/corpus/static.py`.
 
@@ -426,5 +438,53 @@ feeds:                                   # one entry per envelope `source`
   facts the log lacks.
 - The MCP server tails the log (`log.Tail`) and applies new entries before each call;
   `neptune_site_changes(since_seq)` (`query.changes`) lists facts appended after a seq.
-- `make site-live` runs `broker` (amqtt, anonymous), `live` and `publish` (`START=2026-10-20T09:55:00`,
-  earlier messages at once). No auth, TLS or reconnect handling.
+- `make site-live` runs `broker` (amqtt, anonymous), `live` and `publish` (`START` is 09:55 on Plant 7's
+  day and 10:02 on Harbor's, earlier messages at once). No auth, TLS or reconnect handling.
+
+## 14. Web view (#210)
+
+- `python -m neptune_memory.site web <site_dir> [--port 8765] [--open]` serves one page (`site/web.html`:
+  vanilla JS and SVG, no build step) over stdlib `http.server`. `make site-web` opens it for `SITE_DIR`;
+  `make site-live` serves it beside `live` and prints its URL.
+- **Panels:** a site map, the live state table, a timeline of mode/health/zone changes, the findings
+  (inferred), the pending-confirm queue (yes/no appends a `confirm` entry), and a source viewer.
+- **Map:** layouts state no coordinates, so it is laid out from `part_of` (areas hold cells and zones),
+  `located_in` and the live `in_zone`; a machine with neither sits on its area's floor beside what it
+  `feeds`. Colour reads mode, health and the current task's state; stale is grey and dashed. A stated
+  `same_as` group is one glyph. An asset with no place and no live state (a CMMS-only row such as
+  `MR-1141`) is listed under the map as "records only", not drawn. `feeds` edges out of a faulted or waiting node flow in the fault colour.
+- **API** (JSON, read through `query.py` / `insights.py`): `/api/snapshot?at=T|seq=N` (the time slider
+  sets `at` or `as_of_seq`), `/api/why?fact=ID`, `/api/source?file=&locator=` (lines of a text file, a
+  CSV/XLSX row, a PDF page's blocks from the compiler's package, a JSON object, an image region),
+  `POST /api/confirm`, and `/events` (server-sent events each time the log grows; the model tails it
+  with `log.Tail`). `#fact=ID` or `#entity=REF` in the URL opens a fact or an entity.
+- **Actions panel** (§15): `GET /api/actions` lists pending proposals and the last five answered ones
+  (status, the message as dispatched, the outcome); `POST /api/actions/approve|reject {"id"}` calls
+  `actions.approve` / `actions.reject`. `web --broker` (site-live passes its `BROKER`) is where an
+  approved robot action goes, so approving from the page dispatches it under `make site-live`.
+- `make site-show` (#214) prints a 3-minute script (`docs/site-model/show/<SITE>.txt`) and runs
+  `site-live` at `SPEED=10` with the page opened.
+
+## 15. Actions (#212)
+
+- **Propose:** `site/actions.py` `propose(site_dir, action, target, reason, cites, zone=None)` and MCP
+  `neptune_site_propose_action` log an **inferred** `<target> proposed_action "<verb> [<zone>]"`, source
+  `neptune.actions`. Verbs: `pause`, `resume`, `send_to` (a known zone), `cancel_task` (robots), `page`
+  (a person). It cites `actions/proposed.jsonl` line N (quote = the reason), then the cited facts' citations.
+- **Approve / reject:** a person only, by `python -m neptune_memory.site approve|reject <site_dir> <id>`
+  or the web view (`approve(site_dir, id, by)`, `reject(...)`, `pending(site_dir)`). No MCP tool approves.
+  Each is a `confirm` entry; the fold turns a yes into a **stated** `intent` (the proposal's citations plus
+  the confirm line).
+- **Dispatch:** an approved robot action goes over MQTT as VDA 5050-style `instantActions`
+  (`startPause`, `stopPause`, `cancelOrder`) or an `order` (one node: the zone) on the target's own topic
+  (its `.../state` topic with the last segment swapped). The message as sent is a line of
+  `actions/dispatched.jsonl`; the log gets an **observed** `dispatched` fact citing it and the approval.
+  `page` is logged only.
+- **Outcome:** `live` follows the log and appends an **inferred** `outcome`: `done` at the first observed
+  change the action asked for (`mode = PAUSED`, `in_zone = <zone>` …), or `not observed within 120 s` of
+  site time. `dispatched` and `outcome` text opens with the proposal id. `neptune_site_actions` lists them.
+- **Simulator:** `publish` answers commands: a paused AMR reports `operatingMode: PAUSED`; `send_to` drives
+  it into the zone 30 site seconds later. Commands are never recorded as feed messages.
+- Actions never touch safety functions; they only go through the fleet manager's protocol.
+- Several processes append to one log (`live`, the MCP server, the CLI): `FactLog` holds
+  `.neptune/log.lock` per append and picks up the others' entries first.

@@ -1,0 +1,26 @@
+# How the public UR3 CobotOps export (UCI dataset 963, CC BY 4.0) becomes facts (spec §12).
+# Started from `draft-mapping site-public static/ur3/dataset_02052023.xlsx`; see
+# docs/site-model/real-data.md for what the draft got and what was changed by hand.
+mappings: 1
+
+tables:
+  - file: ur3/dataset_02052023.xlsx     # sheet `data`, one row per ~1 s sample
+    source: ur3
+    kind: observed                       # the controller wrote these rows
+    changes: true                        # a row per sample -> a fact per change, as a feed
+    subject: robot:ur3
+    # Timestamps read 2022-10-26T08:17:21.847Z; a few are wrapped in quotes. Kept to the second.
+    time: '{Timestamp|strip:"|until:.}'
+    facts:
+      - {predicate: health, column: Robot_ProtectiveStop,
+         values: {"False": ok, "True": "fault:protective_stop"}}
+      - {subject: component:ur3-gripper, predicate: health, column: grip_lost,
+         values: {"False": ok, "True": "fault:grip_lost"}}
+      - {predicate: cycle, column: cycle}
+      # The export states no unit for temperatures; none is assumed.
+      - {subject: component:ur3-j0, predicate: temperature, column: Temperature_T0}
+      - {subject: component:ur3-j1, predicate: temperature, column: Temperature_J1}
+      - {subject: component:ur3-j2, predicate: temperature, column: Temperature_J2}
+      - {subject: component:ur3-j3, predicate: temperature, column: Temperature_J3}
+      - {subject: component:ur3-j4, predicate: temperature, column: Temperature_J4}
+      - {subject: component:ur3-j5, predicate: temperature, column: Temperature_J5}

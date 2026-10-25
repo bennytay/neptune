@@ -1,7 +1,7 @@
-"""Neptune Context: Layer 3, query and context packets over Memory and the Ledger.
+"""Neptune Context: the MCP server that answers site questions over the site model.
 
-Context reads the Ledger's catalog API and Memory's graph schema and never writes either. See this
-package's AGENTS.md (rules), ARCHITECTURE.md (diagram) and docs/adr/0001 (place in the programme).
+``neptune_context.mcp.site`` holds the ``neptune_site_*`` tools; ``python -m neptune_context.mcp
+--site <site_dir>`` serves them. The site model itself is ``neptune_memory.site``.
 """
 
 __version__ = "0.0.1"

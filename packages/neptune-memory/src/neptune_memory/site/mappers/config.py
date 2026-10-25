@@ -96,6 +96,8 @@ def render(
                 text = slug(text)
             elif kind == "until":
                 text = text.split(arg, 1)[0]
+            elif kind == "strip":
+                text = text.strip(arg or None)
             elif kind == "type":
                 text = mapping.entity_type(text)
             elif kind == "tag":

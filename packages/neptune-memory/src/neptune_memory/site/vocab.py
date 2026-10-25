@@ -15,6 +15,7 @@ ENTITY_TYPES: tuple[str, ...] = (
     "zone",
     "robot",
     "machine",
+    "component",
     "person",
     "role",
     "qualification",
@@ -40,6 +41,7 @@ class Predicate:
 
 _PLACES = ("area", "cell", "zone")
 _ASSETS = ("robot", "machine")
+_PARTS = ("robot", "machine", "component")  # a component: a joint, a gripper, a drive
 _WO = ("work_order",)
 
 PREDICATES: dict[str, Predicate] = {
@@ -55,13 +57,14 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("name", (), "value", "many"),
         Predicate("serial", _ASSETS, "value", "one"),
         Predicate("mode", ("robot", "machine", "cell"), "value", "one"),
-        Predicate("health", _ASSETS, "value", "one"),
+        Predicate("health", _PARTS, "value", "one"),
         Predicate("current_task", ("robot",), "ref", "one"),
         Predicate("in_zone", ("robot",), "ref", "one"),
         Predicate("battery", ("robot",), "value", "one"),
         Predicate("setpoint", ("machine",), "value", "one"),
         Predicate("belt_tension", ("machine",), "value", "one"),
-        Predicate("temperature", _ASSETS, "value", "one"),
+        Predicate("temperature", _PARTS, "value", "one"),
+        Predicate("cycle", _ASSETS, "value", "one"),  # a controller's program cycle counter
         Predicate("firmware", _ASSETS, "value", "one"),
         Predicate("parts_out", ("cell",), "value", "one"),
         Predicate("task_state", ("task",), "value", "one"),
@@ -89,6 +92,12 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("note", (), "value", "many"),
         Predicate("finding", (), "value", "many"),  # inferred by site/insights.py
         Predicate("same_as", (), "ref", "many"),
+        # Actions (site/actions.py): a proposal (inferred), its approval (stated, the confirm's
+        # copy), the message as sent, and whether the target's state followed (inferred).
+        Predicate("proposed_action", ("robot", "person"), "value", "many"),
+        Predicate("intent", ("robot", "person"), "value", "many"),
+        Predicate("dispatched", ("robot",), "value", "many"),
+        Predicate("outcome", ("robot",), "value", "many"),
         Predicate("report_interval", ("source",), "value", "one"),
         # An unmapped file (spec §12): its rows or blocks verbatim, and the "not mapped" marker.
         Predicate("text", (), "value", "many"),

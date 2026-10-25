@@ -3,7 +3,6 @@ name: ci
 # One job per workspace package, selected by .github/scripts/ci_plan.py from the PR's changed paths;
 # merge-queue groups, pushes to main and the nightly run every job. `check` aggregates them and is the only
 # required status: a skipped package job counts as success, a failed or cancelled one fails it.
-# The `docs` job builds the documentation site on every event, unfiltered.
 on:
   pull_request:
   merge_group:
@@ -36,7 +35,6 @@ jobs:
     outputs:
       compiler: ${{ steps.plan.outputs.compiler }}
       packages: ${{ steps.plan.outputs.packages }}
-      template: ${{ steps.plan.outputs.template }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -70,8 +68,6 @@ jobs:
         run: make setup
       - name: Lint, type-check, test
         run: make "$CHECK" PKG=neptune
-      - name: Contracts (owner rule)
-        run: make contracts-check PKG=neptune
 
   package:
     needs: plan
@@ -92,55 +88,16 @@ jobs:
         run: uv python install
       - name: Install workspace and dev tools
         run: make setup
+      - name: Fetch the public site (#211's gold questions; they skip without it)
+        if: github.event_name != 'pull_request' && matrix.package == 'neptune-memory'
+        run: scripts/fetch_public_site.sh site-public
       - name: Lint, type-check, test
         env:
           PACKAGE: ${{ matrix.package }}
         run: make "$CHECK" PKG="$PACKAGE"
-      - name: Contracts (lock, owner rule, upstream contract tests)
-        env:
-          PACKAGE: ${{ matrix.package }}
-        run: make contracts-check PKG="$PACKAGE"
-
-  template:
-    needs: plan
-    if: needs.plan.outputs.template == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - name: Install Python from .python-version
-        run: uv python install
-      - name: Generate a package from the template
-        run: scripts/new-package.sh ci-template-smoke
-      - name: Install workspace and dev tools
-        run: make setup
-      - name: Check the generated package
-        run: make check PKG=ci-template-smoke
-      - name: Contracts check of the generated package
-        run: make contracts-check PKG=ci-template-smoke
-
-  # The documentation site (packages/neptune-platform ADR 0012), on every event: any repository
-  # path can be a link target and every public module is a page, so no path filter is safe.
-  docs:
-    runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - name: Install Python from .python-version
-        run: uv python install
-      - name: Install workspace and dev tools
-        run: make setup
-      - name: Build the documentation site (strict, offline)
-        run: make docs
 
   check:
-    needs: [plan, neptune, package, template, docs]
+    needs: [plan, neptune, package]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}

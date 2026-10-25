@@ -117,10 +117,8 @@ reason to add a round.
 
 ### Rules every PR follows
 
-- **Schema changes.** A package-schema change bumps `SCHEMA_VERSION` and the package-schema contract with its
-  goldens under `contracts/`. The consumer pin rows in `packages/*/docs/contracts.md` and `contracts/lock.toml`
-  move in the same PR, and `make contracts-check` passes. Accepted ADRs are never edited in place: a changed
-  decision is a new ADR that supersedes or amends the old one (the index shows "amended by").
+- **Schema changes.** A package-schema change bumps `SCHEMA_VERSION`. Accepted ADRs are never edited in
+  place: a changed decision is a new ADR that supersedes or amends the old one (the index shows "amended by").
 - **Expected outcomes.** The PR whose change alters an expected outcome (a golden, a count, a finding code, a
   documented behaviour) updates that expectation and says so; a later PR never "fixes" a test it did not break.
 - **Test scratch space.** Tests write under a `TMPDIR` on disk, e.g.
@@ -143,7 +141,7 @@ reason to add a round.
    find it. REVISE goes back to the same implementer and the new head is re-reviewed (adapter PRs: one round, see
    *Model policy*). REJECT closes the PR.
 4. **Refresh only when asked.** `factory-merge.sh` merges a PR that is behind `main` when nothing `main`
-   changed reaches it (packages/neptune-platform/docs/adr/0005-merge-without-a-queue.md). When it refuses with
+   changed reaches it (`scripts/merge_freshness.py`). When it refuses with
    "needs a refresh", bring that PR up to date on its own branch: `git merge origin/main`,
    resolve conflicts (hotspots below), push, `gh pr checks <n> --watch`. A clean auto-merge keeps the verdict
    valid for the new head; a hand-resolved conflict needs a re-review. When a PR's base branch has just

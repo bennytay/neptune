@@ -144,6 +144,52 @@ def _insights(args: argparse.Namespace) -> int:
     return 0
 
 
+def _web(args: argparse.Namespace) -> int:
+    from neptune_memory.site.web import serve
+
+    _interruptible()
+    server = serve(args.site_dir, args.host, args.port, broker=args.broker)
+    url = f"http://{args.host}:{server.server_port}/"
+    _say(f"web: {url} (the site model of {args.site_dir}; Ctrl-C stops it)")
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(url)
+    with contextlib.suppress(KeyboardInterrupt):
+        server.serve_forever()
+    server.server_close()
+    return 0
+
+
+def _actions(args: argparse.Namespace) -> int:
+    from neptune_memory.site.actions import actions
+    from neptune_memory.site.render import render
+    from neptune_memory.site.views import load
+
+    sys.stdout.write(render(actions(load(args.site_dir))))
+    return 0
+
+
+def _approve(args: argparse.Namespace) -> int:
+    from neptune_memory.site.actions import approve
+
+    action = approve(args.site_dir, args.id, by=args.by, broker=args.broker)
+    _say(f"{action.id}: {action.verb} {action.zone or ''} on {action.target} approved by {args.by}")
+    if action.dispatched is not None:
+        _say(f"dispatched: {action.dispatched.citations[0].quote}")
+    else:
+        _say("logged only (no robot to command)")
+    return 0
+
+
+def _reject(args: argparse.Namespace) -> int:
+    from neptune_memory.site.actions import reject
+
+    action = reject(args.site_dir, args.id, by=args.by)
+    _say(f"{action.id}: {action.verb} on {action.target} rejected by {args.by}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m neptune_memory.site")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -217,6 +263,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     photos.add_argument("site_dir", type=Path)
     photos.set_defaults(run=_extract_photos)
+
+    web = commands.add_parser(
+        "web", help="serve the live web view: map, states, timeline, findings, sources"
+    )
+    web.add_argument("site_dir", type=Path)
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--open", action="store_true", help="open it in the default browser")
+    web.add_argument("--broker", default=DEFAULT_BROKER, help="where approved actions go")
+    web.set_defaults(run=_web)
+    listed = commands.add_parser(
+        "actions", help="list proposed actions: pending, approved, dispatched, outcomes"
+    )
+    listed.add_argument("site_dir", type=Path)
+    listed.set_defaults(run=_actions)
+
+    approve = commands.add_parser(
+        "approve", help="approve a proposed action; a robot action goes to its fleet manager"
+    )
+    approve.add_argument("site_dir", type=Path)
+    approve.add_argument("id", help="the proposal's fact id (fact:...)")
+    approve.add_argument("--by", default="operator")
+    approve.add_argument("--broker", default=DEFAULT_BROKER)
+    approve.set_defaults(run=_approve)
+
+    reject = commands.add_parser("reject", help="reject a proposed action")
+    reject.add_argument("site_dir", type=Path)
+    reject.add_argument("id", help="the proposal's fact id (fact:...)")
+    reject.add_argument("--by", default="operator")
+    reject.set_defaults(run=_reject)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)

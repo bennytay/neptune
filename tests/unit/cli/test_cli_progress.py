@@ -49,7 +49,7 @@ Neptune · ingesting run/{pad}3 files
 ✓ arm/operator.txt      text                4 records  · 1 finding
 ✓ notes.txt             text                4 records
 ⚠ arm/operator.txt      text          block 1 is not valid UTF-8 from byte 38; its text is unknown
-── 3 ingested · 52 records · 3 warnings · X s ──
+── 3 ingested · 51 records · 3 warnings · X s ──
 unknown: 3 run bindings with no calibration or configuration record (left unresolved)
 unknown: 1 run with no software identity (not guessed)
 unknown: 2 clock pairs with no shared reading (left unrelated)
@@ -62,7 +62,8 @@ flagged: +1 more kinds: see receipt.md
 
 
 def test_the_live_view_is_golden_text_for_a_small_run(run_folder: Path) -> None:
-    code, _, err = cli("ingest", "run", "--out", "pkg", "-w", "ws", "--progress")
+    # --no-plugins: the count must not depend on which plugin distributions are installed.
+    code, _, err = cli("ingest", "run", "--out", "pkg", "-w", "ws", "--progress", "--no-plugins")
     assert code == 0
     header = "Neptune · ingesting run/"
     pad = " " * (120 - len(header) - len("3 files"))

@@ -24,12 +24,10 @@ htmlcov/
 # Claude Code worktrees
 .claude/worktrees/
 
-# `make demo` output, and what the quickstart wires into Claude Code (scripts/quickstart.sh)
-/demo/
-# `make up` output
-/up/
+# Local Claude Code wiring
 /.mcp.json
 /.claude/skills/
 # `make site-demo` output
 /site-demo/
 /site-harbor/
+/site-public/

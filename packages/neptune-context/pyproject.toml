@@ -1,30 +1,18 @@
-# Workspace member generated from packages/_template by scripts/new-package.sh.
+# Workspace member: the MCP server for the site model (docs/site-model/).
 # Dev tools (ruff, mypy, pytest) come from the root project's `dev` group; `make setup` installs them.
 [project]
 name = "neptune-context"
 version = "0.0.1"
-description = "Neptune Context: query language, retrieval and context packets over Memory and the Ledger."
+description = "Neptune Context: the MCP server for the neptune_site_* tools over the site model."
 license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
-# Context is Layer 3: it reads the Ledger's catalog API and Memory's graph schema and writes nothing
-# to either (ADR 0001). The workspace dependency list drives CI selection, so a Ledger or Memory
-# change also runs this job. The pins are contracts/lock.toml and neptune_context.pins.
 dependencies = [
     "mcp>=1.19,<2",
-    "neptune",
-    "neptune-ledger",
     "neptune-memory",
 ]
 
-# The live planner model client (ADR 0005 §4). Optional: the planner, its replay client and CI never need
-# it; install it (`uv sync --extra anthropic`) to plan against, or re-record the golden set from, the API.
-[project.optional-dependencies]
-anthropic = ["anthropic>=1.0"]
-
 [tool.uv.sources]
-neptune = { workspace = true }
-neptune-ledger = { workspace = true }
 neptune-memory = { workspace = true }
 
 [build-system]
@@ -48,11 +36,6 @@ strict = true
 warn_unreachable = true
 files = ["src", "tests"]
 mypy_path = "src"
-
-# `anthropic` is an optional extra, imported only inside AnthropicClient; CI does not install it.
-[[tool.mypy.overrides]]
-module = ["anthropic", "anthropic.*"]
-ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

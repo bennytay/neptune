@@ -3,12 +3,14 @@
 One read-only MCP tool per function of ``neptune_memory.site.query``. Each takes a JSON object that
 mirrors the Python arguments and answers ``neptune_memory.site.render.render(answer)``: compact
 cited lines and a ``Sources:`` footer. ``python -m neptune_context.mcp --site <site_dir>`` serves
-them, alone or beside the v2 tools (``--memory`` / ``--packets`` / ``--url``), which stay as they
-are.
+them.
 
 The model is folded from ``<site_dir>/.neptune/log`` once; each tool call then applies the entries
 appended since (``log.Tail``), so a live site (``python -m neptune_memory.site live``) shows up in
 the next answer without a restart. A log started again (a fresh ``build``) is folded from scratch.
+
+One tool writes: ``neptune_site_propose_action`` logs an inferred proposal (``site/actions.py``).
+No tool approves one: a person does, on the CLI or the web view.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from neptune_memory.site import insights, log, query, views
+from neptune_memory.site import actions, insights, log, query, views
 from neptune_memory.site.render import render
 
 from neptune_context import __version__
@@ -37,7 +39,8 @@ SITE_INSTRUCTIONS: Final = (
     "rule of one site, and what feeds what. Answer site questions with the neptune_site_* tools; "
     "every line ends with [S<n>] keys into the Sources footer, and says observed, stated or "
     "inferred, and stale, unknown, ambiguous or pending when it is. Times are the site clock's, "
-    "never converted."
+    "never converted. You may propose an action (neptune_site_propose_action); a person approves "
+    "it, never you, and it only goes through the fleet manager's protocol, never a safety function."
 )
 
 _STR = {"type": "string"}
@@ -54,6 +57,8 @@ class SiteTool:
     description: str
     properties: dict[str, dict[str, Any]]
     required: tuple[str, ...]
+    writes: bool = False
+    """Called as ``function(site_dir, model, **arguments)``, ``model`` being a callable."""
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -164,7 +169,46 @@ SITE_TOOLS: Final[dict[str, SiteTool]] = {
         {"shift_id": _STR, "start": _TIME, "end": _TIME},
         (),
     ),
+    PREFIX + "propose_action": SiteTool(
+        lambda site_dir, model, **args: _propose(site_dir, model, **args),
+        "Propose an action for a person to approve: pause, resume, send_to (needs zone), "
+        "cancel_task on a robot, or page a person. Give the reason and the fact ids (fact:...) "
+        "from earlier answers that support it. It is logged as an inferred proposal; nothing "
+        "moves until a person approves it (python -m neptune_memory.site approve <site_dir> "
+        "<id>, or the web view). No tool approves. Approved robot actions go to the fleet "
+        "manager (VDA 5050 instantActions / order), never to a safety function.",
+        {
+            "action": {"type": "string", "enum": list(actions.VERBS)},
+            "target": {**_STR, "description": "robot:... (person:... for page)"},
+            "zone": {**_STR, "description": "zone:... for send_to"},
+            "reason": _STR,
+            "cites": {**_STRINGS, "description": "fact ids that support the action"},
+        },
+        ("action", "target", "reason", "cites"),
+        writes=True,
+    ),
+    PREFIX + "actions": SiteTool(
+        actions.actions,
+        "Proposed actions and what became of them: pending (waiting for a person), rejected, "
+        "approved (the intent, by whom), dispatched (the message as sent) and the outcome (the "
+        "target's observed change, or not observed in time), each cited.",
+        {},
+        (),
+    ),
 }
+
+
+def _propose(
+    site_dir: Path,
+    model: Callable[[], SiteModel],
+    action: str,
+    target: str,
+    reason: str,
+    cites: list[str],
+    zone: str | None = None,
+) -> Answer:
+    fact = actions.propose(site_dir, action, target, reason, cites, zone, model=model())
+    return actions.actions(model(), ids=[fact.id])
 
 
 class SiteTools:
@@ -187,13 +231,16 @@ class SiteTools:
         read_only = types.ToolAnnotations(
             readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
         )
+        writes = types.ToolAnnotations(
+            readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+        )
         return [
             types.Tool(
                 name=name,
                 title=name.replace("_", " "),
                 description=tool.description,
                 inputSchema=tool.schema(),
-                annotations=read_only,
+                annotations=writes if tool.writes else read_only,
             )
             for name, tool in SITE_TOOLS.items()
         ]
@@ -210,7 +257,10 @@ class SiteTools:
                 f"{name} needs {list(tool.required)}; missing {missing}, unknown {unknown}"
             )
         try:
-            answer = tool.function(self.model(), **arguments)
+            if tool.writes:
+                answer = tool.function(self.site_dir, self.model, **arguments)
+            else:
+                answer = tool.function(self.model(), **arguments)
         except Exception as error:
             return _error(f"{type(error).__name__}: {error}")
         text = render(answer)

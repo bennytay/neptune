@@ -1,0 +1,21 @@
+
+=== Neptune site-show: Harbor DC, live at SPEED x (3-minute demo) ===
+
+0:00  Open the web view (URL below). The feed starts at 10:02 site time: the sorter and two humanoids
+      in the sortation hall, goods-to-person robots in storage, a legged inspector on patrol.
+      SORT-1, INSP-1 and AMR-17 sit under the map as "records only" (CMMS ids). Under "Pending
+      confirmation", click "Yes, same" on AMR-17 / gtp-03 and they become one glyph.
+0:45  At about 10:12 site time SORT-1 trips on overtemp (red); hum-01 and hum-02 go idle, then the
+      GTPs wait (amber). Click SORT-1, then its health fact: the cited feed line opens.
+1:15  Findings (right): click the starvation chain and the change before the fault.
+
+1:30  In Claude Code (MCP line below), ask:
+      1. "Give me the shift report for crew B today, 07:00 to now."
+      2. "What is blocked right now, and why?"
+      3. "Who is qualified, and not on break, to reset the tripped sorter?"
+      4. "Propose paging that person to reset SORT-1. Cite the facts."
+2:30  In the web view's Actions panel, click Approve. A page is logged, not dispatched: Harbor's
+      robots report over no fleet protocol Neptune can command (Plant 7 shows the robot loop).
+      5. Back in Claude: "What happened to the action you proposed?"
+
+Script: docs/site-model/show/harbor.txt   Ctrl-C stops everything.
