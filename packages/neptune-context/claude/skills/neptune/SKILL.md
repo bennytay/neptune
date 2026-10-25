@@ -11,6 +11,13 @@ When the server offers `neptune_site_*` tools (started with `--site <site_dir>`)
 question about the live site (what is blocked, why output dropped, who is qualified and on shift,
 what changed, what is unknown) with them, not with the tools below:
 
+- **Start with the insights.** `neptune_site_insights` (what is going on, what went wrong, at a
+  time) and `neptune_site_shift_report` (`shift_id` such as `shift:A`, or `start` and `end`) give
+  Neptune's findings: starvation chains, qualification gaps, stale sources, changes before faults
+  and work orders checked against rule clauses. Every finding is **inferred** by a deterministic
+  rule and cites the facts behind it: say "Neptune infers ...", and call a change before a fault
+  a correlation, never its cause. Then drill in with the tools below. `neptune_site_sql` also has
+  `downtime`, `utilisation` and `fault_clear_time`.
 - `neptune_site_resolve` turns a name (`MR-1142`, `cv-2`) into entity refs; pass refs to the rest.
 - `neptune_site_impact` (what is blocked), `neptune_site_state_at` (one entity now or at a time),
   `neptune_site_timeline`, `neptune_site_diff` (what changed between two times), `neptune_site_find`

@@ -86,6 +86,7 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("change_by", ("change",), "ref", "one"),
         Predicate("change_reason", ("change",), "value", "one"),
         Predicate("note", (), "value", "many"),
+        Predicate("finding", (), "value", "many"),  # inferred by site/insights.py
         Predicate("same_as", (), "ref", "many"),
         Predicate("report_interval", ("source",), "value", "one"),
     )

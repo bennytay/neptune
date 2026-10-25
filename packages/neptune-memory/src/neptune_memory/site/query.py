@@ -59,6 +59,8 @@ class Answer:
     columns: list[str] = field(default_factory=list)
     rows: list[tuple[Any, ...]] = field(default_factory=list)
     omitted: int = 0
+    sections: list[tuple[int, str]] = field(default_factory=list)
+    """``(index of its first item, title)``: headings ``render`` prints (the shift report)."""
     _stale: dict[tuple[str, str, str | None], tuple[int, list[str]]] = field(
         default_factory=dict, repr=False, compare=False
     )
@@ -410,7 +412,8 @@ CREATE TABLE entities (ref TEXT PRIMARY KEY, type TEXT, id TEXT, names TEXT);
 
 def sql(model: SiteModel, query: str) -> Answer:
     """A read-only ``sqlite3`` query over tables ``facts``, ``intervals``, ``seen`` and
-    ``entities``; rows that select a ``fact_id`` cite that fact."""
+    ``entities``, and the analysis tables ``downtime``, ``utilisation`` and ``fault_clear_time``
+    (``insights.analysis_tables``); rows that select a ``fact_id`` cite that fact."""
     answer = _new("sql", model, None)
     db = _database(model)
     try:
@@ -498,6 +501,9 @@ def _database(model: SiteModel) -> sqlite3.Connection:
         "INSERT INTO seen VALUES (?,?)",
         [(source, t) for source, times in model.seen.items() for t in times],
     )
+    from neptune_memory.site.insights import analysis_tables  # it imports this module
+
+    analysis_tables(model, db)
     db.commit()
     db.execute("PRAGMA query_only = ON")
     _DATABASE["last"] = (model, model.seq, db)

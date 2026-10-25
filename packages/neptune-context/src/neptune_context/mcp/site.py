@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from neptune_memory.site import query, views
+from neptune_memory.site import insights, query, views
 from neptune_memory.site.render import render
 
 from neptune_context import __version__
@@ -135,6 +135,26 @@ SITE_TOOLS: Final[dict[str, SiteTool]] = {
         "id, names). Select fact_id to get each row's citations.",
         {"query": _STR},
         ("query",),
+    ),
+    PREFIX + "insights": SiteTool(
+        insights.insights,
+        "Call this first for 'what is going on' or 'what went wrong': Neptune's inferred findings "
+        "at a time, from deterministic rules: starvation chains (a fault, then what waits "
+        "downstream), qualification gaps (no free on-shift holder), stale sources, changes "
+        "before faults (correlation only) and work orders checked against rule clauses. Each is "
+        "inferred, cited by its supporting facts. sql also has tables downtime(entity, state, "
+        'start, "end", seconds, cause, work_order, fact_id), utilisation(robot, mode, seconds) '
+        'and fault_clear_time(entity, fault, start, "end", seconds, fact_id).',
+        {"at": _AT},
+        (),
+    ),
+    PREFIX + "shift_report": SiteTool(
+        insights.shift_report,
+        "Call this first for a shift summary or handover: a compact cited report of one shift "
+        "(shift_id such as shift:A, its latest window) or of start..end: who was on, faults, "
+        "stops and work orders, chains, gaps and checks, stale sources, changes, what is unknown.",
+        {"shift_id": _STR, "start": _TIME, "end": _TIME},
+        (),
     ),
 }
 
