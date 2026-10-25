@@ -1,0 +1,27 @@
+{
+  "about": "Insight gold questions for Harbor DC (#204): the same rules as Plant 7's (gold_insights.json), on a differently shaped site. A finding is matched by its rule (the text it opens with) and the entity refs it names, never by its wording; cites lists the corpus files the answers must cite.",
+  "questions": [
+    {
+      "id": "HI1",
+      "question": "What did the SORT-1 OVERTEMP trip hold up, at 10:20 on 2026-11-04?",
+      "calls": [
+        {"tool": "insights", "args": {"at": "2026-11-04T10:20:00"}}
+      ],
+      "expect": [
+        {"subject": "machine:sort-1", "predicate": "finding", "kind": "inferred", "rule": "starvation chain", "mentions": ["machine:sort-1", "fault:OVERTEMP_M2", "robot:hum-01", "robot:hum-02", "robot:gtp-01", "robot:gtp-02", "task:PK-7731"]}
+      ],
+      "cites": ["feed/sorter_plc.jsonl", "feed/humanoids.jsonl", "feed/rmf_fleet.jsonl", "static/layout.yaml"]
+    },
+    {
+      "id": "HI2",
+      "question": "Could anyone reset the tripped sorter at 10:20 on 2026-11-04?",
+      "calls": [
+        {"tool": "insights", "args": {"at": "2026-11-04T10:20:00"}}
+      ],
+      "expect": [
+        {"subject": "machine:sort-1", "predicate": "finding", "kind": "inferred", "rule": "qualification gap", "mentions": ["qualification:electrical-isolation", "rule:hsr-7-3.4", "person:reyes", "on break"]}
+      ],
+      "cites": ["feed/sorter_plc.jsonl", "static/docs/HSR-7_excerpt.pdf", "static/roster/roster.csv"]
+    }
+  ]
+}

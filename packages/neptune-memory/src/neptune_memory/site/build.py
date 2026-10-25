@@ -19,6 +19,7 @@ can hand in their own. ``Appender`` is the same path held open, one input at a t
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import importlib
 import shutil
@@ -124,7 +125,8 @@ class Appender:
 
     def __init__(self, site_dir: Path, seam: Seam | None = None) -> None:
         self.site_dir = Path(site_dir)
-        self.seam = seam or Seam.default()
+        self._default = seam is None
+        self.seam = seam or Seam.default(self.site_dir)
         self.log = _fresh(self.site_dir)
         self._out = _Writer(self.log)
 
@@ -148,6 +150,9 @@ class Appender:
         """``static/`` changed: ingest it again and append only the facts not yet in the log (a
         record's facts may lean on other files, e.g. the asset register). Returns how many."""
         self.log.flush()
+        if self._default:  # the mapping file may be what changed: tables and documents reread it
+            fresh_seam = Seam.default(self.site_dir)
+            self.seam = dataclasses.replace(self.seam, map_record=fresh_seam.map_record)
         logged = {e.fact.id for e in read(self.site_dir) if e.fact is not None}
         before = self.log.seq
         fresh = _Fresh(self._out, logged)

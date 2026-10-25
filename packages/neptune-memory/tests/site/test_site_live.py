@@ -66,7 +66,7 @@ def test_site_live_log_equals_build_over_the_capture(tmp_path: Path) -> None:
         for e in read(site_dir)
     )
     live_log = _log_bytes(site_dir)
-    build(site_dir, seam=dataclasses.replace(Seam.default(), messages=captured))
+    build(site_dir, seam=dataclasses.replace(Seam.default(site_dir), messages=captured))
     assert _log_bytes(site_dir) == live_log
 
 

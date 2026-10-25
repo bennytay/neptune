@@ -65,7 +65,6 @@ def _ask(site_dir: Path, question: dict[str, Any]) -> list[Any]:
     return answers
 
 
-@pytest.mark.xfail(strict=True, reason="Harbor's mapping file lands with the M2 gate")
 @pytest.mark.parametrize("qid", sorted(QUESTIONS))
 def test_site_harbor_gold_question(tmp_path_factory: pytest.TempPathFactory, qid: str) -> None:
     question = QUESTIONS[qid]

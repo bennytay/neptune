@@ -1,16 +1,9 @@
 # ruff: noqa: E501, RUF001
 """Harbor DC's mapping file, ``static/neptune.mappings.yaml``, in the format of spec §12 (#200).
 
-Harbor is shaped unlike Plant 7, so the file leans on five things the Plant 7 file does not need.
-The M2 gate decides whether each becomes part of the format or Harbor adapts:
-
-- ``rows: <dotted path>`` on a table entry: the rows are the objects of a nested JSON array
-  (``cmms/work_orders.json`` is ``{"workOrders": [...]}``); columns are dotted paths (``asset.tag``).
-- ``time`` / ``until`` as a template (``"{Shift date}T{Clock in}"``): the roster splits date from time.
-- ``split: "|"`` on a fact (and on a ``terms`` column): one cell holds several values (certifications).
-- decoders ``opcua`` (``payload.nodes[]``: ``{name, value, eu}``, ``eu`` is the unit) and
-  ``ros2_diagnostics`` (``payload.status[]`` flattened to ``<status name>/<key>``, plus
-  ``<status name>/level``; level 0 reads as no fault code; ``{hardware_id}`` names the status's device).
+Harbor is shaped unlike Plant 7: a nested JSON CMMS (``rows:``), a roster that splits date from time
+(templated ``time`` / ``until``), multi-value cells (``split:``) and the ``opcua`` and
+``ros2_diagnostics`` decoders. All of it is mapping format; no mapper code names Harbor.
 """
 
 MAPPINGS = """\
@@ -39,7 +32,6 @@ tables:
     source: cmms
     subject: "work_order:{id}"
     time: opened
-    until: closed
     facts:
       - {subject: "{asset.tag|tag}", predicate: work_order, column: asset.tag, ref: "work_order:{id}"}
       - {predicate: wo_problem, column: summary}
@@ -78,9 +70,9 @@ documents:
       id: "rule:{id|lower}-{1}"
       text: 2
     lift:
-      - {pattern: '\\d+\\s?[–-]\\s?\\d+\\s?°C', predicate: states_limit, on: document}
+      - {pattern: '\\d+\\s?[–-]\\s?\\d+\\s?°C', predicate: states_limit, about: document}
       - {terms: {table: roster/roster.csv, column: Certifications, split: "|"},
-         predicate: requires_qualification, ref: qualification, on: rule}
+         predicate: requires_qualification, ref: qualification, about: rule}
 
 extractions:
   - file: photos/*.extraction.json

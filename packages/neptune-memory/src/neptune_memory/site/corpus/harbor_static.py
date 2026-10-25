@@ -55,6 +55,7 @@ topology:
   - {subject: robot:gtp-01, predicate: depends_on, object: cell:tote-pickup}
   - {subject: robot:gtp-02, predicate: depends_on, object: cell:tote-pickup}
   - {subject: robot:gtp-03, predicate: depends_on, object: cell:tote-pickup}
+  - {subject: rule:hsr-7-3.4, predicate: covers_zone, object: cell:sortation}
 sources:
   - {id: plc.sort1, name: SORT-1 PLC (OPC UA node values), report_interval: 10}
   - {id: vendor.humanoid, name: Humanoid vendor state API, report_interval: 10}

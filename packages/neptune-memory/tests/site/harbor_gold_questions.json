@@ -78,8 +78,8 @@
         {"tool": "resolve", "args": {"name": "AMR-17"}}
       ],
       "expect": [
-        {"subject": "robot:gtp-03", "predicate": "same_as", "object": "robot:AMR-17", "kind": "inferred", "state": "pending"},
-        {"subject": "robot:gtp-03", "predicate": "same_as", "object": "robot:AMR-17", "kind": "stated", "state": "known"}
+        {"subject": "robot:AMR-17", "predicate": "same_as", "object": "robot:gtp-03", "kind": "inferred", "state": "pending"},
+        {"subject": "robot:AMR-17", "predicate": "same_as", "object": "robot:gtp-03", "kind": "stated", "state": "known"}
       ],
       "cites": ["feed/rmf_fleet.jsonl", "static/cmms/assets.json"]
     }

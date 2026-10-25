@@ -17,12 +17,24 @@ from neptune_memory.site.render import render
 
 GOLD = json.loads((Path(__file__).parent / "gold_insights.json").read_text(encoding="utf-8"))
 QUESTIONS = {q["id"]: q for q in GOLD["questions"]}
+HARBOR = json.loads(
+    (Path(__file__).parent / "harbor_gold_insights.json").read_text(encoding="utf-8")
+)
+HARBOR_QUESTIONS = {q["id"]: q for q in HARBOR["questions"]}
 
 
 @pytest.fixture(scope="module")
 def site_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("site-insights")
     corpus.generate(out)
+    build(out)
+    return out
+
+
+@pytest.fixture(scope="module")
+def harbor_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("harbor-insights")
+    corpus.generate(out, site="harbor")
     build(out)
     return out
 
@@ -41,9 +53,8 @@ def _matches(item: query.Item, want: dict[str, Any]) -> bool:
     return all(ref in text for ref in want.get("mentions", ()))
 
 
-@pytest.mark.parametrize("qid", sorted(QUESTIONS))
-def test_site_insights_gold_question(site_dir: Path, qid: str) -> None:
-    question = QUESTIONS[qid]
+def _ask_gold(site_dir: Path, question: dict[str, Any]) -> None:
+    qid = question["id"]
     model = views.load(site_dir)
     answers = [getattr(insights, c["tool"])(model, **c["args"]) for c in question["calls"]]
     items = [item for answer in answers for item in answer.items]
@@ -51,6 +62,17 @@ def test_site_insights_gold_question(site_dir: Path, qid: str) -> None:
     assert not missing, f"{qid} lacks {missing}"
     cited = {c.file for answer in answers for c in answer.sources.values()}
     assert set(question["cites"]) <= cited, f"{qid} cites {sorted(cited)}"
+
+
+@pytest.mark.parametrize("qid", sorted(QUESTIONS))
+def test_site_insights_gold_question(site_dir: Path, qid: str) -> None:
+    _ask_gold(site_dir, QUESTIONS[qid])
+
+
+@pytest.mark.parametrize("qid", sorted(HARBOR_QUESTIONS))
+def test_site_insights_harbor_gold_question(harbor_dir: Path, qid: str) -> None:
+    """The same rules, no Harbor ids in the code: the sorter trip's chain and Reyes's break."""
+    _ask_gold(harbor_dir, HARBOR_QUESTIONS[qid])
 
 
 def test_site_insights_findings_are_inferred_and_never_say_cause(site_dir: Path) -> None:
