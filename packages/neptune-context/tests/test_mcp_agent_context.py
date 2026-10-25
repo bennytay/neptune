@@ -36,6 +36,7 @@ from agent_goldens_context import (
 from neptune_context.mcp import query_from_arguments
 from neptune_context.mcp.__main__ import build_parser, local_client, main
 from neptune_context.mcp.server import MAX_ARGUMENT_DEPTH, TOOLS, check_shape
+from neptune_context.mcp.site import SITE_TOOLS
 from neptune_context.render.agent import parse_answer
 from neptune_context.sdk import AsyncClient, ErrorCode, SdkError
 from sdk_testing_context import golden_stub
@@ -277,7 +278,7 @@ def test_the_skill_names_only_real_tools_and_its_example_is_a_valid_query() -> N
     head, _, body = text.removeprefix("---\n").partition("\n---\n")
     fields = dict(line.split(": ", 1) for line in head.splitlines())
     assert fields["name"] == "neptune" and len(fields["description"]) <= 1024
-    assert set(re.findall(r"`(neptune_[a-z_]+)`", body)) == set(TOOLS)
+    assert set(re.findall(r"`(neptune_[a-z_]+)`", body)) == set(TOOLS) | set(SITE_TOOLS)
     example = json.loads(body.split("```json\n", 1)[1].split("```", 1)[0])
     query = query_from_arguments("neptune_query", example)
     assert query.include_inferred is True

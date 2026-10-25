@@ -34,7 +34,7 @@ ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check harness demo demo-pin demo-folder up check-all
+  contracts-check harness demo demo-pin demo-folder up check-all site-demo site-replay
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -114,6 +114,24 @@ demo-folder: ## A clean folder for Claude Code over the demo: make demo-folder D
 up: ## Your own folder -> compiler -> Deploy -> Ledger -> Memory -> a Claude Code folder: make up SRC=<folder>
 > @test -n "$(SRC)" || { echo "usage: make up SRC=<folder> [ARGS='--deploy FILE ...']" >&2; exit 2; }
 > $(RUN) python -m harness.up "$(SRC)" $(ARGS)
+
+# Site model v3 (docs/site-model/spec.md §9): the Plant 7 corpus -> fact log -> the MCP command.
+# site-demo confirms the amr-02 / MR-1142 identity proposal as the operator would (spec §7).
+SITE_DIR ?= site-demo
+SPEED ?= 60
+SITE := $(RUN) python -m neptune_memory.site
+SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
+site-demo: ## Site model: generate the Plant 7 corpus, build the fact log, confirm, print the MCP command
+> $(SITE) generate "$(SITE_DIR)"
+> $(SITE) build "$(SITE_DIR)"
+> $(SITE) confirm "$(SITE_DIR)" --yes-all --by demo-operator
+> @echo "MCP: $(SITE_MCP)"
+> @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
+
+site-replay: ## Site model: the same, live (SPEED=60 is 60x real time)
+> $(SITE) generate "$(SITE_DIR)"
+> @echo "MCP: $(SITE_MCP)"
+> $(SITE) replay "$(SITE_DIR)" --speed "$(SPEED)"
 
 # The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
 # A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.
