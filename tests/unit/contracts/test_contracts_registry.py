@@ -16,6 +16,9 @@ import pytest
 
 from neptune.model.record import SCHEMA_VERSION
 
+# Each test validates the whole registry (about 30 s), so the module runs nightly, not on PRs.
+pytestmark = pytest.mark.slow
+
 REPO = Path(__file__).resolve().parents[3]
 CONTRACTS = REPO / "contracts"
 
