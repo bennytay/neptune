@@ -106,8 +106,14 @@ ADAPTER_IMPORT = re.compile(
 
 
 # The site model's build ingests a site's static files through ``neptune.sdk`` (docs/site-model
-# spec §5). CI already runs Memory's job on any adapter change (its snapshot, platform ADR 0009).
-INGESTING_FILES = frozenset({"packages/neptune-memory/src/neptune_memory/site/build.py"})
+# spec §5), and ``draft-mapping`` reads that package back for an XLSX table (#211). CI already runs
+# Memory's job on any adapter change (its snapshot, platform ADR 0009).
+INGESTING_FILES = frozenset(
+    {
+        "packages/neptune-memory/src/neptune_memory/site/build.py",
+        "packages/neptune-memory/src/neptune_memory/site/draft.py",
+    }
+)
 
 
 def test_no_member_imports_a_format_adapter_or_runs_ingestion() -> None:
