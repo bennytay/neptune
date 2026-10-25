@@ -148,7 +148,7 @@ def _web(args: argparse.Namespace) -> int:
     from neptune_memory.site.web import serve
 
     _interruptible()
-    server = serve(args.site_dir, args.host, args.port)
+    server = serve(args.site_dir, args.host, args.port, broker=args.broker)
     url = f"http://{args.host}:{server.server_port}/"
     _say(f"web: {url} (the site model of {args.site_dir}; Ctrl-C stops it)")
     if args.open:
@@ -271,6 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--open", action="store_true", help="open it in the default browser")
+    web.add_argument("--broker", default=DEFAULT_BROKER, help="where approved actions go")
     web.set_defaults(run=_web)
     listed = commands.add_parser(
         "actions", help="list proposed actions: pending, approved, dispatched, outcomes"

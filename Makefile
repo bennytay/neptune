@@ -26,7 +26,7 @@ EACH = set -ef; for p in $(SELECTED); do \
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  check-all site-demo site-replay site-live site-web
+  check-all site-demo site-replay site-live site-web site-show
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -105,7 +105,7 @@ site-replay: ## Site model: the same, live (SPEED=60 is 60x real time)
 # site-live (#202): a local MQTT broker, `live` subscribed to it, then `publish` at SPEED x from START
 # (earlier messages go at once). Ctrl-C stops all three. The MCP server tails the log as it grows.
 BROKER ?= mqtt://127.0.0.1:1883
-START ?= 2026-10-20T09:55:00
+START ?= $(if $(filter harbor,$(SITE)),2026-11-04T10:02:00,2026-10-20T09:55:00)
 SITE_READY = $(SITE_DIR)/.neptune/live.ready
 WEB_PORT ?= 8765
 SITE_URL = http://127.0.0.1:$(WEB_PORT)/
@@ -117,7 +117,7 @@ site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x fro
 > @echo "Web view: $(SITE_URL)"
 > @$(SITE_CMD) broker --broker "$(BROKER)" & b=$$!; \
   $(SITE_CMD) live "$(SITE_DIR)" --broker "$(BROKER)" & l=$$!; \
-  $(SITE_CMD) web "$(SITE_DIR)" --port "$(WEB_PORT)" & w=$$!; \
+  $(SITE_CMD) web "$(SITE_DIR)" --port "$(WEB_PORT)" --broker "$(BROKER)" $(WEB_OPEN) & w=$$!; \
   trap 'kill $$l $$b $$w 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
   until [ -f "$(SITE_READY)" ]; do kill -0 $$l 2>/dev/null || exit 1; sleep 0.2; done; \
   $(SITE_CMD) publish "$(SITE_DIR)" --broker "$(BROKER)" --speed "$(SPEED)" --start "$(START)"; \
@@ -128,3 +128,13 @@ site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x fro
 site-web: ## Site model: serve the web view of SITE_DIR at WEB_PORT and open it (run site-demo first)
 > @test -d "$(SITE_DIR)/.neptune/log" || { echo "no fact log in $(SITE_DIR): run make site-demo first" >&2; exit 2; }
 > $(SITE_CMD) web "$(SITE_DIR)" --port "$(WEB_PORT)" --open
+
+# site-show (#214): the demo in one command. site-live at a demo-friendly SPEED (10: the Plant 7
+# story runs about ten minutes instead of 95 s) with the web view opened, after a 3-minute script.
+SHOW_SCRIPT = docs/site-model/show/$(SITE).txt
+SHOW_OPEN ?= --open
+site-show: SPEED = 10
+site-show: ## Site model demo: live site + web view at SPEED=10, prints a 3-minute script (SITE=p7 | harbor)
+> @test -f "$(SHOW_SCRIPT)" || { echo "site-show runs SITE=p7 or SITE=harbor" >&2; exit 2; }
+> @sed 's/SPEED x/$(SPEED)x/' "$(SHOW_SCRIPT)"
+> @$(MAKE) --no-print-directory site-live SITE="$(SITE)" SPEED="$(SPEED)" WEB_OPEN="$(SHOW_OPEN)"

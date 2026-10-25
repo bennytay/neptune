@@ -4,24 +4,36 @@ import json
 import threading
 import urllib.request
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import pytest
 
 from neptune_memory.site import corpus
+from neptune_memory.site.actions import propose
 from neptune_memory.site.build import build
+from neptune_memory.site.views import load
 from neptune_memory.site.web import serve
 
 JAM = "2026-10-20T10:06:30"
 
 
+SENT: list[tuple[str, bytes]] = []
+"""What the web view dispatched to the fleet manager (instead of MQTT)."""
+
+
 @pytest.fixture(scope="module")
-def url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+def site_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     site_dir = tmp_path_factory.mktemp("web") / "site"
     corpus.generate(site_dir)
     build(site_dir, until="2026-10-20T10:10:00")
-    server = serve(site_dir, port=0)
+    return site_dir
+
+
+@pytest.fixture(scope="module")
+def url(site_dir: Path) -> Iterator[str]:
+    server = serve(site_dir, port=0, send=lambda topic, payload: SENT.append((topic, payload)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_port}"
@@ -103,4 +115,19 @@ def test_site_web_serves_the_page_and_events(url: str) -> None:
     with urllib.request.urlopen(f"{url}/events", timeout=30) as events:
         line = events.readline()
     assert json.loads(line.removeprefix(b"data: "))["seq"] > 0
-    assert _get(f"{url}/api/actions")["available"] in (True, False)
+
+
+def test_site_web_approving_an_action_dispatches_it(url: str, site_dir: Path) -> None:
+    model = load(site_dir)
+    cite = model.by_key[("robot:amr-01", "in_zone")][-1]
+    proposal = propose(site_dir, "send_to", "robot:amr-01", "clear aisle-a", [cite], "zone:aisle-b")
+    listed = _get(f"{url}/api/actions")
+    assert [(a["id"], a["status"]) for a in listed["items"]] == [(proposal.id, "pending")]
+    done = _post(f"{url}/api/actions/approve", {"id": proposal.id, "by": "benjamin"})["result"]
+    assert (done["status"], done["by"]) == ("dispatched", "benjamin")
+    [(topic, payload)] = SENT
+    assert topic == "uagv/v2/p7/amr-01/order"
+    assert json.loads(payload)["nodes"][0]["nodeId"] == "zone:aisle-b"
+    listed = _get(f"{url}/api/actions")
+    assert listed["items"] == []
+    assert listed["recent"][0]["dispatched"] == "order on uagv/v2/p7/amr-01/order"

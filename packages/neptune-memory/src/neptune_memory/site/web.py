@@ -10,6 +10,9 @@ small JSON API over the same query layer as the MCP tools (``query.py``, ``insig
 - ``GET /api/source?file=F&locator=L``: the cited span: lines of a text file, rows of a table,
   a PDF page's blocks (from the compiler's package), or an image region.
 - ``POST /api/confirm`` ``{"proposal", "answer"}``: appends a ``confirm`` entry (spec §7).
+- ``GET /api/actions``, ``POST /api/actions/approve|reject`` ``{"id"}``: proposed actions and a
+  person's answer (``actions.py``, spec §15); an approved robot action is dispatched to the
+  fleet manager over MQTT.
 - ``GET /events``: server-sent events, one ``{"seq", "clock"}`` each time the log grows.
 
 The model is folded once and then tails the log (``log.Tail``), like the MCP server, so it follows
@@ -19,14 +22,11 @@ The model is folded once and then tails the log (``log.Tail``), like the MCP ser
 from __future__ import annotations
 
 import csv
-import importlib
-import importlib.util
 import json
 import re
 import struct
 import threading
 import time
-from dataclasses import asdict, is_dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import islice
@@ -34,11 +34,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
+from neptune_memory.site import actions, insights, log, query, views
 from neptune_memory.site import confirm as confirm_queue
-from neptune_memory.site import insights, log, query, views
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from neptune_memory.site.query import Answer
     from neptune_memory.site.views import Reading, SiteModel
 
@@ -64,7 +66,8 @@ CONTEXT = 4
 """Lines or rows shown either side of a cited one."""
 LONG_LINE = 160
 """Past this many characters a cited line keeps only one neighbour on each side."""
-ACTIONS = "neptune_memory.site.actions"
+RECENT_ACTIONS = 5
+"""Answered actions the panel keeps showing, newest first."""
 
 
 # --- the model ---------------------------------------------------------------------------------
@@ -73,8 +76,15 @@ ACTIONS = "neptune_memory.site.actions"
 class Site:
     """One site directory: the live model (tailing the log) and what the API answers from it."""
 
-    def __init__(self, site_dir: Path) -> None:
+    def __init__(
+        self,
+        site_dir: Path,
+        broker: str = actions.DEFAULT_BROKER,
+        send: Callable[[str, bytes], None] | None = None,
+    ) -> None:
         self.site_dir = Path(site_dir)
+        self.broker = broker
+        self.send = send
         self.lock = threading.Lock()
         self._tail = log.Tail(self.site_dir)
         self._model = views.SiteModel.empty()
@@ -186,39 +196,48 @@ class Site:
             self._package = (stamp, _read_package(self.site_dir))
         return self._package[1]
 
-    # -- the actions placeholder (#212) --------------------------------------------------------
+    # -- actions (#212) ------------------------------------------------------------------------
 
     def actions(self) -> dict[str, Any]:
-        module = _actions()
-        if module is None:
-            return {"available": False, "items": []}
-        try:
-            return {"available": True, "items": [_plain(a) for a in module.pending(self.site_dir)]}
-        except Exception as error:  # a demo panel: show the error, keep the page up
-            return {"available": True, "items": [], "error": f"{type(error).__name__}: {error}"}
+        """Proposals waiting for a person, then the latest answered ones and what became of them."""
+        with self.lock:
+            every = actions.load_actions(self.model())
+        answered = [a for a in every if a.status != "pending"][-RECENT_ACTIONS:]
+        return {
+            "available": True,
+            "items": [_action(a) for a in every if a.status == "pending"],
+            "recent": [_action(a) for a in reversed(answered)],
+        }
 
     def act(self, verb: str, action_id: str, by: str) -> dict[str, Any]:
-        module = _actions()
-        if module is None or verb not in ("approve", "reject"):
+        """A person's approve or reject; an approved robot action goes to the fleet manager."""
+        if verb == "approve":
+            done = actions.approve(self.site_dir, action_id, by, broker=self.broker, send=self.send)
+        elif verb == "reject":
+            done = actions.reject(self.site_dir, action_id, by)
+        else:
             raise ValueError(f"no action {verb!r}")
-        return {"result": _plain(getattr(module, verb)(self.site_dir, action_id, by=by))}
+        return {"result": _action(done)}
 
 
-def _actions() -> Any:
-    """The human-approved actions module (#212), when this checkout has it."""
-    if importlib.util.find_spec(ACTIONS) is None:
-        return None
-    return importlib.import_module(ACTIONS)
+def _action(action: actions.Action) -> dict[str, Any]:
+    def text(fact: Fact | None) -> str | None:
+        if fact is None:
+            return None
+        value = fact.object.ref if isinstance(fact.object, Ref) else fact.object.value
+        return str(value).removeprefix(f"{action.id}: ")
 
-
-def _plain(value: Any) -> Any:
-    if isinstance(value, Fact):
-        return {"id": value.id, **value.to_json()}
-    if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
-    if isinstance(value, dict | list | str | int | float | bool) or value is None:
-        return value
-    return str(value)
+    return {
+        "id": action.id,
+        "verb": action.verb,
+        "target": action.target,
+        "zone": action.zone,
+        "reason": action.reason,
+        "status": action.status,
+        "by": action.by,
+        "dispatched": text(action.dispatched),
+        "outcome": text(action.outcome),
+    }
 
 
 # --- the snapshot ------------------------------------------------------------------------------
@@ -577,6 +596,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (KeyError, ValueError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+        except OSError as error:  # the broker is down: the approval is logged, not dispatched
+            self._json({"error": f"not dispatched: {error}"}, HTTPStatus.BAD_GATEWAY)
 
     def _json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         self._send(json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json", status)
@@ -612,9 +633,17 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(self.poll)
 
 
-def serve(site_dir: Path, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
-    """A server for ``site_dir`` (not yet serving: call ``serve_forever``)."""
-    handler = type("SiteHandler", (Handler,), {"site": Site(Path(site_dir))})
+def serve(
+    site_dir: Path,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    *,
+    broker: str = actions.DEFAULT_BROKER,
+    send: Callable[[str, bytes], None] | None = None,
+) -> ThreadingHTTPServer:
+    """A server for ``site_dir`` (not yet serving: call ``serve_forever``). Approved actions go to
+    the fleet manager over MQTT on ``broker`` (or through ``send``)."""
+    handler = type("SiteHandler", (Handler,), {"site": Site(Path(site_dir), broker, send)})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
     return server

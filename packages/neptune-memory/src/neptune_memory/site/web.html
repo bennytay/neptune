@@ -51,6 +51,8 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
   margin: 0 0 8px; font-weight: 600; display: flex; justify-content: space-between; }
 #map svg { width: 100%; height: auto; display: block; }
+.records { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.records a { margin-left: 8px; }
 .side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .wide { grid-column: 1 / -1; }
 .cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; }
@@ -126,11 +128,11 @@ svg .hot { animation: flow 0.8s linear infinite; stroke-dasharray: 6 4; }
     <span><i style="background:var(--fault);border-color:var(--fault-b)"></i>fault</span>
     <span><i style="background:var(--idle);border-color:var(--idle-b)"></i>idle / docked</span>
     <span><i style="background:var(--stale);border-color:var(--stale-b);border-style:dashed"></i>stale / unknown</span>
-  </span></h2><svg id="svg" viewBox="0 0 1000 600"></svg></section>
+  </span></h2><svg id="svg" viewBox="0 0 1000 600"></svg><div id="records" class="records"></div></section>
   <div class="side">
     <section><h2><span>Findings</span><span class="badge inferred">inferred</span></h2><div id="findings" class="scroll"></div></section>
     <section><h2><span>Pending confirmation</span></h2><div id="pending"></div></section>
-    <section id="actions-panel" hidden><h2><span>Actions awaiting approval</span></h2><div id="actions"></div></section>
+    <section id="actions-panel"><h2><span>Actions</span><span class="legend">Claude proposes · you approve</span></h2><div id="actions"></div></section>
   </div>
   <div class="wide cols">
     <section><h2><span>Live state</span><span id="state-at" class="legend"></span></h2><div class="scroll" id="table"></div></section>
@@ -225,7 +227,13 @@ function render() {
 }
 
 function drawMap() {
-  const svg = $("svg"), W = 1000, P = 14, BOX = 116, places = snap.places, assets = snap.assets;
+  // an asset only the records name (a CMMS row: no zone, location or live state) is listed, not drawn
+  const recordsOnly = (a) => !a.place && a.status === "unknown";
+  const records = snap.assets.filter(recordsOnly);
+  $("records").innerHTML = records.length
+    ? `Records only (no location or live state):${records.map((a) => `<a href="#" data-entity="${esc(a.id)}" title="${esc(a.name)}">${esc(short(a.id))}</a>`).join("")}`
+    : "";
+  const svg = $("svg"), W = 1000, P = 14, BOX = 116, places = snap.places, assets = snap.assets.filter((a) => !recordsOnly(a));
   const byId = Object.fromEntries(places.map((p) => [p.id, p]));
   const areas = places.filter((p) => p.type === "area");
   const kids = (id) => places.filter((p) => p.parent === id && p.type !== "area");
@@ -366,15 +374,20 @@ function drawPending() {
   ).join("") || `<div class="empty">nothing waits for a person</div>`;
 }
 
+let actionError = "";
 async function loadActions() {
   const a = await (await fetch("/api/actions")).json();
-  $("actions-panel").hidden = !a.available;
-  if (!a.available) return;
-  $("actions").innerHTML = (a.error ? `<div class="empty">${esc(a.error)}</div>` : "") + (a.items.map((it) => {
-    const id = it.id ?? it.action_id ?? it.fact_id ?? "";
-    const text = it.text ?? it.summary ?? it.description ?? JSON.stringify(it);
-    return `<div class="item"><div>${esc(text)}</div><div class="btns"><button data-act="approve" data-id="${esc(id)}">Approve</button><button data-act="reject" data-id="${esc(id)}">Reject</button></div></div>`;
-  }).join("") || `<div class="empty">no actions waiting</div>`);
+  const what = (it) => `${esc(short(it.target))} <b>${esc(it.verb.replace("_", " "))}</b>${it.zone ? " " + esc(short(it.zone)) : ""}`;
+  const pending = a.items.map((it) =>
+    `<div class="item"><div class="row" data-fact="${esc(it.id)}">${what(it)} <span class="badge inferred">proposed</span><span class="badge pending">pending</span></div>
+     <div class="rel">${esc(it.reason)}</div>
+     <div class="btns"><button data-act="approve" data-id="${esc(it.id)}">Approve</button><button data-act="reject" data-id="${esc(it.id)}">Reject</button></div></div>`
+  ).join("") || `<div class="empty">nothing proposed; ask Claude to propose an action</div>`;
+  const recent = a.recent.map((it) =>
+    `<div class="item"><div class="row" data-fact="${esc(it.id)}">${what(it)} <span class="badge">${esc(it.status)}</span>${it.by ? `<span class="badge">by ${esc(it.by)}</span>` : ""}</div>
+     <div class="rel">${[it.dispatched, it.outcome].filter(Boolean).map(esc).join("<br>")}</div></div>`
+  ).join("");
+  $("actions").innerHTML = (actionError ? `<div class="empty">${esc(actionError)}</div>` : "") + pending + recent;
 }
 
 // ---- clicks ---------------------------------------------------------------------------------
@@ -387,7 +400,9 @@ document.addEventListener("click", async (e) => {
     await post("/api/confirm", { proposal: t.dataset.confirm, answer: t.dataset.answer });
     refresh();
   } else if (t.dataset.act) {
-    await post(`/api/actions/${t.dataset.act}`, { id: t.dataset.id });
+    t.disabled = true;
+    const res = await post(`/api/actions/${t.dataset.act}`, { id: t.dataset.id });
+    actionError = res.ok ? "" : (await res.json()).error;
     refresh();
   } else if (t.dataset.finding) {
     const it = snap.findings.items[+t.dataset.finding];

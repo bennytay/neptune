@@ -438,8 +438,8 @@ feeds:                                   # one entry per envelope `source`
   facts the log lacks.
 - The MCP server tails the log (`log.Tail`) and applies new entries before each call;
   `neptune_site_changes(since_seq)` (`query.changes`) lists facts appended after a seq.
-- `make site-live` runs `broker` (amqtt, anonymous), `live` and `publish` (`START=2026-10-20T09:55:00`,
-  earlier messages at once). No auth, TLS or reconnect handling.
+- `make site-live` runs `broker` (amqtt, anonymous), `live` and `publish` (`START` is 09:55 on Plant 7's
+  day and 10:02 on Harbor's, earlier messages at once). No auth, TLS or reconnect handling.
 
 ## 14. Web view (#210)
 
@@ -451,16 +451,20 @@ feeds:                                   # one entry per envelope `source`
 - **Map:** layouts state no coordinates, so it is laid out from `part_of` (areas hold cells and zones),
   `located_in` and the live `in_zone`; a machine with neither sits on its area's floor beside what it
   `feeds`. Colour reads mode, health and the current task's state; stale is grey and dashed. A stated
-  `same_as` group is one glyph. `feeds` edges out of a faulted or waiting node flow in the fault colour.
+  `same_as` group is one glyph. An asset with no place and no live state (a CMMS-only row such as
+  `MR-1141`) is listed under the map as "records only", not drawn. `feeds` edges out of a faulted or waiting node flow in the fault colour.
 - **API** (JSON, read through `query.py` / `insights.py`): `/api/snapshot?at=T|seq=N` (the time slider
   sets `at` or `as_of_seq`), `/api/why?fact=ID`, `/api/source?file=&locator=` (lines of a text file, a
   CSV/XLSX row, a PDF page's blocks from the compiler's package, a JSON object, an image region),
   `POST /api/confirm`, and `/events` (server-sent events each time the log grows; the model tails it
   with `log.Tail`). `#fact=ID` or `#entity=REF` in the URL opens a fact or an entity.
-- `FactLog` appends under a lock (`.neptune/log.lock`) and numbers on from any entries another writer
-  added, so a confirm from the page while `live` runs never reuses a `seq`.
-- An actions panel calls `neptune_memory.site.actions` (`pending`, `approve`, `reject`, #212) when that
-  module exists, and is hidden otherwise.
+- **Actions panel** (§15): `GET /api/actions` lists pending proposals and the last five answered ones
+  (status, the message as dispatched, the outcome); `POST /api/actions/approve|reject {"id"}` calls
+  `actions.approve` / `actions.reject`. `web --broker` (site-live passes its `BROKER`) is where an
+  approved robot action goes, so approving from the page dispatches it under `make site-live`.
+- `make site-show` (#214) prints a 3-minute script (`docs/site-model/show/<SITE>.txt`) and runs
+  `site-live` at `SPEED=10` with the page opened.
+
 ## 15. Actions (#212)
 
 - **Propose:** `site/actions.py` `propose(site_dir, action, target, reason, cites, zone=None)` and MCP

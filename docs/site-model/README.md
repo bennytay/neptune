@@ -36,6 +36,8 @@ uv run --all-packages --all-groups pytest packages/neptune-memory/tests/site -q
 make check PKG=neptune-memory               # once, before the PR
 make site-live                              # broker + live + publish at 60x (spec §13)
 make site-web                               # the web view of site-demo/ (spec §14); site-live serves it too
+make site-show                              # the demo: site-live at 10x + web view + a 3-minute script
+make site-demo SITE=public                  # real UR3 data (real-data.md)
 ```
 
 PRs: branch `<issue>-<slug>`, body `Closes #<issue>`, commit trailer `Refs: #<issue>`. Merge on green CI.

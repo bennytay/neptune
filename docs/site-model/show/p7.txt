@@ -1,0 +1,25 @@
+
+=== Neptune site-show: Plant 7, live at SPEED x (3-minute demo) ===
+
+0:00  Open the web view (URL below). The feed starts at 09:55 site time; every glyph is a robot or
+      machine, coloured by its live mode, health and task. MR-1141, MR-1142 and MR-1143 sit under
+      the map as "records only": the CMMS names them, nothing places them. Under "Pending
+      confirmation", Neptune asks whether MR-1142 is amr-02 (same serial): click "Yes, same" and
+      MR-1142 joins amr-02's glyph.
+0:45  Watch cell C3. At about 10:05 site time CV-2 jams (red), arm-c3 starves, then amr-01 and
+      amr-02 wait on their tasks (amber). The feeds arrows into C3 turn red. Click CV-2, then its
+      health fact: the cited feed line opens with the quote highlighted.
+1:15  Findings (right): click "starvation chain" to see the inferred rule and the facts behind it.
+
+1:30  In Claude Code (MCP line below), ask:
+      1. "Give me the shift report for shift A."
+      2. "What is blocked right now, and why?"
+      3. "Who is qualified and on shift to reset arm-c3?"
+      4. "Propose sending amr-01 to aisle-b to clear aisle-a. Cite the facts."
+2:30  In the web view's Actions panel, click Approve on amr-01 send_to aisle-b. The fleet manager
+      gets a VDA 5050 order; within about 30 site seconds amr-01 moves to aisle-b on the map and
+      the panel shows dispatched, then done.
+      5. Back in Claude: "What happened to the action you proposed?" (intent, dispatched, outcome,
+         each cited).
+
+Script: docs/site-model/show/p7.txt   Ctrl-C stops everything.

@@ -10,15 +10,44 @@ feeds what. Every answer cites the file, row, page or feed line it rests on, and
 Needs `uv` and GNU make 3.82+. `make setup` once, then:
 
 ```
-make site-demo                  # Plant 7 (assembly: conveyor, arm cell, AMR fleet); prints the MCP line
+make site-show                  # the demo: Plant 7 live at 10x, the web view, and a 3-minute script
+make site-show SITE=harbor      # the same for Harbor DC
+```
+
+`site-show` prints what to watch on the map, what to click and which questions to ask Claude, plus the
+`claude mcp add neptune-site -- ...` line, then starts a local MQTT broker, Neptune subscribed to it, the
+site's robot feeds replayed from just before the incident, and the web view at `http://127.0.0.1:8765/`.
+Ctrl-C stops everything.
+
+![The Plant 7 web view during the CV-2 jam](docs/site-model/img/web-view-jam.png)
+
+The map is laid out from the site's own declarations (areas, cells, zones, what feeds what) and coloured by
+each robot's live mode, health and task. Click any glyph or fact and the cited source opens: the feed line,
+spreadsheet row, PDF block or photo region it rests on. Findings are Neptune's inferred, deterministic
+rules (starvation chains, qualification gaps, stale sources). Assets only a CMMS export names, with no
+location or live state, are listed under the map as "records only".
+
+**Actions, approved by a person.** Ask Claude to propose one ("send amr-01 to aisle-b"): it logs an inferred
+proposal citing its reasons. It shows in the page's Actions panel; Approve sends the robot's fleet manager a
+VDA 5050 `order`, and the panel and the log follow it through intent, dispatched and outcome, each cited. No
+MCP tool approves, and actions never touch safety functions.
+
+![Approving Claude's proposed action in the web view](docs/site-model/img/web-view-action.png)
+
+Other ways in:
+
+```
+make site-demo                  # Plant 7 built to the end of its story; prints the MCP line
 make site-demo SITE=harbor      # Harbor DC (warehouse: sorter, legged inspector, humanoids, goods-to-person)
+make site-demo SITE=public      # real public data: a UR3 cobot's controller export (below)
+make site-web                   # the web view over an already-built site
+make site-live                  # live at 60x without the script (SPEED=..., SITE=harbor)
 claude mcp add neptune-site -- <the "MCP:" line it printed>
 ```
 
-**Live:** `make site-live` starts a local MQTT broker, subscribes Neptune to it and replays Plant 7's feeds at
-60x from 09:55 (the conveyor jams about 10 s in). The MCP server picks up each new log entry before every
-call; `neptune_site_changes` lists what arrived since your last answer. Drop a file into
-`site-demo/static/` while it runs and it is ingested. Ctrl-C stops all three.
+While a site is live, the MCP server picks up each new log entry before every call;
+`neptune_site_changes` lists what arrived since your last answer. Drop a file into `site-demo/static/` and
+it is ingested.
 
 **Your own folder:** lay it out as `<dir>/static/` (a `layout.yaml` naming your areas, robots, machines and
 feed sources, plus your exports: CSV, XLSX, JSON, JSONL, PDF, photos) and `<dir>/feed/*.jsonl` (recorded feed
@@ -74,13 +103,17 @@ What Claude gets back from the `neptune-site` MCP tools (trimmed; real output of
 
 Two names stay two entities until an operator says yes (`python -m neptune_memory.site confirm <dir>`;
 `make site-demo` answers yes for the demo). Gold questions pin all of this in CI: Plant 7 8/8 and 3 insight
-questions, Harbor 5/5 and 2 insight questions, each checked by its cited facts, never by wording.
+questions, Harbor 5/5 and 2 insight questions, the public UR3 site 5/5 (nightly), each checked by its cited facts, never by wording.
 
 ## What's real, what's synthetic
 
-- **Synthetic:** both sites. Plant 7 and Harbor DC are deterministic generated corpora (`generate --site`):
+- **Real data:** `make site-demo SITE=public` fetches UCI's **UR3 CobotOps** export (CC BY 4.0, 1.7 MB,
+  sha256-pinned, not committed): 7,409 rows of one Universal Robots UR3's controller log with protective
+  stops, grip losses, cycles and joint temperatures. One mapping file turns it into facts, and 5 gold
+  questions cite its workbook cells ([real-data.md](docs/site-model/real-data.md)).
+- **Synthetic:** both demo sites. Plant 7 and Harbor DC are deterministic generated corpora (`generate --site`):
   invented people, regulations, work orders and two days of feed messages. No real robot or plant is
-  connected. Feed payloads are JSON in the shape of each dialect (Sparkplug metrics, OPC UA node values,
+  connected; actions go to a simulated fleet manager that answers a VDA 5050 order. Feed payloads are JSON in the shape of each dialect (Sparkplug metrics, OPC UA node values,
   VDA 5050 state, Open-RMF fleet states, ROS 2 `DiagnosticArray`), not the binary wire formats.
   The whiteboard photo's text is a recorded model extraction; `extract-photos` re-records it if you set
   `ANTHROPIC_API_KEY` (`uv sync --extra anthropic`).
