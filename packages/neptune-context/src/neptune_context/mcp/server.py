@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from neptune.model.jsonvalue import JsonValue
+    from neptune_context.mcp.site import SiteTools
     from neptune_context.packets.model import ContextPacket
     from neptune_context.query.model import Query
     from neptune_context.sdk.client import AsyncClient
@@ -711,13 +712,15 @@ def build_server(
     name: str = SERVER_NAME,
     sources: SourceIndex | None = None,
     links: bool = True,
+    site: SiteTools | None = None,
 ) -> Server[Any]:
-    """An MCP server whose every answer comes from ``client``. With ``sources`` (ADR 0016) each
+    """An MCP server whose every answer comes from ``client`` (and, with ``site``, the
+    ``neptune_site_*`` tools over a live site model, ``mcp.site``). With ``sources`` (ADR 0016) each
     answer names every cited source's corpus file and place, and a hydration the engine cannot
     serve says where the index places the source. ``links=False`` (an engine with no Ledger
     catalog, ADR 0020) leaves the resource links out of packet answers."""
     server: Server[Any] = Server(name, version=__version__, instructions=INSTRUCTIONS)
-    tools = _tools()
+    tools = _tools() + (site.tools() if site is not None else [])
 
     @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
     async def list_tools() -> list[types.Tool]:
@@ -725,6 +728,8 @@ def build_server(
 
     @server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]
     async def call_tool(tool: str, arguments: dict[str, Any]) -> types.CallToolResult:
+        if site is not None and tool.startswith("neptune_site_"):
+            return site.call(tool, arguments)
         try:
             if tool in (TOOL_QUERY, TOOL_WHY, TOOL_DIFF, TOOL_COMPARE):  # checks shape
                 packet = await client.query(query_from_arguments(tool, arguments))

@@ -5,6 +5,22 @@ description: Answer questions about robot deployments (incidents, configurations
 
 # Neptune: cited answers about robot deployments
 
+## Site questions: use the `neptune_site_*` tools
+
+When the server offers `neptune_site_*` tools (started with `--site <site_dir>`), answer every
+question about the live site (what is blocked, why output dropped, who is qualified and on shift,
+what changed, what is unknown) with them, not with the tools below:
+
+- `neptune_site_resolve` turns a name (`MR-1142`, `cv-2`) into entity refs; pass refs to the rest.
+- `neptune_site_impact` (what is blocked), `neptune_site_state_at` (one entity now or at a time),
+  `neptune_site_timeline`, `neptune_site_diff` (what changed between two times), `neptune_site_find`
+  (who holds a qualification, which rule requires it), `neptune_site_gaps` (stale, unknown,
+  pending), `neptune_site_why` (one `fact:` id), `neptune_site_search_evidence`, `neptune_site_sql`.
+- Times are site-clock `YYYY-MM-DDTHH:MM:SS`, never converted. Leave `at` out for "now".
+- Each line ends `[S<n>]`; the `Sources:` footer gives the file and line, row or page. Keep the key
+  and name the file in your answer. Say `stale`, `unknown`, `ambiguous`, `pending` and `inferred`
+  as the line does; a pending proposal is not a fact until an operator confirms it.
+
 Neptune holds typed, cited claims about machines of every kind (arms, mobile bases, legged robots,
 drones, vessels, vehicles, fleets), their sites, runs, incidents and configurations. The `neptune`
 MCP server is read-only. Never answer from memory or guesswork when Neptune can be asked.
