@@ -6,6 +6,7 @@ and the Ledger version, whatever order packages are registered in. ``resolve`` c
 contract suite close the file.
 """
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final
@@ -371,6 +372,10 @@ def _deep_finding(depth: int) -> Any:
     return change
 
 
+@pytest.mark.skipif(
+    bool(os.environ.get("PYTEST_XDIST_WORKER")),
+    reason="probes the interpreter's recursion limit, which an xdist worker's deeper stack lowers",
+)
 def test_a_finding_nested_to_the_compilers_limit_registers(pg_uri: str, tmp_path: Path) -> None:
     """Free-form ``details`` may nest as deep as the compiler's readers accept; indexing must not
     run out of stack where they did not (a rebuild from main would otherwise fail)."""

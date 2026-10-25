@@ -7,9 +7,8 @@ form; this is the reference.
 
 ```bash
 git clone git@github.com:bennytay/neptune.git && cd neptune
-make setup            # uv sync --all-groups; installs Python from .python-version if needed
-uv run pre-commit install
-make check
+make setup            # uv sync --all-groups, plus the pre-commit hooks
+make check            # lint, types, fast tests in parallel (what PR CI runs); `make check-all` adds slow tests
 ```
 
 ## Issue lifecycle

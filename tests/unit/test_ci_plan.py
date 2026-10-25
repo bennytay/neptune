@@ -62,6 +62,12 @@ def test_root_docs_and_scripts_are_the_compilers() -> None:
     )
 
 
+def test_markdown_outside_the_schema_and_readme_skips_the_compiler() -> None:
+    assert _plan("docs/architecture.md", "AGENTS.md", "docs/adr/0070-x.md") == (False, (), False)
+    assert _plan("docs/schema/README.md")[0] is True
+    assert _plan("docs/a.md", "src/neptune/x.py")[0] is True
+
+
 def test_contracts_run_every_member_but_not_the_compiler() -> None:
     assert _plan("contracts/ledger.schema.json") == (False, tuple(sorted(MEMBERS)), False)
 
@@ -70,7 +76,7 @@ def test_harness_runs_the_platform_job_which_lints_it() -> None:
     """harness/ is the platform's: its tests live in packages/neptune-platform/tests, and the
     platform job's `make lint` formats and lints harness/ (the Makefile's MEMBER_DIRS)."""
     assert _plan("harness/runner.py") == (False, ("neptune-platform",), False)
-    assert _plan("harness/x.py", "docs/y.md")[:2] == (
+    assert _plan("harness/x.py", "scripts/y.py")[:2] == (
         True,
         ("neptune-ledger", "neptune-platform", "neptune-recall"),
     )
