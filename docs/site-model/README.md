@@ -35,6 +35,7 @@ frozen, so import it and don't reshape it.
 make test-fast PKG=neptune-memory           # while iterating
 uv run --all-packages --all-groups pytest packages/neptune-memory/tests/site -q
 make check PKG=neptune-memory               # once, before the PR
+make site-live                              # broker + live + publish at 60x (spec §13)
 ```
 
 PRs: branch `<issue>-<slug>`, body `Closes #<issue>`, commit trailer `Refs: #<issue>`. Merge on green CI.

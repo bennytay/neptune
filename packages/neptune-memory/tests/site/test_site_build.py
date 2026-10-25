@@ -109,7 +109,14 @@ def test_site_replay_paces_and_matches_build(tmp_path: Path) -> None:
 
 
 def test_site_build_fleet_messages_are_seen_per_robot() -> None:
-    from neptune_memory.site.build import _fleet_robot
+    import yaml
 
-    assert _fleet_robot(StubMessage("t", "fleet", "uagv/v2/p7/amr-03/state")) == "amr-03"
-    assert _fleet_robot(StubMessage("t", "plc.cv2", "spBv1.0/P7/DDATA/cv2-edge/cv2")) is None
+    from neptune_memory.site.corpus.static import MAPPINGS
+    from neptune_memory.site.mappers import Mapping, device
+    from neptune_memory.site.replay import FeedMessage
+
+    mapping = Mapping(yaml.safe_load(MAPPINGS))
+    fleet = FeedMessage("t", "fleet", "uagv/v2/p7/amr-03/state", {}, "feed/fleet.jsonl", 1)
+    plc = FeedMessage("t", "plc.cv2", "spBv1.0/P7/DDATA/cv2-edge/cv2", {}, "feed/plc.jsonl", 1)
+    assert device(fleet, mapping) == "amr-03"
+    assert device(plc, mapping) is None

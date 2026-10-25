@@ -1,112 +1,141 @@
 # Neptune
 
-**Ask Claude what happened to your robots, and get answers cited to the exact row, page or byte of your own
-files.**
+**A live, cited model of a whole robot site that Claude can ask.** Neptune folds a site's exports, documents
+and live robot feeds into one fact log: robots, machines, people by role and shift, tasks, rules, and what
+feeds what. Every answer cites the file, row, page or feed line it rests on, and says `stale`, `unknown` or
+`pending` instead of guessing.
 
-Neptune compiles the evidence robotics teams already have (MCAP and ROS 2 bags, CMMS work orders, change
-tickets, syslogs, incident PDFs, URDF, calibration and configs) into a cited, provenance-preserving memory.
-Claude Code asks it through an MCP server. Nothing is guessed: a blank stays a blank, two names for one robot
-stay two until a source says they are one, and clock times are shown as declared, never converted.
+## Run it
 
-Every type of robot: arms, mobile bases, legged platforms, humanoids, drones, marine vehicles, autonomous
-vehicles and fleets. Nothing assumes one morphology.
+Needs `uv` and GNU make 3.82+. `make setup` once, then:
+
+```
+make site-demo                  # Plant 7 (assembly: conveyor, arm cell, AMR fleet); prints the MCP line
+make site-demo SITE=harbor      # Harbor DC (warehouse: sorter, legged inspector, humanoids, goods-to-person)
+claude mcp add neptune-site -- <the "MCP:" line it printed>
+```
+
+**Live:** `make site-live` starts a local MQTT broker, subscribes Neptune to it and replays Plant 7's feeds at
+60x from 09:55 (the conveyor jams about 10 s in). The MCP server picks up each new log entry before every
+call; `neptune_site_changes` lists what arrived since your last answer. Drop a file into
+`site-demo/static/` while it runs and it is ingested. Ctrl-C stops all three.
+
+**Your own folder:** lay it out as `<dir>/static/` (a `layout.yaml` naming your areas, robots, machines and
+feed sources, plus your exports: CSV, XLSX, JSON, JSONL, PDF, photos) and `<dir>/feed/*.jsonl` (recorded feed
+messages, one `{t, source, topic, payload}` envelope per line). Then:
+
+```
+uv run --all-packages --all-groups python -m neptune_memory.site build <dir>
+uv run --all-packages --all-groups python -m neptune_memory.site draft-mapping <dir> static/cmms/work_orders.csv
+```
+
+`build` logs every file it cannot map as `not mapped` (still searchable, never a fact). `draft-mapping` drafts
+the entry for one file; check it, save it into `<dir>/static/neptune.mappings.yaml`
+([spec §12](docs/site-model/spec.md)) and `build` again. The Claude Code skill does the same loop and shows
+you every draft before it saves. No mapper code names a site: Plant 7 and Harbor differ only in that file.
+
+## Ask it
+
+What Claude gets back from the `neptune-site` MCP tools (trimmed; real output of `make site-demo`):
+
+**"What did the CV-2 jam hold up?"** (Plant 7, `neptune_site_insights` at 10:10)
 
 ```text
-$ make up SRC=~/site-S-007            # 15 files: work orders, change tickets, runs, an incident PDF, URDFs
-up: green in 4 s; memory holds 199 claims (30 clock, 23 event, 7 machine, 4 run, 8 stream)
-
-> what was work order WO-26-0414?    (what Claude gets back from the neptune MCP server, trimmed)
-
-event named "WO-26-0414" (valid at 2026-04-14 19:30, local wall time, zone not stated):
-1. Stated: involves machine "cmms.asset:AMR-07". [I2][E1][E2][E3]
-2. Stated: stated_cause "Localisation drift after map update". [I3][E2][E5][E3]
-3. Stated: at_site site "cmms.site:S-007". [I4][E6][E2][E3]
-Sources: F1 "cmms/work_orders.csv" ... [E1] F1 row 7, column 3 "Asset ID" ... [E5] F1 row 7, column 6 "Problem"
+- machine:cv-2 finding = "starvation chain: machine:cv-2 fault:JAM_PE3 at 10:05:02 → robot:arm-c3
+  idle_starved at 10:05:30 → task:T-8812 (robot:amr-01, robot:amr-02) waiting at 10:06:00 (downstream in
+  the topology, within 120 s; the fault holds still)" since 10:05:02 · inferred [S7][S8][S9][S10]...
+! findings are inferred by deterministic rules: correlations, not causes
+[S7] feed/plc_cv2.jsonl line 3423 "JAM_PE3"
+[S9] feed/arm_c3.jsonl line 3428 "no part at pick position for 28 s; waiting for infeed"
+[S10] static/layout.yaml line 26 "- {subject: machine:cv-2, predicate: feeds, object: cell:c3}"
 ```
 
-**Try it:** the [15-minute quickstart](#15-minute-quickstart) runs the demo plant in one paste.
-**Your data:** [`make up SRC=<folder>`](#run-it-on-your-own-folder).
+**"Who can reset the tripped sorter right now?"** (Harbor, `neptune_site_insights` at 10:20)
 
-> **What's real, what's not yet (v0.1)**
->
-> - **Real:** ingest of MCAP, ROS 2 bags, CSV/XLSX, PDF, URDF, YAML configs and more into a deterministic,
->   cited package; mapping of common CSV exports (CMMS, ServiceNow, Jira, Linear, syslog, registers) by their
->   columns; the memory graph; Claude Code answers with citations. Linux, tested on every PR; macOS, nightly.
-> - **Not yet:** a CSV whose columns match no shipped preset is ingested but not turned into events; a robot
->   named differently in two systems stays two ids until you declare aliases in a `neptune.yaml`; no time
->   zones unless you state them; on macOS adapters run without the sandbox (it needs Linux); no hosted
->   service; pre-alpha APIs.
-> - **Next (M1, in progress):** a live model of a whole site (robots, machines, people by role and shift,
->   work, rules) kept current as evidence arrives; design in `docs/site-model/`. Neptune is a demo project.
-
-## Run it on your own folder
-
-Point it at a folder of your files (MCAP or ROS 2 bags, CSV exports, PDFs, URDF, configs). The folder is
-only read; nothing to write first:
-
-```
-make up SRC=~/my-robot-logs
-cd up/my-robot-logs/claude && claude
+```text
+- machine:sort-1 finding = "qualification gap: machine:sort-1 fault:OVERTEMP_M2 needs
+  qualification:electrical-isolation (rule:hsr-7-3.4) and no on-shift holder is free from 10:12:10 to now;
+  its only holder, person:reyes, is on break 10:00:00 to 10:30:00" since 10:12:10 · inferred [S11][S1][S5][S12][S13]
+[S1] static/docs/HSR-7_excerpt.pdf page 1 block 2 "3.4 After a thermal-overload trip, a powered sorter drive
+     is inspected and reset only by a person qualified for electrical isolation."
+[S5] static/roster/roster.csv row 2 col "Certifications" "electrical-isolation|sorter-reset"
+[S11] feed/sorter_plc.jsonl line 1035 "OVERTEMP_M2"
+[S13] static/roster/roster.csv row 6 col "Break from" "10:00:00"
 ```
 
-**On macOS** (make 3.81, and the adapter sandbox needs Linux), run it with `uv` and say the adapters may
-run unconfined over a folder you trust:
-`uv run --all-packages --all-groups python -m harness.up ~/my-robot-logs --isolation in_process`.
-The quickstart's demo does this by itself on macOS, and says so.
+**"Is fleet robot gtp-03 the CMMS asset AMR-17?"** (Harbor, `neptune_site_resolve`, before anyone confirms)
 
-It ingests the folder, maps every CSV a shipped Deploy preset fits by its columns (CMMS work orders and
-downtime logs, ServiceNow changes, Jira and Linear tickets, syslogs, asset, risk and zone registers,
-requalification tests) and incident-report PDFs, builds the memory graph and writes a Claude Code folder
-over it. `up/my-robot-logs/up.md` says what each stage did and what memory now holds. Over the demo's S-007
-site folder (15 files, no setup) that is 4 runs, 7 machine ids, 23 events (work orders, changes,
-requalification, the incident) in about 5 s.
+```text
+- robot:AMR-17 serial = "GTP-4471" · stated [S1]
+- robot:AMR-17 same_as = robot:gtp-03 · inferred, pending [S1][S3]
+[S1] static/cmms/assets.json json /assets/2/serial "GTP-4471"
+[S3] feed/rmf_fleet.jsonl line 3 "GTP-4471"
+```
 
-- **No `neptune.yaml`:** each CSV's first row is read as its header (`--csv-header none` says not). A
-  machine named in two systems stays two ids until you state they are one: `neptune init-manifest SRC`
-  drafts a commented manifest; fill in its `machines:` aliases to say so.
-- **A CSV no preset fits** is ingested and searchable, but not mapped to events. Copy a preset from
-  `packages/neptune-deploy/src/neptune_deploy/lifecycle/presets/`, rename its columns, and pass a
-  declaration with `make up SRC=... ARGS="--deploy my-deploy.json"` (`harness/acceptance/deploy.json` is one).
+Two names stay two entities until an operator says yes (`python -m neptune_memory.site confirm <dir>`;
+`make site-demo` answers yes for the demo). Gold questions pin all of this in CI: Plant 7 8/8 and 3 insight
+questions, Harbor 5/5 and 2 insight questions, each checked by its cited facts, never by wording.
 
-## Status
+## What's real, what's synthetic
 
-**Demo v1 runs end to end.** One command takes a messy two-site hand-over (an arm cell, an AMR fleet, a legged
-inspector; corpus `acceptance 2.3.0`) through every layer and asks its nine gold questions through the `neptune`
-MCP tools. Every answer is cited, and CI checks the citations by claim id, never by wording.
+- **Synthetic:** both sites. Plant 7 and Harbor DC are deterministic generated corpora (`generate --site`):
+  invented people, regulations, work orders and two days of feed messages. No real robot or plant is
+  connected. Feed payloads are JSON in the shape of each dialect (Sparkplug metrics, OPC UA node values,
+  VDA 5050 state, Open-RMF fleet states, ROS 2 `DiagnosticArray`), not the binary wire formats.
+  The whiteboard photo's text is a recorded model extraction; `extract-photos` re-records it if you set
+  `ANTHROPIC_API_KEY` (`uv sync --extra anthropic`).
+- **Real:** everything that reads them. The Neptune compiler ingests the files (CSV, XLSX, JSON, PDF, PNG)
+  into cited packages; one mapping file per site turns rows, blocks and feed fields into facts; the fact log,
+  views, identity proposals, insights and MCP tools are the same code for any site. `site-live` is a real
+  MQTT broker (amqtt) and client (paho-mqtt): it records each message, then logs it, and a rebuild from the
+  recording gives the same bytes.
+- **Not there:** no MQTT auth, TLS or reconnects; no hosted service. Insights are five deterministic rules
+  (starvation chains, qualification gaps, stale sources, changes before faults, regulation checks):
+  correlations, never causes. A PDF's rules need a hand-written `documents:` entry; `draft-mapping` covers
+  CSV and JSONL tables and feeds only. Times are the site's clock, never converted.
 
-- **Real:** compiler ingest · Deploy's lifecycle and event-log mapping · the Ledger's catalog (embedded
-  PostgreSQL) · Memory's consolidation (byte-identical to its committed snapshot) · Context's local engine
-  and MCP server · Deploy's evidence-pack PDFs. CI runs all of it.
-- **Answered today (22 of 46 gold claims supported)**, asked exactly as the Claude Code skill asks
-  (`neptune_entities`, a one-hop read of the incident, `neptune_compare_runs` of the last good run and the
-  incident run). *What happened:* the fingers struck PF-3, collision detection stopped the arm, the E-stop at
-  OP-2. *What changed since the last good run:* WO-26-0911 replaced the finger set (FS-0340) and set TCP z
-  145.5 -> 151.5 mm, removed and refitted the wrist camera bracket and deferred the hand-eye recalibration;
-  WO-26-0912 re-ran it with a substitute board; the calibration went from CAL-ARM3A-0818 to CAL-ARM3A-0911
-  (reprojection error 1.86 px, camera z 0.0745 -> 0.0702), which passed because SOP-CELL-021 revision C
-  (2026-09-11) raised the acceptance limit from 0.8 to 2.0 px and dropped the 10-pick verification, naming no
-  change record and no approver. Also: no wrist camera images exist, the cell PC's
-  log runs about a minute and a half late, LEG-01 went to firmware 3.2.0, and INC-0007's stated cause (the
-  rack face 40 mm out). *Did the maintenance follow the vendor's procedure:* service bulletin SB-2026-117
-  applies to the finger set WO-26-0911 installed (FS-0340, one part by a reviewer's stated assertion) and asks
-  for torque 2.5 N.m, TCP z +6.0 mm, a hand-eye recalibration before production after a bracket removal and a
-  change record; the work order raised TCP z by 6.0 mm but deferred the recalibration to the next day.
-  *When did ARM-3A stop:* the controller syslog's protective stop at 14:32:38 and the CMMS downtime log's
-  DT-26-0914-01 at 14:33:10, both local wall time in America/New_York as Deploy's declaration states, shown on
-  their own clocks and never converted; a reviewer's stated assertion makes them one stop.
-- **Not answered yet:** 11 gold claims are cited only through statements about something else (`co_cited`),
-  among them "the calibration caused it" (Neptune states differences, never causes) and the hand-entered CMMS
-  time as the 32 s outlier (both times are shown; the difference is the agent's arithmetic). 13 are gaps: that
-  no change record sets the new TCP, the bags' statuses (events
-  that cite the bag by byte range, not by row), survey text, the stale config export's values, the
-  envelope register. Each is pinned with its reason in `harness/acceptance/answers.json`.
-  No spatial baseline (MVL-135), no LeRobot export, no hosted service; pre-alpha APIs.
+## Development
 
-## 15-minute quickstart
+```bash
+make setup   # uv-managed venv with dev tools
+make check   # lint + mypy --strict + tests (what CI runs); PKG=<name> for one package
+```
 
-On a laptop with `git` and `curl`, paste this into a terminal (CI runs the same lines as
-`scripts/quickstart.sh` on a clean machine, with a 15-minute limit). With GNU make 3.82 or later, `make setup`
-and `make demo` are the same two `uv` commands.
+Working here? Read `AGENTS.md`, then [`docs/site-model/README.md`](docs/site-model/README.md) and
+[`docs/site-model/spec.md`](docs/site-model/spec.md). Neptune is a demo project. Raw sources are never
+rewritten, every value carries provenance, blanks stay blank, and the same inputs give the same bytes.
+
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| `docs/site-model/` | The site model: spec, mapping format, live, insights, gold questions |
+| `docs/architecture.md` | The compiler: package boundaries, evidence vs. derived |
+| `docs/canonical-data-model.md` | The compiler's entities, epistemic states, time/frame/unit primitives |
+| `docs/adapter-contract.md` | The four-method adapter ABI |
+| `docs/developer-workflow.md` | Git, issue and PR workflow |
+| `docs/adr/` | Architecture Decision Records |
+
+## Earlier: robot-incident demo
+
+Before the site model, Neptune answered questions about one robot incident from a two-site hand-over
+(Demo v1: an arm cell, an AMR fleet, a legged inspector). It still runs, and CI still checks it.
+
+- **Your own folder:** `make up SRC=~/my-robot-logs`, then `cd up/my-robot-logs/claude && claude`. It ingests
+  the folder, maps every CSV a Deploy preset fits by its columns, builds the memory graph and writes a Claude
+  Code folder over it. On macOS run `uv run --all-packages --all-groups python -m harness.up <folder>
+  --isolation in_process`.
+- **A clean folder for recording:** `make demo-folder DIR=~/neptune-demo`.
+
+### Status
+
+Demo v1 asks nine gold questions through the `neptune` MCP tools, every answer cited
+(22 of 46 gold claims supported). 11 gold claims are cited only through statements about something else
+(`co_cited`) and 13 are gaps; each is pinned with its reason in `harness/acceptance/answers.json`.
+
+### 15-minute quickstart
+
+On a laptop with `git` and `curl` (CI runs the same lines as `scripts/quickstart.sh` on a clean machine):
 
 ```bash
 command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"; }
@@ -118,96 +147,9 @@ cp packages/neptune-context/claude/mcp.sample.json .mcp.json
 mkdir -p .claude/skills/neptune && cp -R packages/neptune-context/claude/skills/neptune/. .claude/skills/neptune/
 export NEPTUNE_MEMORY_GRAPH=demo/graph.json NEPTUNE_SOURCES=demo/sources.json
 ```
-
-1. Open `demo/incident-timeline-INC-C3-0011.pdf` (and `demo/configuration-traceability-ARM-3A.pdf`). Every line
-   cites the claims it rests on; `demo/answers.md` shows the gold questions answered through the MCP tools,
-   with each gold claim's class and reason.
-2. Run `claude` in the same folder and approve the `neptune` server (`.mcp.json`; the skill is
-   `.claude/skills/neptune`). Ask: **"Why did the arm-cell incident INC-C3-0011 happen?"** and
-   **"What changed on ARM-3A since its last good run?"** Each fact comes back as
-   `[I…][E…]` citations, and the `Sources` footer names each `[E…]` file and its row, page or field;
-   `neptune_why` on a claim shows its evidence. In this path no Ledger catalog is attached, so
-   `neptune_hydrate` (opening an `[E…]` source) answers `unavailable` with the file's corpus path;
-   `make demo` hydrates through the Ledger and checks it.
-
-Re-running the block is safe (`demo/` is rebuilt from scratch; an interrupted run leaves nothing it needs).
-
-**Record or use it from a clean folder**: only the server (`demo/` if `make demo` ran, else the committed
-snapshot), the skill and `MAX_MCP_OUTPUT_TOKENS`, none of the repository's agent instructions:
-
-```
-make demo-folder DIR=~/neptune-demo
-cd ~/neptune-demo && claude
-```
-
-**Use it from Claude Desktop.**
-
-Claude Desktop does not expand `${…}`, so give absolute paths. Add this to `claude_desktop_config.json`
-(Settings, Developer, Edit Config), put the real path of this clone in both places and the output of
-`command -v uv` as `command`, then restart Claude Desktop. The `--memory` and `--sources` paths are `NEPTUNE_MEMORY_GRAPH` and
-`NEPTUNE_SOURCES` of `mcp.sample.json`: the graph and source index `make demo` wrote.
-
-```json
-{
-  "mcpServers": {
-    "neptune": {
-      "command": "uv",
-      "args": [
-        "run", "--directory", "/ABSOLUTE/PATH/TO/neptune", "--all-packages",
-        "python", "-m", "neptune_context.mcp",
-        "--memory", "/ABSOLUTE/PATH/TO/neptune/demo/graph.json",
-        "--sources", "/ABSOLUTE/PATH/TO/neptune/demo/sources.json"
-      ]
-    }
-  }
-}
-```
-
-## Principles in one breath
-
-Raw evidence is immutable · every value has provenance · missingness is explicit · no silent assumptions about
-units, clocks, frames or identities · deterministic and idempotent · parser upgrades create new lineage ·
-partial success over total failure · evidence stays separate from interpretation · all input is untrusted.
-
-## Intended developer experience
-
-```bash
-neptune ingest ./run_2026_09_30/
-neptune ingest s3://bucket/site-a/
-```
-
-```python
-from neptune import ingest
-result = ingest("./run")
-```
-
-No per-file type declarations. Ambiguity is surfaced in the receipt, never guessed; an optional manifest
-overrides it.
-
-## Development
-
-```bash
-make setup   # uv-managed venv with dev tools
-make check   # lint + mypy --strict + tests (what CI runs)
-```
-
-Working here? Read `AGENTS.md` first, then `docs/architecture.md`.
-
-## Documentation
-
-| Doc | Contents |
-|---|---|
-| `docs/architecture.md` | System shape, package boundaries, four input domains, evidence vs. derived |
-| `docs/ingestion-pipeline.md` | Stages from discovery to receipt; runtime vs. adapter responsibilities |
-| `docs/canonical-data-model.md` | Entities, epistemic states, time/frame/unit primitives |
-| `docs/provenance-and-identity.md` | Three-tier identity, provenance records, locators |
-| `docs/adapter-contract.md` | The four-method adapter ABI |
-| `docs/developer-workflow.md` | Git, Linear, PR and software-factory workflow |
-| `docs/testing-strategy.md` | Test categories, fixtures, determinism and golden tests |
-| `docs/security.md` | Threat model and per-milestone hardening |
-| `docs/adr/` | Architecture Decision Records |
-| `docs/reviews/` | Milestone review gates |
-| `docs/audit-2026-09-30.md` | Engineering handoff audit that shaped the plan |
+Then open `demo/incident-timeline-INC-C3-0011.pdf`, or run `claude` in the same folder and ask **"Why did the
+arm-cell incident INC-C3-0011 happen?"** No Ledger catalog is attached on this path, so `neptune_hydrate`
+answers `unavailable` with the file's corpus path; `make demo` hydrates through the Ledger.
 
 ## License
 

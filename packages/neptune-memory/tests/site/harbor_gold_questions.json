@@ -1,0 +1,87 @@
+{
+  "about": "Harbor DC gold questions (issue #201): a warehouse hub of legged, humanoid, goods-to-person and conveyor robots in other export shapes. Each call is a site query (docs/site-model/spec.md §8); expect lists items the answer must contain (object may be omitted) and the corpus files it must cite. Wording is never checked. Harbor's mapping file (static/neptune.mappings.yaml) is what makes these pass; they are xfail until the M2 gate.",
+  "questions": [
+    {
+      "id": "H1",
+      "question": "What is blocked right now (10:20 on 2026-11-04) and why?",
+      "calls": [
+        {"tool": "impact", "args": {"entity": "machine:sort-1", "at": "2026-11-04T10:20:00"}},
+        {"tool": "state_at", "args": {"entity": "robot:gtp-03", "at": "2026-11-04T10:20:00"}}
+      ],
+      "expect": [
+        {"subject": "machine:sort-1", "predicate": "mode", "object": "FAULT", "kind": "observed", "state": "known"},
+        {"subject": "machine:sort-1", "predicate": "health", "object": "fault:OVERTEMP_M2", "kind": "observed", "state": "known"},
+        {"subject": "machine:sort-1", "predicate": "feeds", "object": "cell:tote-pickup", "kind": "stated", "state": "known"},
+        {"subject": "robot:hum-01", "predicate": "mode", "object": "IDLE", "kind": "observed", "state": "known"},
+        {"subject": "robot:hum-02", "predicate": "mode", "object": "IDLE", "kind": "observed", "state": "known"},
+        {"subject": "task:PK-7731", "predicate": "task_state", "object": "waiting", "kind": "observed", "state": "known"},
+        {"subject": "robot:gtp-03", "predicate": "battery", "kind": "observed", "state": "stale"}
+      ],
+      "cites": ["feed/sorter_plc.jsonl", "feed/humanoids.jsonl", "feed/rmf_fleet.jsonl", "static/layout.yaml"]
+    },
+    {
+      "id": "H2",
+      "question": "Why did the sortation count stall between 10:00 and 10:50 on 2026-11-04?",
+      "calls": [
+        {"tool": "timeline", "args": {"entity": "machine:sort-1", "start": "2026-11-04T10:00:00", "end": "2026-11-04T10:50:00"}},
+        {"tool": "timeline", "args": {"entity": "robot:hum-01", "start": "2026-11-04T10:00:00", "end": "2026-11-04T10:50:00"}},
+        {"tool": "timeline", "args": {"entity": "cell:sortation", "start": "2026-11-04T10:00:00", "end": "2026-11-04T10:50:00", "predicates": ["parts_out"]}},
+        {"tool": "find", "args": {"predicate": "work_order", "obj": "work_order:WO-88231"}}
+      ],
+      "expect": [
+        {"subject": "machine:sort-1", "predicate": "health", "object": "fault:OVERTEMP_M2", "kind": "observed"},
+        {"subject": "robot:hum-01", "predicate": "mode", "object": "IDLE", "kind": "observed"},
+        {"subject": "cell:sortation", "predicate": "parts_out", "kind": "observed"},
+        {"subject": "work_order:WO-88231", "predicate": "wo_cause", "object": "motor M2 cooling fan fouled, thermal overload tripped", "kind": "stated"}
+      ],
+      "cites": ["feed/sorter_plc.jsonl", "feed/humanoids.jsonl", "static/cmms/work_orders.json"]
+    },
+    {
+      "id": "H3",
+      "question": "Who is qualified, and not on break, to reset the tripped sorter at 10:20 on 2026-11-04?",
+      "calls": [
+        {"tool": "find", "args": {"predicate": "requires_qualification", "obj": "qualification:electrical-isolation"}},
+        {"tool": "find", "args": {"predicate": "holds_qualification", "obj": "qualification:electrical-isolation", "at": "2026-11-04T10:20:00"}},
+        {"tool": "state_at", "args": {"entity": "person:reyes", "at": "2026-11-04T10:20:00"}},
+        {"tool": "state_at", "args": {"entity": "person:nowak", "at": "2026-11-04T10:20:00"}}
+      ],
+      "expect": [
+        {"subject": "rule:hsr-7-3.4", "predicate": "requires_qualification", "object": "qualification:electrical-isolation", "kind": "stated"},
+        {"subject": "person:reyes", "predicate": "holds_qualification", "object": "qualification:electrical-isolation", "kind": "stated"},
+        {"subject": "person:reyes", "predicate": "on_break", "kind": "stated", "state": "known"},
+        {"subject": "person:nowak", "predicate": "holds_qualification", "object": "qualification:sorter-reset", "kind": "stated"}
+      ],
+      "cites": ["static/docs/HSR-7_excerpt.pdf", "static/roster/roster.csv"]
+    },
+    {
+      "id": "H4",
+      "question": "What warned of the trip, and what changed on SORT-1 since the last good shift (2026-11-03 crew B)?",
+      "calls": [
+        {"tool": "diff", "args": {"start": "2026-11-03T15:00:00", "end": "2026-11-04T08:30:00"}},
+        {"tool": "state_at", "args": {"entity": "machine:sort-1", "at": "2026-11-04T08:30:00"}}
+      ],
+      "expect": [
+        {"subject": "machine:sort-1", "predicate": "setpoint", "object": 8400, "kind": "observed"},
+        {"subject": "machine:sort-1", "predicate": "change", "object": "change:CHG-742", "kind": "stated"},
+        {"subject": "machine:sort-1", "predicate": "temperature", "kind": "observed", "state": "known"},
+        {"subject": "machine:sort-1", "predicate": "note", "kind": "inferred"},
+        {"subject": "robot:hum-02", "predicate": "firmware", "object": "3.5.0", "kind": "observed"}
+      ],
+      "cites": ["feed/inspector_diag.jsonl", "feed/sorter_plc.jsonl", "static/changes/change_log.xlsx", "static/photos/whiteboard_2026-11-04.png"]
+    },
+    {
+      "id": "H5",
+      "question": "Is fleet robot gtp-03 the same machine as CMMS asset AMR-17? (before and after the operator confirms)",
+      "calls": [
+        {"tool": "resolve", "args": {"name": "AMR-17"}},
+        {"tool": "confirm", "args": {"answer": "yes"}},
+        {"tool": "resolve", "args": {"name": "AMR-17"}}
+      ],
+      "expect": [
+        {"subject": "robot:AMR-17", "predicate": "same_as", "object": "robot:gtp-03", "kind": "inferred", "state": "pending"},
+        {"subject": "robot:AMR-17", "predicate": "same_as", "object": "robot:gtp-03", "kind": "stated", "state": "known"}
+      ],
+      "cites": ["feed/rmf_fleet.jsonl", "static/cmms/assets.json"]
+    }
+  ]
+}

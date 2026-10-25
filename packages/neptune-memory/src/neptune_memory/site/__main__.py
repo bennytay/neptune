@@ -6,6 +6,8 @@ Each lane adds its own subcommand; don't reorder the others.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import signal
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,8 +19,26 @@ if TYPE_CHECKING:
 def _generate(args: argparse.Namespace) -> int:
     from neptune_memory.site import corpus
 
-    corpus.generate(Path(args.out))
-    sys.stdout.write(f"generated the Plant 7 corpus in {args.out}\n")
+    corpus.generate(Path(args.out), site=args.site)
+    sys.stdout.write(f"generated the {corpus.SITES[args.site]} corpus in {args.out}\n")
+    return 0
+
+
+def _extract_photos(args: argparse.Namespace) -> int:
+    import os
+
+    from neptune_memory.site.derived.photos import extract_photos
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.stdout.write("ANTHROPIC_API_KEY is not set: keeping the recorded extractions\n")
+        return 0
+    try:
+        written = extract_photos(args.site_dir)
+    except ImportError:
+        sys.stdout.write("the anthropic SDK is missing: uv sync --extra anthropic\n")
+        return 1
+    for path in written:
+        sys.stdout.write(f"recorded {path}\n")
     return 0
 
 
@@ -40,6 +60,7 @@ def _replay(args: argparse.Namespace) -> int:
 
 def _say(line: str) -> None:
     sys.stdout.write(line + "\n")
+    sys.stdout.flush()
 
 
 def _confirm(args: argparse.Namespace) -> int:
@@ -68,11 +89,67 @@ def _confirm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _draft_mapping(args: argparse.Namespace) -> int:
+    from neptune_memory.site.draft import draft_mapping
+
+    sys.stdout.write(draft_mapping(args.site_dir, args.file))
+    return 0
+
+
+DEFAULT_BROKER = "mqtt://127.0.0.1:1883"  # live.DEFAULT_BROKER, without importing the compiler
+
+
+def _publish(args: argparse.Namespace) -> int:
+    from neptune_memory.site.live import publish
+
+    with contextlib.suppress(KeyboardInterrupt):
+        n = publish(
+            args.site_dir, args.broker, speed=args.speed, start=args.start, until=args.until
+        )
+        _say(f"published {n} messages to {args.broker}")
+    return 0
+
+
+def _interruptible() -> None:
+    """Ctrl-C stops a command even when a shell started it with ``&`` (which ignores SIGINT)."""
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
+def _live(args: argparse.Namespace) -> int:
+    from neptune_memory.site.live import live
+
+    _interruptible()
+    live(args.site_dir, args.broker)
+    return 0
+
+
+def _broker(args: argparse.Namespace) -> int:
+    from neptune_memory.site.live import broker
+
+    _interruptible()
+    _say(f"broker: {args.broker} (amqtt, anonymous; Ctrl-C stops it)")
+    with contextlib.suppress(KeyboardInterrupt):
+        broker(args.broker)
+    return 0
+
+
+def _insights(args: argparse.Namespace) -> int:
+    from neptune_memory.site.insights import append, insights
+    from neptune_memory.site.render import render
+    from neptune_memory.site.views import load
+
+    new = append(args.site_dir)
+    _say(f"{len(new)} new findings appended to the log")
+    sys.stdout.write(render(insights(load(args.site_dir))))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m neptune_memory.site")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    generate = commands.add_parser("generate", help="write the deterministic Plant 7 corpus")
+    generate = commands.add_parser("generate", help="write a deterministic demo corpus")
+    generate.add_argument("--site", choices=("p7", "harbor"), default="p7")
     generate.add_argument("out", help="output directory (static/ and feed/ go under it)")
     generate.set_defaults(run=_generate)
 
@@ -100,6 +177,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     confirm.add_argument("--yes-all", action="store_true", help="confirm every pending proposal")
     confirm.add_argument("--by", default="operator")
     confirm.set_defaults(run=_confirm)
+
+    draft = commands.add_parser(
+        "draft-mapping", help="print a draft mapping entry for an unmapped CSV or JSONL file"
+    )
+    draft.add_argument("site_dir", type=Path)
+    draft.add_argument("file", type=Path, help="the file, relative to site_dir or absolute")
+    draft.set_defaults(run=_draft_mapping)
+
+    publish = commands.add_parser(
+        "publish", help="replay the corpus feed to an MQTT broker on its real topics"
+    )
+    publish.add_argument("site_dir", type=Path)
+    publish.add_argument("--broker", default=DEFAULT_BROKER)
+    publish.add_argument("--speed", type=float, default=60.0)
+    publish.add_argument("--start", help="publish messages before this site time at once")
+    publish.add_argument("--until", help="stop after this site time (YYYY-MM-DDTHH:MM:SS)")
+    publish.set_defaults(run=_publish)
+
+    live = commands.add_parser(
+        "live", help="subscribe; record and log each message, and new static files, as they land"
+    )
+    live.add_argument("site_dir", type=Path)
+    live.add_argument("--broker", default=DEFAULT_BROKER)
+    live.set_defaults(run=_live)
+
+    broker = commands.add_parser("broker", help="run a local MQTT broker (amqtt) for the demo")
+    broker.add_argument("--broker", default=DEFAULT_BROKER, help="where to listen")
+    broker.set_defaults(run=_broker)
+
+    insights = commands.add_parser(
+        "insights", help="append the deterministic findings (inferred) to the log; idempotent"
+    )
+    insights.add_argument("site_dir", type=Path)
+    insights.set_defaults(run=_insights)
+
+    photos = commands.add_parser(
+        "extract-photos", help="send each photo to Claude and record its .extraction.json"
+    )
+    photos.add_argument("site_dir", type=Path)
+    photos.set_defaults(run=_extract_photos)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)

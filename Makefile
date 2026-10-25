@@ -34,7 +34,7 @@ ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check harness demo demo-pin demo-folder up check-all site-demo site-replay
+  contracts-check harness demo demo-pin demo-folder up check-all site-demo site-replay site-live
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -115,23 +115,44 @@ up: ## Your own folder -> compiler -> Deploy -> Ledger -> Memory -> a Claude Cod
 > @test -n "$(SRC)" || { echo "usage: make up SRC=<folder> [ARGS='--deploy FILE ...']" >&2; exit 2; }
 > $(RUN) python -m harness.up "$(SRC)" $(ARGS)
 
-# Site model v3 (docs/site-model/spec.md §9): the Plant 7 corpus -> fact log -> the MCP command.
-# site-demo confirms the amr-02 / MR-1142 identity proposal as the operator would (spec §7).
-SITE_DIR ?= site-demo
+# Site model v3 (docs/site-model/spec.md §9): a demo corpus -> fact log -> the MCP command.
+# SITE=p7 (Plant 7, default) or SITE=harbor (Harbor DC). site-demo confirms the identity proposals
+# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would (spec §7).
+SITE ?= p7
+SITE_DIR ?= $(if $(filter p7,$(SITE)),site-demo,site-$(SITE))
 SPEED ?= 60
-SITE := $(RUN) python -m neptune_memory.site
+SITE_CMD := $(RUN) python -m neptune_memory.site
 SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
-site-demo: ## Site model: generate the Plant 7 corpus, build the fact log, confirm, print the MCP command
-> $(SITE) generate "$(SITE_DIR)"
-> $(SITE) build "$(SITE_DIR)"
-> $(SITE) confirm "$(SITE_DIR)" --yes-all --by demo-operator
+site-demo: ## Site model: generate the SITE corpus (p7 | harbor), build the fact log, confirm, log insights, print the MCP command
+> $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
+> $(SITE_CMD) build "$(SITE_DIR)"
+> $(SITE_CMD) confirm "$(SITE_DIR)" --yes-all --by demo-operator
+> $(SITE_CMD) insights "$(SITE_DIR)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
 
 site-replay: ## Site model: the same, live (SPEED=60 is 60x real time)
-> $(SITE) generate "$(SITE_DIR)"
+> $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
 > @echo "MCP: $(SITE_MCP)"
-> $(SITE) replay "$(SITE_DIR)" --speed "$(SPEED)"
+> $(SITE_CMD) replay "$(SITE_DIR)" --speed "$(SPEED)"
+
+# site-live (#202): a local MQTT broker, `live` subscribed to it, then `publish` at SPEED x from START
+# (earlier messages go at once). Ctrl-C stops all three. The MCP server tails the log as it grows.
+BROKER ?= mqtt://127.0.0.1:1883
+START ?= 2026-10-20T09:55:00
+SITE_READY = $(SITE_DIR)/.neptune/live.ready
+site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x from START
+> $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
+> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_READY)"
+> @echo "MCP: $(SITE_MCP)"
+> @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
+> @$(SITE_CMD) broker --broker "$(BROKER)" & b=$$!; \
+  $(SITE_CMD) live "$(SITE_DIR)" --broker "$(BROKER)" & l=$$!; \
+  trap 'kill $$l $$b 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
+  until [ -f "$(SITE_READY)" ]; do kill -0 $$l 2>/dev/null || exit 1; sleep 0.2; done; \
+  $(SITE_CMD) publish "$(SITE_DIR)" --broker "$(BROKER)" --speed "$(SPEED)" --start "$(START)"; \
+  echo "live keeps running; drop a file into $(SITE_DIR)/static/ to see it ingested. Ctrl-C stops."; \
+  wait
 
 # The documentation site (platform ADR 0012): Sphinx in strict mode, offline, into build/docs/html.
 # A whole-workspace `make check` builds it; CI builds it in its own `docs` job on every change.

@@ -59,6 +59,8 @@ class Answer:
     columns: list[str] = field(default_factory=list)
     rows: list[tuple[Any, ...]] = field(default_factory=list)
     omitted: int = 0
+    sections: list[tuple[int, str]] = field(default_factory=list)
+    """``(index of its first item, title)``: headings ``render`` prints (the shift report)."""
     _stale: dict[tuple[str, str, str | None], tuple[int, list[str]]] = field(
         default_factory=dict, repr=False, compare=False
     )
@@ -327,7 +329,8 @@ def diff(model: SiteModel, start: str, end: str, entities: list[str] | None = No
 
 
 def gaps(model: SiteModel, at: str | None = None) -> Answer:
-    """What is stale, unknown or ambiguous at t, and every pending proposal."""
+    """What is stale, unknown or ambiguous at t, every pending proposal, and every file the
+    site's mapping file does not map (spec §12)."""
     t = _at(model, at)
     answer = _new("gaps", model, t)
     for reading in model.state_at(t):
@@ -335,6 +338,10 @@ def gaps(model: SiteModel, at: str | None = None) -> Answer:
             answer.add_cell(reading)
     for fact in model.pending():
         answer.add(fact, "pending")
+    for fact in _live(model):
+        if fact.predicate == "unmapped":
+            answer.add(fact)
+            answer.gaps.append(f"{fact.citations[0].file}: not mapped")
     return answer
 
 
@@ -410,7 +417,8 @@ CREATE TABLE entities (ref TEXT PRIMARY KEY, type TEXT, id TEXT, names TEXT);
 
 def sql(model: SiteModel, query: str) -> Answer:
     """A read-only ``sqlite3`` query over tables ``facts``, ``intervals``, ``seen`` and
-    ``entities``; rows that select a ``fact_id`` cite that fact."""
+    ``entities``, and the analysis tables ``downtime``, ``utilisation`` and ``fault_clear_time``
+    (``insights.analysis_tables``); rows that select a ``fact_id`` cite that fact."""
     answer = _new("sql", model, None)
     db = _database(model)
     try:
@@ -429,6 +437,29 @@ def sql(model: SiteModel, query: str) -> Answer:
             fact = model.facts.get(str(row[column]))
             if fact is not None:
                 answer.add(fact)
+    return answer
+
+
+def changes(model: SiteModel, since_seq: int = 0) -> Answer:
+    """What the log learned after ``since_seq`` (a live site, #202): each fact appended since, in
+    log order, and each proposal answered since. Pass the answer's ``log seq`` back next time."""
+    answer = _new("changes", model, model.clock())
+    pending = {f.id for f in model.pending()}
+    new = sorted(
+        (seq, fid) for fid, seq in model.fact_seq.items() if seq > since_seq and model.live(fid)
+    )
+    for seq, fid in new:
+        if answer.full():
+            answer.omitted += len(new) - len(answer.items) - 1
+            answer.gaps.append(f"more changed: ask again with since_seq={seq - 1}")
+            break
+        answer.add(model.facts[fid], _state(model, model.facts[fid], pending))
+    for proposal, (seq, confirm) in sorted(model.confirms.items(), key=lambda c: c[1][0]):
+        if seq > since_seq and confirm.answer == "no":
+            answer.gaps.append(f"{proposal} rejected by {confirm.by} (log seq {seq})")
+    if not new:
+        reports = sum(len(times) for times in model.seen.values())
+        answer.gaps.append(f"no new facts after log seq {since_seq} ({reports} reports so far)")
     return answer
 
 
@@ -498,6 +529,9 @@ def _database(model: SiteModel) -> sqlite3.Connection:
         "INSERT INTO seen VALUES (?,?)",
         [(source, t) for source, times in model.seen.items() for t in times],
     )
+    from neptune_memory.site.insights import analysis_tables  # it imports this module
+
+    analysis_tables(model, db)
     db.commit()
     db.execute("PRAGMA query_only = ON")
     _DATABASE["last"] = (model, model.seq, db)

@@ -9,6 +9,15 @@ requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = ["neptune"]
 
+# The live site (#202): an MQTT client, and a pure-pip broker so `make site-live` needs no Docker.
+[dependency-groups]
+live = ["amqtt>=0.11", "paho-mqtt>=2.1"]
+
+# `python -m neptune_memory.site extract-photos` (spec §7). Optional: the build reads the recorded
+# extraction and never calls a model; `uv sync --extra anthropic` to re-record from real photos.
+[project.optional-dependencies]
+anthropic = ["anthropic>=1.0"]
+
 # `memory consolidate | rebuild | dump` (MVL-132, ADR 0016).
 [project.scripts]
 memory = "neptune_memory.cli:main"
@@ -38,6 +47,11 @@ warn_unreachable = true
 files = ["src", "tests"]
 mypy_path = "src"
 
+# `anthropic` is an optional extra, imported only inside site/derived/photos.py; CI does not install it.
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers --strict-config"
@@ -46,3 +60,8 @@ markers = [
   "integration: exercises multiple components against real fixtures",
   "slow: takes more than a few seconds; excluded by `make test-fast`",
 ]
+
+# amqtt (the live demo's broker, #202) ships no type information.
+[[tool.mypy.overrides]]
+module = ["amqtt", "amqtt.*"]
+ignore_missing_imports = true

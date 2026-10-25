@@ -10,16 +10,14 @@ from typing import TYPE_CHECKING
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 from mcp.shared.memory import create_connected_server_and_client_session
-from neptune_memory.site.facts import Citation, Fact, LogEntry, Seen, Value
-from neptune_memory.site.views import fold
+from neptune_memory.site.facts import Citation, Fact, Ref, Value
+from neptune_memory.site.log import FactLog
 
 from context_packet_goldens import PACKETS
 from neptune_context.mcp.site import SITE_TOOLS, SiteTools, build_site_server
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from neptune_memory.site.views import SiteModel
 
 V2_TOOLS = [
     "neptune_query",
@@ -41,6 +39,9 @@ SITE_NAMES = [
     "neptune_site_impact",
     "neptune_site_search_evidence",
     "neptune_site_sql",
+    "neptune_site_changes",
+    "neptune_site_insights",
+    "neptune_site_shift_report",
 ]
 
 
@@ -80,22 +81,90 @@ STOPPED = Fact(
 )
 
 
-def _one_fact(site_dir: Path) -> SiteModel:
-    """The smallest site model: one observed mode, folded by the real views."""
-    seen = Seen("plc.cv2", "2026-10-20T10:05:02")
-    return fold([LogEntry(1, "seen", seen=seen), LogEntry(2, "fact", fact=STOPPED)])
+def _text(result: types.CallToolResult) -> str:
+    assert not result.isError
+    first = result.content[0]
+    assert isinstance(first, types.TextContent)
+    return first.text
 
 
 def test_site_tool_answers_with_cited_lines(tmp_path: Path) -> None:
-    server = build_site_server(SiteTools(tmp_path, loader=_one_fact))
+    with FactLog(tmp_path) as log:
+        log.seen("plc.cv2", "2026-10-20T10:05:02")
+        log.fact(STOPPED)
+    server = build_site_server(SiteTools(tmp_path))
 
     async def go() -> types.CallToolResult:
         async with create_connected_server_and_client_session(server) as session:
             return await session.call_tool("neptune_site_state_at", {"entity": "machine:cv-2"})
 
-    result = asyncio.run(go())
-    assert not result.isError
-    first = result.content[0]
-    assert isinstance(first, types.TextContent)
-    assert '- machine:cv-2 mode = "stopped" since 10:05:02 · observed [S1]' in first.text
-    assert "[S1] feed/plc_cv2.jsonl line 812" in first.text
+    text = _text(asyncio.run(go()))
+    assert '- machine:cv-2 mode = "stopped" since 10:05:02 · observed [S1]' in text
+    assert "[S1] feed/plc_cv2.jsonl line 812" in text
+
+
+def test_site_tools_apply_what_the_log_appends_between_calls(tmp_path: Path) -> None:
+    """A live site: entries appended after the first call show up in the next one."""
+    site = SiteTools(tmp_path)
+    with FactLog(tmp_path) as log:
+        log.seen("plc.cv2", "2026-10-20T10:05:02")
+        log.fact(STOPPED)
+    first = site.model()
+    assert "stopped" in _text(site.call("neptune_site_state_at", {"entity": "machine:cv-2"}))
+
+    running = Fact(
+        "machine:cv-2",
+        "mode",
+        Value("running"),
+        "2026-10-20T10:41:00",
+        None,
+        "observed",
+        "plc.cv2",
+        (Citation("feed/plc_cv2.jsonl", "line 1250", "running"),),
+    )
+    with FactLog(tmp_path) as log:
+        log.seen("plc.cv2", "2026-10-20T10:41:00")
+        log.fact(running)
+    assert site.model() is first  # applied in place, not folded again
+    state = _text(site.call("neptune_site_state_at", {"entity": "machine:cv-2"}))
+    assert '- machine:cv-2 mode = "running" since 10:41:00' in state
+    changes = _text(site.call("neptune_site_changes", {"since_seq": 2}))
+    assert changes.startswith("changes · at 2026-10-20T10:41:00 · log seq 4")
+    assert '- machine:cv-2 mode = "running"' in changes and "stopped" not in changes
+    assert "[S1] feed/plc_cv2.jsonl line 1250" in changes
+
+
+def _chain(site_dir: Path) -> None:
+    """A fault on cv-2, then the arm in the cell it feeds starves: one starvation chain."""
+
+    def fact(subject: str, predicate: str, obj: Ref | Value, t: str | None, line: int) -> Fact:
+        cite = Citation("feed/x.jsonl" if t else "static/layout.yaml", f"line {line}", None)
+        if t is None:
+            return Fact(subject, predicate, obj, t, None, "stated", "layout", (cite,))
+        return Fact(subject, predicate, obj, t, None, "observed", "plc", (cite,))
+
+    with FactLog(site_dir) as log:
+        log.seen("plc", "2026-10-20T10:06:00")
+        log.fact(fact("machine:cv-2", "feeds", Ref("cell:c3"), None, 1))
+        log.fact(fact("robot:arm-c3", "located_in", Ref("cell:c3"), None, 2))
+        log.fact(fact("machine:cv-2", "health", Value("fault:JAM"), "2026-10-20T10:05:02", 3))
+        log.fact(fact("robot:arm-c3", "mode", Value("idle_starved"), "2026-10-20T10:05:30", 4))
+
+
+def test_site_insight_tools_answer_findings_and_a_report(tmp_path: Path) -> None:
+    _chain(tmp_path)
+    site = SiteTools(tmp_path)
+    found = site.call("neptune_site_insights", {})
+    report = site.call(
+        "neptune_site_shift_report", {"start": "2026-10-20T10:00:00", "end": "2026-10-20T11:00:00"}
+    )
+    texts = []
+    for result in (found, report):
+        assert not result.isError
+        first = result.content[0]
+        assert isinstance(first, types.TextContent)
+        texts.append(first.text)
+    assert "starvation chain: machine:cv-2 fault:JAM at 10:05:02 → robot:arm-c3" in texts[0]
+    assert "· inferred [S" in texts[0]
+    assert "Chains (inferred):" in texts[1]
+    assert "What happened:" in texts[1]

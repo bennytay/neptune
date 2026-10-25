@@ -1,53 +1,30 @@
-"""The compiler's records of ``static/`` become facts (spec §5, §7).
+"""The compiler's records of ``static/`` become facts, as the mapping file says (spec §5, §12).
 
-``map_record(record, package)`` is called once per record, in package order. Each corpus file is
-recognised by its path under ``static/``; anything else maps to nothing.
+``map_record(record, package, mapping)`` is called once per record, in package order. A record's
+file (its path under ``static/``) picks the mapping entry; this module knows no site's paths.
 
-Tabular files (the compiler's ``StructuredRecord`` rows, as ``site/corpus/static.py`` writes
-them; row 1 is the header), all values verbatim, citing ``row N col "<column as written>"`` with
-``N`` counted as a spreadsheet does (header = row 1). Columns are matched case-blind, spaces as
-``_``. An equipment (header = row 1). Columns are matched case-blind, spaces as ``_``. An equipment
-tag (``CV-2``) names ``<type>:<tag lowercased>``, the type from the asset register row whose name
-carries the tag (``conveyor`` -> ``machine``, ``... robot ...`` -> ``robot``). A person is
-``person:<name lowercased>``.
+- **Tables** (``StructuredRecord`` rows): a CSV's row 1 is its header, cited
+  ``row N col "<column as written>"``; a JSONL line's keys are its columns, cited
+  ``line N col "<key>"``. Each declared fact cites its ``column`` cell, verbatim.
+- **Documents** (``DocumentBlock``): cited ``page P block B`` (``B`` counted within the page) with
+  the block text as the quote. The first block is the document's ``name``; a block matching the
+  ``rule`` pattern is a clause; ``lift`` states values found in a block verbatim.
+- **Extractions** (recorded model output, read through the compiler's configuration records)::
 
-- ``cmms/assets.csv``: ``Asset,Name,Type,Serial,Location`` -> ``serial``, ``name`` on
-  ``<type>:<Asset>``, the CMMS id (``robot:MR-1142``).
-- ``cmms/work_orders.csv``: ``WO,Asset,Equipment,Opened,Closed,Problem,Action,Cause,Done by,LOTO,
-  Note`` -> ``work_order`` on the equipment, ``wo_*`` on ``work_order:<WO>``; ``valid_from`` =
-  ``Opened``.
-- ``changes/changes.csv``: ``Change,Equipment,Parameter,From,To,Unit,When,Requested by,Reason`` ->
-  ``change`` on the equipment; ``name`` (the parameter), ``change_from`` / ``change_to`` (with
-  ``Unit``), ``change_by`` and ``change_reason`` on ``change:<Change>``; ``valid_from`` = ``When``;
-  source ``cmms`` (the change log is a maintenance-system export).
-- ``roster/shift_roster.csv``: ``Person,Role,Shift,Start,End,Break start,Break end`` -> ``name`` and
-  ``has_role`` (``role:<role, spaces as ->``) from a person's first row; per row ``on_shift``
-  ``shift:<Shift>`` [Start, End) and ``on_break`` [Break start, Break end).
-- ``roster/qualifications.csv``: ``Person,Qualification,Granted`` -> ``holds_qualification``
-  (``valid_from`` = ``Granted`` as written).
+      {"image": "<name>.png", "model": "<model id>", "prompt_sha256": "<hex>", "taken": "...",
+       "regions": [{"id": 1, "box": [x0, y0, x1, y1], "text": "CV-2: PE3 dirty"}]}
 
-PDFs under ``docs/`` (``DocumentBlock``s): ``document:<file stem up to "_">``. A value is stated
-only where it is in a block verbatim, citing ``page P block B`` (``B`` counted within the page)
-and the block text as the quote. A block's first text is the document's ``name``; a clause
-``4.2 <text>`` (``§`` optional) makes ``rule:<document id lowercased>-4.2`` with ``rule_text`` =
-the text; a range with a unit (``45-55 N``, hyphen or en dash) is ``states_limit``; a qualification
-held in ``roster/qualifications.csv`` named in the block (``conveyor-lockout`` or
-``conveyor lockout``) is ``requires_qualification`` of the rule, or of the document outside a rule.
-
-Recorded model output, ``photos/<name>.extraction.json`` (read through the compiler's configuration
-records)::
-
-    {"image": "<name>.png", "model": "<model id>", "prompt": "...", "prompt_sha256": "<hex>",
-     "regions": [{"id": 1, "box": [x0, y0, x1, y1], "text": "CV-2: PE3 dirty — clean every shift"}]}
-
-Each region is an inferred ``note`` with ``model`` = ``<model id>@<prompt sha256[:12]>``, citing
-``region x0,y0,x1,y1`` of the image (no quote). It is about the equipment its text starts with
-(``CV-2:`` -> ``machine:cv-2``), else about the image as a document; ``taken``, when present, is
-``valid_from``.
+  Each region is an inferred fact with ``model`` = ``<model id>@<prompt sha256[:12]>``, citing
+  ``region x0,y0,x1,y1`` of the image (no quote), about the ``<tag>:`` its text starts with, else
+  the image as a document.
+- **Unmapped** tables (CSV, TSV, JSONL, XLSX) and documents: ``document:<path>``
+  ``unmapped = "not mapped"``, and one stated ``text`` fact per row or block, so they stay
+  searchable.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -55,30 +32,25 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from neptune.model.configuration import ConfigurationSnapshot, ConfigurationValue
-from neptune.model.knowledge import Known
-from neptune.model.provenance import Page
+from neptune.model.knowledge import Known, NotApplicable
+from neptune.model.provenance import JsonPointer, Page
 from neptune.model.source import LocalPath, SourceRevision
-from neptune.model.world import DocumentBlock, StructuredRecord
+from neptune.model.world import DocumentBlock, StructuredRecord, StructuredTable
 from neptune_memory.site.facts import Citation, Fact, Kind, Ref, Value
+from neptune_memory.site.mappers.config import Mapping, render, tag_ref
 from neptune_memory.site.mappers.layout import STATIC
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
-_RULE = re.compile(r"^§?\s*(\d+(?:\.\d+)+)\s+(.+)$", re.DOTALL)
-_DASH = "\N{EN DASH}-"  # en dash first: a trailing "-" stays literal in a class
-_LIMIT = re.compile(
-    rf"(?<![\w.{_DASH}])\d+(?:\.\d+)?\s?[{_DASH}]\s?\d+(?:\.\d+)?\s?"
-    r"(?:N|Nm|mm|cm|m|m/s|kg|bar|°C|%)(?![\w/])"
-)
-_ASSETS = "cmms/assets.csv"
-_ROSTER = "roster/shift_roster.csv"
-_QUALIFICATIONS = "roster/qualifications.csv"
+UNMAPPED_SOURCE = "files"
+TABLE_SUFFIXES = (".csv", ".tsv", ".jsonl", ".xlsx")
+"""Files whose rows are logged when unmapped; an image's metadata table is not an export."""
 
 
-def map_record(record: Any, package: Any) -> list[Fact]:
+def map_record(record: Any, package: Any, mapping: Mapping) -> list[Fact]:
     """The facts one compiler record states about the site; ``[]`` for records that state none."""
-    index = _index(package)
+    index = _index(package, mapping)
     provenance = getattr(record, "provenance", None)
     if provenance is None:
         return []
@@ -86,14 +58,28 @@ def map_record(record: Any, package: Any) -> list[Fact]:
     if path is None:
         return []
     if isinstance(record, StructuredRecord):
-        tabular = _TABLES.get(path)
-        if tabular is None or record.row == 0:
+        row = index.row(path, record)
+        entry = mapping.match("tables", path)
+        if entry is None:
+            return _unmapped_row(path, record, row) if path.endswith(TABLE_SUFFIXES) else []
+        return [] if row is None else _table(entry, row, index, mapping)
+    if isinstance(record, DocumentBlock | ConfigurationSnapshot) and record.id in index.json_rows:
+        table = mapping.match("tables", path)  # a JSON table, read as configuration or as text
+        out: list[Fact] = []
+        for row in index.json_rows[record.id] if table is not None else []:
+            out.extend(_table(table or {}, row, index, mapping))
+        return out
+    if isinstance(record, DocumentBlock):
+        if mapping.match("tables", path) is not None:
             return []
-        return tabular(_Row(f"{STATIC}/{path}", record, index.headers[record.table]), index)
-    if isinstance(record, DocumentBlock) and path.startswith("docs/"):
-        return _document_block(path, record, index)
-    if isinstance(record, ConfigurationSnapshot) and path.endswith(".extraction.json"):
-        return _extraction(path, index.config.get(record.id, []), index)
+        entry = mapping.match("documents", path)
+        if entry is None:
+            return _unmapped_block(path, record, index)
+        return _document_block(entry, path, record, index, mapping)
+    if isinstance(record, ConfigurationSnapshot):
+        entry = mapping.match("extractions", path)
+        if entry is not None:
+            return _extraction(entry, path, index.config.get(record.id, []), index, mapping)
     return []
 
 
@@ -104,60 +90,120 @@ def map_record(record: Any, package: Any) -> list[Fact]:
 class _Index:
     paths: dict[str, str] = field(default_factory=dict)  # content id -> path under static/
     headers: dict[str, tuple[str, ...]] = field(default_factory=dict)  # table id -> header
+    keyed: set[str] = field(default_factory=set)  # tables with no header row (JSONL)
     blocks: dict[str, tuple[int, int]] = field(default_factory=dict)  # block id -> page, block
     config: dict[str, list[ConfigurationValue]] = field(default_factory=dict)
-    qualifications: tuple[str, ...] = ()
-    assets: tuple[tuple[str, str], ...] = ()  # (name, type) per asset register row
-    first_row: dict[str, int] = field(default_factory=dict)  # roster person -> first data row
+    rows: dict[str, list[_Row]] = field(default_factory=dict)  # path -> data rows, in order
+    json_rows: dict[str, list[_Row]] = field(default_factory=dict)  # record id -> JSON rows
+    register: tuple[tuple[str, str], ...] = ()  # (name, type) per `tags` register row
+    _first: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+
+    def row(self, path: str, record: StructuredRecord) -> _Row | None:
+        """``record`` as a data row of ``path``; ``None`` for a header row."""
+        if record.table in self.keyed:
+            header = tuple(_pointer(cell, i) for i, cell in enumerate(record.cells))
+            return _Row.tabular(f"{STATIC}/{path}", record, header, "line")
+        if record.row == 0:
+            return None
+        header = self.headers.get(record.table, ())
+        return _Row.tabular(f"{STATIC}/{path}", record, header, "row")
+
+    def column(self, path: str, column: str) -> list[str]:
+        return [row[_key(column)] for row in self.rows.get(path, [])]
+
+    def first(self, path: str, column: str, value: str) -> int | None:
+        """The first row of ``path`` whose ``column`` holds ``value`` (case-blind)."""
+        if (path, column) not in self._first:
+            first: dict[str, int] = {}
+            for row in self.rows.get(path, []):
+                first.setdefault(row[column].lower(), row.number)
+            self._first[(path, column)] = first
+        return self._first[(path, column)].get(value.lower())
 
 
-_CACHE: dict[str, _Index] = {}
+_CACHE: dict[tuple[str, int], _Index] = {}
 
 
-def _index(package: Any) -> _Index:
-    """What a record needs from the rest of its package, built once per package."""
-    cached = _CACHE.get(package.id)
+def _index(package: Any, mapping: Mapping) -> _Index:
+    """What a record needs from the rest of its package, built once per package and mapping."""
+    key = (str(package.id), id(mapping))
+    cached = _CACHE.get(key)
     if cached is not None:
         return cached
     index = _Index()
-    rows: list[StructuredRecord] = []
+    records: list[StructuredRecord] = []
+    snapshots: list[ConfigurationSnapshot] = []
     pages: dict[tuple[str, int], list[DocumentBlock]] = defaultdict(list)
     for record in package.records:
         if isinstance(record, SourceRevision) and isinstance(record.location, LocalPath):
             index.paths[record.content_id] = record.location.path
+        elif isinstance(record, StructuredTable) and isinstance(record.header, NotApplicable):
+            index.keyed.add(record.id)
         elif isinstance(record, StructuredRecord):
-            rows.append(record)
+            records.append(record)
             if record.row == 0:
                 index.headers[record.table] = tuple(_text(cell) for cell in record.cells)
         elif isinstance(record, DocumentBlock):
             pages[(record.document, _page(record))].append(record)
+        elif isinstance(record, ConfigurationSnapshot):
+            snapshots.append(record)
         elif isinstance(record, ConfigurationValue):
             index.config.setdefault(record.snapshot, []).append(record)
     for (_, page), blocks in pages.items():
         for number, block in enumerate(sorted(blocks, key=lambda b: b.order), start=1):
             index.blocks[block.id] = (page + 1, number)
-    held: set[str] = set()
-    assets: list[tuple[str, str]] = []
-    for record in sorted(rows, key=lambda r: r.row):
+    for record in sorted(records, key=lambda r: r.row):
         path = index.paths.get(str(record.provenance.evidence.source))
-        if record.row == 0 or path not in (_ASSETS, _ROSTER, _QUALIFICATIONS):
-            continue
-        row = _Row(f"{STATIC}/{path}", record, index.headers[record.table])
-        if path == _QUALIFICATIONS:
-            held.add(row["qualification"])
-        elif path == _ASSETS:
-            assets.append((row["name"], row["type"]))
-        else:
-            index.first_row.setdefault(row["person"].lower(), row.number)
-    index.qualifications = tuple(sorted(q for q in held if q))
-    index.assets = tuple(assets)
+        row = None if path is None else index.row(path, record)
+        if path is not None and row is not None:
+            index.rows.setdefault(path, []).append(row)
+    tags = mapping.tags
+
+    def json_table(record: Any, leaves: Iterable[tuple[tuple[Any, ...], str]]) -> None:
+        path = index.paths.get(str(record.provenance.evidence.source))
+        entry = None if path is None else mapping.match("tables", path)
+        if path is not None and (entry is not None or tags.get("table") == path):
+            rows_path = (entry or {}).get("rows") or (tags.get("rows") if entry is None else None)
+            rows = _json_rows(f"{STATIC}/{path}", leaves, rows_path)
+            index.json_rows[record.id] = rows
+            index.rows.setdefault(path, []).extend(rows)
+
+    # A JSON table reaches the package as configuration values, or as one text document.
+    for snapshot in snapshots:
+        values = index.config.get(snapshot.id, [])
+        json_table(snapshot, [(v.path, v.text.value) for v in values if isinstance(v.text, Known)])
+    documents: dict[str, list[DocumentBlock]] = defaultdict(list)
+    for (document, _), blocks in sorted(pages.items()):
+        documents[document].extend(sorted(blocks, key=lambda b: b.order))
+    for blocks in documents.values():
+        path = index.paths.get(str(blocks[0].provenance.evidence.source), "")
+        if path.endswith(".json"):
+            text = "\n".join(b.text.value for b in blocks if isinstance(b.text, Known))
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                continue
+            first = min(blocks, key=lambda b: b.order)
+            json_table(first, _leaves(parsed, ()))
+    if "table" in tags:
+        names = index.column(str(tags["table"]), str(tags["name"]))
+        types = index.column(str(tags["table"]), str(tags["type"]))
+        index.register = tuple(zip(names, types, strict=True))
     _CACHE.clear()
-    _CACHE[package.id] = index
+    _CACHE[key] = index
     return index
 
 
 def _text(cell: Any) -> str:
     return str(cell.value) if isinstance(cell, Known) else ""
+
+
+def _pointer(cell: Any, position: int) -> str:
+    provenance = getattr(cell, "provenance", None)
+    evidence = getattr(provenance, "evidence", None)
+    if evidence is not None and evidence.locator and isinstance(evidence.locator[-1], JsonPointer):
+        return evidence.locator[-1].pointer.lstrip("/")
+    return f"col{position + 1}"
 
 
 def _page(block: DocumentBlock) -> int:
@@ -167,189 +213,255 @@ def _page(block: DocumentBlock) -> int:
     return 0
 
 
-def _kind_of(asset_type: str) -> str:
-    """The site entity type of an asset register ``Type``."""
-    return "robot" if "robot" in asset_type.lower() else "machine"
-
-
-def _equipment(tag: str, index: _Index) -> str:
-    """``CV-2`` -> ``machine:cv-2``: typed by the asset whose name carries the tag."""
-    for name, asset_type in index.assets:
-        if tag in name.split():
-            return f"{_kind_of(asset_type)}:{tag.lower()}"
-    return f"machine:{tag.lower()}"
-
-
-def _person(name: str) -> str:
-    return f"person:{name.lower()}"
+def _or_none(text: str) -> str | None:
+    return text or None
 
 
 # --- Tables -----------------------------------------------------------------------------------
 
 
 def _key(column: str) -> str:
-    return column.strip().lower().replace(" ", "_")
+    return str(column).strip().lower().replace(" ", "_")
 
 
 class _Row:
-    """One data row: cells by column key, and the facts it states, each citing its cell."""
+    """One data row: cells by column key, and the facts it states, each citing its cell.
 
-    def __init__(self, file: str, record: StructuredRecord, header: tuple[str, ...]) -> None:
-        self.file, self.number = file, record.row + 1
-        self.columns = {_key(name): name for name in header}
-        self.cells = {
-            _key(name): _text(cell) for name, cell in zip(header, record.cells, strict=False)
-        }
+    ``cells`` holds (column as written, text, locator) per cell."""
+
+    def __init__(
+        self, file: str, number: int, label: str, cells: list[tuple[str, str, str]]
+    ) -> None:
+        self.file, self.number, self.label = file, number, label
+        self.written = [(name, text) for name, text, _ in cells]
+        self.cells = {_key(name): text for name, text, _ in cells}
+        self.locators = {_key(name): locator for name, _, locator in cells}
+
+    @staticmethod
+    def tabular(file: str, record: StructuredRecord, header: tuple[str, ...], label: str) -> _Row:
+        """A CSV/XLSX row (``row N col "X"``) or a JSONL line (``line N col "key"``)."""
+        number = record.row + 1
+        cells = [
+            (name, _text(cell), f'{label} {number} col "{name}"')
+            for name, cell in zip(header, record.cells, strict=False)
+        ]
+        return _Row(file, number, label, cells)
 
     def __getitem__(self, column: str) -> str:
         return self.cells.get(column, "")
 
+    def render(
+        self, template: Any, index: _Index, mapping: Mapping, extra: dict[str, str] | None = None
+    ) -> str:
+        def lookup(name: str) -> str:
+            return extra[name] if extra and name in extra else self[_key(name)]
+
+        return render(template, lookup, mapping, index.register)
+
+    def when(self, name: Any, index: _Index, mapping: Mapping) -> str | None:
+        """A ``time`` / ``until``: a column, or a template (``None`` if a cell it names is
+        blank)."""
+        if not name:
+            return None
+        if "{" not in str(name):
+            return _or_none(self[_key(name)])
+        blank: list[str] = []
+
+        def lookup(column: str) -> str:
+            text = self[_key(column)]
+            if not text:
+                blank.append(column)
+            return text
+
+        text = render(name, lookup, mapping, index.register)
+        return None if blank else text
+
     def fact(
         self,
         source: str,
+        kind: Kind,
         subject: str,
         predicate: str,
         column: str,
-        obj: Ref | Value | None = None,
+        obj: Ref | Value,
         valid_from: str | None = None,
         valid_to: str | None = None,
     ) -> Fact:
-        written = self.columns.get(column, column)
-        cite = Citation(self.file, f'row {self.number} col "{written}"', self[column])
-        value = obj if obj is not None else Value(self[column])
-        return Fact(subject, predicate, value, valid_from, valid_to, "stated", source, (cite,))
+        locator = self.locators.get(column, f'{self.label} {self.number} col "{column}"')
+        cite = Citation(self.file, locator, self[column])
+        return Fact(subject, predicate, obj, valid_from, valid_to, kind, source, (cite,))
 
 
-def _or_none(text: str) -> str | None:
-    return text or None
+def _leaves(value: Any, path: tuple[Any, ...]) -> list[tuple[tuple[Any, ...], str]]:
+    """Every scalar in parsed JSON with its path; text as is, other scalars as JSON."""
+    if isinstance(value, dict):
+        return [leaf for key, item in value.items() for leaf in _leaves(item, (*path, key))]
+    if isinstance(value, list):
+        return [leaf for i, item in enumerate(value) for leaf in _leaves(item, (*path, i))]
+    return [(path, value if isinstance(value, str) else json.dumps(value))]
 
 
-def _assets(row: _Row, index: _Index) -> list[Fact]:
-    asset = f"{_kind_of(row['type'])}:{row['asset']}"
-    return [
-        row.fact("cmms", asset, predicate, predicate)
-        for predicate in ("name", "serial")
-        if row[predicate]
-    ]
+def _json_rows(
+    file: str, leaves: Iterable[tuple[tuple[Any, ...], str]], rows_path: Any
+) -> list[_Row]:
+    """A JSON file's rows: the objects of the array at dotted ``rows_path`` (or the top-level
+    array, or the whole object as one row); columns are dotted paths, cited ``json <pointer>``."""
+    prefix = tuple(str(rows_path).split(".")) if rows_path else ()
+    rows: dict[int, list[tuple[str, str, str]]] = {}
+    for path, text in leaves:
+        if tuple(str(p) for p in path[: len(prefix)]) != prefix:
+            continue
+        rest = path[len(prefix) :]
+        index, column = (rest[0], rest[1:]) if rest and isinstance(rest[0], int) else (0, rest)
+        if column:
+            pointer = "/" + "/".join(str(p) for p in path)
+            name = ".".join(str(p) for p in column)
+            rows.setdefault(index, []).append((name, str(text), f"json {pointer}"))
+    return [_Row(file, i + 1, "json", cells) for i, cells in sorted(rows.items())]
 
 
-def _work_orders(row: _Row, index: _Index) -> list[Fact]:
-    wo, opened = f"work_order:{row['wo']}", _or_none(row["opened"])
-    asset = _equipment(row["equipment"], index)
-    out = [row.fact("cmms", asset, "work_order", "equipment", Ref(wo), opened)]
-    for predicate, column in (
-        ("wo_opened", "opened"),
-        ("wo_closed", "closed"),
-        ("wo_problem", "problem"),
-        ("wo_action", "action"),
-        ("wo_cause", "cause"),
-        ("wo_loto", "loto"),
-        ("wo_note", "note"),
-    ):
-        if row[column]:
-            out.append(row.fact("cmms", wo, predicate, column, valid_from=opened))
-    if row["done_by"]:
-        by = Ref(_person(row["done_by"]))
-        out.append(row.fact("cmms", wo, "wo_by", "done_by", by, opened))
-    return out
-
-
-def _changes(row: _Row, index: _Index) -> list[Fact]:
-    change, at = f"change:{row['change']}", _or_none(row["when"])
-    asset = _equipment(row["equipment"], index)
-    unit = _or_none(row["unit"])
-    out = [row.fact("cmms", asset, "change", "change", Ref(change), at)]
-    if row["parameter"]:
-        out.append(row.fact("cmms", change, "name", "parameter", valid_from=at))
-    for predicate, column in (("change_from", "from"), ("change_to", "to")):
-        if row[column]:
-            value = Value(row[column], unit)
-            out.append(row.fact("cmms", change, predicate, column, value, at))
-    if row["requested_by"]:
-        by = Ref(_person(row["requested_by"]))
-        out.append(row.fact("cmms", change, "change_by", "requested_by", by, at))
-    if row["reason"]:
-        out.append(row.fact("cmms", change, "change_reason", "reason", valid_from=at))
-    return out
-
-
-def _roster(row: _Row, index: _Index) -> list[Fact]:
-    person = _person(row["person"])
+def _table(entry: dict[str, Any], row: _Row, index: _Index, mapping: Mapping) -> list[Fact]:
+    source, kind = str(entry["source"]), entry.get("kind", "stated")
+    path = row.file.removeprefix(f"{STATIC}/")
     out: list[Fact] = []
-    if index.first_row.get(row["person"].lower()) == row.number:
-        out.append(row.fact("roster", person, "name", "person"))
-        if row["role"]:
-            role = Ref("role:" + row["role"].replace(" ", "-"))
-            out.append(row.fact("roster", person, "has_role", "role", role))
-    if row["shift"]:
-        shift = Ref(f"shift:{row['shift']}")
-        start, end = _or_none(row["start"]), _or_none(row["end"])
-        out.append(row.fact("roster", person, "on_shift", "shift", shift, start, end))
-    if row["break_start"]:
-        brk = Value("break")
-        start, end = row["break_start"], _or_none(row["break_end"])
-        out.append(row.fact("roster", person, "on_break", "break_start", brk, start, end))
+    for spec in entry.get("facts") or []:
+        column = _key(spec["column"])
+        if not row[column]:
+            continue
+        once = spec.get("once")
+        if once and index.first(path, _key(once), row[_key(once)]) != row.number:
+            continue
+        times = [row.when(spec.get(w, entry.get(w)), index, mapping) for w in ("time", "until")]
+        items = [row[column]]
+        if "split" in spec:
+            items = [item.strip() for item in row[column].split(spec["split"]) if item.strip()]
+        for item in items:
+            extra = {"item": item}
+            default = entry.get("subject", "")
+            subject = row.render(spec.get("subject", default), index, mapping, extra)
+            obj: Ref | Value
+            if "ref" in spec:
+                obj = Ref(row.render(spec["ref"], index, mapping, extra))
+            else:
+                value = item
+                if "value" in spec:
+                    value = row.render(spec["value"], index, mapping, extra)
+                unit = row.render(spec["unit"], index, mapping, extra) if "unit" in spec else ""
+                obj = Value(value, unit or None)
+            out.append(row.fact(source, kind, subject, spec["predicate"], column, obj, *times))
     return out
 
 
-def _qualifications(row: _Row, index: _Index) -> list[Fact]:
-    qualification = Ref(f"qualification:{row['qualification']}")
-    granted = _or_none(row["granted"])
-    person = _person(row["person"])
-    return [
-        row.fact("roster", person, "holds_qualification", "qualification", qualification, granted)
-    ]
+def _unmapped_row(path: str, record: StructuredRecord, row: _Row | None) -> list[Fact]:
+    document = f"document:{path}"
+    file, number = f"{STATIC}/{path}", record.row + 1
+    out: list[Fact] = []
+    if row is None:  # a CSV header: the file's marker
+        quote = ",".join(_text(cell) for cell in record.cells)
+        out.append(_unmapped(document, Citation(file, f"row {number}", quote)))
+        return out
+    if record.row == 0:
+        out.append(_unmapped(document, Citation(file, f"line {number}", None)))
+    if row.label == "line":
+        text = ", ".join(f"{name}: {value}" for name, value in row.written)
+    else:
+        text = ",".join(value for _, value in row.written)
+    cite = Citation(file, f"{row.label} {number}", text)
+    out.append(Fact(document, "text", Value(text), None, None, "stated", UNMAPPED_SOURCE, (cite,)))
+    return out
 
 
-_TABLES: dict[str, Callable[[_Row, _Index], list[Fact]]] = {
-    _ASSETS: _assets,
-    "cmms/work_orders.csv": _work_orders,
-    "changes/changes.csv": _changes,
-    _ROSTER: _roster,
-    _QUALIFICATIONS: _qualifications,
-}
+def _unmapped(document: str, cite: Citation) -> Fact:
+    obj = Value("not mapped")
+    return Fact(document, "unmapped", obj, None, None, "stated", UNMAPPED_SOURCE, (cite,))
 
 
 # --- Documents --------------------------------------------------------------------------------
 
 
-def _document_block(path: str, block: DocumentBlock, index: _Index) -> list[Fact]:
+def _block_text(block: DocumentBlock) -> str | None:
     if not isinstance(block.text, Known) or not block.text.value.strip():
+        return None
+    return block.text.value
+
+
+def _unmapped_block(path: str, block: DocumentBlock, index: _Index) -> list[Fact]:
+    text = _block_text(block)
+    if text is None:
         return []
-    text = block.text.value
-    document = "document:" + PurePosixPath(path).stem.split("_", 1)[0]
+    page, number = index.blocks[block.id]
+    document = f"document:{path}"
+    cite = Citation(f"{STATIC}/{path}", f"page {page} block {number}", text)
+    out = [_unmapped(document, cite)] if block.order == 0 else []
+    out.append(Fact(document, "text", Value(text), None, None, "stated", UNMAPPED_SOURCE, (cite,)))
+    return out
+
+
+def _document_block(
+    entry: dict[str, Any], path: str, block: DocumentBlock, index: _Index, mapping: Mapping
+) -> list[Fact]:
+    text = _block_text(block)
+    if text is None:
+        return []
+    names = {"stem": PurePosixPath(path).stem}
+    document = render(entry["id"], names.__getitem__, mapping, index.register)
+    names["id"] = document.split(":", 1)[1]
     page, number = index.blocks[block.id]
     cite = (Citation(f"{STATIC}/{path}", f"page {page} block {number}", text),)
+    source = str(entry["source"])
 
     def stated(subject: str, predicate: str, obj: Ref | Value) -> Fact:
-        return Fact(subject, predicate, obj, None, None, "stated", "docs", cite)
+        return Fact(subject, predicate, obj, None, None, "stated", source, cite)
 
     out: list[Fact] = []
     if block.order == 0:
         out.append(stated(document, "name", Value(text.strip())))
     holder = document
-    rule = _RULE.match(text.strip())
-    if rule:
-        holder = f"rule:{document.split(':', 1)[1].lower()}-{rule.group(1)}"
-        out.append(stated(holder, "rule_text", Value(rule.group(2).strip())))
-    out.extend(stated(document, "states_limit", Value(m.group(0))) for m in _LIMIT.finditer(text))
+    rule = entry.get("rule")
+    clause = re.match(rule["pattern"], text.strip(), re.DOTALL) if rule else None
+    if rule and clause:
+        groups = {**names, **{str(i): g or "" for i, g in enumerate(clause.groups(), start=1)}}
+        holder = render(rule["id"], groups.__getitem__, mapping, index.register)
+        rule_text = clause.group(int(rule.get("text", 2))).strip()
+        out.append(stated(holder, "rule_text", Value(rule_text)))
     lowered = text.lower()
-    for qualification in index.qualifications:
-        if qualification.lower() in lowered or qualification.replace("-", " ").lower() in lowered:
-            qref = Ref(f"qualification:{qualification}")
-            out.append(stated(holder, "requires_qualification", qref))
+    for lift in entry.get("lift") or []:
+        about = lift.get("about", lift.get(True, lift.get("on", "document")))  # YAML 1.1: on = True
+        on = holder if about == "rule" else document
+        predicate, ref = lift["predicate"], lift.get("ref")
+        found: list[str] = []
+        if "pattern" in lift:
+            for match in re.finditer(lift["pattern"], text):
+                found.append(match.group(1) if match.groups() else match.group(0))
+        if "terms" in lift:
+            terms = lift["terms"]
+            held = index.column(str(terms["table"]), str(terms["column"]))
+            if "split" in terms:
+                held = [t.strip() for cell in held for t in cell.split(terms["split"])]
+            for term in sorted({t for t in held if t}):
+                if term.lower() in lowered or term.replace("-", " ").lower() in lowered:
+                    found.append(term)
+        for value in found:
+            out.append(stated(on, predicate, Ref(f"{ref}:{value}") if ref else Value(value)))
     return out
 
 
 # --- Recorded model output --------------------------------------------------------------------
 
 
-def _extraction(path: str, values: Iterable[ConfigurationValue], index: _Index) -> list[Fact]:
+def _extraction(
+    entry: dict[str, Any],
+    path: str,
+    values: Iterable[ConfigurationValue],
+    index: _Index,
+    mapping: Mapping,
+) -> list[Fact]:
     scalars = {v.path: v.text.value for v in values if isinstance(v.text, Known)}
     model = f"{scalars[('model',)]}@{scalars[('prompt_sha256',)][:12]}"
     image = PurePosixPath(STATIC, path).parent / scalars[("image",)]
     taken = scalars.get(("taken",))
     kind: Kind = "inferred"
+    source, predicate = str(entry["source"]), str(entry.get("predicate", "note"))
     out: list[Fact] = []
     region = 0
     while ("regions", region, "text") in scalars:
@@ -357,7 +469,9 @@ def _extraction(path: str, values: Iterable[ConfigurationValue], index: _Index) 
         cite = Citation(str(image), f"region {box}", None)
         text = scalars[("regions", region, "text")]
         tag, colon, _ = text.partition(":")
-        subject = _equipment(tag.strip(), index) if colon else f"document:{image.stem}"
-        out.append(Fact(subject, "note", Value(text), taken, None, kind, "photos", (cite,), model))
+        subject = (
+            tag_ref(tag.strip(), mapping, index.register) if colon else f"document:{image.stem}"
+        )
+        out.append(Fact(subject, predicate, Value(text), taken, None, kind, source, (cite,), model))
         region += 1
     return out

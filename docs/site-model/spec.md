@@ -87,6 +87,7 @@ neptune confirm (yes/no) ──────────────────�
 | `wo_action`, `wo_cause`, `wo_by`, `wo_loto` | work_order → text/person | one | stated (CMMS) |
 | `change` | machine/robot → change | many | stated (change log) |
 | `note` | any → text | many | inferred (photo) until confirmed |
+| `finding` | any → text | many | inferred (insight rules, §8a) |
 | `same_as` | any → same type | many | inferred proposal → stated on confirm |
 | `report_interval` | source → value seconds | one | stated (layout) |
 
@@ -106,7 +107,8 @@ neptune confirm (yes/no) ──────────────────�
 - **Static files**, in `build(site_dir)`:
   1. `neptune.sdk.ingest(site_dir / "static", site_dir / ".neptune/package", isolation="in_process")`;
      then `neptune.store.package.read_package(...)`.
-  2. Hand each record to `mappers.map_record(record, package) -> list[Fact]`. Records arrive in package order
+  2. Hand each record to `mappers.map_record(record, package, mapping) -> list[Fact]`, where `mapping` is the
+     site's declared mapping file (§12). Records arrive in package order
      (stable), and citations come from each record's `provenance` evidence locator.
   3. `layout.yaml` is read directly by `mappers.map_layout(path)`. It is the declared site, so its facts are
      stated.
@@ -182,6 +184,33 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   - They are enabled by `python -m neptune_context.mcp --site <site_dir>`.
   - v2 tools stay as they are.
 
+## 8a. Insights (`site/insights.py`, #203)
+
+- **Rules, not a model.** Each rule reads the views through the generic vocabulary and topology, never a
+  site's ids, and writes **inferred** facts: predicate `finding`, `source="neptune.insights"`, `model=None`.
+  A finding's text opens with its rule, and it cites the citations of the facts that support it.
+  - **starvation chain:** a `fault:` health, then something downstream (topology, robots in a reached zone,
+    their tasks) goes idle, starved, waiting or blocked within 120 s.
+  - **qualification gap:** during a fault, no on-shift, not-on-break person holds a qualification that a
+    document or rule requires. The document or rule must name the entity (one of its stated names) or cover
+    its zone.
+  - **stale source:** a source, or one fleet device, is silent for more than 3 × `report_interval` while
+    other sources keep reporting.
+  - **change before fault:** a `change`, `work_order`, `setpoint` or `firmware` change on the same entity in
+    the 24 h before a fault. This is a correlation, never a cause.
+  - **regulation check:** a work order against a rule clause that shares its words. It checks lockout (when
+    the clause names it) and the qualification of the person who did the work.
+- `findings(model, at)` reads only what was true by `at`. `insights(model, at)` and
+  `shift_report(model, shift_id | start, end)` return `Answer`s. The report sets `Answer.sections`, and
+  `render` prints those as headings.
+- `python -m neptune_memory.site insights <site_dir>` appends the findings the log does not hold yet. It is
+  idempotent.
+- `sql` also has `downtime(entity, state, start, "end", seconds, cause, work_order, fact_id)`,
+  `utilisation(robot, mode, seconds)` (only time the source was reporting) and
+  `fault_clear_time(entity, fault, start, "end", seconds, fact_id)`.
+- **MCP:** `neptune_site_insights {at}` and `neptune_site_shift_report {shift_id | start, end}`. Gold:
+  `tests/site/gold_insights.json`.
+
 ## 9. The live-site corpus (`site/corpus/`, `site/replay.py`, #182)
 
 - `python -m neptune_memory.site generate <out>` (Python: `neptune_memory.site.corpus.generate(out: Path)`) writes the corpus. It is deterministic: same code, same
@@ -208,6 +237,7 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 | Path | What | Becomes |
 |---|---|---|
 | `static/layout.yaml` | site, areas, zones, machines, topology, sources and `report_interval`, clock | stated facts (`map_layout`) |
+| `static/neptune.mappings.yaml` | how every file below becomes facts (§12) | nothing itself |
 | `static/cmms/assets.csv` | asset register: `MR-1141..1143` with serials (`SN-88412` = MR-1142) | `serial`, `name` (stated) |
 | `static/cmms/work_orders.csv` | WO-5521 (10-19 15:20, CV-2 belt replaced, "tension per SOP-CV-04 rev B"); WO-5530 (10-20 10:08–10:41, cleared jam at PE3, by Lindqvist, LOTO yes, cause "belt tracking off") | work-order facts (stated) |
 | `static/changes/changes.csv` | CHG-311: CV-2 speed setpoint 0.80 → 0.95 m/s, 10-20 05:40 | `change` (stated) |
@@ -243,6 +273,10 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   cited files.
 - They pass since #188 (no xfail). Tests call the §8 API. The answers must cite the files
   listed; wording is never checked.
+- Harbor DC (`generate --site harbor`, #201) has five more (`tests/site/harbor_gold_questions.json`), and
+  insights have three for Plant 7 (`gold_insights.json`) and two for Harbor (`harbor_gold_insights.json`:
+  the sorter's starvation chain, Reyes on break). All pass since #204, through the same code: the two sites
+  differ only in their `static/neptune.mappings.yaml` and `layout.yaml`.
 
 ## 11. Lane ownership
 
@@ -257,3 +291,140 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
 | #188 gate | flips the gold xfails, adds one replay test, `make site-demo` end to end; v2 stays (Context and Demo v1 still import it) | all |
 
 - Shared files (`site/__main__.py`, `Makefile`): add your subcommand or target only; don't reorder the others.
+
+## 12. Mappings: config, not code (`static/neptune.mappings.yaml`, #200)
+
+- Every site-specific id, path, column and topic lives in **one file per site**,
+  `<site_dir>/static/neptune.mappings.yaml`. `site/mappers/` holds only the generic machinery: a new site with
+  new exports needs a mapping file, never code. `layout.yaml` stays the declared site; it is not a mapping.
+- The file sits in `static/`, so it is ingested and citable like everything else, but it maps to no facts.
+  A site with no mapping file maps only `layout.yaml`; everything else is unmapped (below).
+- **Templates** (`"robot:{topic[-2]}"`) fill each `{name}`, then apply `|filters` left to right:
+  - `lower`; `slug` (spaces → `-`); `until:<c>` (the text before the first `<c>`);
+  - `type`: free text → entity type, through `types`;
+  - `tag`: an equipment tag (`CV-2`) → `<type>:<tag lowercased>`, through `tags`.
+- Names: in a table, `{Column}` is a cell as written (column names match case-blind, spaces = `_`). In a feed,
+  `{source}`, `{topic}`, `{topic[N]}` (the `/`-split segment, negative from the end) and `{payload.a.b}`. In a
+  document, `{stem}` (file name without extension), `{id}` (the document id without its type) and `{1}`, `{2}`
+  … (the rule pattern's groups).
+
+```text
+mappings: 1                              # format version
+
+types:                                   # `|type`: the first rule whose word the text contains
+  - {contains: robot, type: robot}
+  - {type: machine}                      # no `contains`: the fallback
+tags:                                    # `|tag`: the register row whose `name` cell holds the tag as a word
+  table: cmms/assets.csv                 #   gives the type (its `type` cell, through `types`);
+  name: Name                             #   no such row: machine
+  type: Type
+
+tables:                                  # CSV/XLSX rows (header = row 1), JSONL lines, JSON arrays
+  - file: cmms/work_orders.csv           # glob under static/; the first matching entry wins
+    source: cmms                         # the facts' source id (layout.yaml `sources`)
+    kind: stated                         # stated (default) | observed
+    subject: "work_order:{WO}"           # the default subject of every fact below
+    time: Opened                         # valid_from: a column, or a template; optional
+    facts:                               # in order; a fact whose `column` cell is blank is skipped
+      - {subject: "{Equipment|tag}", predicate: work_order, column: Equipment, ref: "work_order:{WO}"}
+      - {predicate: wo_problem, column: Problem}          # object = the cell as written
+      - {predicate: wo_by, column: Done by, ref: "person:{Done by|lower}"}
+  - file: cmms/work_orders.json          # a JSON table: `rows` is the dotted path of its array
+    rows: workOrders                     #   (none: a top-level array, or the object as one row)
+    source: cmms
+    subject: "work_order:{id}"           # columns are dotted paths (`asset.tag`), cited `json /workOrders/1/cause`
+    time: opened
+  - file: roster/shift_roster.csv
+    source: roster
+    subject: "person:{Person|lower}"
+    facts:
+      - {predicate: has_role, column: Role, ref: "role:{Role|slug}", once: Person}  # first row per Person
+      - {predicate: holds_qualification, column: Certs, split: "|", ref: "qualification:{item}"}  # one per item
+      - {predicate: on_break, column: Break start, value: break,
+         time: "{Date}T{Break start}", until: "{Date}T{Break end}"}  # a template; None if a cell is blank
+  - file: changes/changes.csv
+    source: cmms
+    subject: "change:{Change}"
+    time: When
+    facts:
+      - {predicate: change_to, column: To, unit: "{Unit}"}  # a unit template; blank = none
+
+documents:                               # PDF blocks, cited `page P block B`
+  - file: docs/*.pdf
+    source: docs
+    id: "document:{stem|until:_}"        # the first block's text is the document's `name`
+    rule:                                # a block matching `pattern` is a clause: `id` gets rule_text = group `text`
+      pattern: '^§?\s*(\d+(?:\.\d+)+)\s+(.+)$'
+      id: "rule:{id|lower}-{1}"
+      text: 2
+    lift:                                # values stated verbatim in a block
+      - {pattern: '\d+\s?[–-]\s?\d+\s?N\b', predicate: states_limit, about: document}  # group 1 if any, else the match
+      - {terms: {table: roster/qualifications.csv, column: Qualification},          # each term named in the block
+                                                                    # (terms may `split: "|"` a cell)
+         predicate: requires_qualification, ref: qualification, about: rule}         # (case-blind, `-` or space)
+                                         # about: document | rule (the block's clause, else the document)
+extractions:                             # recorded model output (§7)
+  - file: photos/*.extraction.json
+    source: photos
+    predicate: note                      # subject: a `<tag>:` text prefix (through `tags`), else the image
+
+feeds:                                   # one entry per envelope `source`
+  - source: plc.cv2
+    decoder: sparkplug                   # payload.metrics[]: {name, value, unit}; the metric's unit is kept
+    subject: machine:cv-2
+    fields:                              # name (glob) -> predicate, or {predicate, subject, unit, ref, state}
+      state: mode
+      alarm: health
+      "*/parts_out": {predicate: parts_out, subject: cell:c3}
+  - source: fleet
+    decoder: vda5050                     # payload fields by dotted path (same as `json`)
+    subject: "robot:{topic[-2]}"
+    fields:
+      batteryState.batteryCharge: {predicate: battery, unit: "%"}
+      zone: {predicate: in_zone, ref: zone}                    # ref: <type> prefixes a bare id
+      orderId: {predicate: current_task, state: orderState}
+  - source: arm.c3
+    decoder: controller_log              # as `json`; the quote is the line's `text`, except on `event: heartbeat`
+    subject: robot:arm-c3
+    fields: {mode: mode, fault: health}
+  - source: ros.insp1
+    decoder: ros2_diagnostics            # status[] as `<status name>/<key>` and `<status name>/level`
+    subject: robot:insp-1
+    fields:
+      "insp1/thermal_scan */max_temp_c": {predicate: temperature, subject: "machine:{hardware_id}", unit: "°C"}
+```
+
+- **Decoders:** `sparkplug` (`metrics[]`), `opcua` (`nodes[]`: `name`, `value`, `eu` = unit), `json` (any JSON
+  object payload), `vda5050` (= `json`), `controller_log`, `ros2_diagnostics` (a `DiagnosticArray`; level 0 =
+  no fault code, else `WARN`/`ERROR`/`STALE`, quoting the status message; `{hardware_id}` names the status's
+  device). A new one is a function registered by name in `DECODERS`, `site/mappers/feeds.py`.
+- **Feed fields** are emitted when present and not null, and only on change (§4). `health` reads a fault code:
+  `""` or `[]` = `ok`, else `fault:<code>` (a list's first `errorType`). `current_task` makes `task:<value>`,
+  its `assigned_to` back, and `task_state` from the `state` field; a blank value is `none`.
+- **Freshness per device:** when a feed's `subject` is a template (`robot:{topic[-2]}`), each message also logs
+  `seen` for `<source>/<id>`, so one silent robot turns stale while its fleet still reports.
+- **`time` / `until`** state when a fact holds. Leave `until` off for facts that stay true after the row's end
+  (a work order's cause does not stop being its cause when it closes): views read a fact past its `until` as over.
+- **YAML 1.1 reads a bare `on` key as `true`**; write `about:` (`on:` is accepted as an alias).
+- **Unmapped files** (a CSV/TSV/JSONL/XLSX table or a document no entry matches) are still logged:
+  `document:<path under static/>` gets `unmapped = "not mapped"` citing the file, plus one stated `text` fact
+  per row or block, verbatim. So `search_evidence` finds them and `gaps` lists them as not mapped.
+- **`python -m neptune_memory.site draft-mapping <site_dir> <file>`** prints a draft `tables:` entry (CSV or
+  JSONL rows) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
+  heuristics. The skill says: draft → show the user → save into the mapping file → `build`.
+- Plant 7's full file is `MAPPINGS` in `site/corpus/static.py`.
+
+## 13. Live (#202)
+
+- `python -m neptune_memory.site publish <site_dir> --broker mqtt://127.0.0.1:1883 --speed 60 [--start T]`
+  replays the corpus feed to MQTT on each message's real topic; the payload is the feed envelope.
+- `python -m neptune_memory.site live <site_dir> --broker ...` subscribes to `#`, starts a fresh log
+  (`static/`, then any earlier recording), and per message records the envelope to
+  `feed/live/segment-NNNNNN.jsonl` first, then appends `seen` + facts through `build.Appender` (the
+  same `Seam` as `build`). Facts cite the recorded line, so `build` with `messages=live.captured`
+  writes the same bytes. A new or changed file under `static/` re-ingests `static/` and appends only
+  facts the log lacks.
+- The MCP server tails the log (`log.Tail`) and applies new entries before each call;
+  `neptune_site_changes(since_seq)` (`query.changes`) lists facts appended after a seq.
+- `make site-live` runs `broker` (amqtt, anonymous), `live` and `publish` (`START=2026-10-20T09:55:00`,
+  earlier messages at once). No auth, TLS or reconnect handling.
