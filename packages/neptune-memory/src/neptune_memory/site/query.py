@@ -22,7 +22,7 @@ from neptune_memory.site.facts import KIND_RANK, Citation, Fact, Kind, Ref, Stat
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from neptune_memory.site.views import Reading, SiteModel
+    from neptune_memory.site.views import Interval, Reading, SiteModel
 
 # --- Answers -----------------------------------------------------------------------------------
 
@@ -47,7 +47,8 @@ class Item:
 @dataclass
 class Answer:
     """A cited answer: items, what it could not cover (``gaps``), and numbered sources. ``sql``
-    also fills ``columns`` and ``rows``."""
+    also fills ``columns`` and ``rows``. Past ``MAX_ITEMS`` items are counted in ``omitted``,
+    not kept, so one answer stays small enough for an agent to read."""
 
     tool: str
     at: str | None
@@ -57,6 +58,7 @@ class Answer:
     sources: dict[str, Citation] = field(default_factory=dict)
     columns: list[str] = field(default_factory=list)
     rows: list[tuple[Any, ...]] = field(default_factory=list)
+    omitted: int = 0
 
     def cite(self, citations: Iterable[Citation]) -> tuple[str, ...]:
         """Number ``citations`` in order of first use and return their keys."""
@@ -70,27 +72,45 @@ class Answer:
                 keys.append(key)
         return tuple(keys)
 
-    def add(self, fact: Fact, state: State = "known", relation: str | None = None) -> Item:
-        item = Item(
-            fact_id=fact.id,
-            subject=fact.subject,
-            predicate=fact.predicate,
-            object=fact.object,
-            valid_from=fact.valid_from,
-            valid_to=fact.valid_to,
-            kind=fact.kind,
-            state=state,
-            cite=self.cite(fact.citations),
-            relation=relation,
+    def full(self) -> bool:
+        """True once ``MAX_ITEMS`` are kept; counts the item that did not fit."""
+        if len(self.items) < MAX_ITEMS:
+            return False
+        self.omitted += 1
+        return True
+
+    def add(
+        self,
+        fact: Fact,
+        state: State = "known",
+        relation: str | None = None,
+        span: tuple[str | None, str | None] | None = None,
+    ) -> None:
+        """One fact as an item; ``span`` replaces its stated validity with a history interval."""
+        if self.full():
+            return
+        start, end = span if span is not None else (fact.valid_from, fact.valid_to)
+        self.items.append(
+            Item(
+                fact_id=fact.id,
+                subject=fact.subject,
+                predicate=fact.predicate,
+                object=fact.object,
+                valid_from=start,
+                valid_to=end,
+                kind=fact.kind,
+                state=state,
+                cite=self.cite(fact.citations),
+                relation=relation,
+            )
         )
-        self.items.append(item)
-        return item
 
     def add_cell(self, cell: Reading) -> None:
         if not cell.facts:
-            self.items.append(
-                Item(None, cell.subject, cell.predicate, None, None, None, None, cell.state, ())
-            )
+            if not self.full():
+                self.items.append(
+                    Item(None, cell.subject, cell.predicate, None, None, None, None, cell.state, ())
+                )
             self.gaps.append(f"{cell.subject} {cell.predicate}: {cell.state}, no source states it")
             return
         for fact in cell.facts:
@@ -107,6 +127,9 @@ class Answer:
 # --- Helpers -----------------------------------------------------------------------------------
 
 _FAR_FUTURE = "9999-12-31T23:59:59"
+MAX_ITEMS = 200
+SERIES_LIMIT = 3
+"""``diff`` shows a (subject, predicate) that changed more often than this by its ends only."""
 STATUS = frozenset(
     {"mode", "health", "task_state", "battery", "current_task", "in_zone", "parts_out", "setpoint"}
 )
@@ -152,7 +175,12 @@ def resolve(model: SiteModel, name: str) -> Answer:
     for entity in matched:
         group.update(model.same_as(entity))
     pending = {f.id for f in model.pending()}
+    said: set[tuple[str, str, Ref | Value, str]] = set()
     for fact in live:
+        said_once = (fact.subject, fact.predicate, fact.object, fact.kind)
+        if said_once in said:
+            continue  # a feed repeating a serial or name says nothing new
+        said.add(said_once)
         touches = fact.subject in group or (
             isinstance(fact.object, Ref) and fact.object.ref in group
         )
@@ -206,20 +234,7 @@ def timeline(
         if predicates is None or i.fact.predicate in predicates
     ]
     for interval in sorted(intervals, key=lambda i: i.start or ""):
-        fact = interval.fact
-        answer.items.append(
-            Item(
-                fact_id=fact.id,
-                subject=fact.subject,
-                predicate=fact.predicate,
-                object=fact.object,
-                valid_from=interval.start,
-                valid_to=interval.end,
-                kind=fact.kind,
-                state="known",
-                cite=answer.cite(fact.citations),
-            )
-        )
+        answer.add(interval.fact, span=(interval.start, interval.end))
     if not answer.items:
         answer.gaps.append(f"no interval of {entity} overlaps {start} to {end}")
     return answer
@@ -263,15 +278,32 @@ def _contest(fact: Fact, other: Fact) -> str:
 
 
 def diff(model: SiteModel, start: str, end: str, entities: list[str] | None = None) -> Answer:
-    """Facts that began in ``(start, end]``, optionally only about ``entities``."""
+    """Values that began in ``(start, end]`` (history intervals, so a value a feed repeats counts
+    once), optionally only about ``entities``, in site-clock order."""
     answer = _new("diff", model, end)
-    wanted = None if entities is None else {s for e in entities for s in model.same_as(e)}
+    wanted = model.entities if entities is None else {s for e in entities for s in model.same_as(e)}
     pending = {f.id for f in model.pending()}
-    for fact in _live(model):
-        if fact.valid_from is None or not start < fact.valid_from <= end:
-            continue
-        if wanted is None or fact.subject in wanted:
-            answer.add(fact, _state(model, fact, pending))
+    began = [
+        i
+        for subject in sorted(wanted)
+        for i in model.history(subject, start=start, end=end)
+        if i.start is not None and start < i.start <= end
+    ]
+    series: dict[tuple[str, str], list[Interval]] = {}
+    for interval in began:
+        series.setdefault((interval.fact.subject, interval.fact.predicate), []).append(interval)
+    shown: list[Interval] = []
+    for (subject, predicate), changes in series.items():
+        if len(changes) > SERIES_LIMIT:  # a battery or counter: its first and last change
+            answer.gaps.append(
+                f"{subject} {predicate} changed {len(changes)} times; first and last shown "
+                "(timeline gives every one)"
+            )
+            changes = [changes[0], changes[-1]]
+        shown += changes
+    for interval in sorted(shown, key=lambda i: i.start or ""):
+        fact = interval.fact
+        answer.add(fact, _state(model, fact, pending), span=(interval.start, interval.end))
     if not answer.items:
         answer.gaps.append(f"no fact began between {start} and {end}")
     return answer
@@ -367,8 +399,6 @@ def sql(model: SiteModel, query: str) -> Answer:
     except sqlite3.Error as error:
         answer.gaps.append(f"sql error: {error}")
         return answer
-    finally:
-        db.close()
     if len(answer.rows) > SQL_ROW_LIMIT:
         answer.rows = answer.rows[:SQL_ROW_LIMIT]
         answer.gaps.append(f"only the first {SQL_ROW_LIMIT} rows are shown")
@@ -381,8 +411,17 @@ def sql(model: SiteModel, query: str) -> Answer:
     return answer
 
 
+_DATABASE: dict[str, tuple[SiteModel, int, sqlite3.Connection]] = {}
+
+
 def _database(model: SiteModel) -> sqlite3.Connection:
-    db = sqlite3.connect(":memory:")
+    """The tables for ``model``, built once per model and log position (one cached at a time)."""
+    cached = _DATABASE.get("last")
+    if cached is not None and cached[0] is model and cached[1] == model.seq:
+        return cached[2]
+    if cached is not None:
+        cached[2].close()
+    db = sqlite3.connect(":memory:", check_same_thread=False)
     db.executescript(SQL_TABLES)
     pending = {f.id for f in model.pending()}
     db.executemany(
@@ -440,4 +479,5 @@ def _database(model: SiteModel) -> sqlite3.Connection:
     )
     db.commit()
     db.execute("PRAGMA query_only = ON")
+    _DATABASE["last"] = (model, model.seq, db)
     return db

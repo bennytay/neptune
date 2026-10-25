@@ -31,6 +31,8 @@ def render(answer: Answer) -> str:
     if not answer.items and not answer.rows:
         lines.append("(nothing)")
     lines += [f"! {gap}" for gap in answer.gaps]
+    if answer.omitted:
+        lines.append(f"! {answer.omitted} more items not shown; ask a narrower question")
     if answer.sources:
         lines.append("Sources:")
         for key, citation in answer.sources.items():
