@@ -308,7 +308,7 @@ def sql(model, query: str) -> Answer                         # sqlite3 over tabl
   document, `{stem}` (file name without extension), `{id}` (the document id without its type) and `{1}`, `{2}`
   … (the rule pattern's groups).
 
-```yaml
+```text
 mappings: 1                              # format version
 
 types:                                   # `|type`: the first rule whose word the text contains
