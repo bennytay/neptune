@@ -13,7 +13,8 @@ any ``same_as`` it now implies (inferred, pending until someone confirms it), so
 shows the proposal the moment the second serial arrives.
 
 The mappers (#184) and the replay (#182) are reached through ``Seam``, so tests and early callers
-can hand in their own.
+can hand in their own. ``Appender`` is the same path held open, one input at a time: the live site
+(``live.py``) appends each message as it arrives and each static file as it changes.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from neptune.sdk import Isolation, JobOptions, ingest, read_package
 from neptune_memory.site.identity import propose_same_as
-from neptune_memory.site.log import FactLog, log_dir
+from neptune_memory.site.log import FactLog, log_dir, read
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -116,6 +117,58 @@ def replay(
     return log_dir(site_dir)
 
 
+class Appender:
+    """A fresh log held open: ``static()`` once, then ``message()`` / ``restatic()`` as inputs
+    arrive. Each call flushes, so readers (the MCP server) see it at once. ``static()`` then
+    ``message()`` for each message writes the bytes ``build`` writes for the same messages."""
+
+    def __init__(self, site_dir: Path, seam: Seam | None = None) -> None:
+        self.site_dir = Path(site_dir)
+        self.seam = seam or Seam.default()
+        self.log = _fresh(self.site_dir)
+        self._out = _Writer(self.log)
+
+    def __enter__(self) -> Appender:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.log.close()
+
+    def static(self) -> None:
+        """Ingest ``static/`` and append its facts."""
+        _static(self.site_dir, self._out, self.seam)
+        self.log.flush()
+
+    def message(self, message: Message) -> None:
+        """Append one feed message: ``seen``, then its facts."""
+        _append_message(self._out, self.seam, message)
+        self.log.flush()
+
+    def restatic(self) -> int:
+        """``static/`` changed: ingest it again and append only the facts not yet in the log (a
+        record's facts may lean on other files, e.g. the asset register). Returns how many."""
+        self.log.flush()
+        logged = {e.fact.id for e in read(self.site_dir) if e.fact is not None}
+        before = self.log.seq
+        fresh = _Fresh(self._out, logged)
+        _static(self.site_dir, fresh, self.seam)
+        self.log.flush()
+        return self.log.seq - before
+
+
+@dataclass
+class _Fresh:
+    """A ``_Writer`` front that drops facts the log already holds."""
+
+    writer: _Writer
+    logged: set[str]
+
+    def emit(self, facts: Iterable[Fact]) -> None:
+        new = [f for f in facts if f.id not in self.logged]
+        self.logged.update(f.id for f in new)
+        self.writer.emit(new)
+
+
 def _fresh(site_dir: Path) -> FactLog:
     for output in (log_dir(site_dir), _package_dir(site_dir)):
         if output.exists():
@@ -127,8 +180,10 @@ def _package_dir(site_dir: Path) -> Path:
     return site_dir / ".neptune" / "package"
 
 
-def _static(site_dir: Path, out: _Writer, seam: Seam) -> None:
+def _static(site_dir: Path, out: _Writer | _Fresh, seam: Seam) -> None:
     package_dir = _package_dir(site_dir)
+    if package_dir.exists():  # a live re-ingest; build and replay start without one
+        shutil.rmtree(package_dir)
     ingest(
         site_dir / "static",
         package_dir,

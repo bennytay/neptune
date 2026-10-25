@@ -437,6 +437,29 @@ def sql(model: SiteModel, query: str) -> Answer:
     return answer
 
 
+def changes(model: SiteModel, since_seq: int = 0) -> Answer:
+    """What the log learned after ``since_seq`` (a live site, #202): each fact appended since, in
+    log order, and each proposal answered since. Pass the answer's ``log seq`` back next time."""
+    answer = _new("changes", model, model.clock())
+    pending = {f.id for f in model.pending()}
+    new = sorted(
+        (seq, fid) for fid, seq in model.fact_seq.items() if seq > since_seq and model.live(fid)
+    )
+    for seq, fid in new:
+        if answer.full():
+            answer.omitted += len(new) - len(answer.items) - 1
+            answer.gaps.append(f"more changed: ask again with since_seq={seq - 1}")
+            break
+        answer.add(model.facts[fid], _state(model, model.facts[fid], pending))
+    for proposal, (seq, confirm) in sorted(model.confirms.items(), key=lambda c: c[1][0]):
+        if seq > since_seq and confirm.answer == "no":
+            answer.gaps.append(f"{proposal} rejected by {confirm.by} (log seq {seq})")
+    if not new:
+        reports = sum(len(times) for times in model.seen.values())
+        answer.gaps.append(f"no new facts after log seq {since_seq} ({reports} reports so far)")
+    return answer
+
+
 _DATABASE: dict[str, tuple[SiteModel, int, sqlite3.Connection]] = {}
 
 

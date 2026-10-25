@@ -16,6 +16,8 @@ what changed, what is unknown) with them, not with the tools below:
   `neptune_site_timeline`, `neptune_site_diff` (what changed between two times), `neptune_site_find`
   (who holds a qualification, which rule requires it), `neptune_site_gaps` (stale, unknown,
   pending), `neptune_site_why` (one `fact:` id), `neptune_site_search_evidence`, `neptune_site_sql`.
+- The site may be live: `neptune_site_changes` with the `log seq` of your last answer lists what
+  arrived since.
 - Times are site-clock `YYYY-MM-DDTHH:MM:SS`, never converted. Leave `at` out for "now".
 - Each line ends `[S<n>]`; the `Sources:` footer gives the file and line, row or page. Keep the key
   and name the file in your answer. Say `stale`, `unknown`, `ambiguous`, `pending` and `inferred`

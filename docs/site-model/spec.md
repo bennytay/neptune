@@ -381,3 +381,18 @@ feeds:                                   # one entry per envelope `source`
   JSONL rows) or `feeds:` entry (feed envelopes) from the file's header and first rows, by deterministic
   heuristics. The skill says: draft → show the user → save into the mapping file → `build`.
 - Plant 7's full file is `MAPPINGS` in `site/corpus/static.py`.
+
+## 13. Live (#202)
+
+- `python -m neptune_memory.site publish <site_dir> --broker mqtt://127.0.0.1:1883 --speed 60 [--start T]`
+  replays the corpus feed to MQTT on each message's real topic; the payload is the feed envelope.
+- `python -m neptune_memory.site live <site_dir> --broker ...` subscribes to `#`, starts a fresh log
+  (`static/`, then any earlier recording), and per message records the envelope to
+  `feed/live/segment-NNNNNN.jsonl` first, then appends `seen` + facts through `build.Appender` (the
+  same `Seam` as `build`). Facts cite the recorded line, so `build` with `messages=live.captured`
+  writes the same bytes. A new or changed file under `static/` re-ingests `static/` and appends only
+  facts the log lacks.
+- The MCP server tails the log (`log.Tail`) and applies new entries before each call;
+  `neptune_site_changes(since_seq)` (`query.changes`) lists facts appended after a seq.
+- `make site-live` runs `broker` (amqtt, anonymous), `live` and `publish` (`START=2026-10-20T09:55:00`,
+  earlier messages at once). No auth, TLS or reconnect handling.

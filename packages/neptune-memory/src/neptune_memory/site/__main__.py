@@ -6,6 +6,8 @@ Each lane adds its own subcommand; don't reorder the others.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import signal
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,6 +42,7 @@ def _replay(args: argparse.Namespace) -> int:
 
 def _say(line: str) -> None:
     sys.stdout.write(line + "\n")
+    sys.stdout.flush()
 
 
 def _confirm(args: argparse.Namespace) -> int:
@@ -72,6 +75,43 @@ def _draft_mapping(args: argparse.Namespace) -> int:
     from neptune_memory.site.draft import draft_mapping
 
     sys.stdout.write(draft_mapping(args.site_dir, args.file))
+    return 0
+
+
+DEFAULT_BROKER = "mqtt://127.0.0.1:1883"  # live.DEFAULT_BROKER, without importing the compiler
+
+
+def _publish(args: argparse.Namespace) -> int:
+    from neptune_memory.site.live import publish
+
+    with contextlib.suppress(KeyboardInterrupt):
+        n = publish(
+            args.site_dir, args.broker, speed=args.speed, start=args.start, until=args.until
+        )
+        _say(f"published {n} messages to {args.broker}")
+    return 0
+
+
+def _interruptible() -> None:
+    """Ctrl-C stops a command even when a shell started it with ``&`` (which ignores SIGINT)."""
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
+def _live(args: argparse.Namespace) -> int:
+    from neptune_memory.site.live import live
+
+    _interruptible()
+    live(args.site_dir, args.broker)
+    return 0
+
+
+def _broker(args: argparse.Namespace) -> int:
+    from neptune_memory.site.live import broker
+
+    _interruptible()
+    _say(f"broker: {args.broker} (amqtt, anonymous; Ctrl-C stops it)")
+    with contextlib.suppress(KeyboardInterrupt):
+        broker(args.broker)
     return 0
 
 
@@ -114,6 +154,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     draft.add_argument("site_dir", type=Path)
     draft.add_argument("file", type=Path, help="the file, relative to site_dir or absolute")
     draft.set_defaults(run=_draft_mapping)
+
+    publish = commands.add_parser(
+        "publish", help="replay the corpus feed to an MQTT broker on its real topics"
+    )
+    publish.add_argument("site_dir", type=Path)
+    publish.add_argument("--broker", default=DEFAULT_BROKER)
+    publish.add_argument("--speed", type=float, default=60.0)
+    publish.add_argument("--start", help="publish messages before this site time at once")
+    publish.add_argument("--until", help="stop after this site time (YYYY-MM-DDTHH:MM:SS)")
+    publish.set_defaults(run=_publish)
+
+    live = commands.add_parser(
+        "live", help="subscribe; record and log each message, and new static files, as they land"
+    )
+    live.add_argument("site_dir", type=Path)
+    live.add_argument("--broker", default=DEFAULT_BROKER)
+    live.set_defaults(run=_live)
+
+    broker = commands.add_parser("broker", help="run a local MQTT broker (amqtt) for the demo")
+    broker.add_argument("--broker", default=DEFAULT_BROKER, help="where to listen")
+    broker.set_defaults(run=_broker)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)
