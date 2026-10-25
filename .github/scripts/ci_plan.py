@@ -9,6 +9,8 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
   runs every job;
 * a root directory owned by a member runs that member, not the compiler (``harness/**`` and
   ``docsite/**`` are ``neptune-platform``'s: their tests live in the package and import them);
+* a markdown file outside ``docs/schema/``, other than ``README.md``, runs no compiler job
+  (``docs_only``; the ``docs`` job still builds the site);
 * the compiler runs when any other path outside ``packages/`` and ``contracts/`` changed, or a path
   under ``contracts/<id>/`` of a contract the compiler owns (so its owner check runs on the PR);
 * a member runs when ``packages/<name>/**`` or ``contracts/**`` changed, or when a workspace
@@ -108,6 +110,17 @@ MEMORY_SNAPSHOT_INPUTS = (
     "harness/contracts.py",
     *DEPLOY_STAGE_INPUTS,
 )
+
+
+def docs_only(path: str) -> bool:
+    """A markdown file the compiler's tests never read: the `docs` job builds it, nothing else.
+
+    ``docs/schema/`` is generated from the model and ``README.md`` holds the quickstart, so both
+    keep their routing.
+    """
+    return path.endswith(".md") and path != "README.md" and not path.startswith("docs/schema/")
+
+
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
@@ -182,7 +195,9 @@ def plan(
         if p.startswith("contracts/") and p.count("/") >= 2
     }
     compiler_paths = [
-        p for p in changed if not p.startswith(("packages/", "contracts/", *MEMBER_DIRS))
+        p
+        for p in changed
+        if not p.startswith(("packages/", "contracts/", *MEMBER_DIRS)) and not docs_only(p)
     ]
     compiler = COMPILER in owned or bool(compiler_paths)
     core = COMPILER in owned or any(not ADAPTER_DIR.match(p) for p in compiler_paths)
