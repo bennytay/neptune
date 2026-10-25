@@ -1,7 +1,7 @@
 name: ci
 
 # One job per workspace package, selected by .github/scripts/ci_plan.py from the PR's changed paths;
-# merge-queue groups and pushes to main run every job. `check` aggregates them and is the only
+# merge-queue groups, pushes to main and the nightly run every job. `check` aggregates them and is the only
 # required status: a skipped package job counts as success, a failed or cancelled one fails it.
 # The `docs` job builds the documentation site on every event, unfiltered.
 on:
@@ -9,13 +9,30 @@ on:
   merge_group:
   push:
     branches: [main]
+  # Nightly: every job with the full suite (`make check-all`), on main.
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a PR cancels its older run; main and nightly runs are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Tests run on every core (pytest-xdist); the 15 slowest are printed. A PR runs `make check`
+# (slow tests excluded); main, the nightly schedule and a manual dispatch run `make check-all`.
+env:
+  PYTEST_WORKERS: auto
+  PYTEST_ARGS: --durations=15
+  CHECK: ${{ github.event_name == 'pull_request' && 'check' || 'check-all' }}
+
 jobs:
   plan:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
     outputs:
       compiler: ${{ steps.plan.outputs.compiler }}
       packages: ${{ steps.plan.outputs.packages }}
@@ -41,6 +58,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.compiler == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -51,7 +69,7 @@ jobs:
       - name: Install workspace and dev tools
         run: make setup
       - name: Lint, type-check, test
-        run: make check PKG=neptune
+        run: make "$CHECK" PKG=neptune
       - name: Contracts (owner rule)
         run: make contracts-check PKG=neptune
 
@@ -60,6 +78,7 @@ jobs:
     if: needs.plan.outputs.packages != '[]'
     name: ${{ matrix.package }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
     strategy:
       fail-fast: false
       matrix:
@@ -76,7 +95,7 @@ jobs:
       - name: Lint, type-check, test
         env:
           PACKAGE: ${{ matrix.package }}
-        run: make check PKG="$PACKAGE"
+        run: make "$CHECK" PKG="$PACKAGE"
       - name: Contracts (lock, owner rule, upstream contract tests)
         env:
           PACKAGE: ${{ matrix.package }}
@@ -86,6 +105,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.template == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -106,6 +126,7 @@ jobs:
   # path can be a link target and every public module is a page, so no path filter is safe.
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -122,6 +143,7 @@ jobs:
     needs: [plan, neptune, package, template, docs]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 90 }}
     steps:
       - name: Require every selected job to succeed or be skipped
         env:
