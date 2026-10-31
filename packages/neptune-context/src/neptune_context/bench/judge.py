@@ -106,6 +106,7 @@ def judge(api: Any, question: Question, answer: str, *, model: str) -> list[dict
         out.append(
             {
                 "fact": describe(item),
+                "predicate": item["predicate"],
                 "state": item.get("state", "known"),
                 "verdict": v["verdict"],
                 "made_up": bool(v["made_up"]) and item.get("state", "known") in UNSURE,

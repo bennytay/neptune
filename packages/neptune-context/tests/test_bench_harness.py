@@ -117,3 +117,23 @@ def test_bench_one_scripted_answer_is_recorded_and_summarised(tmp_path: Path) ->
     assert agent.strip_images([{"type": "image", "source": {}}]) == [
         {"type": "image", "omitted": True}
     ]
+
+
+def test_bench_summary_prints_counts_and_sites_too_big_count_as_wrong(
+    tmp_path: Path, capsys: Any
+) -> None:
+    from neptune_context.bench.__main__ import main
+
+    question = questions.Question(
+        id="Q1",
+        site="t",
+        text="What jammed?",
+        expect=({"subject": "machine:cv-2", "predicate": "health", "object": "fault:JAM_PE3"},),
+    )
+    arm = arms.Context(tmp_path, chars_per_token=4.0)
+    record = run.did_not_fit(arm, question, run.Settings(), "prompt is too long")
+    results = tmp_path / "results.jsonl"
+    results.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    assert main(["summary", str(results), "--root", str(tmp_path)]) == 0
+    assert "context  0/1 (0%)" in capsys.readouterr().out
+    assert run.summarise([record])["context"]["did_not_fit"] == 1

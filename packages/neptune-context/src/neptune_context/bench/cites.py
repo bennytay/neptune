@@ -25,6 +25,8 @@ def sources(answer: str) -> list[tuple[str, str, str]]:
     """``(file, where, quote)`` per source line, from the last ``Sources:`` section on."""
     tail = answer[answer.rfind("Sources") :] if "Sources" in answer else answer
     starts = [m.end() for m in _ENTRY.finditer(tail)]
+    if not starts:
+        return []
     ends = [*[m.start() for m in _ENTRY.finditer(tail)][1:], len(tail)]
     out = []
     for start, end in zip(starts, ends, strict=True):

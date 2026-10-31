@@ -14,6 +14,9 @@ GOLD_FILES: dict[str, tuple[str, ...]] = {
     "harbor": ("harbor_gold_questions.json", "harbor_gold_insights.json"),
     "public": ("public_gold_questions.json",),
 }
+# Facts read from the demo sites' whiteboard photos. The photos are placeholder patterns and the
+# text is a recorded extraction (README, "What's real"), so no reader of the raw files can get it.
+UNANSWERABLE = frozenset({"note"})
 
 
 @dataclass(frozen=True)
@@ -28,7 +31,7 @@ class Question:
 
 def _question(site: str, raw: dict[str, Any]) -> Question:
     text = raw["question"]
-    expect = [dict(e) for e in raw["expect"]]
+    expect = [dict(e) for e in raw["expect"] if e["predicate"] not in UNANSWERABLE]
     if any(call["tool"] == "confirm" for call in raw.get("calls", [])):
         # Before-and-after questions: an agent cannot confirm, so ask the "before" half only.
         text = text.split(" (before")[0] + " (No operator has confirmed anything yet.)"

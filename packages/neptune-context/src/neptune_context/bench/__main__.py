@@ -7,7 +7,9 @@ summary  per-arm counts of one or more results files, citations checked again; n
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -51,12 +53,15 @@ def main(argv: list[str] | None = None) -> int:
             workers=args.workers,
         )
         api = agent.client(os.environ.get("ANTHROPIC_API_KEY"))
+        sys.stdout.write(f"{len(qs)} questions x {args.arms} -> {out}\n")
         run.run(api, qs, tuple(args.arms.split(",")), args.root, out, settings)
         records = run.load([out])
     else:
         records = run.load(args.results)
     run.recheck(records, args.root)
-    run.summarise(records)
+    summary = run.summarise(records)
+    as_json = getattr(args, "json", False)
+    sys.stdout.write((json.dumps(summary, indent=2) if as_json else run.table(summary)) + "\n")
     return 0
 
 

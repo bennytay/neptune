@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from neptune_context.bench import agent, arms, cites, judge, readers, sites
+from neptune_context.bench.questions import UNANSWERABLE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -80,6 +81,50 @@ def answer(
     }
 
 
+def did_not_fit(
+    arm: arms.Arm, question: Question, settings: Settings, error: str
+) -> dict[str, Any]:
+    """A context arm whose site is bigger than the window: no answer, every fact missing."""
+    return {
+        "qid": question.id,
+        "site": question.site,
+        "arm": arm.name,
+        "question": question.text,
+        "model": settings.model,
+        "effort": settings.effort,
+        "judge_model": settings.judge_model,
+        "answer": "",
+        "stop": "prompt_too_long",
+        "tool_calls": 0,
+        "seconds": 0.0,
+        "usage": dict.fromkeys(agent.USAGE, 0),
+        "arm_notes": {**arm.notes, "error": error[:300]},
+        "judged": [
+            {
+                "fact": judge.describe(item),
+                "predicate": item["predicate"],
+                "state": item.get("state", "known"),
+                "verdict": "missing",
+                "made_up": False,
+                "why": "the site does not fit in the context window",
+            }
+            for item in judge.expected(question)
+        ],
+        "cites": {"listed": 0, "verified": 0, "unverifiable": 0, "details": []},
+        "transcript": [],
+    }
+
+
+def _graded(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """The judged facts, less those no reader of the raw files can get (``UNANSWERABLE``)."""
+    out = []
+    for j in record["judged"]:
+        predicate = j.get("predicate") or j["fact"].split(" · ")[1].split(" ")[0].rstrip(".")
+        if predicate not in UNANSWERABLE:
+            out.append(j)
+    return out
+
+
 def run(
     api: Any,
     questions: list[Question],
@@ -110,6 +155,12 @@ def run(
         try:
             record = answer(api, arm, question, built, settings)
         except Exception as error:
+            if "prompt is too long" in str(error):
+                record = did_not_fit(arm, question, settings, str(error))
+                with lock, out.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(record) + "\n")
+                log(f"{question.id} {name}: the site does not fit in the context window")
+                return
             log(f"{question.id} {name}: FAILED {type(error).__name__}: {error}")
             return
         with lock, out.open("a", encoding="utf-8") as f:
@@ -171,23 +222,29 @@ def summarise(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for name in [a for a in ARMS if any(r["arm"] == a for r in records)]:
         mine = [r for r in records if r["arm"] == name]
-        facts = [j for r in mine for j in r["judged"]]
+        fit = [r for r in mine if r["stop"] != "prompt_too_long"]
+        facts = [j for r in mine for j in _graded(r)]
         unsure = [j for j in facts if j["state"] in judge.UNSURE]
         costs = [c for c in (cost(r) for r in mine) if c is not None]
         out[name] = {
             "questions": len(mine),
-            "correct": sum(all(j["verdict"] == "stated" for j in r["judged"]) for r in mine),
+            "correct": sum(all(j["verdict"] == "stated" for j in _graded(r)) for r in mine),
+            "did_not_fit": sum(r["stop"] == "prompt_too_long" for r in mine),
             "facts": len(facts),
             "facts_stated": sum(j["verdict"] == "stated" for j in facts),
             "unsure_facts": len(unsure),
             "made_up": sum(j["made_up"] for j in unsure),
             "citations": sum(r["cites"]["listed"] - r["cites"]["unverifiable"] for r in mine),
             "citations_verified": sum(r["cites"]["verified"] for r in mine),
-            "median_tokens": statistics.median(tokens(r["usage"]) for r in mine),
-            "median_tool_calls": statistics.median(r["tool_calls"] for r in mine),
+            "median_tokens": _median([tokens(r["usage"]) for r in fit]),
+            "median_tool_calls": _median([r["tool_calls"] for r in fit]),
             "cost_usd": round(sum(costs), 2) if costs else None,
         }
     return out
+
+
+def _median(values: list[int]) -> float:
+    return float(statistics.median(values)) if values else 0.0
 
 
 def table(summary: dict[str, dict[str, Any]]) -> str:
