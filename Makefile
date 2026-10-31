@@ -164,6 +164,6 @@ site-sim-run: ## Simulated plant, offline: DAYS shifts into feed/, then build an
 # question set; one JSON line per answer in bench/results/. Needs ANTHROPIC_API_KEY; costs money.
 SET ?= gold
 ARMS ?= files,context,neptune
-BENCH_SITES ?= p7,harbor,public
+BENCH_SITES ?=
 bench: ## Benchmark: ask SET through ARMS and print x / N per arm (needs ANTHROPIC_API_KEY)
 > $(RUN) --extra anthropic python -m neptune_context.bench run --set "$(SET)" --sites "$(BENCH_SITES)" --arms "$(ARMS)"

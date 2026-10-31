@@ -25,7 +25,10 @@ def prepare(site: str, root: Path) -> tuple[Path, Path]:
     """The built site and its raw copy, made if missing."""
     built, raw = root / site, root / f"{site}-raw"
     if not (built / ".neptune").exists():
-        if site == "public":
+        if site.startswith("plant7-"):
+            if not (built / "feed").exists():
+                raise FileNotFoundError(f"generate {site} first (questions.load('plant7'))")
+        elif site == "public":
             subprocess.run([str(ROOT / "scripts" / "fetch_public_site.sh"), str(built)], check=True)
         else:
             corpus.generate(built, site=site)

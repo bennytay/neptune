@@ -567,14 +567,42 @@ def append(site_dir: Path) -> list[Fact]:
     return new
 
 
-def insights(model: SiteModel, at: str | None = None) -> Answer:
-    """The findings at ``at`` as a cited answer (``neptune_site_insights``)."""
+RECENT = timedelta(hours=2)
+"""``insights`` shows findings that began this long before ``at``, and those still open."""
+OPEN_ENDED = ("stale source", "qualification gap")
+"""Findings that hold with no end until the state changes (the others are events)."""
+
+
+def _current(fact: Fact, t: str, since: str) -> bool:
+    """Began since ``since``, or still holds at ``t``."""
+    if (fact.valid_from or "") >= since:
+        return True
+    if fact.valid_to is not None:
+        return fact.valid_to > t
+    return str(getattr(fact.object, "value", "")).startswith(OPEN_ENDED)
+
+
+def insights(model: SiteModel, at: str | None = None, since: str | None = None) -> Answer:
+    """The findings at ``at`` as a cited answer (``neptune_site_insights``): those still open at
+    ``at`` and those that began since ``since`` (default: ``RECENT`` before ``at``). Earlier
+    ones are counted, not shown, so the answer stays the size of the moment asked about; pass
+    an earlier ``since`` (or use ``shift_report``) for history."""
     t = _at(model, at)
+    if since is None:
+        since = (datetime.fromisoformat(t) - RECENT).isoformat(timespec="seconds") if at else ""
     answer = Answer(tool="insights", at=t, as_of_seq=model.seq)
+    earlier = 0
     for fact in findings(model, t):
-        answer.add(fact)
+        if _current(fact, t, since):
+            answer.add(fact)
+        else:
+            earlier += 1
+    if earlier:
+        answer.gaps.append(
+            f"{earlier} earlier findings, closed before {since}, not shown: pass since to see them"
+        )
     if not answer.items:
-        answer.gaps.append(f"no rule finds anything by {t}")
+        answer.gaps.append(f"no rule finds anything open at {t} or since {since}")
     answer.gaps.append("findings are inferred by deterministic rules: correlations, not causes")
     return answer
 

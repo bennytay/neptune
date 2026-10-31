@@ -164,8 +164,9 @@ SITE_TOOLS: Final[dict[str, SiteTool]] = {
         "before faults (correlation only) and work orders checked against rule clauses. Each is "
         "inferred, cited by its supporting facts. sql also has tables downtime(entity, state, "
         'start, "end", seconds, cause, work_order, fact_id), utilisation(robot, mode, seconds) '
-        'and fault_clear_time(entity, fault, start, "end", seconds, fact_id).',
-        {"at": _AT},
+        'and fault_clear_time(entity, fault, start, "end", seconds, fact_id). Shows findings '
+        "still open at the time and those from the 2 hours before it; pass since for earlier.",
+        {"at": _AT, "since": {**_TIME, "description": "show findings that began from this time"}},
         (),
     ),
     PREFIX + "shift_report": SiteTool(

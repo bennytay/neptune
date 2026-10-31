@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     go = sub.add_parser("run", help="run a question set through the arms")
     go.add_argument("--set", default="gold")
-    go.add_argument("--sites", default="p7,harbor,public")
+    go.add_argument("--sites", default="", help="comma-separated; default: the set's sites")
     go.add_argument("--arms", default=",".join(run.ARMS))
     go.add_argument("--only", default="", help="comma-separated question ids")
     go.add_argument("--model", default=run.Settings.model)
@@ -33,6 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     go.add_argument("--workers", type=int, default=run.Settings.workers)
     go.add_argument("--root", type=Path, default=ROOT / "sites")
     go.add_argument("--out", type=Path)
+    again = sub.add_parser("rejudge", help="grade recorded answers again against a fixed key")
+    again.add_argument("results", type=Path)
+    again.add_argument("--set", default="gold")
+    again.add_argument("--judge-model", default=run.Settings.judge_model)
+    again.add_argument("--root", type=Path, default=ROOT / "sites")
     show = sub.add_parser("summary", help="per-arm counts of results files")
     show.add_argument("results", type=Path, nargs="+")
     show.add_argument("--root", type=Path, default=ROOT / "sites")
@@ -40,7 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        qs = questions.load(args.set, tuple(args.sites.split(",")))
+        sites = tuple(args.sites.split(",")) if args.sites else None
+        qs = questions.load(args.set, sites, args.root)
         if args.only:
             wanted = set(args.only.split(","))
             qs = [q for q in qs if q.id in wanted]
@@ -56,6 +62,14 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(f"{len(qs)} questions x {args.arms} -> {out}\n")
         run.run(api, qs, tuple(args.arms.split(",")), args.root, out, settings)
         records = run.load([out])
+    elif args.command == "rejudge":
+        records = run.load([args.results])
+        sets = {r["site"] for r in records}
+        qs = questions.load(args.set, tuple(sorted(sets)), args.root)
+        api = agent.client(os.environ.get("ANTHROPIC_API_KEY"))
+        done = run.rejudge(api, records, qs, args.judge_model)
+        args.results.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+        sys.stdout.write(f"graded {done} answers again\n")
     else:
         records = run.load(args.results)
     run.recheck(records, args.root)
