@@ -25,6 +25,7 @@ class FakeClaude:
             stop_reason="end_turn",
             model=request["model"],
             content=[SimpleNamespace(type="text", text=body)],
+            usage=SimpleNamespace(input_tokens=1000, output_tokens=0),
         )
         return _Stream(message)
 
