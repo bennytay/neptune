@@ -13,4 +13,4 @@ about: One deliverable, one PR, at least about a day of agent work
 **Acceptance**
 - [ ]
 
-**Read:** `docs/site-model/README.md`, the spec, and
+**Read:** <!-- files to read beyond this issue, if any -->

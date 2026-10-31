@@ -1,5 +1,5 @@
 {
-  "about": "Harbor DC gold questions (issue #201): a warehouse hub of legged, humanoid, goods-to-person and conveyor robots in other export shapes. Each call is a site query (docs/site-model/spec.md §8); expect lists items the answer must contain (object may be omitted) and the corpus files it must cite. Wording is never checked. Harbor's mapping file (static/neptune.mappings.yaml) is what makes these pass; they are xfail until the M2 gate.",
+  "about": "Harbor DC gold questions (issue #201): a warehouse hub of legged, humanoid, goods-to-person and conveyor robots in other export shapes. Each call is a site query; expect lists items the answer must contain (object may be omitted) and the corpus files it must cite. Wording is never checked. Harbor's mapping file (static/neptune.mappings.yaml) is what makes these pass; they are xfail until the M2 gate.",
   "questions": [
     {
       "id": "H1",

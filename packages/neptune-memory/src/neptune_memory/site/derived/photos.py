@@ -1,4 +1,4 @@
-"""Real photo extraction (spec §7): send each photo to Claude, record the answer next to it.
+"""Real photo extraction: send each photo to Claude, record the answer next to it.
 
 ``extract_photos(site_dir)`` writes ``static/photos/<name>.extraction.json``, the same recorded
 model output the corpus ships (model id, prompt, prompt hash, regions). The build only ever reads

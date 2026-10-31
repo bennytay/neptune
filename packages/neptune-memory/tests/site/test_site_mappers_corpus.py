@@ -1,5 +1,5 @@
 """The mappers on the generated Plant 7 corpus: generate, build, and the key facts are in the log
-with citations to the right files (spec §4, §5, §7, §9)."""
+with citations to the right files."""
 
 import pytest
 

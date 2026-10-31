@@ -1,4 +1,4 @@
-"""The site query API (spec §8) on a small hand-built model: one happy path per question."""
+"""The site query API on a small hand-built model: one happy path per question."""
 
 from __future__ import annotations
 

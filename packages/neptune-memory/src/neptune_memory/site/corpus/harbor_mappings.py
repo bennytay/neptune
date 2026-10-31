@@ -1,5 +1,5 @@
 # ruff: noqa: E501, RUF001
-"""Harbor DC's mapping file, ``static/neptune.mappings.yaml``, in the format of spec §12 (#200).
+"""Harbor DC's mapping file, ``static/neptune.mappings.yaml`` (#200).
 
 Harbor is shaped unlike Plant 7: a nested JSON CMMS (``rows:``), a roster that splits date from time
 (templated ``time`` / ``until``), multi-value cells (``split:``) and the ``opcua`` and

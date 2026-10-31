@@ -1,7 +1,7 @@
 # Tabular fixtures
 
 Real small tables for the `tabular` adapter (`neptune.adapters.tabular`, ADR 0042), one per embodiment
-and one per case the adapter checklist in `docs/adapter-contract.md` asks for. `make_tabular_fixtures.py`
+and one per case the adapter checklist asks for. `make_tabular_fixtures.py`
 writes every file; `tests/unit/adapters/test_tabular_fixtures.py` checks the committed files against it
 (text byte for byte; Parquet through the reader, since pyarrow writes its version into the footer).
 Validate the Parquet files with the format's official reader and nothing of Neptune's:

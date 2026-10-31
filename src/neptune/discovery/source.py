@@ -1,6 +1,6 @@
 """The ``Source`` interface and its local-filesystem implementation.
 
-Walking policy (ADR 0009 §5 as amended by ADR 0010, ``docs/security.md``):
+Walking policy (ADR 0009 §5 as amended by ADR 0010):
 
 - Regular files are yielded as ``SourceEntry``. Names that are not valid UTF-8 are yielded too,
   located by their exact bytes (``RawLocalPath``).

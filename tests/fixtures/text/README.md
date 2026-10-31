@@ -1,7 +1,7 @@
 # Plain-text fixtures
 
 Real files for the `text` reference adapter (`neptune.adapters.text`), one per case the adapter
-checklist in `docs/adapter-contract.md` asks for. Hand-written; bytes matter, so edit them with care.
+checklist asks for. Hand-written; bytes matter, so edit them with care.
 
 | File | Case | What the adapter must do |
 |---|---|---|

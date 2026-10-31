@@ -1,4 +1,4 @@
-"""The site query API (spec §8): ten questions over a folded ``SiteModel``, each a cited ``Answer``.
+"""The site query API: ten questions over a folded ``SiteModel``, each a cited ``Answer``.
 
 Every function takes the model views (#185) fold from the log and returns an ``Answer`` whose items
 point at numbered sources (``S1`` ...), in order of first use. Times are site-clock strings,
@@ -330,7 +330,7 @@ def diff(model: SiteModel, start: str, end: str, entities: list[str] | None = No
 
 def gaps(model: SiteModel, at: str | None = None) -> Answer:
     """What is stale, unknown or ambiguous at t, every pending proposal, and every file the
-    site's mapping file does not map (spec §12)."""
+    site's mapping file does not map."""
     t = _at(model, at)
     answer = _new("gaps", model, t)
     for reading in model.state_at(t):

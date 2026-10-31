@@ -1,4 +1,4 @@
-"""The live-site corpora (spec §9): ``generate(out)`` writes ``static/`` and ``feed/``.
+"""The live-site corpora: ``generate(out)`` writes ``static/`` and ``feed/``.
 
 Two sites: Plant 7 (``p7``, the default) and Harbor DC (``harbor``, a warehouse hub of other robot
 morphologies in other export shapes; ``harbor_feeds.py`` and ``harbor_static.py``).

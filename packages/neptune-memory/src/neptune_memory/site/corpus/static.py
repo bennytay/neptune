@@ -1,5 +1,5 @@
 # ruff: noqa: E501, RUF001
-"""The static half of the Plant 7 corpus: layout, mapping file, CMMS, change log, roster (spec §9).
+"""The static half of the Plant 7 corpus: layout, mapping file, CMMS, change log, roster.
 
 Every file is plain text written verbatim, so the bytes are the same on every host. The
 column headers are the contract with the mappers (#184).
@@ -48,7 +48,7 @@ sources:
   - {id: photos, name: "Shift photos, recorded model extraction"}
 """
 
-MAPPINGS = r"""# How Plant 7's files become facts (spec §12). The mappers know no site; this file does.
+MAPPINGS = r"""# How Plant 7's files become facts. The mappers know no site; this file does.
 mappings: 1
 
 types:

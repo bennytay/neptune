@@ -1,4 +1,4 @@
-"""``python -m neptune_memory.site <command>``: the site model's commands (spec §2).
+"""``python -m neptune_memory.site <command>``: the site model's commands.
 
 Each lane adds its own subcommand; don't reorder the others.
 """

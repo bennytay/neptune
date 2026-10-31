@@ -1,4 +1,4 @@
-"""Feed messages become observed state intervals, emitted only on change (spec §4, §12).
+"""Feed messages become observed state intervals, emitted only on change.
 
 A message is anything with the ``FeedMessage`` fields (#182): ``t``, ``source``, ``topic``,
 ``payload``, plus ``file`` (corpus-relative) and ``line`` (1-based) for the citation

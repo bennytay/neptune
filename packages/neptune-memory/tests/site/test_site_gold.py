@@ -1,8 +1,7 @@
-"""M1's finish line: the gold questions asked of the generated live site (spec §10).
+"""M1's finish line: the gold questions asked of the generated live site.
 
-Each test generates the corpus, builds the fact log, runs its calls through the site query API
-(spec §8) and checks that the expected items are in the answers and that the answers cite the
-expected files.
+Each test generates the corpus, builds the fact log, runs its calls through the site query API and
+checks that the expected items are in the answers and that the answers cite the expected files.
 """
 
 import importlib

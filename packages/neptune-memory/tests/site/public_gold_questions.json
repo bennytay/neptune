@@ -1,5 +1,5 @@
 {
-  "about": "Gold questions over real public data (issue #211): UCI dataset 963 'UR3 CobotOps' (CC BY 4.0), one UR3 cobot's controller export, fetched by scripts/fetch_public_site.sh. Every expected value was read from the raw workbook, not from a story. Each call is a site query (docs/site-model/spec.md §8); expect lists items the answer must contain, rows the first columns of sql rows, locators citations that must appear, cites the files. Wording is never checked.",
+  "about": "Gold questions over real public data (issue #211): UCI dataset 963 'UR3 CobotOps' (CC BY 4.0), one UR3 cobot's controller export, fetched by scripts/fetch_public_site.sh. Every expected value was read from the raw workbook, not from a story. Each call is a site query; expect lists items the answer must contain, rows the first columns of sql rows, locators citations that must appear, cites the files. Wording is never checked.",
   "questions": [
     {
       "id": "P1",
