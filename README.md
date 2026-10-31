@@ -53,6 +53,7 @@ make site-demo SITE=harbor      # Harbor DC (warehouse: sorter, legged inspector
 make site-demo SITE=public      # real public data: a UR3 cobot's controller export (below)
 make site-web                   # the web view over an already-built site
 make site-live                  # live at 60x without the script (SPEED=..., SITE=harbor)
+make site-sim                   # a simulated Plant 7, live, that obeys approved actions (DAYS, SEED)
 claude mcp add neptune-site -- <the "MCP:" line it printed>
 ```
 
