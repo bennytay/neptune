@@ -348,7 +348,7 @@ def _snapshot(model: SiteModel, at: str | None, live: SiteModel) -> dict[str, An
         ],
     )
     shown = {a["id"] for a in assets} | {e for e in model.entities if e.startswith("cell:")}
-    findings = insights.insights(model, t)
+    findings = insights.insights(model, t, since="")  # the dashboard lists every finding
     pending = query.Answer(tool="pending", at=t, as_of_seq=model.seq)
     for proposal in model.pending():
         pending.add(proposal, "pending")

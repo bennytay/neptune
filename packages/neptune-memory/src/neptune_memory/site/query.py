@@ -403,7 +403,7 @@ def search_evidence(model: SiteModel, text: str, limit: int = 20) -> Answer:
     return answer
 
 
-SQL_ROW_LIMIT = 200
+SQL_ROW_LIMIT = 50
 SQL_TABLES = """
 CREATE TABLE facts (fact_id TEXT PRIMARY KEY, subject TEXT, predicate TEXT, object TEXT,
   object_is_ref INTEGER, unit TEXT, valid_from TEXT, valid_to TEXT, kind TEXT, source TEXT,
@@ -430,7 +430,10 @@ def sql(model: SiteModel, query: str) -> Answer:
         return answer
     if len(answer.rows) > SQL_ROW_LIMIT:
         answer.rows = answer.rows[:SQL_ROW_LIMIT]
-        answer.gaps.append(f"only the first {SQL_ROW_LIMIT} rows are shown")
+        answer.gaps.append(
+            f"only the first {SQL_ROW_LIMIT} rows are shown: aggregate (COUNT, GROUP BY), filter, "
+            "or page with LIMIT/OFFSET"
+        )
     if "fact_id" in answer.columns:
         column = answer.columns.index("fact_id")
         for row in answer.rows:
