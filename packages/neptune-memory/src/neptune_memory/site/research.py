@@ -399,7 +399,13 @@ def clean(answer: dict[str, Any], found: improve.Dossier, model: SiteModel) -> d
 
 
 def record(
-    site_dir: Path, found: improve.Dossier, cleaned: dict[str, Any], *, model: str, trigger: str
+    site_dir: Path,
+    found: improve.Dossier,
+    cleaned: dict[str, Any],
+    *,
+    model: str,
+    trigger: str,
+    usage: dict[str, int] | None = None,
 ) -> list[Fact]:
     """Write the round as a line of ``RUNS`` (with its result facts) and log those facts."""
     site_dir = Path(site_dir)
@@ -434,6 +440,7 @@ def record(
         "prompt_sha256": improve._sha(SYSTEM),
         "dossier_sha256": improve._sha(found.text),
         "trigger": trigger,
+        "usage": usage or {},
         **cleaned,
         "facts": [f.to_json() for f in facts],
     }
@@ -452,9 +459,9 @@ def run(
     site_dir = Path(site_dir)
     memory = views.load(site_dir)
     found = dossier(memory, site_dir)
-    answer, served = improve.ask(client, found.text, model, system=SYSTEM, schema=SCHEMA)
+    answer, served, usage = improve.ask(client, found.text, model, system=SYSTEM, schema=SCHEMA)
     cleaned = clean(answer, found, memory)
-    return record(site_dir, found, cleaned, model=served, trigger=trigger)
+    return record(site_dir, found, cleaned, model=served, trigger=trigger, usage=usage)
 
 
 # --- Results for people and agents (#227) -----------------------------------------------------

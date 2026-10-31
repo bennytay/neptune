@@ -7,7 +7,7 @@ from typing import Any
 
 from fake_claude import FakeClaude, fact_id
 
-from neptune_memory.site import onboard, research
+from neptune_memory.site import improve, onboard, research
 from neptune_memory.site.log import log_dir, read
 
 MAPPING = """\
@@ -156,6 +156,7 @@ def test_site_research_tests_hypotheses_against_the_memory(tmp_path: Path) -> No
     assert "not in the memory" in str(hot.object.value)  # type: ignore[union-attr]
 
     line = research.rounds(site)[0].data
+    assert line["usage"] == {**dict.fromkeys(improve.USAGE, 0), "input_tokens": 1000}
     assert "stops-rising: goal goal:not-in-memory" not in line["dropped"]
     assert any("fact:not-in-memory" in d for d in line["dropped"])
     rising = next(h for h in line["hypotheses"] if h["key"] == "stops-rising")

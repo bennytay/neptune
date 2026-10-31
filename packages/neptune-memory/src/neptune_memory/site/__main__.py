@@ -220,6 +220,10 @@ def _research(args: argparse.Namespace) -> int:
         _say(
             f"{fact.subject}: {fact.object.value if hasattr(fact.object, 'value') else fact.object}"
         )
+    done = research.rounds(args.site_dir)
+    usage = done[-1].data.get("usage") if done else None
+    if usage:
+        _say("tokens: " + ", ".join(f"{k} {v}" for k, v in usage.items()))
     return 0
 
 

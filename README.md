@@ -107,7 +107,7 @@ thresholds, goes back into the memory as an inferred fact citing the rows it cou
 rebuild; the next round reads it, so a rejected idea is not proposed again blindly.
 
 ```
-uv run --all-packages --all-groups python -m neptune_memory.site research my-robot   # ANTHROPIC_API_KEY
+uv run --all-packages --all-groups --extra anthropic python -m neptune_memory.site research my-robot   # ANTHROPIC_API_KEY
 ```
 
 The dashboard's **Research** page shows each goal's tally, every result with its numbers, test, evidence

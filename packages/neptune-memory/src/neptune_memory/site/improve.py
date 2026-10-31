@@ -309,10 +309,10 @@ def ask(
     *,
     system: str = SYSTEM,
     schema: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], str]:
-    """One dossier to Claude; its answer (structured output, ``schema``, default ``SCHEMA``) and
-    the model that served it (a refusal falls back server-side to Anthropic's recommended model).
-    ``research.py`` asks with its own prompt and schema."""
+) -> tuple[dict[str, Any], str, dict[str, int]]:
+    """One dossier to Claude; its answer (structured output, ``schema``, default ``SCHEMA``), the
+    model that served it (a refusal falls back server-side to Anthropic's recommended model) and
+    the token usage the API reported. ``research.py`` asks with its own prompt and schema."""
     with client.beta.messages.stream(
         model=model,
         max_tokens=MAX_TOKENS,
@@ -332,7 +332,16 @@ def ask(
     if message.stop_reason == "max_tokens":
         raise RuntimeError(f"the answer did not fit in {MAX_TOKENS} tokens")
     body = next((b.text for b in message.content if b.type == "text"), "")
-    return json.loads(body), str(message.model)
+    return json.loads(body), str(message.model), _usage(message)
+
+
+USAGE = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def _usage(message: Any) -> dict[str, int]:
+    """The answer's token counts (output includes thinking), as the API reported them."""
+    usage = getattr(message, "usage", None)
+    return {k: int(getattr(usage, k, 0) or 0) for k in USAGE} if usage is not None else {}
 
 
 def _client(key: str | None) -> Any:
@@ -459,7 +468,7 @@ def run(site_dir: Path, client: Any, *, trigger: str = "asked", model: str = MOD
     site_dir = Path(site_dir)
     site = views.load(site_dir)
     found = dossier(site, site_dir)
-    answer, served = ask(client, found.text, model)
+    answer, served, _ = ask(client, found.text, model)
     return record(site_dir, found, clean(answer, found, site), model=served, trigger=trigger)
 
 
