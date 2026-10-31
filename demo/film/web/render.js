@@ -1,7 +1,9 @@
 // Render the film's shots in headless Chromium (three.js on the CPU, SwiftShader): no GPU needed.
 //
 //   node demo/film/web/render.js film [--only 04_jam] [--quality draft|preview|final]
-//        [--width 1920 --height 1080] [--every N] [--frames A B] [--workers 2]
+//        [--width 1920 --height 1080] [--every N] [--frames A B] [--workers 2] [--fresh]
+//
+// Frames already on disk are skipped, so a stopped render picks up where it left off (--fresh redoes them).
 //
 // Reads <film>/web/ (export_web.py) and <film>/shots.json, writes
 // <film>/frames/<shot>/rgb_NNNN.png; demo/film/cut.sh makes the video. Needs `npm install` in
@@ -41,7 +43,11 @@ const server = http.createServer((req, res) => {
   for (const name of list) {
     const total = JSON.parse(fs.readFileSync(path.join(film, 'web', `${name}.json`))).frames;
     const [a, b] = range ? [range[0], Math.min(range[1], total - 1)] : [0, total - 1];
-    for (let f = a; f <= b; f += every) jobs.push([name, f]);
+    for (let f = a; f <= b; f += every) {
+      const done = path.join(film, 'frames', name, `rgb_${String(f).padStart(4, '0')}.png`);
+      if (!args.includes('--fresh') && fs.existsSync(done)) continue;  // resume an interrupted render
+      jobs.push([name, f]);
+    }
   }
   const started = Date.now(); let done = 0;
   const worker = async () => {
