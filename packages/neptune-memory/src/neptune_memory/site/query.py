@@ -215,6 +215,31 @@ def state_at(model: SiteModel, entity: str, at: str | None = None) -> Answer:
     return answer
 
 
+STATUS_TYPES = ("robot", "machine", "cell")
+
+
+def status(model: SiteModel, at: str | None = None) -> Answer:
+    """Every robot, machine and cell at t, in one answer: mode, health, battery, task, zone,
+    output and setpoint (``STATUS``), each known, stale, unknown or ambiguous, cited."""
+    t = _at(model, at)
+    answer = _new("status", model, t)
+    quiet = []
+    for entity in sorted(model.entities):
+        if entity.split(":", 1)[0] not in STATUS_TYPES:
+            continue
+        readings = [r for r in model.state_at(t, entity) if r.predicate in STATUS]
+        if not any(r.facts for r in readings):
+            quiet.append(entity)  # records only (a CMMS asset id, say): one line, not a row each
+            continue
+        for reading in readings:
+            answer.add_cell(reading)
+    if quiet:
+        answer.gaps.append(f"{', '.join(quiet)}: no live status (records only)")
+    if not answer.items:
+        answer.gaps.append(f"no robot, machine or cell is known at {t}")
+    return answer
+
+
 def find(model: SiteModel, predicate: str, obj: str, at: str | None = None) -> Answer:
     """Who or what has ``predicate`` = ``obj`` at t (``obj`` a ref, or the value as text), and,
     when ``obj`` is an entity, what is known about it then."""

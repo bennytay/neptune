@@ -197,7 +197,13 @@ def run(
 
 # --- summary ---------------------------------------------------------------------------------
 
-PRICES = {"claude-opus-5-5": (4.0, 20.0, 8.0, 0.20)}  # $/MTok: input, output, cache write 1h, read
+# $/MTok: input, output, cache write, cache read. Writes are priced at the 5-minute rate: the
+# growing conversation is cached for 5 minutes; only the small system prompt takes the 1-hour rate.
+PRICES = {
+    "claude-opus-5-5": (4.0, 20.0, 5.0, 0.20),
+    "claude-sonnet-5-5": (2.0, 10.0, 2.5, 0.20),
+    "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
+}
 
 
 def tokens(usage: dict[str, int]) -> int:
