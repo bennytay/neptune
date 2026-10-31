@@ -294,7 +294,7 @@ def dossier(model: SiteModel, site_dir: Path | None = None) -> Dossier:
                 for item in run.items
             ]
         if not earlier:
-            out.append("(none: this is the first run)")
+            out.append("(none: no improvement run yet)")
     text = "\n".join(out) + "\n"
     return Dossier(text, named, at, model.seq, tuple(f.id for f in found))
 

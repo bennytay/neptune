@@ -66,7 +66,9 @@ that appear there. Name the goals it serves (goal:... ids).
 memory, e.g. robot:ur3 health fault:protective_stop) and compares its rate per hour:
   - rate_when: while a condition holds (subject, predicate, op, value; op is one of = != > >= \
 < <= in, `in` takes a comma-separated list) against while it does not;
-  - before_after: before a site time `at` against after it.
+  - before_after: all observed time before a site time `at` against all of it after, across \
+every observed period (it cannot compare within one session); rate_when likewise counts all \
+observed time.
   `expect` says which way the hypothesis predicts: "more" (higher while the condition holds, or \
 after `at`) or "fewer". Leave unused fields as empty strings.
   A test is inconclusive with fewer than 3 events, or when either side has under 5% of the \
@@ -78,6 +80,8 @@ inconclusive with the numbers. Do not state numbers you have not read in the mem
 that could change its result; then say how in `why`. Prefer tests that would settle an \
 inconclusive one, or follow a supported one further.
 - Correlation is not cause: phrase hypotheses as what the data would show.
+- Write values as the memory has them: never add a unit, name or cause it does not state \
+(a temperature with no unit stays without one; say so in `unknowns`).
 - `next_step` is what a person or their agent could do if it holds: a change, an experiment, \
 or data to collect. Never bypassing or changing a safety function.
 - 3 to 6 hypotheses, the most valuable for the mission first.
