@@ -53,7 +53,7 @@ EFFORT = "high"
 MAX_TOKENS = 64000
 COOLDOWN = 45.0
 """Wall seconds between two automatic runs."""
-STATE = ("robot", "machine", "cell")
+STATE = ("robot", "machine", "cell", "component")
 TIMELINE = ("mode", "health", "in_zone", "setpoint", "current_task")
 VERBATIM = ("text", "unmapped")
 """Unmapped rows and blocks: searchable, never facts, so never evidence."""

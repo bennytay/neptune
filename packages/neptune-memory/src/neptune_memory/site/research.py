@@ -51,6 +51,7 @@ REJECT = 1.25  # under this (or the other way): no real effect
 MIN_EVENTS = 3
 MIN_SHARE = 0.05  # each side of a comparison needs this share of the observed time
 MAX_CITES = 12  # citations kept per result: its run line, then the events it counted
+GAP = 900.0  # seconds with no observed fact at all: not observed time (a gap between sessions)
 
 SYSTEM = """\
 You are Neptune's research engine for one robot or robot site. The user message is its memory: \
@@ -68,6 +69,9 @@ memory, e.g. robot:ur3 health fault:protective_stop) and compares its rate per h
   - before_after: before a site time `at` against after it.
   `expect` says which way the hypothesis predicts: "more" (higher while the condition holds, or \
 after `at`) or "fewer". Leave unused fields as empty strings.
+  A test is inconclusive with fewer than 3 events, or when either side has under 5% of the \
+observed time (listed in the memory), so a condition that holds only for seconds at a time \
+cannot be tested this way; pick `at` inside an observed period.
 - You do not compute results: Neptune runs every test and records supported, rejected or \
 inconclusive with the numbers. Do not state numbers you have not read in the memory.
 - Read earlier results. Do not repeat a tested hypothesis unless the memory changed in a way \
@@ -162,13 +166,35 @@ def _t(text: str | None) -> datetime | None:
 
 
 def _window(model: SiteModel) -> tuple[datetime, datetime] | None:
-    """The observed time: from the first observed fact to the latest report."""
-    times = [_t(f.valid_from) for f in model.facts.values() if f.kind == "observed"]
-    known = [t for t in times if t is not None]
+    """From the first observed fact to the latest report."""
+    periods = observed(model)
+    return (periods[0][0], periods[-1][1]) if periods else None
+
+
+def observed(model: SiteModel) -> list[tuple[datetime, datetime]]:
+    """The observed periods: observed facts with no silence longer than ``GAP`` inside, the
+    last one running to the latest report. A gap between two sessions is not observed time,
+    so it counts neither as time while a condition held nor as time without events."""
+    times = sorted(
+        t for t in (_t(f.valid_from) for f in model.facts.values() if f.kind == "observed") if t
+    )
     end = _t(model.clock())
-    if not known or end is None:
-        return None
-    return min(known), max(end, max(known))
+    if not times or end is None:
+        return []
+    periods = [[times[0], times[0]]]
+    for t in times[1:]:
+        if (t - periods[-1][1]).total_seconds() > GAP:
+            periods.append([t, t])
+        else:
+            periods[-1][1] = t
+    periods[-1][1] = max(end, periods[-1][1])
+    return [(a, b) for a, b in periods]
+
+
+def _hours(periods: list[tuple[datetime, datetime]], start: datetime, end: datetime) -> float:
+    """Observed hours between ``start`` and ``end``."""
+    seconds = sum(max(0.0, (min(b, end) - max(a, start)).total_seconds()) for a, b in periods)
+    return seconds / 3600
 
 
 def _spans(model: SiteModel, subject: str, predicate: str, end: datetime) -> list[_Span]:
@@ -229,14 +255,15 @@ def rate_when(model: SiteModel, test: dict[str, Any]) -> Result:
     if window is None:
         return _unknown("no observed time in the memory")
     t0, t1 = window
+    periods = observed(model)
     condition = test["condition"]
     holding = [
         s
         for s in _spans(model, condition["subject"], condition["predicate"], t1)
         if _holds(_value(s.fact), condition["op"], condition["value"])
     ]
-    held = sum((s.end - s.start).total_seconds() for s in holding) / 3600
-    total = (t1 - t0).total_seconds() / 3600
+    held = sum(_hours(periods, s.start, s.end) for s in holding)
+    total = _hours(periods, t0, t1)
     events = _events(model, test["event"], t1)
     inside = [e for e in events if any(h.start <= e.start < h.end for h in holding)]
     counts = (len(inside), len(events) - len(inside))
@@ -247,7 +274,7 @@ def rate_when(model: SiteModel, test: dict[str, Any]) -> Result:
         "hours_when": round(held, 3),
         "hours_otherwise": round(total - held, 3),
         "ratio": None if ratio is None or math.isinf(ratio) else round(ratio, 2),
-        "thresholds": {"support": SUPPORT, "reject": REJECT, "min_events": MIN_EVENTS},
+        "thresholds": THRESHOLDS,
     }
     rate = _rates(counts, (held, total - held))
     cond = f"{condition['subject']} {condition['predicate']} {condition['op']} {condition['value']}"
@@ -264,11 +291,12 @@ def before_after(model: SiteModel, test: dict[str, Any]) -> Result:
     if window is None or at is None:
         return _unknown("no observed time, or no valid `at`")
     t0, t1 = window
+    periods = observed(model)
     events = _events(model, test["event"], t1)
     after = [e for e in events if e.start >= at]
     counts = (len(after), len(events) - len(after))
-    hours = (max(0.0, (t1 - at).total_seconds() / 3600), max(0.0, (at - t0).total_seconds() / 3600))
-    total = (t1 - t0).total_seconds() / 3600
+    hours = (_hours(periods, at, t1), _hours(periods, t0, at))
+    total = _hours(periods, t0, t1)
     verdict, ratio, why = _verdict(counts, hours, total, test["expect"])
     numbers = {
         "events_after": counts[0],
@@ -276,7 +304,7 @@ def before_after(model: SiteModel, test: dict[str, Any]) -> Result:
         "hours_after": round(hours[0], 3),
         "hours_before": round(hours[1], 3),
         "ratio": None if ratio is None or math.isinf(ratio) else round(ratio, 2),
-        "thresholds": {"support": SUPPORT, "reject": REJECT, "min_events": MIN_EVENTS},
+        "thresholds": THRESHOLDS,
     }
     rate = _rates(counts, hours)
     text = (
@@ -284,6 +312,15 @@ def before_after(model: SiteModel, test: dict[str, Any]) -> Result:
         f"{counts[0]} in {hours[0]:.2f} h after ({rate[0]}/h); {why}"
     )
     return Result(verdict, text, numbers, _cites([e.fact for e in events]))
+
+
+THRESHOLDS = {
+    "support": SUPPORT,
+    "reject": REJECT,
+    "min_events": MIN_EVENTS,
+    "min_share": MIN_SHARE,
+    "gap_seconds": GAP,
+}
 
 
 def _unknown(why: str) -> Result:
@@ -356,11 +393,14 @@ def recorded(site_dir: Path) -> list[Fact]:
 def dossier(model: SiteModel, site_dir: Path) -> improve.Dossier:
     """The improvements dossier, then every earlier research result (newest last)."""
     found = improve.dossier(model, site_dir)
-    lines = ["", "## Earlier research (yours; Neptune ran each test)"]
+    periods = observed(model)
+    lines = ["", "## Observed time (tests count only these periods; a silent gap is not time)"]
+    lines += [f"- {a.isoformat()} to {b.isoformat()}" for a, b in periods] or ["- none"]
+    lines += ["", "## Earlier research (yours; Neptune ran each test)"]
     for one in rounds(site_dir):
         for item in one.data.get("hypotheses", []):
             lines.append(f"- {item['key']}: {item['statement']} -> {item['result']['text']}")
-    if len(lines) == 2:
+    if lines[-1].startswith("## Earlier research"):
         lines.append("(none: this is the first round)")
     text = found.text + "\n".join(lines) + "\n"
     return improve.Dossier(text, found.facts, found.at, found.seq, found.findings)

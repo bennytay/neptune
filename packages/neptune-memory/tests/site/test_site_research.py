@@ -7,7 +7,7 @@ from typing import Any
 
 from fake_claude import FakeClaude, fact_id
 
-from neptune_memory.site import improve, onboard, research
+from neptune_memory.site import improve, onboard, research, views
 from neptune_memory.site.log import log_dir, read
 
 MAPPING = """\
@@ -239,3 +239,28 @@ def test_site_research_results_for_people_and_agents(tmp_path: Path) -> None:
     assert page.research_brief("stops-in-cycle-3")["text"] == brief  # "Copy for agent"
     assert page.dashboard()["research"]["cards"][0]["key"] == "stops-in-cycle-3"
     assert "no research result" in page.research_brief("nope")["error"]
+
+
+def test_site_research_counts_only_observed_time(tmp_path: Path) -> None:
+    """Two 10-minute sessions two hours apart (as the UR3 export has): the gap is not time."""
+    folder = tmp_path / "robot"
+    folder.mkdir()
+    lines = ["Timestamp,Robot,Protective_Stop,Cycle"]
+    for session, start in enumerate((datetime(2026, 3, 2, 8), datetime(2026, 3, 2, 10, 10))):
+        for i in range(600):
+            stop = i % 60 == 30 if session else i in (100, 101)
+            lines.append(f"{(start + timedelta(seconds=i)).isoformat()},arm-1,{stop},{i // 60}")
+    (folder / "arm1_export.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    site = tmp_path / "site"
+    onboard.start(site, folder)
+    onboard.save(site, "mappings", MAPPING)
+    onboard.build(site)
+    model = views.load(site)
+
+    assert len(research.observed(model)) == 2
+    test = {"type": "before_after", "event": STOP, "condition": NONE, "at": "2026-03-02T09:00:00"}
+    result = research.evaluate(model, {**test, "expect": "more"})
+    assert result.numbers["hours_before"] < 0.2 and result.numbers["hours_after"] < 0.2
+    assert result.numbers["events_before"] == 1 and result.numbers["events_after"] == 10
+    assert result.verdict == "supported"
+    assert "## Observed time" in research.dossier(model, site).text
