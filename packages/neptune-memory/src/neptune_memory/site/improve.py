@@ -302,17 +302,28 @@ def dossier(model: SiteModel, site_dir: Path | None = None) -> Dossier:
 # --- Asking Claude ----------------------------------------------------------------------------
 
 
-def ask(client: Any, text: str, model: str = MODEL) -> tuple[dict[str, Any], str]:
-    """One dossier to Claude; its answer (structured output, ``SCHEMA``) and the model that
-    served it (a refusal falls back server-side to Anthropic's recommended model)."""
+def ask(
+    client: Any,
+    text: str,
+    model: str = MODEL,
+    *,
+    system: str = SYSTEM,
+    schema: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str]:
+    """One dossier to Claude; its answer (structured output, ``schema``, default ``SCHEMA``) and
+    the model that served it (a refusal falls back server-side to Anthropic's recommended model).
+    ``research.py`` asks with its own prompt and schema."""
     with client.beta.messages.stream(
         model=model,
         max_tokens=MAX_TOKENS,
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
         thinking={"type": "adaptive"},
-        output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": SCHEMA}},
-        system=SYSTEM,
+        output_config={
+            "effort": EFFORT,
+            "format": {"type": "json_schema", "schema": schema or SCHEMA},
+        },
+        system=system,
         messages=[{"role": "user", "content": text}],
     ) as stream:
         message = stream.get_final_message()

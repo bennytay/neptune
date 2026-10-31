@@ -206,6 +206,23 @@ def _reject(args: argparse.Namespace) -> int:
     return 0
 
 
+def _research(args: argparse.Namespace) -> int:
+    from neptune_memory.site import improve, research
+
+    try:
+        facts = research.run(
+            args.site_dir, improve._client(None), trigger="asked on the command line"
+        )
+    except RuntimeError as error:
+        _say(str(error))
+        return 1
+    for fact in facts:
+        _say(
+            f"{fact.subject}: {fact.object.value if hasattr(fact.object, 'value') else fact.object}"
+        )
+    return 0
+
+
 def _setup(args: argparse.Namespace) -> int:
     from neptune_memory.site import onboard
 
@@ -337,6 +354,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     improve.add_argument("site_dir", type=Path)
     improve.set_defaults(run=_improve)
+
+    researched = commands.add_parser(
+        "research", help="one research round: hypotheses tested on the memory (ANTHROPIC_API_KEY)"
+    )
+    researched.add_argument("site_dir", type=Path)
+    researched.set_defaults(run=_research)
 
     setup = commands.add_parser(
         "setup",
