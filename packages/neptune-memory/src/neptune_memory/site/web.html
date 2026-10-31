@@ -106,13 +106,63 @@ svg .hot { animation: flow 0.8s linear infinite; stroke-dasharray: 6 4; }
   text-transform: none; letter-spacing: 0; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px;
   vertical-align: -1px; border: 1.5px solid; }
+/* ---- tabs and the dashboard (spec §16) ---- */
+.tabs { display: flex; gap: 4px; margin-left: auto; }
+.tabs button { border-radius: 6px; }
+[hidden] { display: none !important; }
+.dash { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; padding: 12px 16px; }
+.tiles { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.tile .n { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.tile .s { color: var(--muted); font-size: 12px; }
+.tile.alert .n { color: var(--warn-b); }
+.col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.goal { padding: 4px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.goal .tag { display: inline-block; min-width: 76px; color: var(--muted); font-size: 12px; }
+.goal b { font-weight: 600; }
+.cov td.c { text-align: center; min-width: 54px; }
+.cov td.c span { display: inline-block; min-width: 36px; padding: 0 6px; border-radius: 9px; }
+.cov .feed { background: var(--ok); } .cov .records { background: var(--idle); }
+.cov .documents { background: var(--warn); } .cov .inferred { background: var(--place); border: 1px dashed var(--idle-b); }
+.cov .none { color: var(--muted); }
+.flag { font-size: 11px; color: var(--warn-b); margin-left: 4px; }
+.flag.unk { color: var(--muted); }
+.engine { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.engine input[type=password] { font: inherit; flex: 1; min-width: 200px; padding: 3px 8px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.engine .note { color: var(--muted); font-size: 12px; flex-basis: 100%; }
+.engine .err { color: var(--fault-b); font-size: 12px; flex-basis: 100%; }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; background: var(--bg); }
+.card.accepted { border-color: var(--ok-b); } .card.rejected { opacity: .55; }
+.card h3 { margin: 0 0 4px; font-size: 14px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.card h3 .rank { color: var(--muted); font-variant-numeric: tabular-nums; }
+.card h3 a { white-space: normal; color: var(--ink); }
+.card .lbl { color: var(--muted); font-size: 12px; display: inline-block; min-width: 82px; vertical-align: top; }
+.card p { margin: 3px 0; }
+.move { font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); }
+.move.new { border-color: var(--idle-b); color: var(--idle-b); }
+.move.up { border-color: var(--ok-b); color: var(--ok-b); }
+.move.down { border-color: var(--warn-b); color: var(--warn-b); }
+.chip { display: inline-block; font-size: 12px; padding: 0 7px; margin: 1px 2px 1px 0; border-radius: 9px;
+  border: 1px solid var(--line); cursor: pointer; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.chip:hover { border-color: var(--accent); background: var(--hit); }
+.chip.inferred { border-style: dashed; }
+.ck { font-size: 12px; } .ck.respects { color: var(--ok-b); } .ck.breaks { color: var(--fault-b); } .ck.unclear { color: var(--muted); }
+.summary { color: var(--ink); margin: 0 0 8px; white-space: pre-wrap; }
+.runmeta { color: var(--muted); font-size: 12px; }
+#coverage { max-height: 460px; }
+@media (max-width: 900px) {
+  .dash, main, .cols { grid-template-columns: minmax(0, 1fr); }
+  .dash > .col:nth-child(3) { order: 1; } .dash > .col:nth-child(2) { order: 2; }  /* improvements first */
+}
 </style>
 </head>
 <body>
 <header>
   <h1 id="title">Neptune site model</h1>
   <span class="meta"><span class="dot" id="livedot"></span><span id="status">connecting…</span></span>
-  <div class="slider">
+  <div class="slider" id="slider" hidden>
     <select id="mode" title="Slide over site time (at) or over what the log knew (as_of_seq)">
       <option value="at">site time</option><option value="seq">log seq</option>
     </select>
@@ -120,8 +170,23 @@ svg .hot { animation: flow 0.8s linear infinite; stroke-dasharray: 6 4; }
     <span class="meta" id="pos"></span>
     <button id="live" class="on" title="Follow the log as it grows">Live</button>
   </div>
+  <nav class="tabs"><button data-tab="dash" class="on">Dashboard</button><button data-tab="site">Site map</button></nav>
 </header>
-<main>
+<div id="dash-view" class="dash">
+  <div class="tiles" id="tiles"></div>
+  <div class="col">
+    <section><h2><span>Mission</span><span class="badge">stated</span></h2><div id="mission"></div></section>
+    <section><h2><span>Evidence sources</span><span class="legend">what Neptune reads</span></h2><div class="scroll" id="sources"></div></section>
+    <section><h2><span>Coverage</span><span class="legend">facts about each thing, by evidence</span></h2><div class="scroll" id="coverage"></div></section>
+    <section><h2><span>What changed since the last run</span><span id="changed-n" class="legend"></span></h2><div class="scroll" id="changes"></div></section>
+  </div>
+  <div class="col">
+    <section><h2><span>Improvement engine</span><span class="legend">Claude proposes · you decide</span></h2><div id="engine" class="engine"></div></section>
+    <section><h2><span>Improvements</span><span id="runmeta" class="runmeta"></span></h2><div id="summary"></div><div id="improvements"></div></section>
+    <section id="retired-panel" hidden><h2><span>Retired since the run before</span></h2><div id="retired"></div></section>
+  </div>
+</div>
+<main id="site-view" hidden>
   <section id="map"><h2><span>Site map</span><span class="legend">
     <span><i style="background:var(--ok);border-color:var(--ok-b)"></i>running</span>
     <span><i style="background:var(--warn);border-color:var(--warn-b)"></i>waiting / starved / stopped</span>
@@ -185,7 +250,8 @@ function connect() {
   events.onmessage = (e) => {
     head = JSON.parse(e.data);
     $("livedot").classList.add("on");
-    if (live) refresh(); else status();
+    if (tab === "dash") loadDash();
+    else if (live) refresh(); else status();
   };
   events.onerror = () => { $("livedot").classList.remove("on"); $("status").textContent = "reconnecting…"; };
 }
@@ -390,12 +456,166 @@ async function loadActions() {
   $("actions").innerHTML = (actionError ? `<div class="empty">${esc(actionError)}</div>` : "") + pending + recent;
 }
 
+// ---- the dashboard (spec §16) ----------------------------------------------------------------
+let tab = "dash", dash = null, dashBusy = false, dashDirty = false, dashLast = 0, dashError = "";
+function setTab(name) {
+  tab = name;
+  for (const b of document.querySelectorAll("[data-tab]")) b.classList.toggle("on", b.dataset.tab === name);
+  $("dash-view").hidden = name !== "dash";
+  $("site-view").hidden = name !== "site";
+  $("slider").hidden = name !== "site";
+  try { localStorage.setItem("neptune-tab", name); } catch (_) { /* no storage: fine */ }
+  if (name === "dash") loadDash(true); else refresh();
+}
+async function loadDash(now) {
+  if (dashBusy) { dashDirty = true; return; }
+  const wait = now ? 0 : 1500 - (Date.now() - dashLast);  // at most one fold of the dashboard per 1.5 s
+  if (wait > 0) { dashDirty = true; setTimeout(() => { if (dashDirty) { dashDirty = false; loadDash(true); } }, wait); return; }
+  dashBusy = true;
+  try {
+    dash = await (await fetch("/api/dashboard")).json();
+    dashLast = Date.now();
+    renderDash();
+  } finally {
+    dashBusy = false;
+    if (dashDirty) { dashDirty = false; loadDash(); }
+  }
+}
+function renderDash() {
+  const d = dash, c = d.counts, k = c.kinds;
+  const name = d.site.name || d.site.id || "site";
+  document.title = `Neptune · ${name}`;
+  $("title").textContent = `Neptune · ${name}`;
+  $("status").textContent = `live · site clock ${clock(d.at)} · log seq ${head ? head.seq : d.seq}`;
+  const tile = (n, label, sub, alert) => `<div class="tile ${alert ? "alert" : ""}"><div class="k">${label}</div><div class="n">${n}</div><div class="s">${sub}</div></div>`;
+  const types = Object.entries(c.entity_types).filter(([, n]) => n).map(([t, n]) => `${n} ${t}${n > 1 ? "s" : ""}`).join(" · ");
+  const run = d.run;
+  $("tiles").innerHTML = [
+    tile(c.sources, "Sources", c.stale_sources ? `${c.stale_sources} stale` : "all fresh", c.stale_sources),
+    tile(c.facts.toLocaleString(), "Facts", `${k.observed || 0} observed · ${k.stated || 0} stated · ${k.inferred || 0} inferred`),
+    tile(c.entities, "Things", types),
+    tile(c.findings, "Findings", "inferred by rules"),
+    tile(c.pending, "Waiting for a person", "identity and action proposals", c.pending),
+    tile(run ? c.improvements : "–", "Open improvements", run ? `run at ${hms(run.at, (d.at || "").slice(0, 10))}` : "no run yet"),
+  ].join("");
+  drawMission(); drawSources(); drawCoverage(); drawChanges(); drawEngine(); drawImprovements();
+}
+function drawMission() {
+  const m = dash.mission, rows = [];
+  for (const g of m.goals) rows.push(`<div class="goal" data-fact="${esc(g.facts[0])}"><span class="tag">goal</span><b>${esc(g.name || g.id)}</b>${g.target ? ` · target ${esc(g.target)}` : ""}${g.metric ? `<div class="rel">${esc(g.metric)} · ${esc(g.cite.file)} ${esc(g.cite.locator)}</div>` : ""}</div>`);
+  for (const r of m.constraints) rows.push(`<div class="goal" data-fact="${esc(r.facts[0])}"><span class="tag">constraint</span>${esc(r.name || r.id)}</div>`);
+  $("mission").innerHTML = rows.join("") || `<div class="empty">no mission stated: add static/mission.yaml (goals and constraints) and it is ingested live</div>`;
+}
+function drawSources() {
+  const day = (dash.at || "").slice(0, 10);
+  $("sources").innerHTML = `<table><tr><th>source</th><th>kind</th><th>facts</th><th>latest</th><th>state</th></tr>${dash.sources.map((s) =>
+    `<tr><td>${esc(s.name)}</td><td>${esc(s.kind)}</td><td>${s.facts}</td><td>${esc(hms(s.last_seen || s.latest, day))}</td><td class="${s.state === "stale" ? "ambiguous" : ""}">${s.state === "stale" ? "stale" : s.kind === "feed" ? "fresh" : ""}${s.note ? ` <span class="rel">${esc(s.note)}</span>` : ""}</td></tr>`).join("")}</table>`;
+}
+function drawCoverage() {
+  const cls = ["feed", "records", "documents", "inferred"].filter((x) => dash.coverage.some((r) => r.counts[x]));
+  $("coverage").innerHTML = `<table class="cov"><tr><th>thing</th>${cls.map((x) => `<th>${x === "feed" ? "live feed" : x}</th>`).join("")}</tr>${dash.coverage.map((r) =>
+    `<tr><td><a href="#" data-entity="${esc(r.id)}" title="${esc(r.name)}">${esc(r.id)}</a>${r.stale.length ? `<span class="flag">stale: ${esc(r.stale.join(", "))}</span>` : ""}${r.unknown.length ? `<span class="flag unk">unknown: ${esc(r.unknown.join(", "))}</span>` : ""}${r.same_as.length ? `<span class="flag unk">= ${esc(r.same_as.join(", "))}</span>` : ""}</td>${cls.map((x) => `<td class="c">${r.counts[x] ? `<span class="${x}">${r.counts[x]}</span>` : `<span class="none">·</span>`}</td>`).join("")}</tr>`).join("")}</table>`;
+}
+function drawChanges() {
+  const day = (dash.at || "").slice(0, 10);
+  $("changed-n").textContent = dash.run ? `${dash.changed} material` : "no run yet: everything is new";
+  $("changes").innerHTML = dash.changes.map((c) =>
+    `<div class="row" ${c.kind === "finding" ? "" : `data-fact="${esc(c.fact)}"`}><span class="t">${esc(hms(c.t, day) || "seq " + c.seq)}</span><span class="badge">${esc(c.kind)}</span> ${esc(c.text)}</div>`
+  ).join("") || `<div class="empty">nothing material since the last run</div>`;
+}
+function drawEngine() {
+  const e = dash.engine;
+  const dot = `<span class="dot ${e.state === "running" ? "on" : ""}"></span>${e.state === "running" ? "running…" : "idle"}`;
+  let html;
+  if (!e.key) {
+    html = `<input type="password" id="apikey" placeholder="Your Anthropic API key (sk-ant-…)" autocomplete="off">
+      <button data-engine="key">Use key</button>
+      <div class="note">Kept in this Neptune server's memory only: never written to disk, the log or the page. Runs are billed to this key (${esc(e.model)}).</div>`;
+  } else {
+    html = `${dot} <span class="meta">key from ${e.key === "page" ? "this page" : "ANTHROPIC_API_KEY"}</span>
+      <button data-engine="run" ${e.state === "running" ? "disabled" : ""}>Re-evaluate now</button>
+      <label class="meta"><input type="checkbox" data-engine="auto" ${e.auto ? "checked" : ""}> re-run when the site changes</label>
+      ${e.key === "page" ? `<button data-engine="forget">Forget key</button>` : ""}
+      <div class="note">${esc(e.model)}${e.due ? ` · due: ${esc(e.due)}` : ""}</div>`;
+  }
+  if (e.error || dashError) html += `<div class="err">${esc(dashError || e.error)}</div>`;
+  const focused = document.activeElement && document.activeElement.id === "apikey";
+  if (!focused) $("engine").innerHTML = html;
+}
+function drawImprovements() {
+  const r = dash.run;
+  $("retired-panel").hidden = !r || !r.retired.length;
+  if (!r) {
+    $("runmeta").textContent = "";
+    $("summary").innerHTML = "";
+    $("improvements").innerHTML = `<div class="empty">${dash.engine.key ? "no run yet: Re-evaluate now asks Claude" : "add your API key to ask Claude for improvements against the mission"}</div>`;
+    return;
+  }
+  $("runmeta").textContent = `run ${dash.runs} · ${clock(r.at)} · seq ${r.as_of_seq} · ${r.model}`;
+  $("summary").innerHTML = `<p class="summary">${esc(r.summary)}</p>` + (r.dropped.length ? `<div class="rel" title="${esc(r.dropped.join("\n"))}">${r.dropped.length} id(s) Claude named were not in the model and were dropped</div>` : "");
+  $("improvements").innerHTML = r.items.map((it, i) => {
+    const mv = it.move.split(" ")[0];
+    const checks = it.constraints.map((c) => `<div class="ck ${esc(c.status)}">${c.status === "respects" ? "✓" : c.status === "breaks" ? "✗" : "?"} ${esc(c.name)}${c.note ? ` <span class="rel">· ${esc(c.note)}</span>` : ""}</div>`).join("");
+    const ev = it.evidence.map((x, j) => `<span class="chip ${x.kind === "inferred" ? "inferred" : ""}" data-ev="${i}:${j}" title="${esc(x.subject ? `${x.subject} ${x.predicate} ${x.value} (${x.kind})` : x.fact)}">${esc(x.subject ? `${short(x.subject)} ${x.predicate}` : x.fact)}</span>`).join("");
+    const act = it.action && it.action.verb !== "none" ? `<p><span class="lbl">action</span>${esc(it.action.verb.replace("_", " "))} ${esc(it.action.target)}${it.action.zone ? " → " + esc(it.action.zone) : ""} <span class="rel">(sent on accept)</span></p>` : "";
+    const buttons = it.status === "open" ? `<div class="btns"><button data-imp="accept" data-id="${esc(it.fact)}">Accept${act ? " and send" : ""}</button><button data-imp="reject" data-id="${esc(it.fact)}">Reject</button></div>` : "";
+    return `<div class="card ${esc(it.status)}"><h3><span class="rank">${it.rank}</span><span class="move ${esc(mv)}">${esc(it.move)}</span><a href="#" data-fact="${esc(it.fact)}">${esc(it.title)}</a><span class="badge inferred">inferred</span>${it.status !== "open" ? `<span class="badge">${esc(it.status)}${it.by ? " by " + esc(it.by) : ""}</span>` : ""}<span class="badge">${esc(it.confidence)} confidence</span></h3>
+      ${it.since_last ? `<p class="rel">${esc(it.since_last)}</p>` : ""}
+      <p><span class="lbl">opportunity</span>${esc(it.opportunity)}</p>
+      <p><span class="lbl">change</span>${esc(it.change)}</p>
+      ${it.goals.length ? `<p><span class="lbl">goals</span>${it.goals.map((g) => `<span class="chip">${esc(g.name)}</span>`).join("")}</p>` : ""}
+      ${checks ? `<p><span class="lbl">constraints</span></p>${checks}` : ""}
+      <p><span class="lbl">size</span>${esc(it.size)}</p>
+      ${it.unknowns.length ? `<p><span class="lbl">unknown</span>${it.unknowns.map(esc).join("; ")}</p>` : ""}
+      <p><span class="lbl">evidence</span>${ev}</p>${act}${buttons}</div>`;
+  }).join("");
+  $("retired").innerHTML = r.retired.map((x) => `<div class="row" data-fact="${esc(x.fact)}">${esc(x.title)}${x.reason ? ` <span class="rel">· ${esc(x.reason)}</span>` : ""}</div>`).join("");
+}
+function showEvidence(x) {
+  const sources = Object.fromEntries(x.cites.map((c, i) => [`S${i + 1}`, c]));
+  const item = { relation: "evidence", subject: x.subject || x.fact, predicate: x.predicate || "", value: x.value || "", kind: x.kind || "unknown", state: "known", cite: Object.keys(sources), fact: x.fact, valid_from: x.valid_from };
+  const gaps = x.logged === false ? ["a finding computed when Claude was asked; findings are not logged facts"] : x.kind ? [] : ["not in the model any more"];
+  showAnswer(x.subject ? `${x.subject} ${x.predicate}` : x.fact, { items: [item], sources, gaps });
+}
+async function engineCall(verb) {
+  dashError = "";
+  if (verb === "key") {
+    const key = $("apikey").value.trim();
+    if (!key) return;
+    $("apikey").value = "";
+    await post("/api/engine/key", { key });
+  } else if (verb === "forget") {
+    await post("/api/engine/key", { key: "" });
+  } else if (verb === "auto") {
+    await post("/api/engine/auto", { on: !dash.engine.auto });
+  } else {
+    const res = await post(`/api/engine/${verb}`, {});
+    if (!res.ok) dashError = (await res.json()).error;
+  }
+  document.activeElement && document.activeElement.blur();
+  loadDash(true);
+}
+
 // ---- clicks ---------------------------------------------------------------------------------
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "apikey") engineCall("key"); });
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-fact],[data-finding],[data-confirm],[data-act],a[data-entity]");
+  const t = e.target.closest("[data-fact],[data-finding],[data-confirm],[data-act],a[data-entity],[data-tab],[data-engine],[data-imp],[data-ev]");
   if (!t || t.closest("#svg")) return;
+  if (t.dataset.engine === "auto") { engineCall("auto"); return; }  // a checkbox keeps its default
   e.preventDefault();
-  if (t.dataset.confirm) {
+  if (t.dataset.tab) {
+    setTab(t.dataset.tab);
+  } else if (t.dataset.engine) {
+    engineCall(t.dataset.engine);
+  } else if (t.dataset.imp) {
+    t.disabled = true;
+    const res = await post(`/api/improvements/${t.dataset.imp}`, { id: t.dataset.id });
+    dashError = res.ok ? "" : (await res.json()).error;
+    loadDash(true);
+  } else if (t.dataset.ev) {
+    const [i, j] = t.dataset.ev.split(":").map(Number);
+    showEvidence(dash.run.items[i].evidence[j]);
+  } else if (t.dataset.confirm) {
     t.disabled = true;
     await post("/api/confirm", { proposal: t.dataset.confirm, answer: t.dataset.answer });
     refresh();
@@ -423,7 +643,8 @@ async function openFact(id) {
   const it = why.items[0];
   showAnswer(it ? `${it.subject} ${it.predicate}` : id, why);
 }
-function openEntity(id) {
+async function openEntity(id) {
+  if (!snap) snap = await (await fetch("/api/snapshot")).json();  // opened from the dashboard
   const rows = snap.table.filter((r) => r.subject === id);
   const a = snap.assets.find((x) => x.id === id);
   const main = rows.find((r) => r.predicate === "health" && r.value && r.value.startsWith("fault")) || rows.find((r) => r.predicate === "mode" && r.fact) || rows.find((r) => r.fact);
@@ -473,12 +694,15 @@ function excerpt(x, quote) {
   return `<pre>${esc(x.message || "")}</pre>`;
 }
 
-refresh().then(() => {
+{
+  const [kind, id] = decodeURIComponent(location.hash.slice(1)).split("=");  // #fact=..., #entity=..., #site
+  let saved = null;
+  try { saved = localStorage.getItem("neptune-tab"); } catch (_) { /* no storage: the dashboard */ }
+  setTab(kind === "site" || kind === "entity" || (!kind && saved === "site") ? "site" : "dash");
   connect();
-  const [kind, id] = decodeURIComponent(location.hash.slice(1)).split("=");  // #fact=... or #entity=...
   if (kind === "fact" && id) openFact(id);
   if (kind === "entity" && id) openEntity(id);
-});
+}
 </script>
 </body>
 </html>

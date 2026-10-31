@@ -86,7 +86,8 @@ examples: ## Regenerate the worked examples and their golden package documents
 SITE ?= p7
 SITE_DIR ?= $(if $(filter p7,$(SITE)),site-demo,site-$(SITE))
 SPEED ?= 60
-SITE_CMD := $(RUN) python -m neptune_memory.site
+# --extra anthropic: the dashboard's improvement runs call Claude with the person's own key (spec §16).
+SITE_CMD := $(RUN) --extra anthropic python -m neptune_memory.site
 SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
 SITE_SOURCE = $(if $(filter public,$(SITE)),scripts/fetch_public_site.sh "$(SITE_DIR)",$(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)")
 site-demo: ## Site model: generate the SITE corpus (p7 | harbor) or fetch it (public), build, confirm, log insights, print the MCP command
@@ -111,7 +112,7 @@ WEB_PORT ?= 8765
 SITE_URL = http://127.0.0.1:$(WEB_PORT)/
 site-live: ## Site model, live over MQTT: broker + live + publish at SPEED x from START
 > $(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)"
-> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_DIR)/actions" "$(SITE_READY)"
+> rm -rf "$(SITE_DIR)/feed/live" "$(SITE_DIR)/actions" "$(SITE_DIR)/improvements" "$(SITE_READY)"
 > @echo "MCP: $(SITE_MCP)"
 > @echo "Claude Code: claude mcp add neptune-site -- $(SITE_MCP)"
 > @echo "Web view: $(SITE_URL)"

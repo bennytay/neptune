@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from neptune.sdk import Isolation, JobOptions, ingest, read_package
 from neptune_memory.site.identity import propose_same_as
 from neptune_memory.site.log import FactLog, log_dir, read
+from neptune_memory.site.mappers.layout import MISSION
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -204,6 +205,9 @@ def _static(site_dir: Path, out: _Writer | _Fresh, seam: Seam) -> None:
     for record in package.records:
         out.emit(seam.map_record(record, package))
     out.emit(seam.map_layout(site_dir / "static" / "layout.yaml"))
+    mission = site_dir / "static" / MISSION
+    if mission.exists():  # the site's goals and constraints, read like the layout
+        out.emit(seam.map_layout(mission))
 
 
 def _feed(site_dir: Path, seam: Seam, until: str | None) -> Iterable[Message]:

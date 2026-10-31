@@ -488,3 +488,37 @@ feeds:                                   # one entry per envelope `source`
 - Actions never touch safety functions; they only go through the fleet manager's protocol.
 - Several processes append to one log (`live`, the MCP server, the CLI): `FactLog` holds
   `.neptune/log.lock` per append and picks up the others' entries first.
+
+## 16. Mission, improvements and the dashboard
+
+- **Mission:** `static/mission.yaml` states the site's `goals` (`name`, `metric`, `target`) and
+  `constraints` (`name`). `build` reads it like `layout.yaml` (`mappers/layout.py`): **stated** facts on
+  `goal:` and `constraint:` entities, each citing its line. Editing it under `live` re-ingests it.
+- **A run** (`site/improve.py`, `python -m neptune_memory.site improve <site_dir>`, or the dashboard): the
+  model is written out as a dossier, one `id | subject predicate object | kind | citation` line per fact
+  (mission, findings, state now, mode/health/zone/setpoint/task changes, stated records and documents,
+  the last two runs with what a person answered). Claude (`claude-opus-5-5`, adaptive thinking, effort
+  `high`, structured output, `fallbacks: "default"`) answers 3–6 ranked improvements: key, title,
+  opportunity, change, goals, evidence (fact ids), a respects / breaks / unclear check per constraint,
+  size and its basis, unknowns, confidence, an optional action (§15 verbs) and what moved it since the
+  last run, plus the earlier keys it retires and why.
+- **Checked, recorded, logged:** ids the model does not hold are dropped and listed (`dropped`); an
+  improvement left without evidence is dropped; an action Neptune cannot send becomes `none`. The cleaned
+  answer is one line of `improvements/runs.jsonl` (model served, prompt and dossier hashes, the seq it
+  read, the findings it saw). Each improvement is an **inferred**
+  `improvement:<key> proposed_improvement "<title>"`, source `neptune.improve`, `model` set, citing that
+  line and then its evidence's citations. A rebuild reads the line; no model is called.
+- **Re-evaluation:** `improve.changes` lists what is material since a run: new mission, record and
+  document facts, faults, findings it did not see. The web view's engine re-runs when there are any, at
+  most every 45 s, and the dashboard shows each item as new, up, down or same, and what retired.
+- **Answer:** accept or reject is a `confirm` entry on the improvement. Accepting one with an action
+  proposes it (citing the improvement) and approves it, so a robot action is dispatched (§15).
+- **Key:** the person's own Anthropic key, pasted into the dashboard (`POST /api/engine/key`), held in the
+  server's memory only and never written; `ANTHROPIC_API_KEY` works too. Without a key everything but
+  the runs works. `uv sync --all-packages --all-groups --extra anthropic` installs the SDK (the `site-*`
+  make targets do).
+- **Dashboard** (the web view's first tab; `GET /api/dashboard`, `site/dashboard.py`): counts (sources,
+  facts by kind, things, findings, waiting for a person, open improvements), the mission, evidence
+  sources with feed freshness, coverage (facts per robot, machine, cell and person by live feed,
+  records, documents, inferred, with stale and unknown values), what changed since the last run, the
+  engine, and the latest run's cards: evidence opens its cited source, constraints show ✓ ✗ ?.

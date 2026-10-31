@@ -13,7 +13,12 @@ small JSON API over the same query layer as the MCP tools (``query.py``, ``insig
 - ``GET /api/actions``, ``POST /api/actions/approve|reject`` ``{"id"}``: proposed actions and a
   person's answer (``actions.py``, spec §15); an approved robot action is dispatched to the
   fleet manager over MQTT.
-- ``GET /events``: server-sent events, one ``{"seq", "clock"}`` each time the log grows.
+- ``GET /api/dashboard``: the dashboard (``dashboard.py``, spec §16): counts, mission, sources,
+  coverage, the latest improvement run and what changed since it, the engine's state.
+- ``POST /api/engine/key`` ``{"key"}`` (kept in memory, never written), ``/api/engine/run``,
+  ``/api/engine/auto`` ``{"on"}``; ``POST /api/improvements/accept|reject`` ``{"id"}``.
+- ``GET /events``: server-sent events, one ``{"seq", "clock", "engine"}`` each time the log grows
+  or the improvement engine starts or ends a run.
 
 The model is folded once and then tails the log (``log.Tail``), like the MCP server, so it follows
 ``make site-live``. No auth: a demo on localhost.
@@ -34,7 +39,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
-from neptune_memory.site import actions, insights, log, query, views
+from neptune_memory.site import actions, dashboard, improve, insights, log, query, views
 from neptune_memory.site import confirm as confirm_queue
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 
@@ -81,11 +86,13 @@ class Site:
         site_dir: Path,
         broker: str = actions.DEFAULT_BROKER,
         send: Callable[[str, bytes], None] | None = None,
+        client: Callable[[str | None], Any] | None = None,
     ) -> None:
         self.site_dir = Path(site_dir)
         self.broker = broker
         self.send = send
         self.lock = threading.Lock()
+        self.engine = improve.Engine(self.site_dir, client or improve._client)
         self._tail = log.Tail(self.site_dir)
         self._model = views.SiteModel.empty()
         self._prefix: tuple[int, SiteModel] | None = None
@@ -121,7 +128,40 @@ class Site:
     def head(self) -> dict[str, Any]:
         with self.lock:
             model = self.model()
-            return {"seq": model.seq, "clock": model.clock()}
+            return {"seq": model.seq, "clock": model.clock(), "engine": self.engine.state}
+
+    # -- the dashboard and improvements (spec §16) -----------------------------------------------
+
+    def dashboard(self) -> dict[str, Any]:
+        with self.lock:
+            return dashboard.build(self.site_dir, self.model(), self.engine)
+
+    def due(self) -> str | None:
+        """Why an automatic improvement run is due now (the engine's watcher asks)."""
+        with self.lock:
+            return self.engine.due(self.model())
+
+    def engine_call(self, verb: str, body: dict[str, Any]) -> dict[str, Any]:
+        if verb == "key":
+            self.engine.set_key(str(body.get("key") or ""))
+        elif verb == "auto":
+            self.engine.auto = bool(body.get("on"))
+        elif verb == "run":
+            self.engine.error = None
+            if not self.engine.start("asked from the dashboard"):
+                why = "no API key" if self.engine.key is None else "a run is already going"
+                raise ValueError(f"not started: {why}")
+        else:
+            raise ValueError(f"no engine call {verb!r}")
+        return self.engine.status()
+
+    def improvement(self, verb: str, fact_id: str, by: str) -> dict[str, Any]:
+        """A person's accept or reject; an accepted action is proposed, approved and dispatched."""
+        if verb not in ("accept", "reject"):
+            raise ValueError(f"no improvement answer {verb!r}")
+        return improve.answer(
+            self.site_dir, fact_id, verb == "accept", by, broker=self.broker, send=self.send
+        )
 
     def confirm(self, proposal: str, answer: str, by: str) -> dict[str, Any]:
         if answer not in ("yes", "no"):
@@ -577,6 +617,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.site.source(args.get("file", ""), args.get("locator", "")))
             elif url.path == "/api/actions":
                 self._json(self.site.actions())
+            elif url.path == "/api/dashboard":
+                self._json(self.site.dashboard())
+            elif url.path == "/api/engine":
+                self._json(self.site.engine.status())
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (BrokenPipeError, ConnectionResetError):
@@ -592,6 +636,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.site.confirm(body["proposal"], body["answer"], by))
             elif m := re.fullmatch(r"/api/actions/(approve|reject)", url.path):
                 self._json(self.site.act(m[1], str(body["id"]), by))
+            elif m := re.fullmatch(r"/api/engine/(key|run|auto)", url.path):
+                self._json(self.site.engine_call(m[1], body))
+            elif m := re.fullmatch(r"/api/improvements/(accept|reject)", url.path):
+                self._json(self.site.improvement(m[1], str(body["id"]), by))
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (KeyError, ValueError) as error:
@@ -640,10 +688,17 @@ def serve(
     *,
     broker: str = actions.DEFAULT_BROKER,
     send: Callable[[str, bytes], None] | None = None,
+    client: Callable[[str | None], Any] | None = None,
+    watch: float = 3.0,
 ) -> ThreadingHTTPServer:
     """A server for ``site_dir`` (not yet serving: call ``serve_forever``). Approved actions go to
-    the fleet manager over MQTT on ``broker`` (or through ``send``)."""
-    handler = type("SiteHandler", (Handler,), {"site": Site(Path(site_dir), broker, send)})
+    the fleet manager over MQTT on ``broker`` (or through ``send``). ``client(key)`` makes the
+    Anthropic client for improvement runs; every ``watch`` seconds the engine checks whether the
+    site changed enough to run again (0: never on its own)."""
+    site = Site(Path(site_dir), broker, send, client)
+    if watch > 0:
+        site.engine.watch(site.due, watch)
+    handler = type("SiteHandler", (Handler,), {"site": site})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
     return server
