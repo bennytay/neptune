@@ -26,6 +26,9 @@ ENTITY_TYPES: tuple[str, ...] = (
     "document",
     "rule",
     "source",
+    "goal",
+    "constraint",
+    "improvement",
 )
 
 
@@ -99,6 +102,11 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("dispatched", ("robot",), "value", "many"),
         Predicate("outcome", ("robot",), "value", "many"),
         Predicate("report_interval", ("source",), "value", "one"),
+        # The mission (static/mission.yaml): goals with a metric and target, and constraints any
+        # change must respect. Improvements (site/improve.py): Claude's ranked proposals (inferred).
+        Predicate("metric", ("goal",), "value", "one"),
+        Predicate("target", ("goal",), "value", "one"),
+        Predicate("proposed_improvement", ("improvement",), "value", "many"),
         # An unmapped file (spec §12): its rows or blocks verbatim, and the "not mapped" marker.
         Predicate("text", (), "value", "many"),
         Predicate("unmapped", ("document",), "value", "one"),
