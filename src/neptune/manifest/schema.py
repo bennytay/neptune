@@ -637,7 +637,7 @@ def json_schema() -> JsonObject:
         "description": (
             "An optional neptune.yaml (or .json) at the root of a folder: declarations the "
             "evidence does not make. Everything it declares is stated, with the manifest as its "
-            "source (docs/manifest.md)."
+            "source."
         ),
         "type": "object",
         "required": ["neptune"],

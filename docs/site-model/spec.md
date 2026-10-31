@@ -1,6 +1,6 @@
 # Site model v3: the M1 spec
 
-The design every M1 lane (#182–#187) builds against. Demo-only rules apply (`docs/site-model/README.md`).
+The design of the site model. Demo-only rules apply (`AGENTS.md`).
 Where this spec is silent, choose the simplest thing that makes a gold question pass, and say so in the PR.
 
 ## 1. What it is

@@ -22,10 +22,8 @@ RUN := $(UV) run --all-packages --all-groups
 EACH = set -ef; for p in $(SELECTED); do \
   if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; x="--extend-exclude packages/*"; \
   else cd "$(CURDIR)/packages/$$p"; x=""; fi; echo "--- $$p" >&2;
-# The compiler's ADR index (docs/adr/README.md); members keep no ADRs.
-COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
-.PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
+.PHONY: help setup fmt lint type test test-fast check schema examples \
   check-all site-demo site-replay site-live site-web site-show
 
 help: ## Show available targets
@@ -35,11 +33,11 @@ setup: ## Install the compiler, every workspace member and the dev tools into .v
 > $(UV) sync --all-packages --all-groups
 > @if git rev-parse --git-dir >/dev/null 2>&1; then $(UV) run pre-commit install >/dev/null || true; fi
 
-fmt: adr-index ## Format code, auto-fix lint findings and regenerate the ADR index
+fmt: ## Format code and auto-fix lint findings
 > $(UV) run ruff format .
 > $(UV) run ruff check --fix .
 
-lint: adr-index-check ## Formatting, lint and ADR-index check without modifying files
+lint: ## Formatting and lint check without modifying files
 # `set -e` ignores a failure on the left of `&&`, so each step exits explicitly.
 > @$(EACH) $(RUN) ruff format --check $$x . || exit 1; $(RUN) ruff check $$x . || exit 1; done
 
@@ -60,12 +58,6 @@ test-fast: ## Test suite excluding tests marked slow
 check: lint type test-fast ## What PR CI runs: lint, types, fast tests; must pass before a PR (PKG=<name> for one)
 
 check-all: lint type test ## Everything, slow tests included; main and the nightly run it (PKG=<name> for one)
-
-adr-index: ## Regenerate docs/adr/README.md; `make fmt` runs it
-> $(if $(COMPILER_ADR),python3 .github/scripts/adr_index.py $(COMPILER_ADR),@true)
-
-adr-index-check: ## Fail if the ADR index is stale
-> $(if $(COMPILER_ADR),python3 .github/scripts/adr_index.py --check $(COMPILER_ADR),@true)
 
 schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 > $(UV) run python -m neptune.model.schema docs/schema/canonical.schema.json

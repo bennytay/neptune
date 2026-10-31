@@ -1,6 +1,6 @@
 """Source entities: which bytes exist and where they were seen.
 
-Semantics and the dedup policy are in ADRs 0009 and 0010 and ``docs/provenance-and-identity.md``.
+Semantics and the dedup policy are in ADRs 0009 and 0010.
 These are ledger records (ADR 0017 §3): their ids come from their content and they carry no
 provenance, because every other record's provenance points at them.
 """

@@ -1,7 +1,7 @@
 # GeoJSON fixtures
 
 Real small GeoJSON files for the `geojson` adapter (`neptune.adapters.geojson`, ADR 0057), one per
-embodiment and one per case the adapter checklist in `docs/adapter-contract.md` asks for.
+embodiment and one per case the adapter checklist asks for.
 `make_geojson_fixtures.py` writes every file (`--check` compares the committed ones);
 `tests/unit/adapters/test_geojson_adapter.py` checks them against it and against the standard library.
 

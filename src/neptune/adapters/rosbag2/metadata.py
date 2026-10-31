@@ -14,7 +14,7 @@ for each topic its type, serialisation and offered QoS profiles. It becomes
 
 The storage files the bag lists are other sources. This adapter reads nothing of them: the
 reconciliation of what is listed with what is present is a cross-source check, so the findings
-here are about the bag's own statements (``docs/adapter-contract.md``, law 9).
+here are about the bag's own statements.
 """
 
 import re

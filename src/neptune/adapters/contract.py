@@ -824,7 +824,7 @@ class ChunkOutput:
 class Adapter(Protocol):
     """A format adapter (ADR 0008): a structural protocol, not a base class.
 
-    Laws (``docs/adapter-contract.md``): ``ingest`` is pure per chunk; ``plan`` is deterministic;
+    Laws: ``ingest`` is pure per chunk; ``plan`` is deterministic;
     problems are findings, never exceptions; ``probe`` reads only ``head`` and ``inspect`` never
     decodes payloads; every record cites exact bytes of the one source it was given.
     """

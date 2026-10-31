@@ -145,23 +145,9 @@ make setup   # uv-managed venv with dev tools
 make check   # lint + mypy --strict + tests (what CI runs); PKG=neptune-memory for one package
 ```
 
-Working here? Read `AGENTS.md`, then [`docs/site-model/README.md`](docs/site-model/README.md) and
-[`docs/site-model/spec.md`](docs/site-model/spec.md). Neptune is a demo project. Raw sources are never
+Working here? Read `AGENTS.md`, then [`docs/site-model/spec.md`](docs/site-model/spec.md) (the design) and
+[`ARCHITECTURE.md`](ARCHITECTURE.md). Neptune is a demo project. Raw sources are never
 rewritten, every value carries provenance, blanks stay blank, and the same inputs give the same bytes.
-
-## Documentation
-
-| Doc | Contents |
-|---|---|
-| `docs/site-model/` | The site model: spec, mapping format, live, insights, gold questions |
-| `docs/architecture.md` | The compiler: package boundaries, evidence vs. derived |
-| `docs/canonical-data-model.md` | The compiler's entities, epistemic states, time/frame/unit primitives |
-| `docs/adapter-contract.md` | The four-method adapter ABI |
-| `docs/developer-workflow.md` | Git, issue and PR workflow |
-| `docs/adr/` | Architecture Decision Records |
-
-Demo v1 (one robot incident through Ledger, Memory v2 and Context v2) was removed in #213; it lives in the
-history before that PR.
 
 ## License
 

@@ -7,7 +7,7 @@ Six states, one class each, closed under ``Knowledge[T]``. Pattern-match on them
         case Unknown() | NotCovered(): ...
 
 or call ``known_or_raise()`` where anything but ``Known`` is a bug in the caller. JSON shape, the
-provenance slot and the blank-field rules are in ADR 0011 and ``docs/adapter-contract.md``.
+provenance slot and the blank-field rules are in ADR 0011.
 """
 
 import math
