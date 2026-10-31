@@ -31,7 +31,7 @@ flowchart LR
     VIEWS["Site views<br/>now · history · topology"]
     INS["Insights<br/>deterministic rules"]
     QRY["neptune-site MCP<br/>neptune_site_* tools · SQL"]
-    WEB["Live web view<br/>dashboard · map · timeline · cited sources"]
+    WEB["Live web view<br/>overview · graph · ask · cited sources"]
     ACT["Actions<br/>Claude proposes · a person approves"]
     IMP["Improvements<br/>mission · Claude ranks · re-runs on change"]
   end

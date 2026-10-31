@@ -13,6 +13,9 @@ small JSON API over the same query layer as the MCP tools (``query.py``, ``insig
 - ``GET /api/actions``, ``POST /api/actions/approve|reject`` ``{"id"}``: proposed actions and a
   person's answer (``actions.py``, spec §15); an approved robot action is dispatched to the
   fleet manager over MQTT.
+- ``GET /api/graph``, ``GET /api/thing?id=E``: every thing and edge; one thing's state, lanes,
+  links, findings and the improvements citing it. ``POST /api/chat`` ``{"id", "text"}``: one turn
+  of the chat (``chat.py``); ``/api/chat/clear``. ``GET /classic``: the earlier map-first page.
 - ``GET /api/dashboard``: the dashboard (``dashboard.py``, spec §16): counts, mission, sources,
   coverage, the latest improvement run and what changed since it, the engine's state.
 - ``POST /api/engine/key`` ``{"key"}`` (kept in memory, never written), ``/api/engine/run``,
@@ -39,7 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
-from neptune_memory.site import actions, dashboard, improve, insights, log, query, views
+from neptune_memory.site import actions, chat, dashboard, improve, insights, log, query, views
 from neptune_memory.site import confirm as confirm_queue
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 
@@ -50,6 +53,8 @@ if TYPE_CHECKING:
     from neptune_memory.site.views import Reading, SiteModel
 
 PAGE = Path(__file__).with_name("web.html")
+CLASSIC = Path(__file__).with_name("web_classic.html")
+"""The earlier map-first page, kept at ``/classic``."""
 ASSETS = ("robot", "machine")
 PLACES = ("area", "cell", "zone")
 TABLE = (
@@ -93,6 +98,7 @@ class Site:
         self.send = send
         self.lock = threading.Lock()
         self.engine = improve.Engine(self.site_dir, client or improve._client)
+        self.chat = chat.Chat(self.site_dir, self.engine.client, guard=self.lock)
         self._tail = log.Tail(self.site_dir)
         self._model = views.SiteModel.empty()
         self._prefix: tuple[int, SiteModel] | None = None
@@ -135,6 +141,18 @@ class Site:
     def dashboard(self) -> dict[str, Any]:
         with self.lock:
             return dashboard.build(self.site_dir, self.model(), self.engine)
+
+    def graph(self) -> dict[str, Any]:
+        with self.lock:
+            return dashboard.graph(self.site_dir, self.model())
+
+    def thing(self, entity: str) -> dict[str, Any]:
+        with self.lock:
+            return dashboard.thing(self.site_dir, self.model(), entity)
+
+    def ask(self, talk: str, text: str) -> dict[str, Any]:
+        """One chat turn: tools read the live model under the lock; Claude's turns run outside."""
+        return self.chat.ask(talk, text, self.model)
 
     def due(self) -> str | None:
         """Why an automatic improvement run is due now (the engine's watcher asks)."""
@@ -604,6 +622,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/":
                 self._send(PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif url.path == "/classic":
+                self._send(CLASSIC.read_bytes(), "text/html; charset=utf-8")
+            elif url.path == "/api/graph":
+                self._json(self.site.graph())
+            elif url.path == "/api/thing":
+                self._json(self.site.thing(args.get("id", "")))
             elif url.path == "/events":
                 self._events()
             elif url.path == "/file":
@@ -640,12 +664,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.site.engine_call(m[1], body))
             elif m := re.fullmatch(r"/api/improvements/(accept|reject)", url.path):
                 self._json(self.site.improvement(m[1], str(body["id"]), by))
+            elif url.path == "/api/chat":
+                self._json(self.site.ask(str(body.get("id") or "default"), str(body["text"])))
+            elif url.path == "/api/chat/clear":
+                self.site.chat.clear(str(body.get("id") or "default"))
+                self._json({"cleared": True})
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (KeyError, ValueError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+        except RuntimeError as error:  # the SDK is missing
+            self._json({"error": str(error)}, HTTPStatus.SERVICE_UNAVAILABLE)
         except OSError as error:  # the broker is down: the approval is logged, not dispatched
             self._json({"error": f"not dispatched: {error}"}, HTTPStatus.BAD_GATEWAY)
+        except Exception as error:  # the API said no (a bad key, a rate limit, no network)
+            self._json({"error": f"{type(error).__name__}: {error}"}, HTTPStatus.BAD_GATEWAY)
 
     def _json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         self._send(json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json", status)

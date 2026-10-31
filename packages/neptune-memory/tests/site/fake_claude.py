@@ -47,3 +47,26 @@ def fact_id(text: str, needle: str) -> str:
     """The id of the dossier line that holds ``needle``."""
     line = next(line for line in text.splitlines() if needle in line and line.startswith("fact:"))
     return line.split(" | ", 1)[0]
+
+
+class FakeChatClaude:
+    """``client.beta.messages.create(...)`` for the chat: each turn in ``script`` is a list of tool
+    calls ``[(name, input), ...]`` or a final text; ``requests`` keeps what was sent."""
+
+    def __init__(self, *script: list[tuple[str, dict[str, Any]]] | str) -> None:
+        self.script = list(script)
+        self.requests: list[dict[str, Any]] = []
+        self.beta = SimpleNamespace(messages=self)
+
+    def create(self, **request: Any) -> Any:
+        self.requests.append({**request, "messages": list(request["messages"])})
+        turn = self.script.pop(0)
+        if isinstance(turn, str):
+            return SimpleNamespace(
+                stop_reason="end_turn", content=[SimpleNamespace(type="text", text=turn)]
+            )
+        uses = [
+            SimpleNamespace(type="tool_use", id=f"use-{len(self.requests)}-{i}", name=n, input=a)
+            for i, (n, a) in enumerate(turn)
+        ]
+        return SimpleNamespace(stop_reason="tool_use", content=uses)

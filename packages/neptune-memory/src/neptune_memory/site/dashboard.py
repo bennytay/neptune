@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -280,3 +281,186 @@ def _evidence(model: SiteModel, then: dict[str, Fact], fid: str) -> dict[str, An
         "logged": fid in model.facts,
         "cites": [{"file": c.file, "locator": c.locator, "quote": c.quote} for c in fact.citations],
     }
+
+
+# --- The graph and one thing (the minimal page's centre) --------------------------------------
+
+GRAPH_TYPES = (
+    "site",
+    "area",
+    "cell",
+    "zone",
+    "robot",
+    "machine",
+    "person",
+    "role",
+    "qualification",
+    "shift",
+    "task",
+    "document",
+    "rule",
+    "work_order",
+    "change",
+    "goal",
+    "constraint",
+    "improvement",
+)
+LANES = ("mode", "health", "in_zone", "current_task", "setpoint", "on_shift", "on_break")
+FAULT = re.compile(r"fault|error|estop|e-stop|alarm|protective", re.IGNORECASE)
+WARN = re.compile(r"starv|wait|block|stop|pause|hold|jam", re.IGNORECASE)
+IDLE = re.compile(r"idle|dock|charg|park", re.IGNORECASE)
+
+
+def status(model: SiteModel, entity: str, at: str | None) -> str:
+    """ok, warn, fault, idle, stale, unknown, or "" for a thing with no live state."""
+    readings = {r.predicate: r for r in model.state_at(at, entity)}
+    mode, health = readings.get("mode"), readings.get("health")
+    if mode is None and health is None:
+        return ""
+    if any(r is not None and r.state == "stale" for r in (mode, health)):
+        return "stale"
+    m = _value(mode.facts[0]) if mode is not None and mode.facts else ""
+    h = _value(health.facts[0]) if health is not None and health.facts else ""
+    if h.startswith("fault") or FAULT.search(m):
+        return "fault"
+    if not m:
+        return "unknown"
+    if WARN.search(m):
+        return "warn"
+    return "idle" if IDLE.search(m) else "ok"
+
+
+def graph(site_dir: Path, model: SiteModel) -> dict[str, Any]:
+    """Every thing and every live edge between two things; improvements link to what their
+    evidence is about and to the goals they serve."""
+    at = model.clock()
+    names = _names(model)
+    edges: dict[tuple[str, str, str], str] = {}
+    for fid, fact in model.facts.items():
+        if not model.live(fid) or not isinstance(fact.object, Ref):
+            continue
+        a, b = fact.subject, fact.object.ref
+        if entity_type(a) in GRAPH_TYPES and entity_type(b) in GRAPH_TYPES and a != b:
+            edges.setdefault((a, b, fact.predicate), fid)
+    every = improve.runs(site_dir, model)
+    if every:
+        then = {f.id: f for f in insights.findings(model, every[-1].data.get("at"))}
+        for item in every[-1].items:
+            for fid in item.data.get("evidence", []):
+                cited = model.facts.get(fid) or then.get(fid)
+                if cited is not None and entity_type(cited.subject) in GRAPH_TYPES:
+                    edges.setdefault((item.fact.subject, cited.subject, "evidence"), fid)
+            for goal in item.data.get("goals", []):
+                edges.setdefault((item.fact.subject, goal, "serves"), item.fact.id)
+    nodes = {e for e in model.entities if entity_type(e) in GRAPH_TYPES}
+    nodes |= {e for edge in edges for e in edge[:2]}
+    if every:
+        nodes |= {i.fact.subject for i in every[-1].items}
+        names |= {i.fact.subject: i.title for i in every[-1].items}
+    degree = Counter(e for edge in edges for e in edge[:2])
+    return {
+        "at": at,
+        "nodes": [
+            {
+                "id": e,
+                "type": entity_type(e),
+                "name": names.get(e, e.split(":", 1)[-1]),
+                "status": status(model, e, at) if entity_type(e) in COVERED else "",
+                "degree": degree[e],
+            }
+            for e in sorted(nodes)
+        ],
+        "edges": [
+            {"from": a, "to": b, "predicate": p, "fact": fid} for (a, b, p), fid in edges.items()
+        ],
+    }
+
+
+def thing(site_dir: Path, model: SiteModel, entity: str) -> dict[str, Any]:
+    """One thing: what is known now (cited), its state lanes over the site's span, what it links
+    to, the findings about it and the improvements that cite it."""
+    at = model.clock()
+    names = _names(model)
+    now = []
+    for reading in model.state_at(at, entity):
+        fact = reading.facts[0] if reading.facts else None
+        now.append(
+            {
+                "predicate": reading.predicate,
+                "value": _value(fact) if fact else None,
+                "unit": getattr(fact.object, "unit", None) if fact else None,
+                "state": reading.state,
+                "kind": fact.kind if fact else None,
+                "since": reading.since,
+                "fact": fact.id if fact else None,
+                "cite": _cite(fact) if fact else None,
+            }
+        )
+    times = [t for ts in model.seen.values() for t in ts[:1]]
+    start = min(times) if times else None
+    lanes: dict[str, list[dict[str, Any]]] = {}
+    for span in model.history(entity, end=at):
+        if span.fact.predicate in LANES and span.start is not None:
+            lanes.setdefault(span.fact.predicate, []).append(
+                {
+                    "start": span.start,
+                    "end": span.end,
+                    "value": _value(span.fact),
+                    "kind": span.fact.kind,
+                    "fact": span.fact.id,
+                }
+            )
+    links = []
+    for fid, fact in model.facts.items():
+        if not model.live(fid) or not isinstance(fact.object, Ref):
+            continue
+        if fact.subject == entity or fact.object.ref == entity:
+            other = fact.object.ref if fact.subject == entity else fact.subject
+            direction = "out" if fact.subject == entity else "in"
+            links.append(
+                {"predicate": fact.predicate, "other": other, "dir": direction, "fact": fid}
+            )
+    found = [
+        {"text": _value(f), "valid_from": f.valid_from, "cites": [_cite_of(c) for c in f.citations]}
+        for f in insights.findings(model, at)
+        if f.subject == entity
+    ]
+    cited_by = []
+    every = improve.runs(site_dir, model)
+    if every:
+        for item in every[-1].items:
+            about = {
+                model.facts[i].subject for i in item.data.get("evidence", []) if i in model.facts
+            }
+            if entity in about or item.fact.subject == entity:
+                cited_by.append({"fact": item.fact.id, "title": item.title, "rank": item.rank})
+    return {
+        "id": entity,
+        "type": entity_type(entity),
+        "name": names.get(entity, entity),
+        "status": status(model, entity, at),
+        "at": at,
+        "start": start,
+        "now": now,
+        "lanes": [{"predicate": p, "spans": lanes[p]} for p in LANES if p in lanes],
+        "links": sorted(links, key=lambda x: (x["predicate"], x["other"])),
+        "findings": found,
+        "improvements": cited_by,
+        "same_as": [e for e in model.same_as(entity) if e != entity],
+    }
+
+
+def _names(model: SiteModel) -> dict[str, str]:
+    return {
+        f.subject: _value(f)
+        for fid, f in model.facts.items()
+        if f.predicate == "name" and model.live(fid)
+    }
+
+
+def _cite(fact: Fact) -> dict[str, Any] | None:
+    return _cite_of(fact.citations[0]) if fact.citations else None
+
+
+def _cite_of(citation: Any) -> dict[str, Any]:
+    return {"file": citation.file, "locator": citation.locator, "quote": citation.quote}

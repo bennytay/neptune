@@ -522,3 +522,14 @@ feeds:                                   # one entry per envelope `source`
   sources with feed freshness, coverage (facts per robot, machine, cell and person by live feed,
   records, documents, inferred, with stale and unknown values), what changed since the last run, the
   engine, and the latest run's cards: evidence opens its cited source, constraints show ✓ ✗ ?.
+- **The page** (`site/web.html`, minimal, three panes): left, the views (Overview, Graph, Improvements,
+  Sources) and a filterable list of things with their status. Centre: the overview (counts, mission,
+  top improvements, findings, what changed); the graph (`GET /api/graph`: every thing and live edge, an
+  improvement linked to what its evidence is about and the goals it serves; groups toggle, pan and
+  zoom); one thing (`GET /api/thing?id=`: swimlanes of mode, health, zone, task, setpoint and shift over
+  the site's span, findings, what it holds now with each citation, links). Right: **Ask**
+  (`site/chat.py`, `POST /api/chat`): Claude calls the read-only query tools (insights, resolve,
+  state_at, find, timeline, why, impact, gaps, search_evidence, sql, improvements) in a loop, each call
+  a step of the shown trace, and cites `file locator`, which the page opens in the source viewer.
+  Conversations stay in the server's memory and nothing is logged. The earlier map-first page is
+  `/classic` (`web_classic.html`).

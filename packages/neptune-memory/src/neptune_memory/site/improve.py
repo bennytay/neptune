@@ -655,6 +655,12 @@ class Engine:
             return "page"
         return "env" if os.environ.get("ANTHROPIC_API_KEY") else None
 
+    def client(self) -> Any:
+        """An Anthropic client on the person's key (the chat uses it too)."""
+        if self.key is None:
+            raise ValueError("no API key: paste yours in the improvement engine")
+        return self._client(self._key)
+
     def status(self) -> dict[str, Any]:
         return {
             "key": self.key,

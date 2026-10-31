@@ -27,18 +27,19 @@ spreadsheet row, PDF block or photo region it rests on. Findings are Neptune's i
 rules (starvation chains, qualification gaps, stale sources). Assets only a CMMS export names, with no
 location or live state, are listed under the map as "records only".
 
-**The dashboard: what Neptune knows, and what to do about it.** The page opens on a dashboard. On the
-left are the site's mission (`static/mission.yaml`: goals with a target, and constraints any change must
+**The page: see the site, ask it, improve it.** Three minimal panes: the things on the site on the left;
+an overview, a graph of every thing and how they link, or one thing's timeline in the centre; and **Ask**
+on the right, where Claude answers from the model, shows each query it ran and cites the line it rests
+on (click to open it). The overview and Improvements views hold the site's mission (`static/mission.yaml`: goals with a target, and constraints any change must
 respect), every evidence source and how fresh it is, coverage of each robot, machine, cell and person by
-live feed, records, documents and inferred facts, and what changed since the last run. On the right, paste
-your own Anthropic API key (it stays in the local server's memory, never on disk) and Claude ranks
+live feed, records, documents and inferred facts, and what changed since the last run. Paste your own Anthropic API key (it stays in the local server's memory, never on disk) and Claude ranks
 improvements against the mission. Each one shows its cited evidence, a ✓ ✗ ? per constraint, a size and
 its basis, and what is unknown. When the site changes materially (a new document, a fault, a new finding)
 the list re-runs and shows what moved and what retired. Accepting one that carries a robot action sends
 it. Each run is recorded, so rebuilding the log never calls a model ([spec §16](docs/site-model/spec.md)).
 
 **Actions, approved by a person.** Ask Claude to propose one ("send amr-01 to aisle-b"): it logs an inferred
-proposal citing its reasons. It shows in the page's Actions panel; Approve sends the robot's fleet manager a
+proposal citing its reasons. It shows in the Actions panel of the classic view (`/classic`); Approve sends the robot's fleet manager a
 VDA 5050 `order`, and the panel and the log follow it through intent, dispatched and outcome, each cited. No
 MCP tool approves, and actions never touch safety functions.
 
