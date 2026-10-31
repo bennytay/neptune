@@ -1,8 +1,0 @@
-{
-  "name": "neptune-film-web",
-  "private": true,
-  "description": "Renders the film's shots in a headless browser (three.js on the CPU): no GPU needed.",
-  "dependencies": {
-    "three": "0.170.0"
-  }
-}

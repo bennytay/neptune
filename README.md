@@ -54,7 +54,6 @@ make site-demo SITE=public      # real public data: a UR3 cobot's controller exp
 make site-web                   # the web view over an already-built site
 make site-live                  # live at 60x without the script (SPEED=..., SITE=harbor)
 make site-sim                   # a simulated Plant 7, live, that obeys approved actions (DAYS, SEED)
-make site-sim-run DAYS=1        # the same offline; then demo/film/ renders it in 3D (Isaac Sim)
 claude mcp add neptune-site -- <the "MCP:" line it printed>
 ```
 

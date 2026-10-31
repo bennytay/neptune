@@ -7,7 +7,7 @@ flowchart LR
   USE["Claude · agents"]
   PERSON["A person"]
   SIM["Simulated plant<br/>Plant 7 · seeded<br/>obeys commands"]
-  REN["Film · demo/film<br/>USD stages · Isaac Sim render"]
+  REN["Photoreal render<br/>Isaac Sim"]
 
   COMP["Compiler · src/neptune<br/>files → cited rows, blocks, regions"]
 
@@ -42,11 +42,10 @@ flowchart LR
   SIM -->|scene · timeline| REN
 
   classDef built fill:#6a9f7426,stroke:#6a9f74,stroke-width:2px
-  classDef partial fill:#c09a5b26,stroke:#c09a5b,stroke-width:2px
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class COMP,MAP,LOG,VIEWS,INS,IMP,MCP,WEB,ACT,SIM built
-  class REN partial
+  class REN todo
   class FILES,FEED,USE,PERSON ext
   style S fill:#8b949e0f,stroke:#8b949e
   linkStyle default stroke:#8b949e
