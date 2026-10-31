@@ -557,5 +557,9 @@ class Simulator:
 
 
 def is_command(topic: str) -> bool:
-    """A message to a robot (``.../instantActions``, ``.../order``), not a report from one."""
-    return topic.rsplit("/", 1)[-1] in COMMANDS
+    """A message to a device (``.../instantActions``, ``.../order``, a Sparkplug ``DCMD`` or
+    ``NCMD``), not a report from one."""
+    parts = topic.split("/")
+    return parts[-1] in COMMANDS or (
+        parts[0].startswith("spBv") and parts[2:3] in (["DCMD"], ["NCMD"])
+    )

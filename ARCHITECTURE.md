@@ -23,6 +23,8 @@ flowchart LR
   end
 
   FEED["Live site feeds<br/>fleet managers · PLCs<br/>MQTT · recorded JSONL"]
+  SIM["Simulated plant<br/>Plant 7 · seeded<br/>obeys commands"]
+  REN["Photoreal render<br/>Isaac Sim"]
   subgraph S["Neptune site model · neptune_memory.site"]
     CAPT["Record-first capture<br/>live · replay"]
     MAP["Mappers<br/>one mapping file per site<br/>draft-mapping"]
@@ -71,6 +73,10 @@ flowchart LR
   QRY -->|propose| ACT
   WEB -->|approve| ACT
   ACT -->|VDA 5050 order| FEED
+  SIM -->|Sparkplug · VDA 5050 · controller log| FEED
+  FEED -->|orders · DCMD| SIM
+  SIM -.->|work orders · reads roster| RAW
+  SIM -->|scene · timeline| REN
   ACT -->|intent · dispatched · outcome| LOG
   VIEWS -->|dossier| IMP
   IMP -.->|inferred, recorded run| LOG
@@ -95,7 +101,8 @@ flowchart LR
   class SDK,CLI built
   class DEV ext
   class RAW,FEED,USE ext
-  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB,ACT,IMP built
+  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB,ACT,IMP,SIM built
+  class REN todo
   style N fill:#8b949e0f,stroke:#8b949e
   style S fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

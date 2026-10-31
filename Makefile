@@ -26,7 +26,7 @@ EACH = set -ef; for p in $(SELECTED); do \
 COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  check-all site-demo site-replay site-live site-web site-show
+  check-all site-demo site-replay site-live site-web site-show site-sim site-sim-run
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -139,3 +139,31 @@ site-show: ## Site model demo: live site + web view at SPEED=10, prints a 3-minu
 > @test -f "$(SHOW_SCRIPT)" || { echo "site-show runs SITE=p7 or SITE=harbor" >&2; exit 2; }
 > @sed 's/SPEED x/$(SPEED)x/' "$(SHOW_SCRIPT)"
 > @$(MAKE) --no-print-directory site-live SITE="$(SITE)" SPEED="$(SPEED)" WEB_OPEN="$(SHOW_OPEN)"
+
+# site-sim (spec §17): a simulated Plant 7 instead of the scripted feed. The plant runs live at
+# SPEED x over MQTT, `live` builds the model from it, the web view shows it, and approved actions
+# change what the plant does next. DAYS simulated shifts (05:30-14:30, nights skipped), SEED picks
+# the plant's luck. The renderer's timeline is $(SIM_SITE)/sim/timeline.jsonl.
+SIM_SITE ?= site-sim
+SIM_READY = $(SIM_SITE)/.neptune/live.ready
+DAYS ?= 1
+SEED ?= 7
+SIM_CMD := $(RUN) python -m neptune_memory.site.sim
+site-sim: ## Simulated plant, live: broker + plant at SPEED x + live + web view (DAYS, SEED)
+> $(SIM_CMD) prepare "$(SIM_SITE)" --days "$(DAYS)"
+> @echo "MCP: uv run --directory \"$(CURDIR)\" --all-packages python -m neptune_context.mcp --site \"$(abspath $(SIM_SITE))\""
+> @echo "Web view: $(SITE_URL)"
+> @$(SITE_CMD) broker --broker "$(BROKER)" & b=$$!; \
+  $(SITE_CMD) live "$(SIM_SITE)" --broker "$(BROKER)" & l=$$!; \
+  $(SITE_CMD) web "$(SIM_SITE)" --port "$(WEB_PORT)" --broker "$(BROKER)" $(WEB_OPEN) & w=$$!; \
+  trap 'kill $$l $$b $$w 2>/dev/null; wait' EXIT; trap 'exit 130' INT TERM; \
+  until [ -f "$(SIM_READY)" ]; do kill -0 $$l 2>/dev/null || exit 1; sleep 0.2; done; \
+  $(SIM_CMD) live "$(SIM_SITE)" --broker "$(BROKER)" --speed "$(SPEED)" --days "$(DAYS)" --seed "$(SEED)"; \
+  echo "the plant's shifts are done; live keeps running. Ctrl-C stops."; \
+  wait
+
+site-sim-run: ## Simulated plant, offline: DAYS shifts into feed/, then build and log insights
+> $(SIM_CMD) run "$(SIM_SITE)" --days "$(DAYS)" --seed "$(SEED)"
+> $(SITE_CMD) build "$(SIM_SITE)"
+> $(SITE_CMD) insights "$(SIM_SITE)" > /dev/null
+> @echo "MCP: uv run --directory \"$(CURDIR)\" --all-packages python -m neptune_context.mcp --site \"$(abspath $(SIM_SITE))\""

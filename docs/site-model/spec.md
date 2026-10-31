@@ -536,3 +536,68 @@ feeds:                                   # one entry per envelope `source`
   graph's layout is the same on every load: each group has a fixed home (the floor in the middle,
   people, documents, work, mission and improvements around it). Conversations stay in the server's
   memory and nothing is logged. The earlier map-first page is `/classic` (`web_classic.html`).
+
+## 17. Simulated plant (`site/sim/`)
+
+- A **seeded simulation of Plant 7** that stands in for a real site. It speaks the corpus's feeds
+  (§9: `plc.cv2` Sparkplug-style, `fleet` VDA 5050-style with `agvPosition`, `arm.c3` controller
+  log), appends its own CMMS work orders to `static/cmms/work_orders.csv`, follows
+  `static/roster/` and takes commands only through the site's protocols. Neptune's code never
+  imports it; `live`, the mappers, insights, actions and the web view run unchanged.
+- `python -m neptune_memory.site.sim prepare <dir> [--days N]`: Plant 7's static corpus with no
+  feed, work orders up to WO-5521, one shift A row per person per day (Okafor's break 10:30-11:00).
+  `run <dir> [--days N] [--seed S] [--commands F] [--frames N] [--keep-static]`: prepare, then
+  simulate offline into `feed/*.jsonl`. `live <dir> --broker --speed`: the same over MQTT.
+- `make site-sim [SPEED= DAYS= SEED=]`: broker + `live` + web view + the plant at SPEED x.
+  `make site-sim-run [DAYS= SEED=]`: offline, then `build` and `insights`. Output: `site-sim/`.
+- **Time:** day 1 is 2026-10-20. Each day runs 05:30-14:30 (shift A 06:00-14:00) and nights are
+  skipped; the night crew charges every robot still standing. CHG-311 (setpoint 0.80 → 0.95 at
+  05:40) and amr-03's firmware 4.1.0 → 4.2.0 (05:50) happen on day 1, as the static files say.
+- **The plant**, one step per site second (`engine.py`; floor plan in metres in `plant.py`):
+  - CV-2 carries parts 16.5 m to the arm's pick position (one part per 32 / speed s); a part can
+    jam at photo-eye PE3. A jam stops the belt (`stopped`, `JAM_PE3`) until a person holding
+    `conveyor-lockout` clears it (25-35 min), which writes a work order.
+  - Arm C3 runs a 27 s pick-and-place cycle into the tote of the AMR docked at the pickup
+    station; it reports `idle_starved` after 28 s with no part, `blocked` after 28 s with no tote,
+    and a `protective_stop` (`PSTOP_C3`) on some belt restarts, reset only by a person holding
+    `arm-reset-c3`.
+  - The fleet manager runs three AMRs on a one-way lane loop (aisle A east, aisle B west) with
+    bypass stations: pickup, drop, two chargers, a park spot per aisle. One robot per lane node, so
+    a robot stopped on the lane blocks the ones behind it. It sends a robot to charge below 20 %
+    (reported), and to pick up the next tote only when the station is free.
+  - People walk the hall; maintenance techs take jobs they are qualified for, nearest first, and
+    not on a break. The line lead goes to watch an open jam.
+- **What goes wrong** (`plant.Truth`; in no file Neptune reads, so Neptune has to find it):
+
+  | Cause | Evidence the plant leaves |
+  |---|---|
+  | Jam chance rises with belt speed (x5 at 0.95 m/s) and with dirt on the PE3 lens, which builds while the belt runs | jams after CHG-311; work orders with cause "PE3 lens dirty" when the lens is dirty; the whiteboard note |
+  | 60 % of belt restarts after a jam trip the arm's protective stop; only Okafor can reset it | controller log, roster, qualifications |
+  | amr-03's aged pack drains 1.3x and its gauge reads about 22 % when empty, so it stops on the lane above the 20 % threshold | `batteryLow` with `batteryCharge` near 20; firmware 4.2.0 is a correlation, not the cause |
+  | All robots reach 20 % at about the same time and share two chargers | robots `waiting` for a charger, arm `blocked` |
+
+- **Commands** the plant obeys, applied at the next site second and recorded in
+  `sim/commands.jsonl` (`run --commands` replays them, so a live run reproduces offline):
+  `uagv/v2/p7/<robot>/instantActions` (`startPause`, `stopPause`, `cancelOrder`), `.../order`
+  (park in the order's last node: a zone), `spBv1.0/P7/DCMD/cv2-edge/cv2` with metric
+  `speed_setpoint`. `actions.is_command` treats Sparkplug `DCMD`/`NCMD` as commands. A changed
+  roster, qualification list or `static/cmms/pm_schedule.csv` (`PM,Equipment,Task,Every hours`; a
+  task naming PE3 schedules a 6 min lens clean) reaches the plant within a site minute.
+- **Plan** (`plant.Plan`): the settings the site runs on: `charge_below`, `charge_until`,
+  `top_up_below` (idle robots charge one at a time), `prestage` (the next robot waits beside the
+  pickup). No command reaches these yet.
+- **Output** in `<dir>/sim/`: `scene.json` (the floor plan, lane graph, arm poses), `timeline.jsonl`
+  (one frame per `--frames` site seconds: belt parts, arm joints and tool position, AMR poses,
+  people and their activity, events; about 50 MB a day at 1 s), `summary.json` (KPIs per day:
+  parts out, jams, stopped/starved/blocked minutes, protective stops, stranded robots). The renderer
+  reads `scene.json` and `timeline.jsonl`; Neptune reads none of it.
+- `python -m neptune_memory.site.sim preview <dir> [--from T] [--to T] [--every S]` writes
+  `sim/preview.html`: one self-contained page that replays that stretch of the timeline top-down
+  (belt and parts, arm, AMRs with battery and tote, people and their jobs, events), to check the
+  plant before the photoreal render. The default window, 10:55-11:50 on day 1 with seed 7, holds a
+  jam, a starved arm, a protective stop and its reset, and amr-03 stopping on the lane.
+- **Same seed, same plant:** randomness is one `random.Random(seed)`; a seed and the same commands
+  at the same site seconds give the same feed bytes.
+- Over 5 days and 3 seeds the baseline makes about 654 parts a day; a PE3 clean every 4 h, staggered
+  top-up charging, `charge_below` 30 and pre-staging together make about 742 (+13 %), better than
+  also lowering the setpoint to 0.85 (715).

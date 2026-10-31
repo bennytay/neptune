@@ -38,6 +38,8 @@ make site-live                              # broker + live + publish at 60x (sp
 make site-web                               # the web view of site-demo/ (spec §14); site-live serves it too
 make site-show                              # the demo: site-live at 10x + web view + a 3-minute script
 make site-demo SITE=public                  # real UR3 data (real-data.md)
+make site-sim SPEED=60 DAYS=1               # a simulated Plant 7, live, that obeys actions (spec §17)
+make site-sim-run DAYS=5                    # the same offline, then build + insights
 ```
 
 PRs: branch `<issue>-<slug>`, body `Closes #<issue>`, commit trailer `Refs: #<issue>`. Merge on green CI.
