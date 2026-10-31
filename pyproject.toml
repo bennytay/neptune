@@ -56,6 +56,7 @@ ignore = ["ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN"]
+"scripts/benchmark/**" = ["ANN", "E501", "E731", "E741", "B007", "RUF001", "T201"]  # report scripts: HTML templates, prints
 
 [tool.ruff.lint.isort]
 known-first-party = ["neptune"]
