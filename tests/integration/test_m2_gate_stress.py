@@ -1,6 +1,6 @@
 """MVL-57, the M2 gate: the runtime and the adapter ABI under the scenarios the gate names.
 
-Each test is one scenario of ``docs/reviews/m2-stress-test.md``, run through the real job with the
+Each test is one scenario of the M2 gate review, run through the real job with the
 real sandbox (ADR 0030) unless it says otherwise: a kill in the middle of a sandboxed parse, a
 parser crash, an adapter whose chunks half carry findings, two adapters tied on an extensionless
 file, cache hits and misses after a rename, a version bump and a config change, and the hostile

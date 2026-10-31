@@ -36,7 +36,7 @@ live feed, records, documents and inferred facts, and what changed since the las
 improvements against the mission. Each one shows its cited evidence, a ✓ ✗ ? per constraint, a size and
 its basis, and what is unknown. When the site changes materially (a new document, a fault, a new finding)
 the list re-runs and shows what moved and what retired. Accepting one that carries a robot action sends
-it. Each run is recorded, so rebuilding the log never calls a model ([spec §16](docs/site-model/spec.md)).
+it. Each run is recorded, so rebuilding the log never calls a model.
 
 **Actions, approved by a person.** Ask Claude to propose one ("send amr-01 to aisle-b"): it logs an inferred
 proposal citing its reasons. It shows in the Actions panel of the classic view (`/classic`); Approve sends the robot's fleet manager a
@@ -53,6 +53,8 @@ make site-demo SITE=harbor      # Harbor DC (warehouse: sorter, legged inspector
 make site-demo SITE=public      # real public data: a UR3 cobot's controller export (below)
 make site-web                   # the web view over an already-built site
 make site-live                  # live at 60x without the script (SPEED=..., SITE=harbor)
+make site-sim                   # a simulated Plant 7, live, that obeys approved actions (DAYS, SEED)
+make site-sim-run DAYS=1        # the same offline; then demo/film/ renders it in 3D (Isaac Sim)
 claude mcp add neptune-site -- <the "MCP:" line it printed>
 ```
 
@@ -71,7 +73,7 @@ uv run --all-packages --all-groups python -m neptune_memory.site draft-mapping <
 
 `build` logs every file it cannot map as `not mapped` (still searchable, never a fact). `draft-mapping` drafts
 the entry for one file; check it, save it into `<dir>/static/neptune.mappings.yaml`
-([spec §12](docs/site-model/spec.md)) and `build` again. The Claude Code skill does the same loop and shows
+(a worked example: [`scripts/public_site/neptune.mappings.yaml`](scripts/public_site/neptune.mappings.yaml)) and `build` again. The Claude Code skill does the same loop and shows
 you every draft before it saves. No mapper code names a site: Plant 7 and Harbor differ only in that file.
 
 ## Ask it
@@ -145,23 +147,8 @@ make setup   # uv-managed venv with dev tools
 make check   # lint + mypy --strict + tests (what CI runs); PKG=neptune-memory for one package
 ```
 
-Working here? Read `AGENTS.md`, then [`docs/site-model/README.md`](docs/site-model/README.md) and
-[`docs/site-model/spec.md`](docs/site-model/spec.md). Neptune is a demo project. Raw sources are never
+Working here? Read `AGENTS.md` and [`ARCHITECTURE.md`](ARCHITECTURE.md). Neptune is a demo project. Raw sources are never
 rewritten, every value carries provenance, blanks stay blank, and the same inputs give the same bytes.
-
-## Documentation
-
-| Doc | Contents |
-|---|---|
-| `docs/site-model/` | The site model: spec, mapping format, live, insights, gold questions |
-| `docs/architecture.md` | The compiler: package boundaries, evidence vs. derived |
-| `docs/canonical-data-model.md` | The compiler's entities, epistemic states, time/frame/unit primitives |
-| `docs/adapter-contract.md` | The four-method adapter ABI |
-| `docs/developer-workflow.md` | Git, issue and PR workflow |
-| `docs/adr/` | Architecture Decision Records |
-
-Demo v1 (one robot incident through Ledger, Memory v2 and Context v2) was removed in #213; it lives in the
-history before that PR.
 
 ## License
 

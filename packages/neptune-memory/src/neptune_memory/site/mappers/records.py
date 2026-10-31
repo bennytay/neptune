@@ -1,4 +1,4 @@
-"""The compiler's records of ``static/`` become facts, as the mapping file says (spec §5, §12).
+"""The compiler's records of ``static/`` become facts, as the mapping file says.
 
 ``map_record(record, package, mapping)`` is called once per record, in package order. A record's
 file (its path under ``static/``) picks the mapping entry; this module knows no site's paths.
@@ -132,7 +132,7 @@ class _Index:
 
     def changed(self, table: str, entry: dict[str, Any], mapping: Mapping) -> dict[int, list[Fact]]:
         """``changes: true``: per row number, the facts whose value differs from the previous row's
-        for (subject, predicate), as a feed logs state intervals (spec §4). Rows reach
+        for (subject, predicate), as a feed logs state intervals. Rows reach
         ``map_record`` in package order, so the whole table is walked once, in row order."""
         key = (table, id(entry))
         if key not in self._changed:

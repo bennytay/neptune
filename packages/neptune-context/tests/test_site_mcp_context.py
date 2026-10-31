@@ -1,4 +1,4 @@
-"""``--site``: the ``neptune_site_*`` tools over a site model (site model v3, spec §8)."""
+"""``--site``: the ``neptune_site_*`` tools over a site model."""
 
 from __future__ import annotations
 

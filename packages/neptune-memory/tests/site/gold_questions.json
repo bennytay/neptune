@@ -1,5 +1,5 @@
 {
-  "about": "M1 gold questions (docs/site-model/spec.md §10). Each call is a site query (spec §8); expect lists items the answer must contain (object may be omitted) and the corpus files it must cite. Wording is never checked.",
+  "about": "M1 gold questions. Each call is a site query; expect lists items the answer must contain (object may be omitted) and the corpus files it must cite. Wording is never checked.",
   "questions": [
     {
       "id": "G1",

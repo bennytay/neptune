@@ -1,6 +1,6 @@
 # Plant 7 on film: the simulated plant, rendered in Isaac Sim
 
-The simulator (`neptune_memory.site.sim`, spec §17) records every second of a run in
+The simulator (`neptune_memory.site.sim`) records every second of a run in
 `sim/timeline.jsonl`. This folder turns that run into a 3D film:
 
 ```

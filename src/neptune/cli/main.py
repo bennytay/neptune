@@ -81,9 +81,7 @@ examples:
   neptune ingest arm-cell/episode-7.mcap --out packages/episode-7 --json
 
 exit codes:
-{table}
-
-docs/cli.md describes the JSON output and every option."""
+{table}"""
 
 
 def build_parser() -> argparse.ArgumentParser:

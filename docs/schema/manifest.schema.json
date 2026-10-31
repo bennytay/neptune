@@ -51,7 +51,7 @@
   "$id": "https://neptune.dev/schema/manifest/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "An optional neptune.yaml (or .json) at the root of a folder: declarations the evidence does not make. Everything it declares is stated, with the manifest as its source (docs/manifest.md).",
+  "description": "An optional neptune.yaml (or .json) at the root of a folder: declarations the evidence does not make. Everything it declares is stated, with the manifest as its source.",
   "properties": {
     "adapters": {
       "oneOf": [

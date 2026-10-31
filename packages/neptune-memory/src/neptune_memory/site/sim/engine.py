@@ -1,7 +1,7 @@
 """The plant, one site second at a time: the conveyor, the arm, the AMR fleet and the people.
 
 ``Engine.step()`` moves the plant one second and returns the feed envelopes the plant's systems
-publish at that second, in the formats the corpus uses (spec §9): the CV-2 edge node (Sparkplug
+publish at that second, in the formats the corpus uses: the CV-2 edge node (Sparkplug
 style, every 5 s and on change), the fleet manager (VDA 5050 style state per robot every 5 s) and
 the arm controller's log (every 5 s and on each event). ``Engine.command()`` takes what Neptune
 sends back: VDA 5050 ``instantActions`` and ``order`` to a robot, a Sparkplug ``DCMD`` to the PLC.

@@ -22,10 +22,8 @@ RUN := $(UV) run --all-packages --all-groups
 EACH = set -ef; for p in $(SELECTED); do \
   if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; x="--extend-exclude packages/*"; \
   else cd "$(CURDIR)/packages/$$p"; x=""; fi; echo "--- $$p" >&2;
-# The compiler's ADR index (docs/adr/README.md); members keep no ADRs.
-COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
-.PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
+.PHONY: help setup fmt lint type test test-fast check schema examples \
   check-all site-demo site-replay site-live site-web site-show site-sim site-sim-run
 
 help: ## Show available targets
@@ -35,11 +33,11 @@ setup: ## Install the compiler, every workspace member and the dev tools into .v
 > $(UV) sync --all-packages --all-groups
 > @if git rev-parse --git-dir >/dev/null 2>&1; then $(UV) run pre-commit install >/dev/null || true; fi
 
-fmt: adr-index ## Format code, auto-fix lint findings and regenerate the ADR index
+fmt: ## Format code and auto-fix lint findings
 > $(UV) run ruff format .
 > $(UV) run ruff check --fix .
 
-lint: adr-index-check ## Formatting, lint and ADR-index check without modifying files
+lint: ## Formatting and lint check without modifying files
 # `set -e` ignores a failure on the left of `&&`, so each step exits explicitly.
 > @$(EACH) $(RUN) ruff format --check $$x . || exit 1; $(RUN) ruff check $$x . || exit 1; done
 
@@ -61,12 +59,6 @@ check: lint type test-fast ## What PR CI runs: lint, types, fast tests; must pas
 
 check-all: lint type test ## Everything, slow tests included; main and the nightly run it (PKG=<name> for one)
 
-adr-index: ## Regenerate docs/adr/README.md; `make fmt` runs it
-> $(if $(COMPILER_ADR),python3 .github/scripts/adr_index.py $(COMPILER_ADR),@true)
-
-adr-index-check: ## Fail if the ADR index is stale
-> $(if $(COMPILER_ADR),python3 .github/scripts/adr_index.py --check $(COMPILER_ADR),@true)
-
 schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 > $(UV) run python -m neptune.model.schema docs/schema/canonical.schema.json
 
@@ -79,14 +71,14 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/golden/urdf/make_urdf_golden.py
 > $(UV) run python tests/golden/manifest/make_manifest_golden.py
 
-# Site model v3 (docs/site-model/spec.md §9): a demo corpus -> fact log -> the MCP command.
+# Site model v3: a demo corpus -> fact log -> the MCP command.
 # SITE=p7 (Plant 7, default) or SITE=harbor (Harbor DC). site-demo confirms the identity proposals
-# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would (spec §7). SITE=public fetches real public
+# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would. SITE=public fetches real public
 # robot data instead of generating a corpus (docs/site-model/real-data.md).
 SITE ?= p7
 SITE_DIR ?= $(if $(filter p7,$(SITE)),site-demo,site-$(SITE))
 SPEED ?= 60
-# --extra anthropic: the dashboard's improvement runs call Claude with the person's own key (spec §16).
+# --extra anthropic: the dashboard's improvement runs call Claude with the person's own key.
 SITE_CMD := $(RUN) --extra anthropic python -m neptune_memory.site
 SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
 SITE_SOURCE = $(if $(filter public,$(SITE)),scripts/fetch_public_site.sh "$(SITE_DIR)",$(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)")
@@ -140,7 +132,7 @@ site-show: ## Site model demo: live site + web view at SPEED=10, prints a 3-minu
 > @sed 's/SPEED x/$(SPEED)x/' "$(SHOW_SCRIPT)"
 > @$(MAKE) --no-print-directory site-live SITE="$(SITE)" SPEED="$(SPEED)" WEB_OPEN="$(SHOW_OPEN)"
 
-# site-sim (spec §17): a simulated Plant 7 instead of the scripted feed. The plant runs live at
+# site-sim: a simulated Plant 7 instead of the scripted feed. The plant runs live at
 # SPEED x over MQTT, `live` builds the model from it, the web view shows it, and approved actions
 # change what the plant does next. DAYS simulated shifts (05:30-14:30, nights skipped), SEED picks
 # the plant's luck. The renderer's timeline is $(SIM_SITE)/sim/timeline.jsonl.

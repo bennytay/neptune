@@ -485,16 +485,6 @@ def test_a_window_is_checked_on_the_source_clock() -> None:
 # --- Review round (PR #85): overflow, tiny rates, the amended contract, streamed records ----------
 
 
-def test_adr_0060_declares_that_it_amends_adr_0050_section_5() -> None:
-    adrs = Path(__file__).parents[3] / "docs" / "adr"
-    [adr] = adrs.glob("0060-*.md")
-    header = adr.read_text().split("## Context")[0]
-    assert "- Amends: ADR 0050 §5" in header
-    index = (adrs / "README.md").read_text()
-    [row] = [line for line in index.splitlines() if line.startswith("| [0050]")]
-    assert row.endswith("amended by 0060 |")
-
-
 def test_a_bound_past_int64_is_no_bound_never_an_error() -> None:
     # the reviewer's repro: the inverse bound is 1.3e19 ticks
     pairs = [(1, 1), (5 * 10**17, 5 * 10**8 + 2 * 10**10), (10**18, 10**9)]

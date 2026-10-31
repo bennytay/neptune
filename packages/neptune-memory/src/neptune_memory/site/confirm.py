@@ -1,4 +1,4 @@
-"""The confirm queue (spec §7): a person answers yes or no on an inferred ``same_as`` proposal.
+"""The confirm queue: a person answers yes or no on an inferred ``same_as`` proposal.
 
 An answer is a ``confirm`` log entry. A yes becomes a stated copy of the proposal with
 ``source="confirm"`` (``stated_from_confirm``, used by the fold); a no only clears the queue.

@@ -1,4 +1,4 @@
-"""Views over a small hand-made fact log (spec §6): now, history, topology, identity."""
+"""Views over a small hand-made fact log: now, history, topology, identity."""
 
 from pathlib import Path
 

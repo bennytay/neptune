@@ -1,11 +1,11 @@
-"""Views over the fact log (spec §6): now / ``state_at``, history, topology and identity.
+"""Views over the fact log: now / ``state_at``, history, topology and identity.
 
 ``SiteModel`` is a fold over log entries. ``apply`` takes one entry and returns the model, so a live
 replay folds each entry as it lands and ``fold`` folds a whole log; both give the same model.
 ``apply`` updates the model in place (folding a site's whole log by copying would be quadratic), so
 keep a model you still need by loading it again.
 
-Choices where the spec is silent:
+Choices:
 
 - Cardinality ``one``: each source's latest fact with ``valid_from <= t`` is current (a fact with no
   ``valid_from`` is current from the start; a stated ``valid_to <= t`` ends it). The highest kind
@@ -89,7 +89,7 @@ class Hop:
 
 @dataclass(frozen=True)
 class Topology:
-    """The topology edges current at one site time (spec §6)."""
+    """The topology edges current at one site time."""
 
     edges: tuple[Fact, ...]
 

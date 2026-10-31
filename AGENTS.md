@@ -15,7 +15,7 @@ Neptune serves **every type of robot** (arms, mobile bases, legged, humanoids, a
 the machines and people around them. Never assume one morphology or a single vehicle.
 
 **This is a demo project.** No customers are onboarded. Build what makes the demo convincing, fast.
-Start with `docs/site-model/README.md` for the current milestone (M1, the site model).
+The README shows the demo; the code and its gold questions are the design.
 
 ## Rules (what the demo must visibly show)
 
@@ -29,7 +29,7 @@ Start with `docs/site-model/README.md` for the current milestone (M1, the site m
 
 - Hostile-input, malformed, boundary, property or scale tests for new code; security or sandbox work.
 - Contract versions, schema bumps, migrations, compatibility shims.
-- An ADR per decision. The spec decides; write an ADR only for a real fork in the road.
+- ADRs, specs and design docs. A real decision gets one paragraph in the PR.
 - Existing robustness code stays as it is; don't spend time removing it unless it blocks the demo.
 
 ## Repository map
@@ -40,7 +40,7 @@ src/neptune/             compiler: discovery, adapters (MCAP, ROS bags, PDF, CSV
 packages/neptune-memory  the site model, neptune_memory/site/: corpus, mappers, fact log, views,
                          identity, query, insights, live (python -m neptune_memory.site)
 packages/neptune-context the `neptune-site` MCP server: neptune_context/mcp/site.py (--site <dir>)
-docs/site-model/         the spec and the lane map; docs/ also holds the compiler's docs and ADRs
+docs/site-model/         real-data notes, demo scripts, screenshots; docs/schema/ is generated
 tests/  scripts/         compiler tests; factory-merge.sh for the coordinator
 ```
 
@@ -52,6 +52,7 @@ make check      lint + types + fast tests, in parallel; what PR CI runs
 make check-all  everything, including slow tests; what the nightly runs
 make test-fast  fast tests only (PKG=<name> for one package)
 make fmt        format and auto-fix
+make site-show  the demo (SITE=harbor); site-demo, site-live, site-web for the parts
 ```
 
 ## Workflow: one GitHub issue → one branch → one PR
@@ -60,7 +61,7 @@ Work is tracked in **GitHub Issues** on `bennytay/neptune`, grouped by milestone
 Order comes from each issue's "blocked by" links. Status is never set by hand:
 open with no linked PR = todo · draft PR = in progress · ready PR = in review · merged = done.
 
-1. Read the issue, `docs/site-model/README.md` and the spec. Nothing else unless the issue names it.
+1. Read the issue. Nothing else unless the issue names it.
 2. Branch from `origin/main`: `gh issue develop N --name N-short-slug --base main`. No stacked branches.
 3. Implement. Happy-path tests plus the issue's acceptance tests; gold demo tests flip from xfail as they pass.
 4. `make check PKG=<package>` green locally, then push. Open a **draft** PR early; mark it ready when done.
@@ -82,7 +83,8 @@ issue that is not blocked.
 
 ## Docs
 
-- Docs describe the system as it is. `docs/site-model/spec.md` is the design for M1.
+- Docs describe the system as it is: the README, this file, `ARCHITECTURE.md` and
+  `docs/site-model/`. Add no others.
 - `ARCHITECTURE.md` is one evolving Mermaid diagram and nothing else, in the soft palette.
 - Tests have no `__init__.py`: test and fixture basenames must be unique across the repository.
 - Golden files are fine to regenerate; say so in the PR.

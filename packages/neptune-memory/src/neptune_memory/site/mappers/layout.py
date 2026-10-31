@@ -1,4 +1,4 @@
-"""``layout.yaml``, the declared site, becomes stated facts citing its lines (spec §5, §9).
+"""``layout.yaml``, the declared site, becomes stated facts citing its lines.
 
 The file (``site/corpus/static.py`` writes it)::
 

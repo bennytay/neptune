@@ -1,4 +1,4 @@
-"""Ask the site (spec §16): Claude (a fake) calls Neptune's query tools, cites, and is traced."""
+"""Ask the site: Claude (a fake) calls Neptune's query tools, cites, and is traced."""
 
 from pathlib import Path
 

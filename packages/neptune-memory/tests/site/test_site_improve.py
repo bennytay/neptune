@@ -1,4 +1,4 @@
-"""Improvements (spec §16): mission -> dossier -> Claude (a fake) -> cited, ranked, re-ranked."""
+"""Improvements: mission -> dossier -> Claude (a fake) -> cited, ranked, re-ranked."""
 
 import json
 import re

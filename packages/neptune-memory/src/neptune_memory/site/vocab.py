@@ -1,4 +1,4 @@
-"""The site vocabulary (spec §4): entity types, predicates, and what each entity type should have.
+"""The site vocabulary: entity types, predicates, and what each entity type should have.
 
 Mappers only emit predicates named here; views read cardinality and expectations from here.
 """
@@ -107,7 +107,7 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("metric", ("goal",), "value", "one"),
         Predicate("target", ("goal",), "value", "one"),
         Predicate("proposed_improvement", ("improvement",), "value", "many"),
-        # An unmapped file (spec §12): its rows or blocks verbatim, and the "not mapped" marker.
+        # An unmapped file: its rows or blocks verbatim, and the "not mapped" marker.
         Predicate("text", (), "value", "many"),
         Predicate("unmapped", ("document",), "value", "one"),
     )
@@ -121,7 +121,7 @@ TOPOLOGY: tuple[str, ...] = (
     "assigned_to",
     "covers_zone",
 )
-"""The predicates the topology view walks (spec §6)."""
+"""The predicates the topology view walks."""
 
 EXPECTED: dict[str, tuple[str, ...]] = {
     "robot": ("mode", "health", "battery"),

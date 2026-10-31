@@ -1,4 +1,4 @@
-"""The append-only fact log (spec §5): JSON Lines segments under ``<site_dir>/.neptune/log/``.
+"""The append-only fact log: JSON Lines segments under ``<site_dir>/.neptune/log/``.
 
 Each line is one ``LogEntry`` in canonical JSON. ``seq`` starts at 1 and counts entries: it is when
 Neptune knew something, never a wall clock. A segment holds ``SEGMENT_SIZE`` entries, then the next

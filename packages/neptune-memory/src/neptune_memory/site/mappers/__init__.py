@@ -1,4 +1,4 @@
-"""Corpus to facts (spec §4, §5, §7, §12): the declared layout, the compiler's records, feed
+"""Corpus to facts: the declared layout, the compiler's records, feed
 messages, each as the site's mapping file (``static/neptune.mappings.yaml``) says."""
 
 from neptune_memory.site.mappers.config import MAPPINGS_FILE, Mapping, load_mapping

@@ -1,4 +1,4 @@
-"""The CI plan (``.github/scripts/ci_plan.py``) and the ADR index generator (``adr_index.py``)."""
+"""The CI plan (``.github/scripts/ci_plan.py``)."""
 
 import importlib.util
 import subprocess
@@ -21,7 +21,6 @@ def _load(name: str) -> ModuleType:
 
 
 ci_plan = _load("ci_plan")
-adr_index = _load("adr_index")
 
 MEMBERS = {
     "neptune-context": frozenset({"mcp", "neptune-memory"}),
@@ -113,68 +112,3 @@ def test_main_diffs_base_against_head(tmp_path: Path, monkeypatch: pytest.Monkey
     assert output.read_text() == 'compiler=false\npackages=["p"]\n'
     assert ci_plan.main(["merge_group"]) == 0
     assert ci_plan.main([]) == 2
-
-
-def _adr(directory: Path, name: str, title: str, status: str) -> None:
-    (directory / name).write_text(f"# {name[:4]} — {title}\n\n- Status: {status}\n- Date: x\n")
-
-
-def test_adr_index_lists_decisions_in_number_order(tmp_path: Path) -> None:
-    _adr(tmp_path, "0000-template.md", "Title", "Proposed | Accepted")
-    _adr(tmp_path, "0002-b.md", "Second | piped", "Superseded by 0003")
-    _adr(tmp_path, "0001-a.md", "First", "Accepted")
-    (tmp_path / "notes.md").write_text("# not an ADR\n")
-    text = adr_index.render(tmp_path)
-    assert text.endswith(
-        "| [0001](0001-a.md) | First | Accepted |\n"
-        "| [0002](0002-b.md) | Second \\| piped | Superseded by 0003 |\n"
-    )
-    assert "0000" not in text.split("|---|", 1)[1]
-
-
-def test_adr_index_without_decisions_says_so(tmp_path: Path) -> None:
-    assert adr_index.render(tmp_path).endswith("| — | _No decisions yet._ | — |\n")
-
-
-def test_adr_index_check_fails_when_stale_and_write_fixes_it(tmp_path: Path) -> None:
-    _adr(tmp_path, "0001-a.md", "First", "Accepted")
-    assert adr_index.main(["--check", str(tmp_path)]) == 1
-    assert adr_index.main([str(tmp_path)]) == 0
-    first = (tmp_path / "README.md").read_bytes()
-    assert adr_index.main(["--check", str(tmp_path)]) == 0
-    assert adr_index.main([str(tmp_path)]) == 0
-    assert (tmp_path / "README.md").read_bytes() == first
-    assert adr_index.main([]) == 2
-
-
-def test_adr_index_shows_who_amends_a_decision(tmp_path: Path) -> None:
-    _adr(tmp_path, "0001-a.md", "First", "Accepted")
-    _adr(tmp_path, "0002-b.md", "Second", "Accepted; §3 amended by 0003")
-    (tmp_path / "0003-c.md").write_text(
-        "# 0003 — Third\n\n- Status: Accepted\n- Amends: ADR 0001 §2 (one thing), ADR 0002\n"
-        "  §3 (wrapped); settles ADR 0004's open point\n\n## Context\n\nAmends: ADR 0001\n"
-    )
-    rows = adr_index.render(tmp_path, compiler=True).splitlines()
-    assert (
-        "amended by 0003 |" not in adr_index.render(tmp_path).split("| First |")[1].split("\n")[0]
-    )
-    assert rows[-3].endswith("| First | Accepted; amended by 0003 |")
-    assert rows[-2].endswith("| Second | Accepted; §3 amended by 0003 |")  # already named
-    assert "amended by" not in rows[-1]  # the settled ADR 0004 is not amended
-
-
-def test_adr_index_compiler_header_and_determinism(tmp_path: Path) -> None:
-    _adr(tmp_path, "0001-a.md", "First", "Accepted")
-    compiler = adr_index.render(tmp_path, compiler=True)
-    assert "Status values:" in compiler
-    assert "Numbers are local" in adr_index.render(tmp_path)
-    assert adr_index.main(["--compiler", str(tmp_path)]) == 0
-    assert (tmp_path / "README.md").read_text() == compiler
-    assert adr_index.main(["--check", "--compiler", str(tmp_path)]) == 0
-    assert adr_index.main(["--check", str(tmp_path)]) == 1  # the other header: stale
-
-
-def test_compiler_adr_index_is_current() -> None:
-    """A PR adding an ADR runs `make adr-index` (or `make fmt`); nobody edits the table by hand."""
-    root = Path(__file__).parents[2]
-    assert adr_index.main(["--check", "--compiler", str(root / "docs" / "adr")]) == 0

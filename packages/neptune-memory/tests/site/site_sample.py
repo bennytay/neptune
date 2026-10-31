@@ -1,4 +1,4 @@
-"""A small hand-built slice of Plant 7 on 2026-10-20 (spec §9) for the query tests.
+"""A small hand-built slice of Plant 7 on 2026-10-20 for the query tests.
 
 ``sample()`` folds these facts and ``seen`` entries with the real views (#185), in memory.
 """

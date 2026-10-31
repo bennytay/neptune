@@ -1,4 +1,4 @@
-"""The three live feeds of Plant 7 (spec §9): conveyor PLC, AMR fleet manager, arm controller.
+"""The three live feeds of Plant 7: conveyor PLC, AMR fleet manager, arm controller.
 
 Two windows are written: the last ten minutes of the 2026-10-19 shift A, and 2026-10-20
 05:30-11:30, every 5 s. Every state below is a pure function of the site time, so the bytes

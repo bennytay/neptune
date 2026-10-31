@@ -1,4 +1,4 @@
-"""Compile a site directory into its fact log (spec §5).
+"""Compile a site directory into its fact log.
 
 ``build`` writes the whole log at once; ``replay`` writes the same entries live, sleeping between
 feed messages. Both start a fresh log: the corpus is the source, ``.neptune/`` is output.
@@ -6,7 +6,7 @@ feed messages. Both start a fresh log: the corpus is the source, ``.neptune/`` i
 Static files go first: ``static/`` is ingested by the compiler (in process), the package is read
 back through ``neptune.sdk.read_package`` (memory never imports ``neptune.store``), and each
 record goes through ``mappers.map_record`` with the site's mapping file
-(``static/neptune.mappings.yaml``, spec §12); then ``static/layout.yaml`` through
+(``static/neptune.mappings.yaml``); then ``static/layout.yaml`` through
 ``mappers.map_layout``. Then the feed: for each ``replay.messages`` message, a ``seen`` entry and
 the facts ``mappers.map_message`` returns. Whenever a new ``serial`` lands, ``identity`` proposes
 any ``same_as`` it now implies (inferred, pending until someone confirms it), so a live replay
@@ -59,7 +59,7 @@ class Seam:
     map_message: Callable[[Any], Iterable[Fact]]
     messages: Callable[[Path], Iterable[Any]]
     device: Callable[[Any], str | None] = lambda message: None
-    """The device a message reports for, if its feed names one per message (spec §12)."""
+    """The device a message reports for, if its feed names one per message."""
 
     @staticmethod
     def default(site_dir: Path) -> Seam:
@@ -67,7 +67,7 @@ class Seam:
         ``neptune_memory.site.replay``.
 
         ``map_message`` carries one ``last`` state through the build, so feed facts are logged
-        only when a value changes for (subject, predicate, source) (spec §4)."""
+        only when a value changes for (subject, predicate, source)."""
         mappers: Any = importlib.import_module("neptune_memory.site.mappers")
         replayer: Any = importlib.import_module("neptune_memory.site.replay")
         mapping = mappers.load_mapping(Path(site_dir))

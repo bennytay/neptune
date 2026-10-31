@@ -1,4 +1,4 @@
-"""build/replay over a tiny static dir and stub feed messages (spec §5).
+"""build/replay over a tiny static dir and stub feed messages.
 
 The mappers (#184) and the replay (#182) are stubbed here through ``Seam``.
 """

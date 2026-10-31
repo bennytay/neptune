@@ -1,4 +1,4 @@
-"""The site's mapping file, ``static/neptune.mappings.yaml``, and its templates (spec §12).
+"""The site's mapping file, ``static/neptune.mappings.yaml``, and its templates.
 
 The mappers hold no site's ids, paths or columns: they read them from here. A site without the
 file maps only ``layout.yaml``; every other table or document is logged as unmapped.

@@ -36,7 +36,7 @@ def for_code(code: str) -> int:
 
 
 def table() -> str:
-    """The exit-code table, for ``--help`` and ``docs/cli.md``."""
+    """The exit-code table, for ``--help``."""
     rows = [
         (OK, "ok: committed, or a dry run planned"),
         (INTERNAL, "internal error: a bug, please report it"),

@@ -1,4 +1,4 @@
-"""Identity proposals and the confirm queue: the happy path (spec §7)."""
+"""Identity proposals and the confirm queue: the happy path."""
 
 from pathlib import Path
 

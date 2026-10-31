@@ -1,4 +1,4 @@
-"""Ask the site (spec §16): a chat in the web view where Claude answers from the site model.
+"""Ask the site: a chat in the web view where Claude answers from the site model.
 
 Claude gets Neptune's read-only query tools (``query.py``, ``insights.py``, the latest improvement
 run) and calls them in a loop; each call is one step of the turn's trace. Tool results are

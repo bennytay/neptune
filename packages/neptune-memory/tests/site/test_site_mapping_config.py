@@ -1,5 +1,5 @@
 # ruff: noqa: E501
-"""Mappings from config, not code (spec §12): a second-shaped site maps from its mapping file
+"""Mappings from config, not code: a second-shaped site maps from its mapping file
 alone, unmapped files stay searchable and show in ``gaps``, and the mappers hold no Plant 7."""
 
 import ast

@@ -1,5 +1,5 @@
 # ruff: noqa: E501
-"""The four live feeds of Harbor DC (spec §9 shape, a different site): every payload is its own dialect.
+"""The four live feeds of Harbor DC (a different site): every payload is its own dialect.
 
 Two windows are written: the last ten minutes of the 2026-11-03 crew-B shift, and 2026-11-04
 07:30-12:00, every 10 s (the inspector every 30 s). Every state is a pure function of the site
