@@ -681,17 +681,24 @@ class Engine:
             "model": self.model,
         }
 
-    def start(self, trigger: str) -> bool:
-        """Run in the background; False when a run is already going or there is no key."""
+    def start(self, trigger: str, work: str = "improvements") -> bool:
+        """Run ``work`` (improvements, or a research round) in the background; False when a run
+        is already going or there is no key."""
         if self.key is None or not self._busy.acquire(blocking=False):
             return False
         self.state, self.error = "running", None
-        threading.Thread(target=self._run, args=(trigger,), daemon=True).start()
+        threading.Thread(target=self._run, args=(trigger, work), daemon=True).start()
         return True
 
-    def _run(self, trigger: str) -> None:
+    def _run(self, trigger: str, work: str = "improvements") -> None:
         try:
-            run(self.site_dir, self._client(self._key), trigger=trigger, model=self.model)
+            if work == "research":
+                from neptune_memory.site import research
+
+                client = self._client(self._key)
+                research.run(self.site_dir, client, trigger=trigger, model=self.model)
+            else:
+                run(self.site_dir, self._client(self._key), trigger=trigger, model=self.model)
         except Exception as error:  # shown on the page: a bad key, no network, a refusal
             self.error = f"{type(error).__name__}: {error}"
         finally:

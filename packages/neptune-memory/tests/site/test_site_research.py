@@ -186,3 +186,55 @@ def test_site_research_results_survive_a_rebuild(tmp_path: Path) -> None:
         assert _results(site) == learned  # kept without calling a model
         logs.append({p.name: p.read_bytes() for p in sorted(log_dir(site).iterdir())})
     assert logs[0] == logs[1]
+
+
+def test_site_research_results_for_people_and_agents(tmp_path: Path) -> None:
+    from neptune_memory.site import views, web
+
+    site = _site(tmp_path)
+    onboard.mission(
+        site,
+        "Halve protective stops on arm-1. Never touch a safety function.",
+        [{"name": "Fewer stops", "metric": "protective stops per hour", "target": "-50 %"}],
+        ["Never change a safety function"],
+    )
+    onboard.ask(site, ["What unit are joint temperatures in?"])
+    onboard.build(site)
+    research.run(site, FakeClaude(_hypotheses))
+    model = views.load(site)
+
+    view = research.results(site, model)
+    assert [c["verdict"] for c in view["cards"]] == ["supported", "inconclusive", "rejected"]
+    assert view["goals"] == [
+        {
+            "id": "goal:fewer-stops",
+            "name": "Fewer stops",
+            "supported": 1,
+            "rejected": 1,
+            "inconclusive": 0,
+        }
+    ]
+    gaps = [g["text"] for g in view["gaps"]]
+    assert "'component:arm-1-j1' is not in the memory" in gaps
+    assert "joint temperature is not in the memory" in gaps
+    assert "What unit are joint temperatures in?" in gaps
+    supported = view["cards"][0]
+    assert supported["evidence"][0]["file"] == "static/files/arm1_export.csv"
+    assert len(view["log"]) == 3
+
+    brief = research.brief(site, model, "stops-in-cycle-3")
+    for part in (
+        "# Research result: Protective stops happen more during program cycle 3",
+        "- Fewer stops (goal:fewer-stops): protective stops per hour -50 %",
+        "- Never change a safety function",
+        "## Finding: supported",
+        'static/files/arm1_export.csv row 72 col "Protective_Stop" "True"',
+        "Slow the moves of cycle 3 and compare.",
+        research.BRIEF_RULE,
+    ):
+        assert part in brief, part
+    assert research.brief_for(site, "hypothesis:stops-in-cycle-3") == brief  # the MCP tool
+    page = web.Site(site)
+    assert page.research_brief("stops-in-cycle-3")["text"] == brief  # "Copy for agent"
+    assert page.dashboard()["research"]["cards"][0]["key"] == "stops-in-cycle-3"
+    assert "no research result" in page.research_brief("nope")["error"]

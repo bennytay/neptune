@@ -13,7 +13,13 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 from neptune_memory.site.log import FactLog
 
-from neptune_context.mcp.site import SETUP_TOOLS, SITE_TOOLS, SiteTools, build_site_server
+from neptune_context.mcp.site import (
+    RESEARCH_TOOLS,
+    SETUP_TOOLS,
+    SITE_TOOLS,
+    SiteTools,
+    build_site_server,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,7 +62,7 @@ def _list(args: list[str]) -> list[str]:
 def test_site_flag_lists_the_site_tools(tmp_path: Path) -> None:
     listed = _list(["--site", str(tmp_path)])
     assert listed[: len(SITE_NAMES)] == SITE_NAMES == list(SITE_TOOLS)
-    assert listed[len(SITE_NAMES) :] == list(SETUP_TOOLS)
+    assert listed[len(SITE_NAMES) :] == [*SETUP_TOOLS, *RESEARCH_TOOLS]
     assert "neptune_setup_start" in SETUP_TOOLS
 
 

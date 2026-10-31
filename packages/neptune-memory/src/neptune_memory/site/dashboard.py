@@ -11,7 +11,9 @@
   documents, inferred), stale readings and expected values no source states;
 - **improvements**: the latest run (``improve.runs``), each item with its evidence spelled out,
   what it retired, and the material changes since it was asked;
-- **engine**: whether a key is set, the engine's state, and why a run is due.
+- **engine**: whether a key is set, the engine's state, and why a run is due;
+- **research**: the latest result per hypothesis, the research log, each goal's tally and the
+  gaps (``research.results``).
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from collections import Counter
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from neptune_memory.site import improve, insights
+from neptune_memory.site import improve, insights, research
 from neptune_memory.site.facts import Fact, Ref
 from neptune_memory.site.views import STALE_AFTER
 from neptune_memory.site.vocab import entity_type
@@ -106,6 +108,7 @@ def build(site_dir: Path, model: SiteModel, engine: improve.Engine) -> dict[str,
         "run": run,
         "runs": len(every),
         "engine": engine.status() | {"due": engine.due(model) if engine.key else None},
+        "research": research.results(site_dir, model),
     }
 
 

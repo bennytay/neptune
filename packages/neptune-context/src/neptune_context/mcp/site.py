@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from neptune_memory.site import actions, insights, log, onboard, query, views
+from neptune_memory.site import actions, insights, log, onboard, query, research, views
 from neptune_memory.site.render import render
 
 from neptune_context import __version__
@@ -300,6 +300,26 @@ SETUP_TOOLS: Final[dict[str, SetupTool]] = {
 }
 
 
+RESEARCH_TOOLS: Final[dict[str, SetupTool]] = {
+    "neptune_site_research": SetupTool(
+        lambda site_dir: research.summary(site_dir),
+        "The research so far: each hypothesis about the mission, the result Neptune computed from "
+        "the memory (supported, rejected or inconclusive, with the numbers), each goal's tally, "
+        "and the gaps: what the memory could not answer.",
+        {},
+    ),
+    "neptune_site_research_result": SetupTool(
+        research.brief_for,
+        "One research result as a brief to act on: the goal, the constraints, the finding and how "
+        "it was tested, the cited evidence, the suggested next step and what is unknown. Check "
+        "with a person before acting on a robot.",
+        {"id": {**_STR, "description": "the hypothesis key, from neptune_site_research"}},
+        ("id",),
+    ),
+}
+TEXT_TOOLS: Final[dict[str, SetupTool]] = {**SETUP_TOOLS, **RESEARCH_TOOLS}
+
+
 def _propose(
     site_dir: Path,
     model: Callable[[], SiteModel],
@@ -336,29 +356,41 @@ class SiteTools:
         writes = types.ToolAnnotations(
             readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
         )
-        return [
-            types.Tool(
-                name=name,
-                title=name.replace("_", " "),
-                description=tool.description,
-                inputSchema=tool.schema(),
-                annotations=writes if tool.writes else read_only,
-            )
-            for name, tool in SITE_TOOLS.items()
-        ] + [
-            types.Tool(
-                name=name,
-                description=tool.description,
-                inputSchema=tool.schema(),
-                annotations=writes,
-            )
-            for name, tool in SETUP_TOOLS.items()
-        ]
+        return (
+            [
+                types.Tool(
+                    name=name,
+                    title=name.replace("_", " "),
+                    description=tool.description,
+                    inputSchema=tool.schema(),
+                    annotations=writes if tool.writes else read_only,
+                )
+                for name, tool in SITE_TOOLS.items()
+            ]
+            + [
+                types.Tool(
+                    name=name,
+                    description=tool.description,
+                    inputSchema=tool.schema(),
+                    annotations=writes,
+                )
+                for name, tool in SETUP_TOOLS.items()
+            ]
+            + [
+                types.Tool(
+                    name=name,
+                    description=tool.description,
+                    inputSchema=tool.schema(),
+                    annotations=read_only,
+                )
+                for name, tool in RESEARCH_TOOLS.items()
+            ]
+        )
 
     def call(self, name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
         arguments = arguments or {}
-        if name in SETUP_TOOLS:
-            return self._setup(SETUP_TOOLS[name], name, arguments)
+        if name in TEXT_TOOLS:
+            return self._setup(TEXT_TOOLS[name], name, arguments)
         tool = SITE_TOOLS.get(name)
         if tool is None:
             return _error(f"unknown tool {name!r}; the site tools are {', '.join(SITE_TOOLS)}")

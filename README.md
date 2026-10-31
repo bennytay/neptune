@@ -97,6 +97,28 @@ lists what only you can say: a column it cannot name, a reading with no unit, a 
 your goal verbatim and as a mission, and builds again. A question you leave unanswered stays `unknown` in
 the memory; it is never filled in. Without an agent: `python -m neptune_memory.site setup start|inventory|draft|mission|build|status`.
 
+### Then it researches your goal
+
+A research round reads the memory and the mission, and Claude proposes hypotheses that would move a goal,
+each with a test. Neptune runs every test on the memory itself (an event's rate while a condition holds
+against the rest of the time, or before against after a moment), so every number is computed from cited
+rows, never written by a model. Each result is `supported`, `rejected` or `inconclusive` by stated
+thresholds, goes back into the memory as an inferred fact citing the rows it counted, and survives a
+rebuild; the next round reads it, so a rejected idea is not proposed again blindly.
+
+```
+uv run --all-packages --all-groups python -m neptune_memory.site research my-robot   # ANTHROPIC_API_KEY
+```
+
+The dashboard's **Research** page shows each goal's tally, every result with its numbers, test, evidence
+and next step, what Neptune needs from you, and the log. **Copy for agent** gives one result as a brief
+(goal, constraints, finding, citations, next step, unknowns) for whoever acts on it; agents get the same
+text from `neptune_site_research_result {"id"}`. Neptune does not change the robot.
+
+![The Research page: a goal's tally and three results, each with its numbers and cited rows](docs/site-model/img/research-view.png)
+
+The screenshot is a synthetic robot export with scripted hypotheses (the research test's data).
+
 ## Ask it
 
 What Claude gets back from the `neptune-site` MCP tools (trimmed; real output of `make site-demo`):

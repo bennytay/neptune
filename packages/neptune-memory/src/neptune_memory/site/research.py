@@ -455,3 +455,168 @@ def run(
     answer, served = improve.ask(client, found.text, model, system=SYSTEM, schema=SCHEMA)
     cleaned = clean(answer, found, memory)
     return record(site_dir, found, cleaned, model=served, trigger=trigger)
+
+
+# --- Results for people and agents (#227) -----------------------------------------------------
+
+BRIEF_RULE = "Check with a person before acting on a robot. Never change a safety function."
+
+
+def _cite_json(citation: Citation) -> dict[str, Any]:
+    return {"file": citation.file, "locator": citation.locator, "quote": citation.quote}
+
+
+def _test_text(test: dict[str, Any]) -> str:
+    event = test.get("event", {})
+    what = f"{event.get('subject')} {event.get('predicate')} = {event.get('value')} per hour"
+    if test.get("type") == "before_after":
+        return f"{what}, before vs after {test.get('at')} (expects {test.get('expect')} after)"
+    cond = test.get("condition", {})
+    held = f"{cond.get('subject')} {cond.get('predicate')} {cond.get('op')} {cond.get('value')}"
+    return f"{what}, while {held} vs otherwise (expects {test.get('expect')} while it holds)"
+
+
+def results(site_dir: Path, model: SiteModel) -> dict[str, Any]:
+    """The research view: the latest result per hypothesis (cards), every result in order (log),
+    each goal with its supported / rejected / inconclusive counts, and the gaps: what the memory
+    could not answer and the setup questions nobody has answered."""
+    from neptune_memory.site import onboard
+
+    names = {
+        f.subject: str(f.object.value)
+        for f in model.facts.values()
+        if f.predicate == "name" and isinstance(f.object, Value)
+    }
+    cards: dict[str, dict[str, Any]] = {}
+    log: list[dict[str, Any]] = []
+    for number, one in enumerate(rounds(site_dir), start=1):
+        facts = {f.subject: f for f in one.facts}
+        for item in one.data.get("hypotheses", []):
+            fact = facts.get(f"hypothesis:{item['key']}")
+            card = {
+                "key": item["key"],
+                "fact": fact.id if fact else None,
+                "statement": item["statement"],
+                "why": item.get("why", ""),
+                "verdict": item["result"]["verdict"],
+                "result": item["result"]["text"],
+                "numbers": {
+                    k: v for k, v in item["result"].items() if k not in ("verdict", "text")
+                },
+                "test": _test_text(item.get("test", {})),
+                "goals": [{"id": g, "name": names.get(g, g)} for g in item.get("goals", [])],
+                "evidence": [_cite_json(c) for c in (fact.citations[1:] if fact else ())],
+                "next_step": item.get("next_step", ""),
+                "unknowns": item.get("unknowns", []),
+                "round": number,
+                "at": one.data.get("at"),
+                "model": one.data.get("model"),
+            }
+            cards[item["key"]] = card
+            log.append(
+                {k: card[k] for k in ("round", "at", "key", "statement", "verdict", "result")}
+            )
+    order = {"supported": 0, "inconclusive": 1, "rejected": 2}
+    latest = sorted(cards.values(), key=lambda c: (order.get(c["verdict"], 3), -c["round"]))
+    goals = []
+    for goal in sorted(e for e in model.entities if entity_type(e) == "goal"):
+        tally = {v: 0 for v in order}
+        for card in latest:
+            if any(g["id"] == goal for g in card["goals"]):
+                tally[card["verdict"]] = tally.get(card["verdict"], 0) + 1
+        goals.append({"id": goal, "name": names.get(goal, goal), **tally})
+    gaps = [
+        {"about": c["key"], "text": c["result"].removeprefix("inconclusive: ")}
+        for c in latest
+        if c["verdict"] == "inconclusive"
+    ]
+    gaps += [{"about": c["key"], "text": u} for c in latest for u in c["unknowns"]]
+    gaps += [
+        {"about": "setup", "text": q["question"]}
+        for q in onboard.open_questions(site_dir)
+        if "answer" not in q
+    ]
+    return {
+        "rounds": len(rounds(site_dir)),
+        "cards": latest,
+        "log": log[::-1],
+        "goals": goals,
+        "gaps": gaps,
+    }
+
+
+def brief(site_dir: Path, model: SiteModel, key: str) -> str:
+    """One result as a brief an agent can act on: the goal, the constraints, the finding, how
+    it was tested, the cited evidence, the suggested next step and what is unknown."""
+    view = results(site_dir, model)
+    card = next(
+        (c for c in view["cards"] if c["key"] in (key, key.removeprefix("hypothesis:"))), None
+    )
+    if card is None:
+        known = ", ".join(c["key"] for c in view["cards"]) or "none yet"
+        raise ValueError(f"no research result {key!r}; results: {known}")
+    goals = {f.subject: f for f in model.facts.values() if entity_type(f.subject) == "goal"}
+    lines = [f"# Research result: {card['statement']}", ""]
+    lines.append("## Goal")
+    served = card["goals"] or [{"id": g, "name": g} for g in sorted(goals)]
+    for goal in served:
+        metric = _first(model, goal["id"], "metric")
+        target = _first(model, goal["id"], "target")
+        lines.append(f"- {goal['name']} ({goal['id']}): {metric} {target}".rstrip())
+    limits = sorted(
+        {_first(model, e, "name") for e in model.entities if entity_type(e) == "constraint"}
+    )
+    lines += ["", "## Constraints (any change must respect them)"]
+    lines += [f"- {c}" for c in limits] or ["- none stated"]
+    lines += ["", f"## Finding: {card['verdict']}", card["result"], "", f"Tested: {card['test']}"]
+    lines.append(f"Why it was proposed: {card['why']}")
+    lines += ["", "## Evidence (cited)"]
+    lines += [
+        f"- {c['file']} {c['locator']}" + (f' "{c["quote"]}"' if c["quote"] else "")
+        for c in card["evidence"]
+    ]
+    lines += ["", "## Suggested next step", card["next_step"] or "none"]
+    if card["unknowns"]:
+        lines += ["", "## Unknown"] + [f"- {u}" for u in card["unknowns"]]
+    lines += [
+        "",
+        f"Neptune research round {card['round']} at {card['at']} ({card['model']}).",
+        BRIEF_RULE,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _first(model: SiteModel, subject: str, predicate: str) -> str:
+    for fact in model.facts.values():
+        if (
+            fact.subject == subject
+            and fact.predicate == predicate
+            and isinstance(fact.object, Value)
+        ):
+            return str(fact.object.value)
+    return ""
+
+
+def summary(site_dir: Path) -> str:
+    """The research view as text (``neptune_site_research``)."""
+    model = views.load(Path(site_dir))
+    view = results(site_dir, model)
+    if not view["cards"]:
+        return "No research yet: run a round (`python -m neptune_memory.site research <site>`)."
+    lines = [f"Research: {view['rounds']} round(s), {len(view['cards'])} hypotheses."]
+    for goal in view["goals"]:
+        lines.append(
+            f"Goal {goal['name']}: {goal['supported']} supported, {goal['rejected']} rejected, "
+            f"{goal['inconclusive']} inconclusive"
+        )
+    lines.append("Results (neptune_site_research_result {id} for the full brief):")
+    lines += [f"- {c['key']}: {c['statement']} -> {c['result']}" for c in view["cards"]]
+    if view["gaps"]:
+        lines.append("Gaps (what Neptune needs from you):")
+        lines += [f"- {g['about']}: {g['text']}" for g in view["gaps"]]
+    return "\n".join(lines)
+
+
+def brief_for(site_dir: Path, id: str) -> str:
+    """``brief`` over the memory as it stands (``neptune_site_research_result``)."""
+    return brief(Path(site_dir), views.load(Path(site_dir)), id)
