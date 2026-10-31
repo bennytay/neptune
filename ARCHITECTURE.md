@@ -33,8 +33,9 @@ flowchart LR
     VIEWS["Site views<br/>now · history · topology"]
     INS["Insights<br/>deterministic rules"]
     QRY["neptune-site MCP<br/>neptune_site_* tools · SQL"]
-    WEB["Live web view<br/>map · timeline · cited sources"]
+    WEB["Live web view<br/>overview · graph · ask · cited sources"]
     ACT["Actions<br/>Claude proposes · a person approves"]
+    IMP["Improvements<br/>mission · Claude ranks · re-runs on change"]
   end
   USE["Agents · LLMs<br/>analysis · insights"]
 
@@ -77,6 +78,10 @@ flowchart LR
   SIM -.->|work orders · reads roster| RAW
   SIM -->|scene · timeline| REN
   ACT -->|intent · dispatched · outcome| LOG
+  VIEWS -->|dossier| IMP
+  IMP -.->|inferred, recorded run| LOG
+  WEB -->|your key · accept| IMP
+  IMP -->|accepted action| ACT
 
   subgraph KEY[" "]
     K1["built"]
@@ -96,7 +101,7 @@ flowchart LR
   class SDK,CLI built
   class DEV ext
   class RAW,FEED,USE ext
-  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB,ACT,SIM built
+  class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB,ACT,IMP,SIM built
   class REN todo
   style N fill:#8b949e0f,stroke:#8b949e
   style S fill:#8b949e0f,stroke:#8b949e

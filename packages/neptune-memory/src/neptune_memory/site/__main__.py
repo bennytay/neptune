@@ -144,6 +144,22 @@ def _insights(args: argparse.Namespace) -> int:
     return 0
 
 
+def _improve(args: argparse.Namespace) -> int:
+    from neptune_memory.site import improve
+
+    try:
+        facts = improve.run(
+            args.site_dir, improve._client(None), trigger="asked on the command line"
+        )
+    except Exception as error:  # no key, no SDK, no network, a refusal: say which
+        sys.stdout.write(f"no run: {type(error).__name__}: {error}\n")
+        return 1
+    for rank, fact in enumerate(facts, start=1):
+        title = fact.citations[0].quote  # the run line is cited first, quoting the title
+        sys.stdout.write(f"{rank}. {fact.subject}: {title}  ({fact.id})\n")
+    return 0
+
+
 def _web(args: argparse.Namespace) -> int:
     from neptune_memory.site.web import serve
 
@@ -265,7 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     photos.set_defaults(run=_extract_photos)
 
     web = commands.add_parser(
-        "web", help="serve the live web view: map, states, timeline, findings, sources"
+        "web", help="serve the live web view: dashboard, map, states, timeline, findings, sources"
     )
     web.add_argument("site_dir", type=Path)
     web.add_argument("--host", default="127.0.0.1")
@@ -293,6 +309,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     reject.add_argument("id", help="the proposal's fact id (fact:...)")
     reject.add_argument("--by", default="operator")
     reject.set_defaults(run=_reject)
+
+    improve = commands.add_parser(
+        "improve", help="ask Claude for ranked improvements against the mission (ANTHROPIC_API_KEY)"
+    )
+    improve.add_argument("site_dir", type=Path)
+    improve.set_defaults(run=_improve)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)

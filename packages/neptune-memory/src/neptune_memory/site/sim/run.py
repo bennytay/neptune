@@ -1,4 +1,4 @@
-"""Run the plant: offline into feed files, or live over MQTT beside ``live`` (spec §16).
+"""Run the plant: offline into feed files, or live over MQTT beside ``live`` (spec §17).
 
 - ``prepare`` writes Plant 7's static corpus without its scripted feed: the work-order export keeps
   only the history before the simulated days, and the roster gets one shift A row per person per

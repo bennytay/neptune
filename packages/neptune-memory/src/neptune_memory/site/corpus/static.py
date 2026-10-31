@@ -191,8 +191,22 @@ Okafor,conveyor-lockout,2024-11-04
 Lindqvist,conveyor-lockout,2025-06-23
 """
 
+MISSION = """\
+# Plant 7 mission: what the hall is for, and what any change must respect. Everything here is stated.
+goals:
+  - {id: goal:c3-output, name: Cell C3 output, metric: parts out of cell C3 per shift, target: ">= 2400"}
+  - {id: goal:amr-uptime, name: AMR fleet availability, metric: share of shift each AMR is in AUTOMATIC, target: ">= 95 %"}
+  - {id: goal:safe-recovery, name: Every stop cleared safely, metric: jams cleared under lockout by a qualified person, target: "100 %"}
+constraints:
+  - {id: constraint:headcount, name: "No added headcount; cross-training and shift or break changes are allowed"}
+  - {id: constraint:floor-space, name: "No new floor space; layout changes stay inside the existing areas"}
+  - {id: constraint:capex, name: "No new equipment purchases this quarter"}
+  - {id: constraint:safety, name: "Never bypass or change a safety function (e-stops, interlocks, fences, speed and separation limits)"}
+"""
+
 FILES: dict[str, str] = {
     "static/layout.yaml": LAYOUT,
+    "static/mission.yaml": MISSION,
     "static/neptune.mappings.yaml": MAPPINGS,
     "static/cmms/assets.csv": ASSETS,
     "static/cmms/work_orders.csv": WORK_ORDERS,

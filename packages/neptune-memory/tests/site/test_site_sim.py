@@ -1,4 +1,4 @@
-"""The simulated plant (spec §16): its feed builds into the site model, commands reach it, and a
+"""The simulated plant (spec §17): its feed builds into the site model, commands reach it, and a
 seed plus the same commands give the same bytes."""
 
 import json

@@ -13,7 +13,15 @@ small JSON API over the same query layer as the MCP tools (``query.py``, ``insig
 - ``GET /api/actions``, ``POST /api/actions/approve|reject`` ``{"id"}``: proposed actions and a
   person's answer (``actions.py``, spec §15); an approved robot action is dispatched to the
   fleet manager over MQTT.
-- ``GET /events``: server-sent events, one ``{"seq", "clock"}`` each time the log grows.
+- ``GET /api/graph``, ``GET /api/thing?id=E``: every thing and edge; one thing's state, lanes,
+  links, findings and the improvements citing it. ``POST /api/chat`` ``{"id", "text"}``: one turn
+  of the chat (``chat.py``); ``/api/chat/clear``. ``GET /classic``: the earlier map-first page.
+- ``GET /api/dashboard``: the dashboard (``dashboard.py``, spec §16): counts, mission, sources,
+  coverage, the latest improvement run and what changed since it, the engine's state.
+- ``POST /api/engine/key`` ``{"key"}`` (kept in memory, never written), ``/api/engine/run``,
+  ``/api/engine/auto`` ``{"on"}``; ``POST /api/improvements/accept|reject`` ``{"id"}``.
+- ``GET /events``: server-sent events, one ``{"seq", "clock", "engine"}`` each time the log grows
+  or the improvement engine starts or ends a run.
 
 The model is folded once and then tails the log (``log.Tail``), like the MCP server, so it follows
 ``make site-live``. No auth: a demo on localhost.
@@ -34,7 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
-from neptune_memory.site import actions, insights, log, query, views
+from neptune_memory.site import actions, chat, dashboard, improve, insights, log, query, views
 from neptune_memory.site import confirm as confirm_queue
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 
@@ -45,6 +53,8 @@ if TYPE_CHECKING:
     from neptune_memory.site.views import Reading, SiteModel
 
 PAGE = Path(__file__).with_name("web.html")
+CLASSIC = Path(__file__).with_name("web_classic.html")
+"""The earlier map-first page, kept at ``/classic``."""
 ASSETS = ("robot", "machine")
 PLACES = ("area", "cell", "zone")
 TABLE = (
@@ -81,11 +91,14 @@ class Site:
         site_dir: Path,
         broker: str = actions.DEFAULT_BROKER,
         send: Callable[[str, bytes], None] | None = None,
+        client: Callable[[str | None], Any] | None = None,
     ) -> None:
         self.site_dir = Path(site_dir)
         self.broker = broker
         self.send = send
         self.lock = threading.Lock()
+        self.engine = improve.Engine(self.site_dir, client or improve._client)
+        self.chat = chat.Chat(self.site_dir, self.engine.client, guard=self.lock)
         self._tail = log.Tail(self.site_dir)
         self._model = views.SiteModel.empty()
         self._prefix: tuple[int, SiteModel] | None = None
@@ -121,7 +134,52 @@ class Site:
     def head(self) -> dict[str, Any]:
         with self.lock:
             model = self.model()
-            return {"seq": model.seq, "clock": model.clock()}
+            return {"seq": model.seq, "clock": model.clock(), "engine": self.engine.state}
+
+    # -- the dashboard and improvements (spec §16) -----------------------------------------------
+
+    def dashboard(self) -> dict[str, Any]:
+        with self.lock:
+            return dashboard.build(self.site_dir, self.model(), self.engine)
+
+    def graph(self) -> dict[str, Any]:
+        with self.lock:
+            return dashboard.graph(self.site_dir, self.model())
+
+    def thing(self, entity: str) -> dict[str, Any]:
+        with self.lock:
+            return dashboard.thing(self.site_dir, self.model(), entity)
+
+    def ask(self, talk: str, text: str) -> dict[str, Any]:
+        """One chat turn: tools read the live model under the lock; Claude's turns run outside."""
+        return self.chat.ask(talk, text, self.model)
+
+    def due(self) -> str | None:
+        """Why an automatic improvement run is due now (the engine's watcher asks)."""
+        with self.lock:
+            return self.engine.due(self.model())
+
+    def engine_call(self, verb: str, body: dict[str, Any]) -> dict[str, Any]:
+        if verb == "key":
+            self.engine.set_key(str(body.get("key") or ""))
+        elif verb == "auto":
+            self.engine.auto = bool(body.get("on"))
+        elif verb == "run":
+            self.engine.error = None
+            if not self.engine.start("asked from the dashboard"):
+                why = "no API key" if self.engine.key is None else "a run is already going"
+                raise ValueError(f"not started: {why}")
+        else:
+            raise ValueError(f"no engine call {verb!r}")
+        return self.engine.status()
+
+    def improvement(self, verb: str, fact_id: str, by: str) -> dict[str, Any]:
+        """A person's accept or reject; an accepted action is proposed, approved and dispatched."""
+        if verb not in ("accept", "reject"):
+            raise ValueError(f"no improvement answer {verb!r}")
+        return improve.answer(
+            self.site_dir, fact_id, verb == "accept", by, broker=self.broker, send=self.send
+        )
 
     def confirm(self, proposal: str, answer: str, by: str) -> dict[str, Any]:
         if answer not in ("yes", "no"):
@@ -564,6 +622,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/":
                 self._send(PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif url.path == "/classic":
+                self._send(CLASSIC.read_bytes(), "text/html; charset=utf-8")
+            elif url.path == "/api/graph":
+                self._json(self.site.graph())
+            elif url.path == "/api/thing":
+                self._json(self.site.thing(args.get("id", "")))
             elif url.path == "/events":
                 self._events()
             elif url.path == "/file":
@@ -577,6 +641,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.site.source(args.get("file", ""), args.get("locator", "")))
             elif url.path == "/api/actions":
                 self._json(self.site.actions())
+            elif url.path == "/api/dashboard":
+                self._json(self.site.dashboard())
+            elif url.path == "/api/engine":
+                self._json(self.site.engine.status())
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (BrokenPipeError, ConnectionResetError):
@@ -592,12 +660,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.site.confirm(body["proposal"], body["answer"], by))
             elif m := re.fullmatch(r"/api/actions/(approve|reject)", url.path):
                 self._json(self.site.act(m[1], str(body["id"]), by))
+            elif m := re.fullmatch(r"/api/engine/(key|run|auto)", url.path):
+                self._json(self.site.engine_call(m[1], body))
+            elif m := re.fullmatch(r"/api/improvements/(accept|reject)", url.path):
+                self._json(self.site.improvement(m[1], str(body["id"]), by))
+            elif url.path == "/api/chat":
+                self._json(self.site.ask(str(body.get("id") or "default"), str(body["text"])))
+            elif url.path == "/api/chat/clear":
+                self.site.chat.clear(str(body.get("id") or "default"))
+                self._json({"cleared": True})
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (KeyError, ValueError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+        except RuntimeError as error:  # the SDK is missing
+            self._json({"error": str(error)}, HTTPStatus.SERVICE_UNAVAILABLE)
         except OSError as error:  # the broker is down: the approval is logged, not dispatched
             self._json({"error": f"not dispatched: {error}"}, HTTPStatus.BAD_GATEWAY)
+        except Exception as error:  # the API said no (a bad key, a rate limit, no network)
+            self._json({"error": f"{type(error).__name__}: {error}"}, HTTPStatus.BAD_GATEWAY)
 
     def _json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         self._send(json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json", status)
@@ -640,10 +721,17 @@ def serve(
     *,
     broker: str = actions.DEFAULT_BROKER,
     send: Callable[[str, bytes], None] | None = None,
+    client: Callable[[str | None], Any] | None = None,
+    watch: float = 3.0,
 ) -> ThreadingHTTPServer:
     """A server for ``site_dir`` (not yet serving: call ``serve_forever``). Approved actions go to
-    the fleet manager over MQTT on ``broker`` (or through ``send``)."""
-    handler = type("SiteHandler", (Handler,), {"site": Site(Path(site_dir), broker, send)})
+    the fleet manager over MQTT on ``broker`` (or through ``send``). ``client(key)`` makes the
+    Anthropic client for improvement runs; every ``watch`` seconds the engine checks whether the
+    site changed enough to run again (0: never on its own)."""
+    site = Site(Path(site_dir), broker, send, client)
+    if watch > 0:
+        site.engine.watch(site.due, watch)
+    handler = type("SiteHandler", (Handler,), {"site": site})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
     return server

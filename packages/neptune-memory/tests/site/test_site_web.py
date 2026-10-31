@@ -2,6 +2,7 @@
 
 import json
 import threading
+import time
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 import pytest
+from fake_claude import FakeClaude, fact_id
 
 from neptune_memory.site import corpus
 from neptune_memory.site.actions import propose
@@ -131,3 +133,79 @@ def test_site_web_approving_an_action_dispatches_it(url: str, site_dir: Path) ->
     listed = _get(f"{url}/api/actions")
     assert listed["items"] == []
     assert listed["recent"][0]["dispatched"] == "order on uagv/v2/p7/amr-01/order"
+
+
+def test_site_web_dashboard_runs_improvements_with_a_key_kept_in_memory(
+    site_dir: Path, tmp_path: Path
+) -> None:
+    copy = tmp_path / "site"
+    for path in site_dir.rglob("*"):
+        if path.is_file() and ".neptune/package" not in path.as_posix():
+            target = copy / path.relative_to(site_dir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(path.read_bytes())
+
+    def answer(text: str) -> dict[str, Any]:
+        chain = fact_id(text, "starvation chain")
+        return {
+            "summary": "CV-2 jams starve C3.",
+            "improvements": [
+                {
+                    "key": "clean-pe3",
+                    "title": "Clean PE3 every shift",
+                    "opportunity": "the jam at PE3 starved C3",
+                    "change": "add PE3 cleaning to the shift checklist",
+                    "goals": ["goal:c3-output"],
+                    "evidence": [chain],
+                    "constraints": [
+                        {"constraint": "constraint:safety", "status": "respects", "note": "no"}
+                    ],
+                    "size": "unknown",
+                    "unknowns": [],
+                    "confidence": "medium",
+                    "action": {"verb": "none", "target": "", "zone": ""},
+                    "since_last": "",
+                }
+            ],
+            "retired": [],
+        }
+
+    keys: list[str | None] = []
+
+    def client(key: str | None) -> FakeClaude:
+        keys.append(key)
+        return FakeClaude(answer)
+
+    server = serve(copy, port=0, client=client, watch=0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        board = _get(f"{base}/api/dashboard")
+        assert next(g["id"] for g in board["mission"]["goals"]) == "goal:c3-output"
+        assert {s["name"] for s in board["sources"]} >= {"fleet", "plc.cv2", "mission.yaml"}
+        cv2 = next(r for r in board["coverage"] if r["id"] == "machine:cv-2")
+        assert cv2["counts"]["feed"] > 0 and cv2["counts"]["records"] > 0
+        assert board["run"] is None and board["engine"]["key"] is None
+
+        secret = "sk-ant-test-NEVER-ON-DISK"
+        assert _post(f"{base}/api/engine/key", {"key": secret})["key"] == "page"
+        _post(f"{base}/api/engine/run", {})
+        for _ in range(100):
+            if _get(f"{base}/api/engine")["state"] == "idle":
+                break
+            time.sleep(0.1)
+        board = _get(f"{base}/api/dashboard")
+        assert keys == [secret]
+        [item] = board["run"]["items"]
+        assert (item["key"], item["move"], item["status"]) == ("clean-pe3", "new", "open")
+        assert item["evidence"][0]["cites"][0]["file"].startswith("feed/")
+        assert board["counts"]["improvements"] == 1
+
+        done = _post(f"{base}/api/improvements/accept", {"id": item["fact"], "by": "benjamin"})
+        assert done["status"] == "accepted"
+        assert _get(f"{base}/api/dashboard")["run"]["items"][0]["by"] == "benjamin"
+        written = [p.read_bytes() for p in copy.rglob("*") if p.is_file()]
+        assert not any(secret.encode() in data for data in written)
+    finally:
+        server.shutdown()
+        server.server_close()

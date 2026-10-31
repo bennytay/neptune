@@ -1,4 +1,4 @@
-"""``python -m neptune_memory.site.sim <command>``: prepare, run offline, or run live (spec §16)."""
+"""``python -m neptune_memory.site.sim <command>``: prepare, run offline, or run live (spec §17)."""
 
 from __future__ import annotations
 

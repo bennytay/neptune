@@ -1,4 +1,4 @@
-"""A top-down replay of the simulated plant: one self-contained HTML page (spec §16).
+"""A top-down replay of the simulated plant: one self-contained HTML page (spec §17).
 
 ``preview(site_dir, start, end, every)`` reads ``sim/scene.json`` and ``sim/timeline.jsonl`` and
 writes ``sim/preview.html``: the floor plan drawn on a canvas, the frames between ``start`` and
