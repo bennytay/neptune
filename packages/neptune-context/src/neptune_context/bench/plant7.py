@@ -290,6 +290,88 @@ def _lookups(day1: dict[str, Any]) -> list[dict[str, Any]]:
     return [{**q, "kind": "lookup"} for q in out]
 
 
+def _holdout(kpis: dict[str, Any], resets: list[str], flats: list[str]) -> list[dict[str, Any]]:
+    """Whole-period aggregates, a kind of question the tools were not designed around: a check
+    that a gain on the other questions is not tuning to them."""
+    days = sorted(kpis)
+    span = f"from {days[0]} to {days[-1]}" if len(days) > 1 else f"on {days[0]}"
+    clears = [c for d in days for c in kpis[d]["jam_clear_s"]]
+    best = max(days, key=lambda d: kpis[d]["parts_out"])
+    out = [
+        {
+            "id": "H1",
+            "question": f"How many times did CV-2 jam {span}, and what was the longest time from "
+            "a jam to its clearing?",
+            "expect": [
+                {
+                    "subject": "machine:cv-2",
+                    "predicate": "jams",
+                    "object": str(sum(kpis[d]["jams"] for d in days)),
+                    "state": "known",
+                },
+                {
+                    "subject": "machine:cv-2",
+                    "predicate": "longest jam to clear",
+                    "object": f"about {max(clears) / 60:.0f} minutes (within 2)",
+                    "state": "known",
+                },
+            ],
+        },
+        {
+            "id": "H3",
+            "question": f"How many protective stops did arm C3 have {span}, and who reset them?",
+            "expect": [
+                {
+                    "subject": "robot:arm-c3",
+                    "predicate": "protective stops",
+                    "object": str(len(resets)),
+                    "state": "known",
+                },
+                {
+                    "subject": "robot:arm-c3",
+                    "predicate": "reset by",
+                    "object": ", ".join(sorted(set(resets))) or "nobody",
+                    "state": "known",
+                },
+            ],
+        },
+    ]
+    if len(days) > 1:
+        out.append(
+            {
+                "id": "H2",
+                "question": f"On which day {span} did cell C3 put out the most parts, "
+                "and how many?",
+                "expect": [
+                    {
+                        "subject": "cell:c3",
+                        "predicate": "best day",
+                        "object": f"{best}, {kpis[best]['parts_out']} parts (within 2)",
+                        "state": "known",
+                    },
+                ],
+            }
+        )
+    if flats:
+        top = max(sorted(set(flats)), key=flats.count)
+        out.append(
+            {
+                "id": "H4",
+                "question": f"Which mobile robot ran its battery flat most often {span}, "
+                "and how many times?",
+                "expect": [
+                    {
+                        "subject": top,
+                        "predicate": "battery flat",
+                        "object": f"{flats.count(top)} times",
+                        "state": "known",
+                    },
+                ],
+            }
+        )
+    return [{**q, "kind": "holdout"} for q in out]
+
+
 def generate(site_dir: Path, days: int, seed: int = SEED) -> list[dict[str, Any]]:
     """Write the simulated site into ``site_dir`` and return its questions with their answers."""
     shutil.rmtree(site_dir, ignore_errors=True)
@@ -304,6 +386,8 @@ def generate(site_dir: Path, days: int, seed: int = SEED) -> list[dict[str, Any]
     asked: list[dict[str, Any]] = []
     day1: dict[str, Any] = {"jams": [], "pstops": [], "flat": []}
     first_day = sim.windows(days)[0][0].date().isoformat()
+    resets: list[str] = []
+    flats: list[str] = []
     try:
         for start, end in sim.windows(days):
             if engine.t < start:
@@ -315,6 +399,11 @@ def generate(site_dir: Path, days: int, seed: int = SEED) -> list[dict[str, Any]
                     fault = _fault(news, engine.t)
                     if fault is not None:
                         pending.append(fault)
+                    text_all = news[20:]
+                    if text_all.startswith("arm C3 reset by "):
+                        resets.append(text_all.rsplit(" ", 1)[1])
+                    elif fault is not None and fault.kind == "flat":
+                        flats.append(fault.target)
                     if news.startswith(first_day):
                         text = news[20:]
                         if text.startswith("CV-2 jam cleared by "):
@@ -339,7 +428,19 @@ def generate(site_dir: Path, days: int, seed: int = SEED) -> list[dict[str, Any]
     summary = outputs.close(engine, seed, days)
     day1["date"] = first_day
     day1["parts_out"] = summary["kpis"][first_day]["parts_out"]
-    return asked + _unsure(days) + _lookups(day1)
+    return (
+        asked
+        + _unsure(days)
+        + _lookups(day1)
+        + _holdout(
+            {
+                d: {"parts_out": k.parts_out, "jams": k.jams, "jam_clear_s": k.jam_clear_s}
+                for d, k in engine.kpis.items()
+            },
+            resets,
+            flats,
+        )
+    )
 
 
 def write(site_dir: Path, key: Path, days: int, seed: int = SEED) -> None:
