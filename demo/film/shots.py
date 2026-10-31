@@ -70,8 +70,8 @@ def auto(timeline: Timeline, scene: dict[str, Any]) -> list[Shot]:
             calm + 200 * s,
             7,
             1,
-            eye=[(bx + 4.5, by - 6.0, 2.0), (bx + 3.2, by - 5.6, 1.8)],
-            target=[(bx + 0.4, by - 1.0, 1.2), (bx + 0.4, by - 1.2, 1.1)],
+            eye=[(bx + 6.5, by - 8.0, 3.0), (bx + 5.0, by - 7.6, 2.6)],
+            target=[(bx + 0.2, by - 0.9, 1.0), (bx + 0.2, by - 1.1, 1.0)],
             focal=30,
             note="arm C3 loading an AMR's tote",
         ),
@@ -149,7 +149,8 @@ def auto(timeline: Timeline, scene: dict[str, Any]) -> list[Shot]:
                 eye=[(x - 7, y - 8, 6), (x - 5, y - 7, 5)],
                 target=[(x, y, 0.3), (x, y, 0.3)],
                 focal=28,
-                note=f"{robot} stops on the lane; the robots behind it queue",
+                note=f"{robot.split(':')[1].upper()} stops on the lane, battery flat;"
+                " the robots behind it queue",
             )
         )
         if pushed:

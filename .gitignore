@@ -33,3 +33,4 @@ htmlcov/
 /site-public/
 /site-sim/
 /film/
+node_modules/

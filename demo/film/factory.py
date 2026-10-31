@@ -64,13 +64,28 @@ COLORS: dict[str, tuple[Vec, float, float]] = {  # name: (rgb, roughness, metall
     "hat_lead": ((0.95, 0.95, 0.95), 0.4, 0.0),
     "lamp_off": ((0.08, 0.08, 0.08), 0.3, 0.0),
     "bench": ((0.35, 0.36, 0.38), 0.6, 0.3),
+    "carton_light": ((0.74, 0.6, 0.42), 0.85, 0.0),
+    "bin_blue": ((0.1, 0.3, 0.6), 0.55, 0.0),
+    "bin_grey": ((0.42, 0.44, 0.47), 0.55, 0.0),
+    "column": ((0.3, 0.32, 0.35), 0.5, 0.6),
+    "duct": ((0.7, 0.72, 0.74), 0.35, 0.8),
+    "red": ((0.75, 0.05, 0.04), 0.4, 0.1),
+    "black": ((0.03, 0.03, 0.035), 0.4, 0.2),
+    "sign_plant7": ((0.1, 0.18, 0.3), 0.5, 0.0),
+    "sign_c3": ((0.95, 0.75, 0.08), 0.5, 0.0),
+    "sign_charge": ((0.1, 0.45, 0.25), 0.5, 0.0),
+    "sign_assembly": ((0.1, 0.18, 0.3), 0.5, 0.0),
 }
 GLOW: dict[str, Vec] = {  # emissive lamp colours
     "info": (0.2, 0.6, 1.0),
     "warn": (1.0, 0.6, 0.05),
     "bad": (1.0, 0.08, 0.05),
     "ok": (0.15, 1.0, 0.3),
+    "fixture": (1.0, 0.97, 0.9),
+    "window": (0.75, 0.85, 1.0),
+    "screen": (0.35, 0.65, 0.95),
 }
+GLOW_STRENGTH = {"fixture": 5.0, "window": 1.5, "screen": 2.5}  # lamps: 12
 
 
 class Builder:
@@ -92,7 +107,7 @@ class Builder:
             rgb = GLOW[name.removeprefix("glow_")]
             shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*rgb))
             shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).Set(
-                Gf.Vec3f(*(c * 12 for c in rgb))
+                Gf.Vec3f(*(c * GLOW_STRENGTH.get(name[5:], 12.0) for c in rgb))
             )
             shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.3)
         else:
@@ -165,7 +180,7 @@ class Builder:
 
 def _hall(b: Builder, scene: dict[str, Any]) -> None:
     w, d = scene["hall"]["width"], scene["hall"]["depth"]
-    b.box("/World/Hall/Floor", (w + 8, d + 8, 0.1), (w / 2, d / 2, -0.05), "floor")
+    b.box("/World/Hall/Floor", (w + 0.6, d + 0.6, 0.1), (w / 2, d / 2, -0.05), "floor")
     height = 7.0
     for name, size, at in (
         ("North", (w + 0.6, 0.3, height), (w / 2, d + 0.15, height / 2)),
@@ -196,8 +211,17 @@ def _hall(b: Builder, scene: dict[str, Any]) -> None:
     b.outline("/World/Floor/charging_edge", zones["zone:charging"], 0.005, "white_line", 0.08)
     lanes = scene["lanes"]
     nodes = lanes["nodes"]
+    stations = {
+        lanes["pickup"],
+        lanes["drop"],
+        lanes["stage"],
+        *lanes["chargers"],
+        *lanes["parking"].values(),
+    }
     for a, outs in lanes["edges"].items():
         for c in outs:
+            if a in stations or c in stations:
+                continue  # the main loop only: station spurs are marked by their bays
             (xa, ya), (xc, yc) = nodes[a], nodes[c]
             length = math.hypot(xc - xa, yc - ya)
             yaw = math.degrees(math.atan2(yc - ya, xc - xa))
@@ -462,14 +486,130 @@ def _rooms(b: Builder, scene: dict[str, Any]) -> None:
                         (x + 0.95, 21.75, z),
                         "rack_beam",
                     )
-                    b.box(
-                        f"{root}/Load{i}_{level}",
-                        (1.6, 1.0, 1.0),
-                        (x + 0.95, 21.75, z + 0.55),
-                        "carton",
-                    )
+                    for j in range(3):
+                        kind = ("carton", "carton_light", "bin_blue", "bin_grey")[
+                            (i * 7 + level * 3 + j + row) % 4
+                        ]
+                        high = 0.9 if kind.startswith("carton") else 0.45
+                        if (i + level + j + row) % 5 == 4:
+                            continue  # an empty slot
+                        b.box(
+                            f"{root}/Load{i}_{level}_{j}",
+                            (0.55, 1.0, high),
+                            (x + 0.33 + j * 0.62, 21.75, z + 0.05 + high / 2),
+                            kind,
+                        )
     for i in range(3):  # empty totes stacked at the drop station
         b.box(f"/World/Rooms/ToteStack{i}", (0.6, 0.4, 0.25), (31.5, 0.6, 0.13 + i * 0.26), "tote")
+
+
+def _detail(b: Builder, scene: dict[str, Any]) -> None:
+    """What makes it read as a working plant: structure, services, safety kit, signs, an
+    assembly area at the end of the AMR run."""
+    w, d = scene["hall"]["width"], scene["hall"]["depth"]
+    root = "/World/Detail"
+    # Steel columns: pilasters along the long walls, two free-standing in the north bay.
+    cols = [(x, 0.25) for x in range(8, int(w), 8)] + [(x, d - 0.25) for x in range(8, int(w), 8)]
+    cols += [
+        (0.25, 8.0),
+        (0.25, 16.0),
+        (w - 0.25, 8.0),
+        (w - 0.25, 16.0),
+        (17.0, 19.0),
+        (29.0, 19.0),
+    ]
+    for i, (x, y) in enumerate(cols):
+        height = 0.4 if y < 1 else 6.8  # the south side is the cutaway
+        b.box(f"{root}/Column{i}/Web", (0.12, 0.36, height), (x, y, height / 2), "column")
+        for side in (-1, 1):
+            b.box(
+                f"{root}/Column{i}/Flange{side + 1}",
+                (0.36, 0.04, height),
+                (x, y + side * 0.18, height / 2),
+                "column",
+            )
+        if y > 1 and y < d - 1 and x > 1 and x < w - 1:
+            for k, (dx, dy) in enumerate(((0.3, 0.0), (-0.3, 0.0), (0.0, 0.3), (0.0, -0.3))):
+                b.cylinder(f"{root}/Column{i}/Guard{k}", 0.06, 1.0, (x + dx, y + dy, 0.5), "yellow")
+    # Hanging light fixtures in rows, on drop rods.
+    i = 0
+    for x in range(5, int(w), 7):
+        for y in range(4, int(d), 6):
+            b.box(f"{root}/Fixture{i}/Body", (2.4, 0.35, 0.08), (x, y, 6.2), "dark_steel")
+            b.box(f"{root}/Fixture{i}/Lens", (2.3, 0.28, 0.02), (x, y, 6.15), "glow_fixture")
+            for k, dx in enumerate((-1.0, 1.0)):
+                b.cylinder(f"{root}/Fixture{i}/Rod{k}", 0.01, 0.8, (x + dx, y, 6.65), "steel")
+            i += 1
+    # High windows along the north and west walls.
+    for i, x in enumerate(range(3, int(w) - 1, 4)):
+        b.box(f"{root}/WindowN{i}", (3.2, 0.04, 1.2), (x + 0.5, d - 0.02, 5.4), "glow_window")
+    for i, y in enumerate(range(3, int(d) - 2, 4)):
+        b.box(f"{root}/WindowW{i}", (0.04, 3.2, 1.2), (0.02, y + 0.5, 5.4), "glow_window")
+    # Services: a duct along the north wall, cable trays along the west.
+    b.cylinder(f"{root}/Duct", 0.45, w - 2, (w / 2, d - 1.2, 6.0), "duct", axis="X")
+    for i, x in enumerate(range(4, int(w), 6)):
+        b.cylinder(f"{root}/DuctHanger{i}", 0.015, 0.9, (x, d - 1.2, 6.55), "steel")
+    b.box(f"{root}/TrayWest", (0.4, d - 2, 0.08), (0.5, d / 2, 4.2), "steel")
+    b.box(f"{root}/TrayNorth", (w - 2, 0.4, 0.08), (w / 2, d - 0.5, 4.2), "steel")
+    # Signs.
+    b.box(f"{root}/SignPlant7", (8.0, 0.05, 1.2), (w / 2, d - 0.05, 3.4), "sign_plant7")
+    x0, y0, _, _ = scene["cells"]["cell:c3"]
+    sx = x0 + 1.4  # west of the arm, so shots of the arm see past it
+    b.box(f"{root}/SignC3", (2.0, 0.04, 0.5), (sx, y0 - 0.03, 2.35), "sign_c3")
+    b.cylinder(f"{root}/SignC3Post0", 0.02, 0.4, (sx - 0.8, y0 - 0.03, 2.1), "steel")
+    b.cylinder(f"{root}/SignC3Post1", 0.02, 0.4, (sx + 0.8, y0 - 0.03, 2.1), "steel")
+    b.box(f"{root}/SignCharge", (0.04, 2.4, 0.6), (0.06, 3.0, 2.6), "sign_charge")
+    # Safety: bollards at the charging bay and aisle ends, extinguishers, first aid.
+    for i, (x, y) in enumerate(
+        ((11.8, 0.6), (11.8, 6.4), (12.3, 6.6), (39.4, 6.6), (39.4, 11.4), (12.3, 11.4))
+    ):
+        b.cylinder(f"{root}/Bollard{i}", 0.08, 1.1, (x, y, 0.55), "yellow")
+        b.cylinder(f"{root}/Bollard{i}/Band", 0.082, 0.12, (x, y, 0.85), "black")
+    for i, (x, y, facing) in enumerate(
+        ((0.2, 10.0, 0), (0.2, 18.0, 0), (39.8, 13.0, 1), (16.0, 23.8, 2))
+    ):
+        dx, dy = ((0.12, 0.0), (-0.12, 0.0), (0.0, -0.12))[facing]
+        b.box(
+            f"{root}/ExtPlate{i}",
+            (0.3 if facing == 2 else 0.02, 0.02 if facing == 2 else 0.3, 0.5),
+            (x, y, 1.4),
+            "red",
+        )
+        b.cylinder(f"{root}/Extinguisher{i}", 0.08, 0.5, (x + dx, y + dy, 0.95), "red")
+    b.box(f"{root}/FirstAid", (0.4, 0.04, 0.4), (10.5, d - 0.04, 1.6), "panel")
+    # Lane chevrons: travel direction on aisle A (east) and aisle B (west).
+    for i, x in enumerate(range(15, 38, 4)):
+        for k, (ya, sign) in enumerate(((8.5, 1), (2.0, -1))):
+            for side in (-1, 1):
+                b.box(
+                    f"{root}/Chevron{i}_{k}_{side + 1}",
+                    (0.5, 0.08, 0.004),
+                    (x + 0.5 + 0.0, ya + side * 0.17, 0.007),
+                    "white_line",
+                    yaw=sign * side * -35.0 + (0 if sign > 0 else 180),
+                )
+    # Assembly area at the end of the run: benches with fixtures and screens.
+    for i, x in enumerate((31.0, 35.0)):
+        r = f"{root}/Assembly{i}"
+        b.box(f"{r}/Top", (2.6, 1.0, 0.06), (x, 4.9, 0.92), "panel")
+        for k, (dx, dy) in enumerate(((-1.2, -0.42), (1.2, -0.42), (-1.2, 0.42), (1.2, 0.42))):
+            b.box(f"{r}/Leg{k}", (0.05, 0.05, 0.9), (x + dx, 4.9 + dy, 0.45), "bench")
+        b.box(f"{r}/Fixture", (0.6, 0.4, 0.25), (x - 0.4, 4.9, 1.07), "bin_grey")
+        b.box(f"{r}/Part", (0.3, 0.22, 0.12), (x - 0.4, 4.9, 1.26), "part")
+        b.box(f"{r}/Screen", (0.6, 0.04, 0.38), (x + 0.8, 5.35, 1.35), "black")
+        b.box(f"{r}/ScreenGlow", (0.55, 0.01, 0.33), (x + 0.8, 5.32, 1.35), "glow_screen")
+        b.cylinder(f"{r}/ScreenPost", 0.02, 0.3, (x + 0.8, 5.37, 1.1), "steel")
+        b.box(f"{r}/Lamp", (1.6, 0.12, 0.05), (x, 4.9, 2.1), "glow_fixture")
+    b.box(f"{root}/SignAssembly", (4.0, 0.05, 0.6), (33.0, 6.2, 2.4), "sign_assembly")
+    for k, x in enumerate((31.2, 34.8)):
+        b.cylinder(f"{root}/SignAssemblyPost{k}", 0.03, 2.4, (x, 6.25, 1.2), "steel")
+    # Odds and ends: a pallet jack and empty pallets at the dock, bins.
+    b.box(f"{root}/PalletStack", (1.2, 1.0, 0.75), (1.6, 18.8, 0.375), "pallet")
+    b.box(f"{root}/Jack/Forks", (1.1, 0.55, 0.08), (2.0, 9.5, 0.06), "red")
+    b.box(f"{root}/Jack/Body", (0.3, 0.55, 0.35), (1.35, 9.5, 0.25), "red")
+    b.cylinder(f"{root}/Jack/Handle", 0.02, 1.1, (1.15, 9.5, 0.85), "black")
+    for i, (x, y) in enumerate(((11.0, 22.6), (24.0, 18.6), (38.6, 17.0))):
+        b.cylinder(f"{root}/Bin{i}", 0.3, 0.9, (x, y, 0.45), "bin_grey")
 
 
 def _chargers(b: Builder, scene: dict[str, Any]) -> None:
@@ -530,6 +670,7 @@ def build(
     _people(b, people)
     _rooms(b, scene)
     _chargers(b, scene)
+    _detail(b, scene)
     _lights(stage, scene, light_scale)
     UsdGeom.Scope.Define(stage, "/World/Cameras")
     stage.GetRootLayer().Save()

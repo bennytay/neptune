@@ -7,6 +7,7 @@ The simulator (`neptune_memory.site.sim`) records every second of a run in
 make site-sim-run          →  site-sim/sim/scene.json + timeline.jsonl     (any machine)
 build_stage.py             →  film/plant.usda + film/shots/*.usdc          (any machine, no GPU)
 render_isaac.py            →  film/frames/<shot>/rgb_NNNN.png              (RTX machine)
+  or export_web.py + web/render.js                                         (any machine, CPU)
 cut.sh                     →  film/video/<shot>.mp4 + film/plant7.mp4      (ffmpeg)
 ```
 
@@ -20,6 +21,32 @@ cut.sh                     →  film/video/<shot>.mp4 + film/plant7.mp4      (ff
 - The shots are picked from what happened in the run, so any seed films: the hall, the line, the arm,
   the first jam, the starved arm, the jam being cleared, a protective stop and its reset, a robot
   stopping on the lane and its rescue, and the shift as a time-lapse. `film/shots.json` lists them.
+
+## Without a GPU: render in a headless browser
+
+The same shots render with three.js in headless Chromium on the CPU (SwiftShader): physically based
+materials, soft shadows, ambient occlusion, bloom, a site clock and captions. About 3-5 s a frame at
+1280x720 on 4 cores, so the whole film takes a few hours on a plain cloud machine.
+
+```bash
+python demo/film/build_stage.py site-sim --out film
+```
+```bash
+python demo/film/export_web.py film
+```
+```bash
+(cd demo/film/web && npm install)
+```
+```bash
+node demo/film/web/render.js film --width 1280 --height 720 --workers 2
+```
+```bash
+demo/film/cut.sh film
+```
+
+`python` here is any Python with `pip install usd-core`. `render.js` takes `--only`, `--every`,
+`--frames A B` and `--quality draft|preview|final` like `render_isaac.py`. The page is
+`web/render.html`; the materials, lights and captions are set there.
 
 ## On the RTX machine
 
