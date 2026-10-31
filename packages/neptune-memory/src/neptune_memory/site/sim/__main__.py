@@ -36,11 +36,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     offline.add_argument("--commands", type=Path, help="a live run's sim/commands.jsonl to replay")
     offline.add_argument("--keep-static", action="store_true", help="don't re-prepare static/")
-    look = sub.add_parser("preview", help="write sim/preview.html, a top-down replay of a run")
-    look.add_argument("site_dir", type=Path)
-    look.add_argument("--from", dest="start", default="2026-10-20T10:55:00")
-    look.add_argument("--to", dest="end", default="2026-10-20T11:50:00")
-    look.add_argument("--every", type=int, default=2, help="site seconds per embedded frame")
     online.add_argument("--broker", default="mqtt://127.0.0.1:1883")
     online.add_argument("--speed", type=float, default=60.0)
     args = parser.parse_args(argv)
@@ -48,12 +43,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "prepare":
         run.prepare(args.site_dir, args.days)
         sys.stdout.write(f"prepared Plant 7 for {args.days} simulated day(s) in {args.site_dir}\n")
-        return 0
-    if args.command == "preview":
-        from neptune_memory.site.sim.preview import preview
-
-        out = preview(args.site_dir, args.start, args.end, args.every)
-        sys.stdout.write(f"wrote {out}\n")
         return 0
     if args.command == "run":
         commands = args.commands

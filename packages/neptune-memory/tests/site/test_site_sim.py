@@ -12,7 +12,6 @@ from neptune_memory.site.build import build
 from neptune_memory.site.live import broker, live
 from neptune_memory.site.log import read
 from neptune_memory.site.sim import run
-from neptune_memory.site.sim.preview import preview
 
 UNTIL = "2026-10-20T08:30:00"  # seed 7 jams CV-2 at 07:13:55
 
@@ -36,8 +35,6 @@ def test_site_sim_offline_run_is_deterministic_and_builds(tmp_path: Path) -> Non
     assert (site_dir / "sim" / "scene.json").exists()
     frame = json.loads((site_dir / "sim" / "timeline.jsonl").read_text().splitlines()[-1])
     assert {a["id"] for a in frame["amrs"]} == {"robot:amr-01", "robot:amr-02", "robot:amr-03"}
-    page = preview(site_dir, "2026-10-20T07:10:00", "2026-10-20T07:20:00").read_text()
-    assert '"alarm"' not in page and "JAM_PE3" in page and "/*DATA*/null" not in page
 
     build(site_dir)
     facts = [e.fact for e in read(site_dir) if e.fact is not None]

@@ -24,7 +24,7 @@ flowchart LR
 
   FEED["Live site feeds<br/>fleet managers · PLCs<br/>MQTT · recorded JSONL"]
   SIM["Simulated plant<br/>Plant 7 · seeded<br/>obeys commands"]
-  REN["Photoreal render<br/>Isaac Sim"]
+  REN["Film<br/>USD stages · Isaac Sim render"]
   subgraph S["Neptune site model · neptune_memory.site"]
     CAPT["Record-first capture<br/>live · replay"]
     MAP["Mappers<br/>one mapping file per site<br/>draft-mapping"]
@@ -102,7 +102,7 @@ flowchart LR
   class DEV ext
   class RAW,FEED,USE ext
   class CAPT,MAP,LOG,CONF,VIEWS,INS,QRY,WEB,ACT,IMP,SIM built
-  class REN todo
+  class REN partial
   style N fill:#8b949e0f,stroke:#8b949e
   style S fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none

@@ -591,11 +591,10 @@ feeds:                                   # one entry per envelope `source`
   people and their activity, events; about 50 MB a day at 1 s), `summary.json` (KPIs per day:
   parts out, jams, stopped/starved/blocked minutes, protective stops, stranded robots). The renderer
   reads `scene.json` and `timeline.jsonl`; Neptune reads none of it.
-- `python -m neptune_memory.site.sim preview <dir> [--from T] [--to T] [--every S]` writes
-  `sim/preview.html`: one self-contained page that replays that stretch of the timeline top-down
-  (belt and parts, arm, AMRs with battery and tote, people and their jobs, events), to check the
-  plant before the photoreal render. The default window, 10:55-11:50 on day 1 with seed 7, holds a
-  jam, a starved arm, a protective stop and its reset, and amr-03 stopping on the lane.
+- **Film** (`demo/film/`, outside the packages): `build_stage.py` turns a run's `scene.json` and
+  `timeline.jsonl` into USD (`plant.usda`, plus one file per shot with its motion and camera as time
+  samples, shots picked from the run's events); `render_isaac.py` renders them with Isaac Sim on an
+  RTX machine; `cut.sh` makes the video. See its README.
 - **Same seed, same plant:** randomness is one `random.Random(seed)`; a seed and the same commands
   at the same site seconds give the same feed bytes.
 - Over 5 days and 3 seeds the baseline makes about 654 parts a day; a PE3 clean every 4 h, staggered
