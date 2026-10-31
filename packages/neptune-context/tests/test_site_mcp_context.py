@@ -13,7 +13,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 from neptune_memory.site.log import FactLog
 
-from neptune_context.mcp.site import SITE_TOOLS, SiteTools, build_site_server
+from neptune_context.mcp.site import SETUP_TOOLS, SITE_TOOLS, SiteTools, build_site_server
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,7 +54,10 @@ def _list(args: list[str]) -> list[str]:
 
 
 def test_site_flag_lists_the_site_tools(tmp_path: Path) -> None:
-    assert _list(["--site", str(tmp_path)]) == SITE_NAMES == list(SITE_TOOLS)
+    listed = _list(["--site", str(tmp_path)])
+    assert listed[: len(SITE_NAMES)] == SITE_NAMES == list(SITE_TOOLS)
+    assert listed[len(SITE_NAMES) :] == list(SETUP_TOOLS)
+    assert "neptune_setup_start" in SETUP_TOOLS
 
 
 STOPPED = Fact(
@@ -196,3 +199,23 @@ def test_site_propose_action_logs_a_pending_proposal_and_nothing_approves(tmp_pa
     assert '[S1] actions/proposed.jsonl line 1 "cv-2 is stopped"' in text
     assert "waiting for a person" in _text(site.call("neptune_site_actions", {}))
     assert not any("approve" in name or "reject" in name for name in SITE_TOOLS)
+
+
+def test_site_setup_tools_onboard_a_folder(tmp_path: Path) -> None:
+    folder = tmp_path / "robot"
+    folder.mkdir()
+    (folder / "log.csv").write_text(
+        "Timestamp,Robot,Mode\n2026-03-02T08:00:00,arm-1,running\n2026-03-02T08:00:05,arm-1,stopped\n",
+        encoding="utf-8",
+    )
+    site = SiteTools(tmp_path / "site")
+    assert "Files: 1, 0 mapped" in _text(site.call("neptune_setup_start", {"folder": str(folder)}))
+    assert "files/log.csv: table" in _text(site.call("neptune_setup_inventory", {}))
+    assert 'column: "Mode"' in _text(site.call("neptune_setup_draft", {"file": "files/log.csv"}))
+    goal = {"name": "Uptime", "metric": "share of time running", "target": ">= 95 %"}
+    site.call("neptune_setup_mission", {"prompt": "Keep arm-1 running.", "goals": [goal]})
+    assert "Mission: goal:uptime" in _text(site.call("neptune_setup_build", {}))
+    bad = site.call(
+        "neptune_setup_save", {"which": "mappings", "text": "tables: [{file: nope.csv}]"}
+    )
+    assert bad.isError

@@ -75,6 +75,28 @@ the entry for one file; check it, save it into `<dir>/static/neptune.mappings.ya
 (a worked example: [`scripts/public_site/neptune.mappings.yaml`](scripts/public_site/neptune.mappings.yaml)) and `build` again. The Claude Code skill does the same loop and shows
 you every draft before it saves. No mapper code names a site: Plant 7 and Harbor differ only in that file.
 
+## Your own robot: one prompt
+
+Point an agent at a folder of anything about your robot (controller exports, logs, manuals, notes, photos)
+and give it your goal. Add the server once, with an empty folder for the site:
+
+```
+claude mcp add neptune-site -- uv run --directory "$PWD" --all-packages python -m neptune_context.mcp --site "$PWD/my-robot"
+```
+
+Then paste this into Claude Code, with your folder and goal:
+
+> Set up Neptune on `~/robot-data` with the neptune_setup_* tools. My goal: halve protective stops on the
+> arm without slowing its cycles; never change a safety function. Start, then go through the inventory:
+> draft and save a mapping for each table, answering what the files answer and asking me only the rest
+> (record those with neptune_setup_ask). Write my goal as the mission, build, and show me the status.
+
+`neptune_setup_start` copies the folder in (your files are never touched) and builds: everything is in memory
+at once, unmapped files as cited text. The agent then maps each table (`neptune_setup_draft` drafts it and
+lists what only you can say: a column it cannot name, a reading with no unit, a table with no time), writes
+your goal verbatim and as a mission, and builds again. A question you leave unanswered stays `unknown` in
+the memory; it is never filled in. Without an agent: `python -m neptune_memory.site setup start|inventory|draft|mission|build|status`.
+
 ## Ask it
 
 What Claude gets back from the `neptune-site` MCP tools (trimmed; real output of `make site-demo`):

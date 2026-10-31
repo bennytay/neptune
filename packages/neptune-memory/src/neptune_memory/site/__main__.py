@@ -206,6 +206,28 @@ def _reject(args: argparse.Namespace) -> int:
     return 0
 
 
+def _setup(args: argparse.Namespace) -> int:
+    from neptune_memory.site import onboard
+
+    site = args.site_dir
+    if args.step == "start":
+        text = onboard.start(site, args.folder)
+    elif args.step == "draft":
+        text = onboard.draft(site, args.file)
+    elif args.step == "mission":
+        goals = []
+        for spec in args.goal:
+            name, metric, target = (part.strip() for part in spec.split("|", 2))
+            goals.append({"name": name, "metric": metric, "target": target})
+        text = onboard.mission(site, args.prompt, goals, args.constraint)
+    else:
+        text = {"inventory": onboard.inventory, "build": onboard.build, "status": onboard.status}[
+            args.step
+        ](site)
+    _say(text)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m neptune_memory.site")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -315,6 +337,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     improve.add_argument("site_dir", type=Path)
     improve.set_defaults(run=_improve)
+
+    setup = commands.add_parser(
+        "setup",
+        help="onboard a folder of a robot's data and a goal (an agent drives the same steps)",
+    )
+    steps = setup.add_subparsers(dest="step", required=True)
+    for step, help_text in (
+        ("start", "copy a folder into the site and build"),
+        ("inventory", "what each file is and whether a mapping reads it"),
+        ("draft", "draft a mapping for one table, and its questions"),
+        ("mission", "write the goal (verbatim and as a mission)"),
+        ("build", "build the memory again"),
+        ("status", "what the memory holds, the mission, open questions"),
+    ):
+        sub = steps.add_parser(step, help=help_text)
+        sub.add_argument("site_dir", type=Path)
+        if step == "start":
+            sub.add_argument("folder", type=Path)
+        if step == "draft":
+            sub.add_argument("file", help="path under static/, from the inventory")
+        if step == "mission":
+            sub.add_argument("--prompt", required=True, help="the goal in the person's words")
+            sub.add_argument(
+                "--goal", action="append", required=True, help='"name | metric | target"'
+            )
+            sub.add_argument("--constraint", action="append", default=[])
+        sub.set_defaults(run=_setup)
 
     args = parser.parse_args(argv)
     code: int = args.run(args)

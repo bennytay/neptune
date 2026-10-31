@@ -11,6 +11,10 @@ the next answer without a restart. A log started again (a fresh ``build``) is fo
 
 One tool writes: ``neptune_site_propose_action`` logs an inferred proposal (``site/actions.py``).
 No tool approves one: a person does, on the CLI or the web view.
+
+The ``neptune_setup_*`` tools onboard a site (``site/onboard.py``): an agent copies a folder in,
+reads what each file is, drafts and saves mappings, asks the person what only they know, writes
+their goal as the mission, and builds. They answer in plain text.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from neptune_memory.site import actions, insights, log, query, views
+from neptune_memory.site import actions, insights, log, onboard, query, views
 from neptune_memory.site.render import render
 
 from neptune_context import __version__
@@ -40,7 +44,10 @@ SITE_INSTRUCTIONS: Final = (
     "every line ends with [S<n>] keys into the Sources footer, and says observed, stated or "
     "inferred, and stale, unknown, ambiguous or pending when it is. Times are the site clock's, "
     "never converted. You may propose an action (neptune_site_propose_action); a person approves "
-    "it, never you, and it only goes through the fleet manager's protocol, never a safety function."
+    "it, never you, and it only goes through the fleet manager's protocol, never a safety "
+    "function. To set up a site from a folder, use the neptune_setup_* tools in order: start, "
+    "inventory, draft and save each table's mapping, ask the person only what the files cannot "
+    "answer, mission, build, status."
 )
 
 _STR = {"type": "string"}
@@ -198,6 +205,101 @@ SITE_TOOLS: Final[dict[str, SiteTool]] = {
 }
 
 
+@dataclass(frozen=True)
+class SetupTool:
+    """One onboarding step: ``function(site_dir, **arguments) -> text``."""
+
+    function: Callable[..., str]
+    description: str
+    properties: dict[str, dict[str, Any]]
+    required: tuple[str, ...] = ()
+
+    def schema(self) -> dict[str, Any]:
+        return {"type": "object", "properties": self.properties, "required": list(self.required)}
+
+
+_GOALS = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {"name": _STR, "metric": _STR, "target": _STR},
+        "required": ["name", "metric", "target"],
+    },
+    "description": "each goal: a name, the metric it is judged by, and the target",
+}
+SETUP_TOOLS: Final[dict[str, SetupTool]] = {
+    "neptune_setup_start": SetupTool(
+        onboard.start,
+        "Copy a folder of a robot's data into the site (the originals are never touched), write a "
+        "starting layout and mapping, and build. Everything is in memory at once: unmapped tables "
+        "and documents are kept as cited text. Answers the status.",
+        {"folder": {**_STR, "description": "absolute path of the folder to onboard"}},
+        ("folder",),
+    ),
+    "neptune_setup_inventory": SetupTool(
+        onboard.inventory,
+        "What each file in the site is (table, document, image, recording, config), how many "
+        "facts it gave, what it holds (a table's columns, a document's first lines), and whether "
+        "a mapping reads it yet.",
+        {},
+    ),
+    "neptune_setup_draft": SetupTool(
+        onboard.draft,
+        "Draft a mapping entry for one table (a path from the inventory) and list the questions "
+        "only a person can answer: unnamed columns, readings with no unit, no time column. Fix "
+        "the draft from what the files say, then save it under `tables:`.",
+        {"file": {**_STR, "description": "path under static/, e.g. files/controller/log.csv"}},
+        ("file",),
+    ),
+    "neptune_setup_save": SetupTool(
+        onboard.save,
+        "Check and write the whole mapping file (which='mappings': `mappings: 1` then `tables:`) "
+        "or layout (which='layout': the site, its robots and their parts). Build after.",
+        {
+            "which": {"type": "string", "enum": ["mappings", "layout"]},
+            "text": {**_STR, "description": "the complete YAML file"},
+        },
+        ("which", "text"),
+    ),
+    "neptune_setup_mission": SetupTool(
+        onboard.mission,
+        "Write the person's goal: their words verbatim (goal.md, cited like any document) and as "
+        "a mission (mission.yaml: goals with metric and target, constraints). Build after.",
+        {
+            "prompt": {**_STR, "description": "the person's goal, in their words"},
+            "goals": _GOALS,
+            "constraints": {**_STRINGS, "description": "what any change must respect"},
+        },
+        ("prompt", "goals"),
+    ),
+    "neptune_setup_ask": SetupTool(
+        onboard.ask,
+        "Record questions for the person that the files cannot answer. Unanswered, what they ask "
+        "about stays unknown in the memory; never fill it in yourself.",
+        {"questions": _STRINGS},
+        ("questions",),
+    ),
+    "neptune_setup_answer": SetupTool(
+        onboard.answer,
+        "Record the person's answer to a question (its id from status), then apply it to the "
+        "mapping or layout and build.",
+        {"question": _STR, "text": {**_STR, "description": "the person's answer, as they gave it"}},
+        ("question", "text"),
+    ),
+    "neptune_setup_build": SetupTool(
+        onboard.build,
+        "Build the memory again from the site's files, mapping, layout and mission; answers the "
+        "status.",
+        {},
+    ),
+    "neptune_setup_status": SetupTool(
+        onboard.status,
+        "What the memory holds (facts by kind, file by file), the mission, and open questions.",
+        {},
+    ),
+}
+
+
 def _propose(
     site_dir: Path,
     model: Callable[[], SiteModel],
@@ -243,11 +345,21 @@ class SiteTools:
                 annotations=writes if tool.writes else read_only,
             )
             for name, tool in SITE_TOOLS.items()
+        ] + [
+            types.Tool(
+                name=name,
+                description=tool.description,
+                inputSchema=tool.schema(),
+                annotations=writes,
+            )
+            for name, tool in SETUP_TOOLS.items()
         ]
 
     def call(self, name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
-        tool = SITE_TOOLS.get(name)
         arguments = arguments or {}
+        if name in SETUP_TOOLS:
+            return self._setup(SETUP_TOOLS[name], name, arguments)
+        tool = SITE_TOOLS.get(name)
         if tool is None:
             return _error(f"unknown tool {name!r}; the site tools are {', '.join(SITE_TOOLS)}")
         missing = [a for a in tool.required if a not in arguments]
@@ -264,6 +376,19 @@ class SiteTools:
         except Exception as error:
             return _error(f"{type(error).__name__}: {error}")
         text = render(answer)
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
+
+    def _setup(self, tool: SetupTool, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+        missing = [a for a in tool.required if a not in arguments]
+        unknown = [a for a in arguments if a not in tool.properties]
+        if missing or unknown:
+            return _error(
+                f"{name} needs {list(tool.required)}; missing {missing}, unknown {unknown}"
+            )
+        try:
+            text = tool.function(self.site_dir, **arguments)
+        except Exception as error:
+            return _error(f"{type(error).__name__}: {error}")
         return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
 
 
