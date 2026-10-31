@@ -531,5 +531,8 @@ feeds:                                   # one entry per envelope `source`
   (`site/chat.py`, `POST /api/chat`): Claude calls the read-only query tools (insights, resolve,
   state_at, find, timeline, why, impact, gaps, search_evidence, sql, improvements) in a loop, each call
   a step of the shown trace, and cites `file locator`, which the page opens in the source viewer.
-  Conversations stay in the server's memory and nothing is logged. The earlier map-first page is
-  `/classic` (`web_classic.html`).
+  Each answer returns what it `touched` (things it names, its tools were asked about, and those on the
+  result lines it cites); the graph lights them in that order, zooms to them and dims the rest. The
+  graph's layout is the same on every load: each group has a fixed home (the floor in the middle,
+  people, documents, work, mission and improvements around it). Conversations stay in the server's
+  memory and nothing is logged. The earlier map-first page is `/classic` (`web_classic.html`).

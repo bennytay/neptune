@@ -11,12 +11,14 @@ the person gave the improvement engine.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from neptune_memory.site import improve, insights, query
 from neptune_memory.site.render import render
+from neptune_memory.site.vocab import ENTITY_TYPES
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -260,6 +262,7 @@ class Chat:
                 )
             return {
                 "reply": reply,
+                "touched": touched(reply, steps),
                 "trace": [
                     {
                         "tool": s.tool,
@@ -281,3 +284,30 @@ def _head(step: Step) -> str:
     first = items[0][2:]
     more = f" (+{len(items) - 1} more)" if len(items) > 1 else ""
     return (first[:150] + "…" if len(first) > 150 else first) + more
+
+
+ENTITY = re.compile(r"\b(?:" + "|".join(ENTITY_TYPES) + r"):[A-Za-z0-9_.\-]*[A-Za-z0-9]")
+CITED = re.compile(
+    r"((?:static|feed|improvements|actions)/\S+?) "
+    r"(line \d+|row \d+ col \"[^\"]*\"|page \d+ block \d+)"
+)
+
+
+def touched(reply: str, steps: list[Step]) -> list[str]:
+    """The things an answer rests on, first seen first: those it names, those its tools were asked
+    about, and those on the result lines whose sources the answer cites. The page lights them up."""
+    found: dict[str, None] = dict.fromkeys(ENTITY.findall(reply))
+    cited = set(CITED.findall(reply))
+    for step in steps:
+        if step.error:
+            continue
+        found.update(dict.fromkeys(ENTITY.findall(json.dumps(step.input))))
+        keys = set()
+        for line in step.summary.splitlines():
+            m = re.match(r"\[(S\d+)\] ", line)
+            if m and any(line.startswith(f"[{m[1]}] {f} {loc}") for f, loc in cited):
+                keys.add(m[1])
+        for line in step.summary.splitlines():
+            if line.startswith("- ") and any(f"[{k}]" in line for k in keys):
+                found.update(dict.fromkeys(ENTITY.findall(line)))
+    return list(found)

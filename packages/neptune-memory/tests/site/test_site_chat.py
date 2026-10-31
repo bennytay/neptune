@@ -37,6 +37,9 @@ def test_site_chat_answers_through_traced_tool_calls(site_dir: Path) -> None:
 
     assert turn["reply"].startswith("CV-2 jammed at PE3 (feed/plc_cv2.jsonl line 3423)")
     assert [s["tool"] for s in turn["trace"]] == ["insights", "resolve"]
+    # what the answer rests on: what it names, then the things on the result lines it cites
+    assert turn["touched"][0] == "robot:arm-c3"
+    assert {"machine:cv-2", "task:T-8812"} <= set(turn["touched"])
     assert "finding" in turn["trace"][0]["head"] and "more)" in turn["trace"][0]["head"]
     second = claude.requests[1]["messages"][-1]["content"]
     assert [r["type"] for r in second] == ["tool_result", "tool_result"]

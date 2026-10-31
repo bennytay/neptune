@@ -101,7 +101,12 @@ td.num { font-family: var(--mono); font-size: 12px; }
 svg text { font-family: system-ui, sans-serif; }
 .edge { stroke: var(--line); stroke-width: 1; }
 .edge.hi { stroke: var(--accent); stroke-width: 1.4; }
-.edge.dim, .node.dim { opacity: .14; }
+.edge.dim, .node.dim { opacity: .14; transition: opacity .4s; }
+.edge.lit { stroke: var(--accent); stroke-width: calc(var(--sw, 1) * 1.8px); }
+.node.focus text { fill: var(--ink); font-weight: 500; }
+.ring { fill: none; stroke: var(--accent); stroke-width: calc(var(--sw, 1) * 1.5px); transform-box: fill-box; transform-origin: center; opacity: 0; animation: ping 1.5s ease-out 2 both; }
+@keyframes ping { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
+.onmap { margin-top: 6px; }
 .node { cursor: pointer; } .node text { font-size: var(--fs, 11px); fill: var(--muted); pointer-events: none; }
 .edge { stroke-width: calc(var(--sw, 1) * 1px); } .edge.hi { stroke-width: calc(var(--sw, 1) * 1.6px); }
 .node.hi text, .node.sel text { fill: var(--ink); font-weight: 500; }
@@ -321,16 +326,17 @@ function drawOverview() {
 
 // ---- graph -----------------------------------------------------------------------------------
 let pos = {}, vb = null;
+const HOME = { place: [0, 0], asset: [0, 0], work: [-360, -240], people: [-360, 250], docs: [360, 250], mission: [380, -250], improve: [240, -90] };
 function layout() {
   const nodes = graphData.nodes, edges = graphData.edges, n = nodes.length;
-  const keys = Object.keys(GROUPS);
   let seed = 7; const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const p = {};
-  nodes.forEach((nd) => {
-    const old = pos[nd.id];
-    const a = (keys.indexOf(groupOf(nd.type)) / keys.length) * Math.PI * 2 + rand() * 0.8;
-    p[nd.id] = old ? { ...old } : { x: Math.cos(a) * 260 + rand() * 40, y: Math.sin(a) * 260 + rand() * 40 };
-  });
+  for (const nd of [...nodes].sort((a, b) => a.id.localeCompare(b.id))) {  // the same start on every load
+    const [hx, hy] = HOME[groupOf(nd.type)], old = pos[nd.id];
+    p[nd.id] = old ? { x: old.x, y: old.y } : { x: hx + (rand() - 0.5) * 160, y: hy + (rand() - 0.5) * 160 };
+    p[nd.id].home = [hx, hy];
+    p[nd.id].pull = ["place", "asset"].includes(groupOf(nd.type)) ? 0.006 : 0.014;
+  }
   const idx = nodes.map((nd) => p[nd.id]);
   const links = edges.map((e) => [p[e.from], p[e.to]]).filter(([a, b]) => a && b);
   const N = 420;
@@ -338,46 +344,81 @@ function layout() {
     const cool = 1 - it / N;
     for (let i = 0; i < n; i++) {
       const a = idx[i];
-      a.vx = (a.vx || 0) * 0.55 - a.x * 0.0022; a.vy = (a.vy || 0) * 0.55 - a.y * 0.0022;
+      a.vx = (a.vx || 0) * 0.55 + (a.home[0] - a.x) * a.pull; a.vy = (a.vy || 0) * 0.55 + (a.home[1] - a.y) * a.pull;
       for (let j = 0; j < n; j++) {
         if (i === j) continue;
         const b = idx[j], dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy + 1, d = Math.sqrt(d2);
-        let f = 3200 / d2;
-        if (d < 34) f += (34 - d) * 0.6 / d;  // keep nodes and their labels apart
+        let f = 3400 / d2;
+        if (d < 56) f += (56 - d) * 0.7 / d;  // keep nodes and their labels apart
         a.vx += dx / d * f; a.vy += dy / d * f;
       }
     }
     for (const [a, b] of links) {
-      const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1, f = (d - 78) * 0.03;
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1, f = (d - 80) * 0.02;
       a.vx += dx / d * f; a.vy += dy / d * f; b.vx -= dx / d * f; b.vy -= dy / d * f;
     }
     for (const a of idx) { a.x += Math.max(-24, Math.min(24, a.vx)) * cool; a.y += Math.max(-24, Math.min(24, a.vy)) * cool; }
   }
+  // labels sit to the right of their node: nudge apart any two whose labels would overlap
+  const named = nodes.map((nd) => ({ p: p[nd.id], w: 6.4 * Math.min(28, nd.name.length) + 18 }));
+  for (let it = 0; it < 80; it++) {
+    for (let i = 0; i < named.length; i++) for (let j = i + 1; j < named.length; j++) {
+      const [l, r] = named[i].p.x <= named[j].p.x ? [named[i], named[j]] : [named[j], named[i]];
+      const dy = r.p.y - l.p.y;
+      if (r.p.x - l.p.x < l.w && Math.abs(dy) < 17) {
+        const push = (17 - Math.abs(dy)) / 2 * (dy >= 0 ? 1 : -1);
+        r.p.y += push; l.p.y -= push;
+      }
+    }
+  }
+  for (const a of idx) { delete a.vx; delete a.vy; }
   pos = p;
-  const xs = idx.map((a) => a.x), ys = idx.map((a) => a.y), pad = 60;
-  vb = { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 };
+  full = fit(nodes.map((nd) => nd.id), 60);
+  if (!vb) vb = { ...full };
+}
+let full = null;
+function fit(ids, pad) {
+  const pts = ids.map((id) => pos[id]).filter(Boolean);
+  if (!pts.length) return full;
+  const xs = pts.map((a) => a.x), ys = pts.map((a) => a.y);
+  const w = Math.max(...xs) - Math.min(...xs) + pad * 2, h = Math.max(...ys) - Math.min(...ys) + pad * 2;
+  const side = Math.max(w, h * 1.4, 360), cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  return { x: cx - side / 2, y: cy - side / 1.4 / 2, w: side, h: side / 1.4 };
+}
+function glide(to) {  // ease the view to a box (an answer's things, or everything)
+  const from = { ...vb }, t0 = performance.now(), svg = $("gsvg");
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / 650), e = 1 - Math.pow(1 - k, 3);
+    vb = { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, w: from.w + (to.w - from.w) * e, h: from.h + (to.h - from.h) * e };
+    svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    scaleLabels();
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 function drawGraph() {
   $("gbar").innerHTML = `<span class="lbl" style="margin-right:4px">Graph</span>` + Object.keys(GROUPS).map((g) =>
     `<button data-group="${g}" class="${state.hidden.has(g) ? "off" : ""}"><i style="background:var(--g-${g})"></i>${GROUP_NAME[g]}</button>`).join("");
-  const visible = (nd) => !state.hidden.has(groupOf(nd.type));
+  const visible = (nd) => !state.hidden.has(groupOf(nd.type)) || (!state.sel && state.focus && state.focus.has(nd.id));
   const nodes = graphData.nodes.filter(visible), ids = new Set(nodes.map((nd) => nd.id));
   const edges = graphData.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
-  const sel = state.sel, near = new Set(sel ? [sel] : []);
+  const sel = state.sel, near = new Set(sel ? [sel] : []), focus = !sel && state.focus ? state.focus : null;
   if (sel) for (const e of edges) { if (e.from === sel) near.add(e.to); if (e.to === sel) near.add(e.from); }
+  const order = focus ? [...focus] : [];
   const color = (nd) => nd.status && nd.status !== "ok" ? `var(--${nd.status === "unknown" ? "stale" : nd.status})` : `var(--g-${groupOf(nd.type)})`;
   let out = "";
   for (const e of edges) {
     const a = pos[e.from], b = pos[e.to];
-    const cls = sel ? (e.from === sel || e.to === sel ? "hi" : "dim") : "";
+    const cls = sel ? (e.from === sel || e.to === sel ? "hi" : "dim") : focus ? (focus.has(e.from) && focus.has(e.to) ? "hi lit" : "dim") : "";
     out += `<line class="edge ${cls}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"><title>${esc(e.from)} ${esc(e.predicate)} ${esc(e.to)}</title></line>`;
   }
   for (const nd of nodes) {
     const a = pos[nd.id], r = 3.5 + Math.min(8, Math.sqrt(nd.degree) * 1.6);
-    const cls = sel ? (nd.id === sel ? "sel" : near.has(nd.id) ? "hi" : "dim") : "";
-    const label = nd.degree >= 4 || (sel && near.has(nd.id)) || nd.type === "improvement" || ["robot", "machine"].includes(nd.type);
+    const cls = sel ? (nd.id === sel ? "sel" : near.has(nd.id) ? "hi" : "dim") : focus ? (focus.has(nd.id) ? "hi focus" : "dim") : "";
+    const label = nd.degree >= 4 || (sel && near.has(nd.id)) || (focus && focus.has(nd.id)) || ["improvement", "goal", "robot", "machine", "cell"].includes(nd.type);
+    const lit = focus && focus.has(nd.id) ? `<circle class="ring" cx="${a.x}" cy="${a.y}" r="${r + 3}" style="animation-delay:${order.indexOf(nd.id) * 140}ms"/>` : "";
     const ring = nd.status === "stale" || nd.status === "unknown" ? `fill="var(--bg)" stroke="${color(nd)}" stroke-width="1.5"` : `fill="${color(nd)}"`;
-    out += `<g class="node ${cls}" data-node="${esc(nd.id)}"><circle cx="${a.x}" cy="${a.y}" r="${r + 8}" fill="transparent"/><circle cx="${a.x}" cy="${a.y}" r="${r}" ${ring}/>${nd.id === sel ? `<circle cx="${a.x}" cy="${a.y}" r="${r + 4}" fill="none" stroke="var(--accent)"/>` : ""}${label ? `<text x="${a.x + r + 4}" y="${a.y + 3.5}">${esc(nd.name.length > 28 ? nd.name.slice(0, 27) + "…" : nd.name)}</text>` : ""}<title>${esc(nd.id)}</title></g>`;
+    out += `<g class="node ${cls}" data-node="${esc(nd.id)}"><circle cx="${a.x}" cy="${a.y}" r="${r + 8}" fill="transparent"/><circle cx="${a.x}" cy="${a.y}" r="${r}" ${ring}/>${nd.id === sel ? `<circle cx="${a.x}" cy="${a.y}" r="${r + 4}" fill="none" stroke="var(--accent)"/>` : ""}${lit}${label ? `<text x="${a.x + r + 4}" y="${a.y + 3.5}">${esc(nd.name.length > 28 ? nd.name.slice(0, 27) + "…" : nd.name)}</text>` : ""}<title>${esc(nd.id)}</title></g>`;
   }
   const svg = $("gsvg");
   svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
@@ -549,6 +590,13 @@ function prose(text) {
   return out.join("");
 }
 let asking = false;
+const answers = [];
+function focusOn(i) {  // the things an answer rests on, lit in the order it reached them
+  const ids = answers[i].filter((id) => pos[id]);
+  state.focus = new Set(ids); state.sel = null;
+  if (view !== "graph") show("graph"); else drawGraph();
+  glide(fit(ids, 70));
+}
 async function ask(text) {
   text = text.trim();
   if (!text || asking) return;
@@ -562,7 +610,10 @@ async function ask(text) {
     const r = await res.json();
     if (!res.ok) { slot.innerHTML = `<span style="color:var(--fault)" class="mono">${esc(r.error)}</span>`; return; }
     const trace = r.trace.length ? `<details class="trace"><summary class="lbl">Trace · ${r.trace.length} step${r.trace.length > 1 ? "s" : ""}</summary>${r.trace.map((s) => `<div class="st"><b>${esc(s.tool)}</b> ${esc(s.input)}${s.head ? "\n" + esc(s.head) : ""}</div>`).join("")}</details>` : "";
-    slot.innerHTML = trace + prose(r.reply);
+    answers.push(r.touched || []);
+    const onmap = (r.touched || []).filter((id) => pos[id]).length;
+    slot.innerHTML = trace + prose(r.reply) + (onmap > 1 ? `<div class="onmap"><a class="ref lbl" data-focus="${answers.length - 1}">on the graph · ${onmap} things</a></div>` : "");
+    if (onmap > 1) focusOn(answers.length - 1);
   } catch (e) {
     slot.innerHTML = `<span style="color:var(--fault)" class="mono">${esc(String(e))}</span>`;
   } finally {
@@ -573,7 +624,7 @@ async function ask(text) {
 $("send").onclick = () => { ask($("ask").value); $("ask").value = ""; };
 $("ask").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").click(); } });
 $("ask").addEventListener("input", () => { $("ask").style.height = "auto"; $("ask").style.height = Math.min(140, $("ask").scrollHeight) + "px"; });
-$("clear").onclick = async () => { await post("/api/chat/clear", { id: talk }); drawChatIntro(); };
+$("clear").onclick = async () => { await post("/api/chat/clear", { id: talk }); answers.length = 0; state.focus = null; drawChatIntro(); if (view === "graph") { drawGraph(); glide(full); } };
 
 // ---- sources drawer --------------------------------------------------------------------------
 function citeLink(c) { return `<a class="cite" data-src-file="${esc(c.file)}" data-src-loc="${esc(c.locator)}" data-src-quote="${esc(c.quote || "")}">${esc(c.file.split("/").pop())} ${esc(c.locator)}</a>`; }
@@ -618,11 +669,15 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("drawer"
 
 // ---- clicks ----------------------------------------------------------------------------------
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view],[data-view-go],[data-thing],[data-node],[data-group],[data-fact],[data-finding],[data-src-file],[data-ask],[data-engine],[data-imp],[data-ev],[data-show-graph]");
-  if (!t) { if (e.target.closest("#gsvg") && state.sel) { state.sel = null; drawGraph(); } return; }
+  const t = e.target.closest("[data-focus],[data-view],[data-view-go],[data-thing],[data-node],[data-group],[data-fact],[data-finding],[data-src-file],[data-ask],[data-engine],[data-imp],[data-ev],[data-show-graph]");
+  if (!t) {
+    if (e.target.closest("#gsvg") && (state.sel || state.focus)) { state.sel = null; state.focus = null; drawGraph(); glide(full); }
+    return;
+  }
   e.preventDefault();
   const d = t.dataset;
-  if (d.view) show(d.view);
+  if (d.focus) focusOn(+d.focus);
+  else if (d.view) show(d.view);
   else if (d.viewGo) show(d.viewGo);
   else if (d.showGraph) { state.sel = d.showGraph; state.hidden.delete(groupOf(typeOf(d.showGraph))); show("graph"); }
   else if (d.node) { state.sel = state.sel === d.node && !t.classList.contains("chip") ? null : d.node; state.hidden.delete(groupOf(typeOf(d.node))); drawGraph(); }
