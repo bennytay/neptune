@@ -183,6 +183,12 @@ svg.i { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor;
 .tag { font: 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
 .tag.inferred { border-style: dashed; } .tag.stale, .tag.unknown { color: var(--warn); } .tag.fault { color: var(--fault); border-color: var(--fault); }
 .tag.up { color: var(--ok); } .tag.down { color: var(--warn); } .tag.new { color: var(--accent); }
+.tag.supported { color: var(--ok); border-color: var(--ok); } .tag.rejected { color: var(--fault); border-color: var(--fault); } .tag.inconclusive { color: var(--warn); border-color: var(--warn); }
+.res .num { font: 12px/1.6 var(--mono); color: var(--text); }
+.tally { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.tally .g { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 220px; }
+.tally .g b { display: block; font-size: 13px; margin-bottom: 4px; }
+.brief { white-space: pre-wrap; font: 12px/1.55 var(--mono); }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th { text-align: left; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); }
 td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -302,6 +308,7 @@ mark { background: rgba(240,190,60,.4); color: inherit; border-radius: 2px; }
       <button data-view="overview" class="on"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg>Overview</button>
       <button data-view="graph"><svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="12" cy="18" r="2.3"/><path d="M8 8.2 10.8 16M16.6 7.9 13.2 16M8.3 6.8l7.4-.6"/></svg>Graph <span class="n" id="n-graph"></span></button>
       <button data-view="improvements"><svg class="i" viewBox="0 0 24 24"><path d="M4 17l5-5 4 4 7-8"/><path d="M15 8h5v5"/></svg>Improvements <span class="n" id="n-imp"></span></button>
+      <button data-view="research"><svg class="i" viewBox="0 0 24 24"><path d="M9 3.5h6M10 3.5v5.2L5.2 17.4A2 2 0 0 0 7 20.5h10a2 2 0 0 0 1.8-3.1L14 8.7V3.5"/><path d="M7.5 14h9"/></svg>Research <span class="n" id="n-res"></span></button>
       <button data-view="sources"><svg class="i" viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10.5a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M14 3.5V8h4M9 13h6M9 16.5h4"/></svg>Sources <span class="n" id="n-src"></span></button>
     </nav>
     <div class="section">
@@ -336,6 +343,7 @@ mark { background: rgba(240,190,60,.4); color: inherit; border-radius: 2px; }
       </section>
       <section class="view" id="v-thing" hidden></section>
       <section class="view" id="v-improvements" hidden></section>
+      <section class="view" id="v-research" hidden></section>
       <section class="view" id="v-sources" hidden></section>
     </main>
   </div>
@@ -400,14 +408,16 @@ function render() {
   $("clock").textContent = head || $("livedot").classList.contains("on") ? "Live" : "Loaded";
   $("seq").textContent = `seq ${head ? head.seq : dash.seq} · ${clock(dash.at).slice(11, 19)}`;
   $("asof").textContent = clock(dash.at) || "—";
-  $("crumb").textContent = { overview: "Overview", graph: "Graph", thing: current ? short(current) : "Thing", improvements: "Improvements", sources: "Sources" }[view];
+  $("crumb").textContent = { overview: "Overview", graph: "Graph", thing: current ? short(current) : "Thing", improvements: "Improvements", research: "Research", sources: "Sources" }[view];
   $("n-graph").textContent = graphData.nodes.length;
   $("n-imp").textContent = dash.run ? dash.counts.improvements : "";
+  $("n-res").textContent = dash.research.cards.length || "";
   $("n-src").textContent = dash.counts.stale_sources ? `${dash.counts.stale_sources} stale` : dash.counts.sources;
   drawThings();
   if (view === "overview") drawOverview();
   if (view === "graph") drawGraph();
   if (view === "improvements") drawImprovements();
+  if (view === "research") drawResearch();
   if (view === "sources") drawSources();
   if (view === "thing" && current) openThing(current, true);
   if (!$("msgs").children.length) drawChatIntro();
@@ -415,7 +425,7 @@ function render() {
 function show(name) {
   view = name;
   for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("on", b.dataset.view === name);
-  for (const v of ["overview", "graph", "thing", "improvements", "sources"]) $("v-" + v).hidden = v !== name;
+  for (const v of ["overview", "graph", "thing", "improvements", "research", "sources"]) $("v-" + v).hidden = v !== name;
   if (dash) render();
 }
 function drawThings() {
@@ -765,6 +775,43 @@ async function engineCall(verb) {
   if (!$("msgs").querySelector(".u")) drawChatIntro();
 }
 
+// ---- research --------------------------------------------------------------------------------
+function drawResearch() {
+  const d = dash, e = d.engine, r = d.research;
+  const run = e.key
+    ? `<button class="btn primary" data-engine="research" ${e.state === "running" ? "disabled" : ""}>${e.state === "running" ? "Running…" : "Run a research round"}</button>`
+    : `<span class="muted">Add your key on the Improvements page to run research.</span>`;
+  const tally = r.goals.length ? `<div class="tally">${r.goals.map((g) => `<div class="g"><b>${esc(g.name)}</b><span class="tag supported">${g.supported} supported</span> <span class="tag rejected">${g.rejected} rejected</span> <span class="tag inconclusive">${g.inconclusive} inconclusive</span></div>`).join("")}</div>`
+    : `<div class="muted" style="margin-top:10px">No mission yet: set a goal (neptune_setup_mission) so research has something to serve.</div>`;
+  const cards = r.cards.length ? r.cards.map((c) => `<div class="imp res"><div class="hd"><span class="tag ${esc(c.verdict)}">${esc(c.verdict)}</span><span class="tt" ${c.fact ? `data-fact="${esc(c.fact)}"` : ""}>${esc(c.statement)}</span><span class="tag">round ${c.round}</span></div>
+      <dl><dt>result</dt><dd class="num">${esc(c.result)}</dd>
+        <dt>tested</dt><dd class="muted">${esc(c.test)}</dd>
+        ${c.why ? `<dt>why</dt><dd>${esc(c.why)}</dd>` : ""}
+        ${c.goals.length ? `<dt>serves</dt><dd>${c.goals.map((g) => esc(g.name)).join(" · ")}</dd>` : ""}
+        ${c.next_step ? `<dt>next step</dt><dd>${esc(c.next_step)}</dd>` : ""}
+        ${c.unknowns.length ? `<dt>unknown</dt><dd class="muted">${c.unknowns.map(esc).join("; ")}</dd>` : ""}
+        <dt>evidence</dt><dd>${c.evidence.length ? c.evidence.map(citeLink).join(" · ") : `<span class="muted">none counted</span>`}</dd></dl>
+      <div class="acts"><button class="btn" data-brief="${esc(c.key)}">Copy for agent</button></div></div>`).join("")
+    : `<div class="muted" style="padding:14px 0;border-top:1px solid var(--line)">No research yet. A round proposes hypotheses about the mission and Neptune tests each one on the memory.</div>`;
+  const gaps = r.gaps.length ? `<div class="block"><div class="lbl">What Neptune needs from you</div><div class="rows">${r.gaps.map((g) => `<div class="r"><span class="x">${esc(g.about)}</span><span class="e">${esc(g.text)}</span></div>`).join("")}</div></div>` : "";
+  const log = r.log.length ? `<div class="block"><div class="lbl">Research log · every result, newest first</div><div class="rows">${r.log.map((x) => `<div class="r"><span class="x"><span class="tag ${esc(x.verdict)}">${esc(x.verdict)}</span> ${esc(x.statement)}</span><span class="e mono">round ${x.round} · ${esc(clock(x.at))}</span></div>`).join("")}</div></div>` : "";
+  $("v-research").innerHTML = `
+    <div class="lbl">Research</div><h1>Against the mission</h1>
+    <div class="sub">${r.rounds ? `${r.rounds} round(s) · ${r.cards.length} hypotheses` : "Claude proposes; Neptune tests every hypothesis on the memory and computes the numbers."}</div>
+    <div class="key" style="margin-top:10px">${run}</div>
+    ${e.error ? `<div style="color:var(--fault);margin-top:8px" class="mono">${esc(e.error)}</div>` : ""}
+    ${tally}
+    <div class="block">${cards}</div>
+    ${gaps}${log}`;
+}
+async function copyBrief(key) {
+  const b = await (await fetch("/api/research/brief?id=" + encodeURIComponent(key))).json();
+  const text = b.text || b.error || "";
+  let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; } catch (_) { /* no clipboard: shown below */ }
+  openDrawer(copied ? "Brief copied for your agent" : "Brief for your agent", [], `<div class="muted" style="margin:6px 0">Paste it into your agent, or have it call neptune_site_research_result {"id": "${esc(key)}"}.</div><pre class="brief">${esc(text)}</pre>`);
+}
+
 // ---- sources ---------------------------------------------------------------------------------
 function drawSources() {
   const d = dash, day = (d.at || "").slice(0, 10);
@@ -885,7 +932,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("drawer"
 
 // ---- clicks ----------------------------------------------------------------------------------
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-focus-ask],[data-ovtab],[data-theme-set],[data-focus],[data-view],[data-view-go],[data-thing],[data-node],[data-group],[data-fact],[data-finding],[data-src-file],[data-ask],[data-engine],[data-imp],[data-ev],[data-show-graph]");
+  const t = e.target.closest("[data-focus-ask],[data-ovtab],[data-theme-set],[data-focus],[data-view],[data-view-go],[data-thing],[data-node],[data-group],[data-fact],[data-finding],[data-src-file],[data-ask],[data-engine],[data-imp],[data-ev],[data-show-graph],[data-brief]");
   if (!t) {
     if (e.target.closest("#gsvg") && (state.sel || state.focus)) { state.sel = null; state.focus = null; drawGraph(); glide(full); }
     return;
@@ -907,6 +954,7 @@ document.addEventListener("click", async (e) => {
   else if (d.fact) openFact(d.fact);
   else if (d.ask) ask(d.ask);
   else if (d.engine) engineCall(d.engine);
+  else if (d.brief) copyBrief(d.brief);
   else if (d.imp) { t.setAttribute("disabled", ""); const res = await post(`/api/improvements/${d.imp}`, { id: d.id }); impError = res.ok ? "" : (await res.json()).error; refresh(true); }
   else if (d.ev) { const [i, j] = d.ev.split(":").map(Number); showEvidence(dash.run.items[i].evidence[j]); }
 });

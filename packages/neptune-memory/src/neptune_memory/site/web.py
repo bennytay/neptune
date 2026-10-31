@@ -20,6 +20,8 @@ small JSON API over the same query layer as the MCP tools (``query.py``, ``insig
   coverage, the latest improvement run and what changed since it, the engine's state.
 - ``POST /api/engine/key`` ``{"key"}`` (kept in memory, never written), ``/api/engine/run``,
   ``/api/engine/auto`` ``{"on"}``; ``POST /api/improvements/accept|reject`` ``{"id"}``.
+- ``POST /api/engine/research``: one research round (``research.py``) on the same key;
+  ``GET /api/research/brief?id=KEY``: one result as the brief an agent gets.
 - ``GET /events``: server-sent events, one ``{"seq", "clock", "engine"}`` each time the log grows
   or the improvement engine starts or ends a run.
 
@@ -42,7 +44,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
-from neptune_memory.site import actions, chat, dashboard, improve, insights, log, query, views
+from neptune_memory.site import (
+    actions,
+    chat,
+    dashboard,
+    improve,
+    insights,
+    log,
+    query,
+    research,
+    views,
+)
 from neptune_memory.site import confirm as confirm_queue
 from neptune_memory.site.facts import Citation, Fact, Ref, Value
 
@@ -164,14 +176,23 @@ class Site:
             self.engine.set_key(str(body.get("key") or ""))
         elif verb == "auto":
             self.engine.auto = bool(body.get("on"))
-        elif verb == "run":
+        elif verb in ("run", "research"):
             self.engine.error = None
-            if not self.engine.start("asked from the dashboard"):
+            work = "research" if verb == "research" else "improvements"
+            if not self.engine.start("asked from the dashboard", work):
                 why = "no API key" if self.engine.key is None else "a run is already going"
                 raise ValueError(f"not started: {why}")
         else:
             raise ValueError(f"no engine call {verb!r}")
         return self.engine.status()
+
+    def research_brief(self, key: str) -> dict[str, Any]:
+        """One research result as the brief an agent gets (``research.brief``)."""
+        with self.lock:
+            try:
+                return {"key": key, "text": research.brief(self.site_dir, self.model(), key)}
+            except ValueError as error:
+                return {"key": key, "error": str(error)}
 
     def improvement(self, verb: str, fact_id: str, by: str) -> dict[str, Any]:
         """A person's accept or reject; an accepted action is proposed, approved and dispatched."""
@@ -645,6 +666,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.site.dashboard())
             elif url.path == "/api/engine":
                 self._json(self.site.engine.status())
+            elif url.path == "/api/research/brief":
+                self._json(self.site.research_brief(args.get("id", "")))
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (BrokenPipeError, ConnectionResetError):
@@ -660,7 +683,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.site.confirm(body["proposal"], body["answer"], by))
             elif m := re.fullmatch(r"/api/actions/(approve|reject)", url.path):
                 self._json(self.site.act(m[1], str(body["id"]), by))
-            elif m := re.fullmatch(r"/api/engine/(key|run|auto)", url.path):
+            elif m := re.fullmatch(r"/api/engine/(key|run|research|auto)", url.path):
                 self._json(self.site.engine_call(m[1], body))
             elif m := re.fullmatch(r"/api/improvements/(accept|reject)", url.path):
                 self._json(self.site.improvement(m[1], str(body["id"]), by))

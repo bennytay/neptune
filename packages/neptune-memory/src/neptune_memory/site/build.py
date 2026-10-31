@@ -90,7 +90,16 @@ def build(site_dir: Path, *, until: str | None = None, seam: Seam | None = None)
         _static(site_dir, out, seam)
         for message in _feed(site_dir, seam, until):
             _append_message(out, seam, message)
+        out.emit(_learned(site_dir))
     return log_dir(site_dir)
+
+
+def _learned(site_dir: Path) -> list[Fact]:
+    """What earlier research rounds concluded (``research/runs.jsonl``), as recorded: a rebuild
+    keeps it without calling a model."""
+    from neptune_memory.site.research import recorded
+
+    return recorded(site_dir)
 
 
 def replay(
