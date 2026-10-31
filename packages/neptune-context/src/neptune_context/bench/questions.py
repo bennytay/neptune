@@ -46,10 +46,37 @@ def _question(site: str, raw: dict[str, Any]) -> Question:
     )
 
 
-def load(name: str, sites: tuple[str, ...] = ("p7", "harbor", "public")) -> list[Question]:
-    """A named set. ``gold``: every gold and gold-insight question of the given sites."""
-    if name != "gold":
-        raise ValueError(f"unknown question set {name!r}; the sets are: gold")
+SETS = {"gold": ("p7", "harbor", "public"), "plant7": ("plant7-1d", "plant7-7d")}
+
+
+def key_file(root: Path, site: str) -> Path:
+    """Where a simulated site's answer key lives: beside the site, never inside it."""
+    return root / f"{site}.answers.json"
+
+
+def load(
+    name: str, sites: tuple[str, ...] | None = None, root: Path | None = None
+) -> list[Question]:
+    """A named set. ``gold``: every gold and gold-insight question of the given sites.
+    ``plant7``: the simulated Plant 7 sites' questions, written from the simulator
+    (``bench.plant7``); each site and its answer key are generated under ``root`` if missing."""
+    if name not in SETS:
+        raise ValueError(f"unknown question set {name!r}; the sets are: {', '.join(SETS)}")
+    sites = sites or SETS[name]
+    if name == "plant7":
+        from neptune_context.bench import plant7
+
+        out: list[Question] = []
+        for site in sites:
+            if root is None:
+                raise ValueError("the plant7 set needs the sites root")
+            key = key_file(root, site)
+            if not key.exists():
+                plant7.write(root / site, key, plant7.DAYS[site])
+            data = json.loads(key.read_text(encoding="utf-8"))
+            suffix = site.removeprefix("plant7-")
+            out += [_question(site, {**q, "id": f"{q['id']}@{suffix}"}) for q in data["questions"]]
+        return out
     out = []
     for site in sites:
         for file in GOLD_FILES[site]:

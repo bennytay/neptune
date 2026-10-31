@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     go = sub.add_parser("run", help="run a question set through the arms")
     go.add_argument("--set", default="gold")
-    go.add_argument("--sites", default="p7,harbor,public")
+    go.add_argument("--sites", default="", help="comma-separated; default: the set's sites")
     go.add_argument("--arms", default=",".join(run.ARMS))
     go.add_argument("--only", default="", help="comma-separated question ids")
     go.add_argument("--model", default=run.Settings.model)
@@ -40,7 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        qs = questions.load(args.set, tuple(args.sites.split(",")))
+        sites = tuple(args.sites.split(",")) if args.sites else None
+        qs = questions.load(args.set, sites, args.root)
         if args.only:
             wanted = set(args.only.split(","))
             qs = [q for q in qs if q.id in wanted]
