@@ -29,6 +29,7 @@ ENTITY_TYPES: tuple[str, ...] = (
     "goal",
     "constraint",
     "improvement",
+    "hypothesis",
 )
 
 
@@ -107,6 +108,8 @@ PREDICATES: dict[str, Predicate] = {
         Predicate("metric", ("goal",), "value", "one"),
         Predicate("target", ("goal",), "value", "one"),
         Predicate("proposed_improvement", ("improvement",), "value", "many"),
+        # Research (site/research.py): a hypothesis and the result Neptune computed (inferred).
+        Predicate("research_result", ("hypothesis",), "value", "many"),
         # An unmapped file: its rows or blocks verbatim, and the "not mapped" marker.
         Predicate("text", (), "value", "many"),
         Predicate("unmapped", ("document",), "value", "one"),
