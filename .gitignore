@@ -32,3 +32,6 @@ htmlcov/
 /site-harbor/
 /site-public/
 /site-sim/
+# `make bench` sites and results (transcripts are published separately)
+/bench/sites/
+/bench/results/

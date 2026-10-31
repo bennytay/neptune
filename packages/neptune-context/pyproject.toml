@@ -45,3 +45,8 @@ markers = [
   "integration: exercises multiple components against real fixtures",
   "slow: takes more than a few seconds; excluded by `make test-fast`",
 ]
+
+# `anthropic` is the optional extra the benchmark harness (bench/) calls; CI does not install it.
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*"]
+ignore_missing_imports = true

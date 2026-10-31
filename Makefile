@@ -24,7 +24,7 @@ EACH = set -ef; for p in $(SELECTED); do \
   else cd "$(CURDIR)/packages/$$p"; x=""; fi; echo "--- $$p" >&2;
 
 .PHONY: help setup fmt lint type test test-fast check schema examples \
-  check-all site-demo site-replay site-live site-web site-show site-sim site-sim-run
+  check-all site-demo site-replay site-live site-web site-show site-sim site-sim-run bench
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -159,3 +159,11 @@ site-sim-run: ## Simulated plant, offline: DAYS shifts into feed/, then build an
 > $(SITE_CMD) build "$(SIM_SITE)"
 > $(SITE_CMD) insights "$(SIM_SITE)" > /dev/null
 > @echo "MCP: uv run --directory \"$(CURDIR)\" --all-packages python -m neptune_context.mcp --site \"$(abspath $(SIM_SITE))\""
+
+# bench (#230): the same Claude with three kinds of memory (files, context, neptune) on a fixed
+# question set; one JSON line per answer in bench/results/. Needs ANTHROPIC_API_KEY; costs money.
+SET ?= gold
+ARMS ?= files,context,neptune
+BENCH_SITES ?= p7,harbor,public
+bench: ## Benchmark: ask SET through ARMS and print x / N per arm (needs ANTHROPIC_API_KEY)
+> $(RUN) --extra anthropic python -m neptune_context.bench run --set "$(SET)" --sites "$(BENCH_SITES)" --arms "$(ARMS)"
