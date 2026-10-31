@@ -1,4 +1,4 @@
-"""The fact log: append, read back in seq order, roll segments (spec §5)."""
+"""The fact log: append, read back in seq order, roll segments."""
 
 from pathlib import Path
 

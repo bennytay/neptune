@@ -29,6 +29,6 @@ Closes #
 
 </details>
 
-<!-- Rules: visible part ≤12 lines, no paragraphs. Depth lives in the spec, linked, not pasted.
+<!-- Rules: visible part ≤12 lines, no paragraphs. Depth lives in the code, linked, not pasted.
      Open as a draft; mark ready when done. Implementers do not merge: the coordinator merges on green
      CI (`scripts/factory-merge.sh`), after one quick review for core PRs. -->

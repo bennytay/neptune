@@ -71,14 +71,14 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/golden/urdf/make_urdf_golden.py
 > $(UV) run python tests/golden/manifest/make_manifest_golden.py
 
-# Site model v3 (docs/site-model/spec.md §9): a demo corpus -> fact log -> the MCP command.
+# Site model v3: a demo corpus -> fact log -> the MCP command.
 # SITE=p7 (Plant 7, default) or SITE=harbor (Harbor DC). site-demo confirms the identity proposals
-# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would (spec §7). SITE=public fetches real public
+# (amr-02 / MR-1142; gtp-03 / AMR-17) as the operator would. SITE=public fetches real public
 # robot data instead of generating a corpus (docs/site-model/real-data.md).
 SITE ?= p7
 SITE_DIR ?= $(if $(filter p7,$(SITE)),site-demo,site-$(SITE))
 SPEED ?= 60
-# --extra anthropic: the dashboard's improvement runs call Claude with the person's own key (spec §16).
+# --extra anthropic: the dashboard's improvement runs call Claude with the person's own key.
 SITE_CMD := $(RUN) --extra anthropic python -m neptune_memory.site
 SITE_MCP := uv run --directory "$(CURDIR)" --all-packages python -m neptune_context.mcp --site "$(abspath $(SITE_DIR))"
 SITE_SOURCE = $(if $(filter public,$(SITE)),scripts/fetch_public_site.sh "$(SITE_DIR)",$(SITE_CMD) generate --site "$(SITE)" "$(SITE_DIR)")

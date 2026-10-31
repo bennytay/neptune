@@ -9,14 +9,14 @@ small JSON API over the same query layer as the MCP tools (``query.py``, ``insig
 - ``GET /api/why?fact=ID``: ``query.why`` as JSON, with its sources.
 - ``GET /api/source?file=F&locator=L``: the cited span: lines of a text file, rows of a table,
   a PDF page's blocks (from the compiler's package), or an image region.
-- ``POST /api/confirm`` ``{"proposal", "answer"}``: appends a ``confirm`` entry (spec §7).
+- ``POST /api/confirm`` ``{"proposal", "answer"}``: appends a ``confirm`` entry.
 - ``GET /api/actions``, ``POST /api/actions/approve|reject`` ``{"id"}``: proposed actions and a
-  person's answer (``actions.py``, spec §15); an approved robot action is dispatched to the
+  person's answer (``actions.py``); an approved robot action is dispatched to the
   fleet manager over MQTT.
 - ``GET /api/graph``, ``GET /api/thing?id=E``: every thing and edge; one thing's state, lanes,
   links, findings and the improvements citing it. ``POST /api/chat`` ``{"id", "text"}``: one turn
   of the chat (``chat.py``); ``/api/chat/clear``. ``GET /classic``: the earlier map-first page.
-- ``GET /api/dashboard``: the dashboard (``dashboard.py``, spec §16): counts, mission, sources,
+- ``GET /api/dashboard``: the dashboard (``dashboard.py``): counts, mission, sources,
   coverage, the latest improvement run and what changed since it, the engine's state.
 - ``POST /api/engine/key`` ``{"key"}`` (kept in memory, never written), ``/api/engine/run``,
   ``/api/engine/auto`` ``{"on"}``; ``POST /api/improvements/accept|reject`` ``{"id"}``.
@@ -136,7 +136,7 @@ class Site:
             model = self.model()
             return {"seq": model.seq, "clock": model.clock(), "engine": self.engine.state}
 
-    # -- the dashboard and improvements (spec §16) -----------------------------------------------
+    # -- the dashboard and improvements ------------------------------------------------------------
 
     def dashboard(self) -> dict[str, Any]:
         with self.lock:

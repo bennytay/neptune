@@ -13,7 +13,7 @@ dependencies = ["neptune"]
 [dependency-groups]
 live = ["amqtt>=0.11", "paho-mqtt>=2.1"]
 
-# `python -m neptune_memory.site extract-photos` (spec §7). Optional: the build reads the recorded
+# `python -m neptune_memory.site extract-photos`. Optional: the build reads the recorded
 # extraction and never calls a model; `uv sync --extra anthropic` to re-record from real photos.
 [project.optional-dependencies]
 anthropic = ["anthropic>=1.0"]

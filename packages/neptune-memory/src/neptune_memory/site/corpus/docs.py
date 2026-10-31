@@ -1,5 +1,5 @@
 # ruff: noqa: RUF001, E501
-"""The controlled documents and the shift photo of Plant 7 (spec §9).
+"""The controlled documents and the shift photo of Plant 7.
 
 The PDFs are tagged (one heading, then paragraphs) and written with the compiler's own small
 PDF writer, ``tests/fixtures/pdf/make_pdfs.py``, loaded by path: no clock, randomness or

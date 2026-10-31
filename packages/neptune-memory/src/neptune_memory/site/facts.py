@@ -1,4 +1,4 @@
-"""The shared types of the site model (spec §3, §5). Frozen by #181: lanes import, never reshape."""
+"""The shared types of the site model. Frozen by #181: lanes import, never reshape."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class Value:
 
 @dataclass(frozen=True)
 class Fact:
-    """One cited assertion about the site (spec §3)."""
+    """One cited assertion about the site."""
 
     subject: str
     predicate: str

@@ -1,4 +1,4 @@
-"""Identity proposals (spec §7): "these two names may be one thing", never merged on their own.
+"""Identity proposals: "these two names may be one thing", never merged on their own.
 
 Two entities of the same type that carry the same ``serial`` from different sources get one inferred
 ``same_as`` fact citing both; the subject is the first of the two refs ignoring case

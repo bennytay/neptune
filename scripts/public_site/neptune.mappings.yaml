@@ -1,4 +1,4 @@
-# How the public UR3 CobotOps export (UCI dataset 963, CC BY 4.0) becomes facts (spec §12).
+# How the public UR3 CobotOps export (UCI dataset 963, CC BY 4.0) becomes facts.
 # Started from `draft-mapping site-public static/ur3/dataset_02052023.xlsx`; see
 # docs/site-model/real-data.md for what the draft got and what was changed by hand.
 mappings: 1

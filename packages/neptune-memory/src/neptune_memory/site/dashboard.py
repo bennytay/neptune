@@ -1,4 +1,4 @@
-"""The dashboard (spec §16): what Neptune knows about a site, and what to do about it, as JSON.
+"""The dashboard: what Neptune knows about a site, and what to do about it, as JSON.
 
 ``build`` reads one folded model and answers the web view's ``GET /api/dashboard``:
 

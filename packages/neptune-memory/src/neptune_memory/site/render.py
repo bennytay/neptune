@@ -1,4 +1,4 @@
-"""Compact cited text for an ``Answer`` (spec §8): one line per item, then a ``Sources:`` footer.
+"""Compact cited text for an ``Answer``: one line per item, then a ``Sources:`` footer.
 
     - machine:cv-2 mode = "stopped" since 10:05:02 · observed [S1]
 

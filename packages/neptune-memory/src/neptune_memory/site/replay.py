@@ -1,4 +1,4 @@
-"""Replay the corpus feeds as one ordered stream of messages (spec §9)."""
+"""Replay the corpus feeds as one ordered stream of messages."""
 
 import json
 import time

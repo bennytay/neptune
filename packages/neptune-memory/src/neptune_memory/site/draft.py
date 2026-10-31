@@ -1,4 +1,4 @@
-"""Draft a mapping entry for an unmapped file (spec §12): ``draft-mapping <site_dir> <file>``.
+"""Draft a mapping entry for an unmapped file: ``draft-mapping <site_dir> <file>``.
 
 Deterministic heuristics over the file's header and first rows: a CSV or JSONL table becomes a
 ``tables:`` entry, and so does any other table the compiler reads (an XLSX workbook's data sheet,

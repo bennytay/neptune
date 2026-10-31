@@ -1,4 +1,4 @@
-"""The site tools (site model v3, ``docs/site-model/spec.md`` §8): ``neptune_site_<name>``.
+"""The site tools: ``neptune_site_<name>``.
 
 One read-only MCP tool per function of ``neptune_memory.site.query``. Each takes a JSON object that
 mirrors the Python arguments and answers ``neptune_memory.site.render.render(answer)``: compact

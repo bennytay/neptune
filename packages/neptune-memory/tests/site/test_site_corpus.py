@@ -1,4 +1,4 @@
-"""The Plant 7 corpus is deterministic and replays in arrival order (spec §9)."""
+"""The Plant 7 corpus is deterministic and replays in arrival order."""
 
 import json
 from pathlib import Path

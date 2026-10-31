@@ -106,7 +106,7 @@ svg .hot { animation: flow 0.8s linear infinite; stroke-dasharray: 6 4; }
   text-transform: none; letter-spacing: 0; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px;
   vertical-align: -1px; border: 1.5px solid; }
-/* ---- tabs and the dashboard (spec §16) ---- */
+/* ---- tabs and the dashboard ---- */
 .tabs { display: flex; gap: 4px; margin-left: auto; }
 .tabs button { border-radius: 6px; }
 [hidden] { display: none !important; }
@@ -456,7 +456,7 @@ async function loadActions() {
   $("actions").innerHTML = (actionError ? `<div class="empty">${esc(actionError)}</div>` : "") + pending + recent;
 }
 
-// ---- the dashboard (spec §16) ----------------------------------------------------------------
+// ---- the dashboard ------------------------------------------------------------------------------
 let tab = "dash", dash = null, dashBusy = false, dashDirty = false, dashLast = 0, dashError = "";
 function setTab(name) {
   tab = name;

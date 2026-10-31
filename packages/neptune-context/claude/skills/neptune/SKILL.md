@@ -31,7 +31,7 @@ or guesswork:
 - A file `neptune_site_gaps` lists as `not mapped` is still searchable with
   `neptune_site_search_evidence`, but none of its rows are facts yet. To map it: run
   `python -m neptune_memory.site draft-mapping <site_dir> <file>`, **show the user the draft**, fix
-  what they say, save it into `<site_dir>/static/neptune.mappings.yaml` (spec §12), then
+  what they say, save it into `<site_dir>/static/neptune.mappings.yaml`, then
   `python -m neptune_memory.site build <site_dir>`. Never save a mapping the user has not seen.
 - **Actions: you propose, a person approves.** `neptune_site_propose_action` (`pause`, `resume`,
   `send_to` with a `zone`, `cancel_task`, or `page` a person) logs an inferred proposal with your

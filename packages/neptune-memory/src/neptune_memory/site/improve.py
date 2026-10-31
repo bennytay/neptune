@@ -1,4 +1,4 @@
-"""Improvements (spec §16): Claude reads the site model against its mission and proposes changes.
+"""Improvements: Claude reads the site model against its mission and proposes changes.
 
 - **The mission** is ``static/mission.yaml``: goals (a ``metric`` and a ``target``) and constraints,
   read like the layout into **stated** facts, so a goal cites its line like any record.
