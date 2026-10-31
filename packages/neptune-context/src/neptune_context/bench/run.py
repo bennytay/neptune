@@ -38,15 +38,32 @@ def chars_per_token(api: Any, model: str, raw: Path) -> float:
     return len(text) / max(int(count.input_tokens), 1)
 
 
+def fitted_context(api: Any, raw: Path, settings: Settings) -> arms.Context:
+    """A context arm whose prompt, counted by the API, is within the budget: the estimate from a
+    sample is only a start, since feed lines take more tokens per character than documents."""
+    ratio = chars_per_token(api, settings.model, raw)
+    for _ in range(6):
+        arm = arms.Context(raw, ratio, budget=settings.context_budget)
+        count = api.messages.count_tokens(
+            model=settings.model,
+            system=arm.system(),
+            messages=[{"role": "user", "content": arm.prompt("?")}],
+        )
+        tokens = int(count.input_tokens)
+        arm.notes["prompt_tokens"] = tokens
+        if tokens <= settings.context_budget or not arm.notes.get("feed_lines_kept"):
+            return arm
+        ratio *= settings.context_budget / tokens * 0.98
+    return arm
+
+
 def make_arm(name: str, built: Path, raw: Path, api: Any, settings: Settings) -> arms.Arm:
     if name == "files":
         return arms.Files(raw)
     if name == "neptune":
         return arms.Neptune(built)
     if name == "context":
-        return arms.Context(
-            raw, chars_per_token(api, settings.model, raw), budget=settings.context_budget
-        )
+        return fitted_context(api, raw, settings)
     raise ValueError(f"unknown arm {name!r}; the arms are {', '.join(ARMS)}")
 
 
@@ -81,6 +98,21 @@ def answer(
     }
 
 
+def missing(question: Question, why: str) -> list[dict[str, Any]]:
+    """Every expected fact graded missing, without a judge (no answer to grade)."""
+    return [
+        {
+            "fact": judge.describe(item),
+            "predicate": item["predicate"],
+            "state": item.get("state", "known"),
+            "verdict": "missing",
+            "made_up": False,
+            "why": why,
+        }
+        for item in judge.expected(question)
+    ]
+
+
 def did_not_fit(
     arm: arms.Arm, question: Question, settings: Settings, error: str
 ) -> dict[str, Any]:
@@ -99,17 +131,7 @@ def did_not_fit(
         "seconds": 0.0,
         "usage": dict.fromkeys(agent.USAGE, 0),
         "arm_notes": {**arm.notes, "error": error[:300]},
-        "judged": [
-            {
-                "fact": judge.describe(item),
-                "predicate": item["predicate"],
-                "state": item.get("state", "known"),
-                "verdict": "missing",
-                "made_up": False,
-                "why": "the site does not fit in the context window",
-            }
-            for item in judge.expected(question)
-        ],
+        "judged": missing(question, "the site does not fit in the context window"),
         "cites": {"listed": 0, "verified": 0, "unverifiable": 0, "details": []},
         "transcript": [],
     }
@@ -196,6 +218,25 @@ def cost(record: dict[str, Any]) -> float | None:
         )
         / 1e6
     )
+
+
+def rejudge(api: Any, records: list[dict[str, Any]], qs: list[Question], model: str) -> int:
+    """Grade recorded answers again where their question's expected facts have changed (a fixed
+    answer key); the answers themselves are kept. Returns how many were graded again."""
+    by_id = {q.id: q for q in qs}
+    done = 0
+    for r in records:
+        q = by_id.get(r["qid"])
+        if q is None or [judge.describe(e) for e in judge.expected(q)] == [
+            j["fact"] for j in r["judged"]
+        ]:
+            continue
+        if r["stop"] == "prompt_too_long":
+            r["judged"] = missing(q, "the site does not fit in the context window")
+        else:
+            r["judged"] = judge.judge(api, q, r["answer"], model=model)
+        done += 1
+    return done
 
 
 def load(paths: list[Path]) -> list[dict[str, Any]]:

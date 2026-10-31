@@ -137,3 +137,21 @@ def test_bench_summary_prints_counts_and_sites_too_big_count_as_wrong(
     assert main(["summary", str(results), "--root", str(tmp_path)]) == 0
     assert "context  0/1 (0%)" in capsys.readouterr().out
     assert run.summarise([record])["context"]["did_not_fit"] == 1
+
+
+def test_bench_rejudge_grades_again_only_where_the_key_changed(tmp_path: Path) -> None:
+    site = _site(tmp_path)
+    old = questions.Question(
+        id="Q1",
+        site="t",
+        text="What jammed?",
+        expect=({"subject": "machine:cv-2", "predicate": "health", "object": "fault:OLD"},),
+    )
+    record = run.answer(_Api(), arms.Files(site), old, site, run.Settings(model="fake"))
+    new = questions.Question(
+        id="Q1", site="t", text=old.text, expect=({**old.expect[0], "object": "fault:JAM_PE3"},)
+    )
+    api = _Api()
+    assert run.rejudge(api, [record], [new], "fake") == 1
+    assert "fault:JAM_PE3" in record["judged"][0]["fact"]
+    assert run.rejudge(api, [record], [new], "fake") == 0

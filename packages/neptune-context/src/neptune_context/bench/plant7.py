@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from neptune_memory.site.sim import run as sim
+from neptune_memory.site.sim.engine import REPORT_EVERY
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +37,11 @@ ASK_AFTER = timedelta(minutes=2)
 FIX = {
     "jam": ("conveyor-lockout", "clear the jam at photo-eye PE3 under lockout (LOTO)"),
     "pstop": ("arm-reset-c3", "reset arm C3's protective stop so its cycle resumes"),
-    "flat": (None, "recover the robot (battery flat, stopped on the lane) to a charger"),
+    "flat": (
+        None,
+        "it needs charging: recover it to a charger (saying no recovery procedure is documented "
+        "is fine)",
+    ),
 }
 ASK = (
     "It is {t} (site time). What is faulted on the line right now, who on site can fix it "
@@ -103,7 +108,13 @@ def _first_fault_question(n: int, engine: Engine, fault: Fault) -> dict[str, Any
     t = engine.t
     need, action = FIX[fault.kind]
     names = _able(engine, need, t)
-    if names:
+    who_state = "known"
+    if fault.kind == "flat":
+        # No site file says who may recover a robot: the simulator sends any tech, the evidence
+        # names nobody, so the honest answer is that it is not documented.
+        who_state = "unknown"
+        who = "not documented: no qualification or procedure names who may recover a robot"
+    elif names:
         who = f"at least one of {', '.join(names)}, and nobody off shift, on break or unqualified"
     else:
         later = _next_able(engine, need, t)
@@ -129,7 +140,7 @@ def _first_fault_question(n: int, engine: Engine, fault: Fault) -> dict[str, Any
                 "subject": fault.target,
                 "predicate": "who_can_fix_now",
                 "object": who,
-                "state": "known",
+                "state": who_state,
             },
             {
                 "subject": fault.target,
@@ -270,7 +281,7 @@ def _lookups(day1: dict[str, Any]) -> list[dict[str, Any]]:
                     {
                         "subject": f"robot:{robot}",
                         "predicate": "battery flat",
-                        "object": f"at {at} in {zone}",
+                        "object": f"first reported at {at} in {zone}",
                         "state": "known",
                     },
                 ],
@@ -313,8 +324,9 @@ def generate(site_dir: Path, days: int, seed: int = SEED) -> list[dict[str, Any]
                         elif text == "arm C3 protective stop":
                             day1["pstops"].append((news[11:19], "?"))
                         elif fault is not None and fault.kind == "flat":
+                            seen = engine.t + timedelta(seconds=-engine.t.second % REPORT_EVERY)
                             day1["flat"].append(
-                                (news[11:19], fault.target.split(":")[1], fault.zone)
+                                (f"{seen:%H:%M:%S}", fault.target.split(":")[1], fault.zone)
                             )
                 for fault in [f for f in pending if engine.t >= f.at + ASK_AFTER]:
                     pending.remove(fault)

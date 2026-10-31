@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -72,7 +73,11 @@ def load(
                 raise ValueError("the plant7 set needs the sites root")
             key = key_file(root, site)
             if not key.exists():
-                plant7.write(root / site, key, plant7.DAYS[site])
+                if (root / site).exists():  # keep the built site; the key is the same either way
+                    with tempfile.TemporaryDirectory() as scratch:
+                        plant7.write(Path(scratch) / site, key, plant7.DAYS[site])
+                else:
+                    plant7.write(root / site, key, plant7.DAYS[site])
             data = json.loads(key.read_text(encoding="utf-8"))
             suffix = site.removeprefix("plant7-")
             out += [_question(site, {**q, "id": f"{q['id']}@{suffix}"}) for q in data["questions"]]
