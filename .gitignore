@@ -35,3 +35,4 @@ htmlcov/
 # `make bench` sites and results (transcripts are published separately)
 /bench/sites/
 /bench/results/
+/bench/charts/
