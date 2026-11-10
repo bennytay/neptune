@@ -125,3 +125,31 @@ def test_site_insights_shift_report_reads_in_sections(site_dir: Path) -> None:
     ]
     assert "Sources:" in text
     assert "! the log ends at 2026-10-20T11:30:00" in text
+
+
+def test_site_who_can_names_the_procedure_and_each_holders_status(site_dir: Path) -> None:
+    model = views.load(site_dir)
+    answer = insights.who_can(model, "robot:arm-c3", "2026-10-20T10:41:00")
+    pairs = {(i.subject, i.predicate, getattr(i.object, "ref", None)) for i in answer.items}
+    assert ("document:SOP-C3-02", "requires_qualification", "qualification:arm-reset-c3") in pairs
+    holder = next(i for i in answer.items if i.predicate == "holds_qualification")
+    assert holder.subject == "person:okafor" and "on break" in (holder.relation or "")
+    assert any("no holder of qualification:arm-reset-c3" in g for g in answer.gaps)
+    unnamed = insights.who_can(model, "robot:amr-03", "2026-10-20T10:41:00")
+    assert not unnamed.items and "does not say who may work on it" in unnamed.gaps[0]
+
+
+def test_site_status_shows_every_asset_with_stale_flags(site_dir: Path) -> None:
+    answer = query.status(views.load(site_dir), "2026-10-20T10:35:00")
+    states = {(i.subject, i.predicate): i.state for i in answer.items}
+    assert states[("machine:cv-2", "health")] == "known"
+    assert states[("robot:amr-03", "battery")] == "stale"
+    assert {i.predicate for i in answer.items} <= query.STATUS
+
+
+def test_site_insights_show_the_moment_and_count_the_rest(site_dir: Path) -> None:
+    model = views.load(site_dir)
+    everything = insights.insights(model, "2026-10-20T13:00:00", since="")
+    recent = insights.insights(model, "2026-10-20T13:00:00")
+    assert len(recent.items) < len(everything.items)
+    assert any("earlier findings" in g for g in recent.gaps)

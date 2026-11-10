@@ -62,5 +62,5 @@ def text_of(path: Path) -> str:
         pages = PdfReader(path).pages
         return "\n".join(f"--- page {n} ---\n{p.extract_text()}" for n, p in enumerate(pages, 1))
     if suffix == ".xlsx":
-        return python(_XLSX, path.parent, args=(str(path),))
+        return python(_XLSX, path.parent, args=(str(path.resolve()),))
     return path.read_text(encoding="utf-8", errors="replace")

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from neptune_memory.site import actions, insights, log, onboard, query, research, views
+from neptune_memory.site import actions, insights, log, onboard, query, research, views, vocab
 from neptune_memory.site.render import render
 
 from neptune_context import __version__
@@ -44,10 +44,17 @@ SITE_INSTRUCTIONS: Final = (
     "every line ends with [S<n>] keys into the Sources footer, and says observed, stated or "
     "inferred, and stale, unknown, ambiguous or pending when it is. Times are the site clock's, "
     "never converted. You may propose an action (neptune_site_propose_action); a person approves "
-    "it, never you, and it only goes through the fleet manager's protocol, never a safety "
-    "function. To set up a site from a folder, use the neptune_setup_* tools in order: start, "
-    "inventory, draft and save each table's mapping, ask the person only what the files cannot "
-    "answer, mission, build, status."
+    "it, never you, and it only goes through the fleet manager's protocol, never a safety function."
+    "\n\nWhich tool: what is wrong or going on at a time -> insights, then status (every robot, "
+    "machine and cell at once); who can fix or work on something now, and under which rule or "
+    "procedure -> who_can; one thing in detail -> state_at; what is downstream or blocked -> "
+    "impact; history -> timeline or shift_report; what is unknown or stale -> gaps; names to "
+    "ids -> resolve; counts and aggregates -> sql. Prefer these over sql and search_evidence."
+    "\n\nIds are type:id ("
+    + ", ".join(vocab.ENTITY_TYPES)
+    + "). Predicates: "
+    + ", ".join(sorted(vocab.PREDICATES))
+    + "."
 )
 
 _STR = {"type": "string"}
@@ -88,6 +95,21 @@ SITE_TOOLS: Final[dict[str, SiteTool]] = {
         query.state_at,
         "Everything known about one entity at a time: mode, health, battery, task, shift, notes "
         "..., each known, stale, unknown or ambiguous, cited.",
+        {"entity": _STR, "at": _AT},
+        ("entity",),
+    ),
+    PREFIX + "status": SiteTool(
+        query.status,
+        "Every robot, machine and cell at a time in one answer: mode, health, battery, task, "
+        "zone, output and setpoint, each known, stale, unknown or ambiguous, cited.",
+        {"at": _AT},
+        (),
+    ),
+    PREFIX + "who_can": SiteTool(
+        insights.who_can,
+        "Who may work on an entity at a time, and under what: the rules and documents that apply "
+        "to it, the qualification each requires and its text, and every holder's status then "
+        "(free, on break until when, not on shift). Says so when no rule names the entity.",
         {"entity": _STR, "at": _AT},
         ("entity",),
     ),

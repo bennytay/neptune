@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from neptune_context.bench import readers, sites
-from neptune_context.mcp.site import PREFIX, SiteTools
+from neptune_context.mcp.site import PREFIX, SITE_INSTRUCTIONS, SiteTools
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -295,7 +295,8 @@ class Neptune:
     def system(self) -> list[dict[str, Any]]:
         text = FRAME + (
             "\nThe site is reached through the neptune_site_* tools, Neptune's model of it. Their "
-            "answers end with a Sources footer; copy the sources you rely on into your own."
+            "answers end with a Sources footer; copy the sources you rely on into your own.\n\n"
+            "The server's instructions (as an MCP client receives them):\n" + SITE_INSTRUCTIONS
         )
         return [{"type": "text", "text": text, "cache_control": CACHE}]
 

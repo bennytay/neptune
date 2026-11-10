@@ -337,6 +337,41 @@ def qualification_gaps(model: SiteModel, at: str) -> list[Fact]:
     return out
 
 
+def who_can(model: SiteModel, entity: str, at: str | None = None) -> Answer:
+    """Who may work on ``entity`` at t, and under what: the rules and documents that apply to it
+    (they name it, or cover the zone it is in), the qualification each requires, its text, and
+    every holder's status at t (free, on break until when, or not on shift). An entity no rule
+    or document names gets a gap: the evidence does not say who may work on it."""
+    t = _at(model, at)
+    day = t[:10]
+    answer = Answer(tool="who_can", at=t, as_of_seq=model.seq)
+    required = _requirements(model, entity, t)
+    for qualification, reqs in sorted(required.items()):
+        for req in reqs:
+            answer.add(req)
+            for text in _facts(model, req.subject, "rule_text") + _facts(
+                model, req.subject, "name"
+            ):
+                answer.add(text)
+        held = _holders(model, qualification, t)
+        if not held:
+            answer.gaps.append(f"nobody holds {qualification}")
+        for fact in held:
+            label, support = _status(model, fact.subject, t, day)
+            free = _free(model, fact.subject, t)
+            answer.add(fact, relation=f"{'free' if free else label} at {_clock(t, day)}")
+            for s in support:
+                answer.add(s)
+        if held and not any(_free(model, f.subject, t) for f in held):
+            answer.gaps.append(f"no holder of {qualification} is on shift and off break at t")
+    if not required:
+        answer.gaps.append(
+            f"no rule or document names {entity} or its zone: the evidence does not say who may "
+            "work on it"
+        )
+    return answer
+
+
 # --- Rule 3: stale source --------------------------------------------------------------------
 
 

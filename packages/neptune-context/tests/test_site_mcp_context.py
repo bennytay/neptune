@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 SITE_NAMES = [
     "neptune_site_resolve",
     "neptune_site_state_at",
+    "neptune_site_status",
+    "neptune_site_who_can",
     "neptune_site_find",
     "neptune_site_timeline",
     "neptune_site_why",
